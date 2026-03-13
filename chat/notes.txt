@@ -1,0 +1,8 @@
+# setup for client remote accessing the backend
+
+take a copy of the backend certificate
+ie. /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+
+copy it to the client and then
+sudo cp /tmp/root.crt /usr/local/share/ca-certificates/caddy-local.crt
+sudo update-ca-certificates

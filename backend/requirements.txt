@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pytest
+httpx
+requests
+argon2-cffi
+python-jose
+caddy-python
