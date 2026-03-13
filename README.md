@@ -27,6 +27,7 @@ expected at: ~/.config/Rueckgrat/infrastructure.json
 Contains list of infrastructure servers. Each node works as a cache for the model registry.
 The first server in the list offer a llama.cpp service
 
+```
 {
   "servers": [
     {
@@ -46,3 +47,4 @@ The first server in the list offer a llama.cpp service
     }    
   ]
 }
+```
