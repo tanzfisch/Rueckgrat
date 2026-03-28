@@ -1,0 +1,17 @@
+{
+    admin 0.0.0.0:2019 {
+        origins http://localhost:2019
+    }
+}
+
+localhost {
+    reverse_proxy /ws* http://rueckgrat_hub:14223 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    tls internal
+    reverse_proxy http://rueckgrat_hub:14223
+}

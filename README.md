@@ -11,23 +11,19 @@ To launch the chat:
 cd chat
 ./run.sh
 
-# example chat.conf
+# example rueckgrat.conf
 
-expected at: ~/.config/Rueckgrat/chat.conf
+expected at: ~/.config/Rueckgrat/rueckgrat.conf
 
 [General]
-backend_port=443
-backend_host=192.168.1.111
+rueckgrat_hub_port=443
+rueckgrat_hub_host=192.168.1.111
 server_cert="/var/www/html/rueckgrad_backend.crt"
- 
-# example infrastructure.json
 
-expected at: ~/.config/Rueckgrat/infrastructure.json
+# backend config files
 
-Contains list of infrastructure servers. Each node works as a cache for the model registry.
-The first server in the list offer a llama.cpp service
+Example infrastructure.json:
 
-```
 {
   "servers": [
     {
@@ -47,4 +43,9 @@ The first server in the list offer a llama.cpp service
     }    
   ]
 }
-```
+
+Contains list of infrastructure servers. Each node works as a cache for the model registry.
+The first server in the list offer a llama.cpp service
+
+
+When installing node or hub the user is asked for the location of config files.

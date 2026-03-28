@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt, QSize
 
 from app.ui import BasePage
 from app.ui.widgets import MessageBox, OneLineBubble, ContactHeader
-from app.utils import backend
+from app.utils import Backend
 
 class ConversationsPage(BasePage):
     def __init__(self, navigator):
@@ -31,7 +31,7 @@ class ConversationsPage(BasePage):
 
     def on_enter(self, **kwargs):
         self.contact_id = kwargs.get("contact_id")
-        contact = backend.get_contact(self.contact_id)
+        contact = Backend.get_instance().get_contact(self.contact_id)
         self.contact_header.set_name(contact["name"])
 
         self.load_conversations()
@@ -43,12 +43,12 @@ class ConversationsPage(BasePage):
         self.navigator("chat", contact_id=self.contact_id, conversation_id=conversation_id)
 
     def create_conversation(self):
-        conversation_id = backend.create_conversation(self.contact_id)
+        conversation_id = Backend.get_instance().create_conversation(self.contact_id)
         self.navigator("chat", contact_id=self.contact_id, conversation_id=conversation_id)
 
     def delete_conversation(self, conversation_id):
         if MessageBox.open("Are you sure you want to delete this conversation?"):
-            backend.delete_conversation(conversation_id)
+            Backend.get_instance().delete_conversation(conversation_id)
 
         self.load_conversations()
 
@@ -60,7 +60,7 @@ class ConversationsPage(BasePage):
             if widget:
                 widget.deleteLater()
 
-        conversations = backend.get_conversations(self.contact_id)
+        conversations = Backend.get_instance().get_conversations(self.contact_id)
 
         start_bubble = OneLineBubble("+")
         start_bubble.clicked.connect(self.create_conversation)

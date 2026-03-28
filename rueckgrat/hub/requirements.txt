@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pytest
+httpx
+requests
+argon2-cffi
+python-jose
+caddy-python
+websockets
+wsproto

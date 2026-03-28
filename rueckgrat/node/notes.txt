@@ -1,0 +1,7 @@
+# To access the registry manager
+
+* ./run.sh -it
+* python -m app.registry_manager list
+
+# install models run
+* python -m app.registry_manager install [modelname as shown by list]

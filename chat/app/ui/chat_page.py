@@ -1,13 +1,16 @@
-import requests
 import json
+import re
 from PySide6.QtWidgets import ( QWidget, QVBoxLayout, QTextEdit, QPushButton, QLabel, QHBoxLayout, QScrollArea, QMenu )
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QFont
 from PySide6.QtCore import Qt, QTimer, QSize, QPoint
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, ContactHeader
+from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker
 from app.speech import Speech
-from app.utils import backend
+from app.utils import Backend
+
+import logging
+logger = logging.getLogger(__name__)
 
 class HistoryContainer(QWidget):
     def resizeEvent(self, event):
@@ -35,6 +38,7 @@ class ChatPage(BasePage):
 
         self.history_container = HistoryContainer()
         self.history_layout = QVBoxLayout(self.history_container)
+        self.history_layout.setSpacing(10)
         self.history_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.history_layout.addStretch()
 
@@ -55,13 +59,18 @@ class ChatPage(BasePage):
         self.input_box = QTextEdit()
         self.input_box.setObjectName("input_box")
         self.input_box.setPlaceholderText("Type here... (Ctrl+Enter to send)")
-        self.input_box.setAcceptRichText(False)
-        self.input_box.setStyleSheet("font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Arial, sans-serif; font-size: 16px; line-height: 1.5;")
+        self.input_box.setAcceptRichText(False)        
         self.input_box.setFixedHeight(40)
         self.input_box.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.input_box.textChanged.connect(self.adjust_input_box_height)
         self.input_box.installEventFilter(self)
         input_layout.addWidget(self.input_box, alignment=Qt.AlignmentFlag.AlignBottom)
+
+        self.emoji_button = QPushButton()
+        self.emoji_button.setIcon(QIcon("app/icons/emoji_light.png"))
+        self.emoji_button.clicked.connect(self.openEmojiPicker)
+        self.emoji_button.setIconSize(QSize(24, 24))
+        input_layout.addWidget(self.emoji_button, alignment=Qt.AlignmentFlag.AlignBottom)
 
         self.mic_toggle_btn = QPushButton()
         self.mic_toggle_btn.setIcon(QIcon("app/icons/mic_off_light.png"))
@@ -80,8 +89,13 @@ class ChatPage(BasePage):
         chat_layout.addWidget(self.history_scroll_area)
         chat_layout.addWidget(input_container)        
 
-        backend.set_on_incomming_message(self.on_incomming_message)
+        Backend.get_instance().set_on_incomming_message(self.on_incomming_message)
 
+    def openEmojiPicker(self):
+        button_pos = self.emoji_button.mapToGlobal(QPoint(0, 0))
+        result = EmojiPicker.open(button_pos)
+        self.input_box.setPlainText(self.input_box.toPlainText() + result)
+        
     def on_go_back(self):
         self.navigator("conversations", contact_id=self.contact_id)
 
@@ -107,12 +121,12 @@ class ChatPage(BasePage):
         self.contact_id = kwargs.get("contact_id")
         self.conversation_id = kwargs.get("conversation_id")
 
-        self.contact = backend.get_contact(self.contact_id)
+        self.contact = Backend.get_instance().get_contact(self.contact_id)
         self.contact_header.set_name(self.contact["name"])
 
         self.clear_history()
 
-        messages = backend.get_messages(self.conversation_id)
+        messages = Backend.get_instance().get_messages(self.conversation_id)
         for message in messages:
             self.append_history(message["role"], message["content"])
 
@@ -123,10 +137,14 @@ class ChatPage(BasePage):
             default_kokoro = "af_adam"
         else:
             default_piper = "en_US-libritts_r-medium"
-            default_kokoro = "af_bella"        
+            default_kokoro = "af_bella"
 
         self.kokoro_voice=self.contact.get("kokoro_voice_type") or default_kokoro
         self.piper_model=self.contact.get("piper_voice_model") or default_piper
+
+        self.profile = json.loads(self.contact["profile"])
+
+        self.temperature = float(self.profile["llm_parameters"]["temperature"])
 
     def on_leave(self):
         pass           
@@ -209,7 +227,33 @@ class ChatPage(BasePage):
         scrollbar.setValue(scrollbar.maximum())
 
     def replay(self):
-        Speech.speak(self.replay_content, voice=self.kokoro_voice, model=self.piper_model, interface="piper")
+        Speech.speak(self._cleanup_for_speech(self.replay_content), voice=self.kokoro_voice, model=self.piper_model, interface="piper")
+
+    def _remove_excess_linebreaks(self, text: str) -> str:
+        code_block_pattern = r"```.*?```"
+        parts = re.split(f"({code_block_pattern})", text, flags=re.DOTALL)
+
+        def clean_text(t: str) -> str:
+            return re.sub(r"\n{2,}", "\n", t)
+
+        return "".join(
+            part if re.match(code_block_pattern, part, flags=re.DOTALL)
+            else clean_text(part)
+            for part in parts
+        )
+
+    def _cleanup_content(self, content):
+        content = self._remove_excess_linebreaks(content)
+
+        return content    
+    
+    def _cleanup_for_speech(self, content):
+        content = content.replace("*", "")
+        content = re.sub(r'```.*?```', '', content, flags=re.DOTALL)
+        content = re.sub(r"\*[^*]+\*|\([^)]*\)|\[[^\]]+\]", "", content)
+        content = re.sub(r'https?://\S+|www\.\S+', '', content).strip()
+        content = re.sub(r'\[IMAGE:[^\]]*\]', '', content).strip()    
+        return content
 
     def on_incomming_message(self, text):
         data = json.loads(text)
@@ -217,15 +261,15 @@ class ChatPage(BasePage):
         if "chat" in data:
             chat = data["chat"]
 
-            content = chat["content"]
+            content = self._cleanup_content(chat["content"])
             role = chat["role"]
 
-            try:
-                Speech.speak(content, voice=self.kokoro_voice, model=self.piper_model, interface="piper")
-            except Exception as e:
-                print(f"Error: {e}")
-
             self.append_history(role, content)
+
+            try:
+                Speech.speak(self._cleanup_for_speech(content), voice=self.kokoro_voice, model=self.piper_model, interface="piper")
+            except Exception as e:
+                logging.error(f"{e}")
 
     def send_message(self):
         message = self.input_box.toPlainText().strip()
@@ -233,5 +277,5 @@ class ChatPage(BasePage):
             return
         self.input_box.clear()
 
-        self.append_history("user", message)
-        backend.async_chat(self.contact_id, self.conversation_id, "user", message)
+        self.append_history("user", message)        
+        Backend.get_instance().async_chat(self.contact_id, self.conversation_id, "user", message, self.temperature)

@@ -18,7 +18,7 @@ class MessageBox(QWidget):
 
         # Card widget
         self.card = QWidget()
-        self.card.setObjectName("messageBox")
+        self.card.setObjectName("overlay_dialog")
         self.card.setFixedWidth(parent.rect().width() * 0.6)
 
         card_layout = QVBoxLayout(self.card)

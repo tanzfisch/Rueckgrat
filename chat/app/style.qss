@@ -2,20 +2,47 @@ QWidget {
     background-color: #121212;
 }
 
+OneLineBubble {
+    border-radius: 16px;
+    padding: 10px;
+    background-color: #3A3A3A;
+    color: white;
+}
+
+TextBlock#code {
+    border-radius: 16px;
+    padding: 16px;
+    margin: 0px;
+    border: 2px solid #8D8D8D;
+    background-color: #262626;
+}
+
+TextBlock#text[role="user"] {
+    padding: 0px;
+    margin: 0px;
+    border: none;
+    background: transparent;
+}
+
+TextBlock#text[role="assistant"] {
+    padding: 0px;
+    margin: 0px;
+    border: none;
+    background: transparent;
+}
+
 ChatBubble {
     border-radius: 16px;
     font-size: 16px;
-    line-height: 1.5;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-    color: #E0E0E0;
 }
 
 ChatBubble#chatBubble[role="user"] {
-    background-color: #3A3A3A;
+    background-color: #00424c;
 }
 
+
 ChatBubble#chatBubble[role="assistant"] {
-    background-color: #1E1E1E;
+    background-color: #343434;
 }
 
 ChatBubble#chatBubble[role="error"] {
@@ -104,20 +131,11 @@ QTextEdit#input_box {
     border: none;
     padding: 0px;
     color: #E0E0E0;
+    font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Arial, sans-serif; font-size: 16px; line-height: 1.5;
 }
 
 QMenuBar, QMenu {
     background-color: #1E1E1E;
-}
-
-QScrollBar:vertical {
-    background: #121212;
-    width: 12px;
-}
-
-QScrollBar::handle:vertical {
-    background: #333;
-    border-radius: 16px;
 }
 
 QLabel {
@@ -136,7 +154,7 @@ MessageBox {
     background-color: rgba(0, 0, 0, 150);
 }
 
-QWidget#messageBox {
+QWidget#overlay_dialog {
     background: #535353;
     border-radius: 16px;
 }
@@ -177,7 +195,7 @@ QListWidget::item:disabled {
 
 QScrollBar:vertical {
     background: #2b2b2b;
-    width: 12px;
+    width: 4px;
     margin: 0px 0px 0px 0px;
     border-radius: 4px;
 }
@@ -195,6 +213,28 @@ QScrollBar::handle:vertical:hover {
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     background: none;
     height: 0px;
+}
+
+QScrollBar:horizontal {
+    background: #2b2b2b;
+    height: 4px;
+    margin: 0px 0px 0px 0px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #555555;
+    min-width: 20px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: #777777;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    background: none;
+    width: 0px;
 }
 
 QDoubleSpinBox {

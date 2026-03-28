@@ -8,7 +8,6 @@ pip install -r requirements.txt --upgrade
 
 python -m spacy download en_core_web_sm
 
-
 # Install Caddy if not present
 if ! command -v caddy &> /dev/null; then
     echo "Installing Caddy..."

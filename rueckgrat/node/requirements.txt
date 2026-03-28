@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pytest
+httpx
+tqdm
+requests
+websocket-client
+Pillow

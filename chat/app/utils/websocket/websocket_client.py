@@ -3,6 +3,9 @@ import websockets
 from typing import Callable, Optional
 from websockets.connection import State
 
+import logging
+logger = logging.getLogger(__name__)
+
 class WebSocketClient:
     def __init__(self, uri: str):
         self.uri = uri
@@ -29,9 +32,9 @@ class WebSocketClient:
                 if self.on_message:
                     self.on_message(msg)
                 else:
-                    print("Server:", msg)
+                    logging.info("Server:", msg)
         except Exception as e:
-            print("Receive error:", e)
+            logging.error("failed to receive ws: ", e)
         finally:
             self._running = False
 

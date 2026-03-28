@@ -207,7 +207,10 @@ marimo/_lsp/
 __marimo__/
 
 
-backend/data/chat.db
-infrastructure/models
-infrastructure/engines
+rueckgrat/hub/config
+rueckgrat/node/config
+rueckgrat/data
+rueckgrat/models
+rueckgrat/ComfyUI/ComfyUI
+rueckgrat/llama.cpp/llama.cpp
 chat/models/

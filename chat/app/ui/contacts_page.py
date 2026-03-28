@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt, Signal, QSize
 
 from app.ui import BasePage
 from app.ui.widgets import OneLineBubble, MessageBox
-from app.utils import backend
+from app.utils import Backend
 
 class ContactCard(QFrame):
     clicked = Signal(int)
@@ -22,15 +22,11 @@ class ContactCard(QFrame):
         name_label = QLabel(contact.get("name", ""))
         layout.addWidget(name_label)
 
-        attributes_label = QLabel(f"{contact.get('gender', '-')}, {contact.get('attributes', '')}")
-        attributes_label.setWordWrap(True)
-        layout.addWidget(attributes_label)
-
-        traits_label = QLabel(contact.get("distinctive_feature", ""))
+        traits_label = QLabel(contact.get("role", ""))
         traits_label.setWordWrap(True)
         layout.addWidget(traits_label)
 
-        purpose_label = QLabel(contact.get("purpose", ""))
+        purpose_label = QLabel(contact.get("persona", ""))
         purpose_label.setWordWrap(True)
         layout.addWidget(purpose_label)
 
@@ -72,7 +68,7 @@ class ContactsPage(BasePage):
             if widget:
                 widget.deleteLater()
 
-        contacts = backend.get_contacts()
+        contacts = Backend.get_instance().get_contacts()
 
         add_contact_bubble = OneLineBubble("+")
         add_contact_bubble.clicked.connect(self.add_contact)
@@ -120,7 +116,7 @@ class ContactsPage(BasePage):
 
     def delete_contact(self, contact_id):
         if MessageBox.open("Are you sure you want to delete this contact?"):
-            backend.delete_contact(contact_id)
+            Backend.get_instance().delete_contact(contact_id)
 
         self.load_contacts()        
 

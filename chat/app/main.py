@@ -5,11 +5,14 @@ import qasync
 import asyncio
 from qasync import QApplication
 from PySide6.QtWidgets import (QStackedWidget, QMainWindow)
+from PySide6.QtCore import QTimer
 import atexit
-from app.utils.backend import backend
-
 from app.ui import LoginPage, ChatPage, ContactsPage, ConversationsPage, ProfilePage
 from app.speech import Speech
+from app.utils.backend import Backend
+
+import logging
+logger = logging.getLogger(__name__)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -37,6 +40,15 @@ class MainWindow(QMainWindow):
 
         self.center_on_screen()
 
+        self.heartbeat_timer = QTimer()
+        self.heartbeat_timer.timeout.connect(self.heartbeat)
+        self.heartbeat_timer.setInterval(10000)
+        self.heartbeat_timer.start()        
+
+    def heartbeat(self):
+        if not Backend.get_instance().check_health():
+            logging.error("system unhealthy")
+
     def navigate(self, page_name, **kwargs):
         if self.current_page:
             self.current_page.on_leave()
@@ -53,13 +65,14 @@ class MainWindow(QMainWindow):
         self.move(geo.topLeft())
 
 
-async def async_main(app, window):
-    asyncio.create_task(backend.start_websocket())
+async def async_main(app, window):    
+    asyncio.create_task(Backend.get_instance().start_websocket())
 
     await asyncio.Event().wait()  # keep loop alive
 
-
 def main():
+    logging.basicConfig(level=logging.INFO)
+
     truststore.inject_into_ssl()
     atexit.register(Speech.kill_current_speech)
 

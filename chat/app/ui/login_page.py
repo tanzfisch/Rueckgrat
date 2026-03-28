@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QStackedLayout,
+    QVBoxLayout, QHBoxLayout, QStackedLayout,
     QWidget, QScrollArea, QLineEdit, QFormLayout,
     QPushButton, QLabel
 )
@@ -7,7 +7,10 @@ from PySide6.QtCore import Qt
 
 from app.ui import BasePage
 from app.ui.widgets import OneLineBubble
-from app.utils import backend, Settings
+from app.utils import Backend
+
+import logging
+logger = logging.getLogger(__name__)
 
 class VCenterLabel(QWidget):
     def __init__(self, text):
@@ -25,7 +28,7 @@ class LoginPage(BasePage):
     def __init__(self, navigator):
         super().__init__(navigator)
 
-        self.users = backend.get_users()
+        self.users = Backend.get_instance().get_users()
         self.selected_user = None
 
         self.setWindowTitle("Login")
@@ -155,11 +158,11 @@ class LoginPage(BasePage):
         self.stack.setCurrentWidget(self.user_page)
 
     def leave_login(self):
-        last_conversation = Settings.get_value("last_conversation", "")
-        if last_conversation != "":
-            self.navigator("chat")
-        else:
-            self.navigator("contacts")
+        # todo later last_conversation = Settings.get_value("last_conversation", "")
+        #if last_conversation != "":
+        #    self.navigator("chat")
+        #else:
+        self.navigator("contacts")
 
     def create_user(self):
         self.user_passwd = self.add_user_passwd.text()
@@ -167,13 +170,13 @@ class LoginPage(BasePage):
 
         # TODO check if user already exits
 
-        backend.create_user(self.user_name, self.user_passwd)
-        self.login_token = backend.login_user(self.user_name, self.user_passwd)
+        Backend.get_instance().create_user(self.user_name, self.user_passwd)
+        self.login_token = Backend.get_instance().login_user(self.user_name, self.user_passwd)
 
         if self.login_token != "":
             self.leave_login()
         else:
-            print("login failed")
+            logging.error("login failed")
 
     def user_chosen(self, user_name, id):
 
@@ -183,9 +186,9 @@ class LoginPage(BasePage):
 
     def check_login(self):
         self.user_passwd = self.password_edit.text()
-        self.login_token = backend.login_user(self.user_name, self.user_passwd)
+        self.login_token = Backend.get_instance().login_user(self.user_name, self.user_passwd)
 
         if self.login_token != "":
             self.leave_login()
         else:
-            print("login failed")
+            logging.error("login failed")

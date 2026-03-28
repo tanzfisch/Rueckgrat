@@ -3,8 +3,11 @@ import signal
 import subprocess
 import sys
 from threading import Lock
-from app.utils import backend
+from app.utils import Backend
 from pathlib import Path
+
+import logging
+logger = logging.getLogger(__name__)
 
 class Speech:
     _current_proc = None
@@ -28,7 +31,7 @@ class Speech:
         if interface == "piper":
             model_path = Path(f"models/{model}/{model}.onnx")
             if not model_path.exists():
-                backend.get_model(model)
+                Backend.get_instance().get_model(model)
 
             proc = subprocess.Popen(
                 [sys.executable, speech_task_path, "--interface", interface, "--text", text, "--model", model_path],

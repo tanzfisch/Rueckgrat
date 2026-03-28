@@ -1,5 +1,4 @@
 PySide6
-websocket-client
 truststore
 piper-tts
 pathvalidate
@@ -7,7 +6,10 @@ pykokoro
 soundfile
 onnxruntime
 qasync
-
+websockets
+markdown
+pygments
+bleach
 requests==2.32.3
 urllib3==2.2.3
 charset-normalizer==3.3.2

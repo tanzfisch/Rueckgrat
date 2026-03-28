@@ -1,14 +1,16 @@
 import json
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QFormLayout, QLineEdit, QRadioButton, QTextEdit,
-    QSpinBox, QDoubleSpinBox, QPushButton, QListWidget, QButtonGroup,
-    QHBoxLayout, QLabel, QScrollArea
+    QWidget, QVBoxLayout, QFormLayout, QLineEdit, QRadioButton, QTextEdit, QPushButton, QButtonGroup,
+    QHBoxLayout, QScrollArea
 )
-from PySide6.QtCore import Signal
-from PySide6.QtGui import QKeySequence
+from PySide6.QtCore import Signal, QRegularExpression, Qt
+from PySide6.QtGui import QTextCharFormat, QSyntaxHighlighter, QFont
 
 from app.ui import BasePage
-from app.utils import backend
+from app.utils import Backend
+
+import logging
+logger = logging.getLogger(__name__)
 
 class TextEdit(QTextEdit):
     def __init__(self):
@@ -28,8 +30,86 @@ class JsonAwareLineEdit(QLineEdit):
             data = json.loads(text)
             self.json_event.emit(data)
         except json.JSONDecodeError:
-            pass        
+            pass
 
+empty_template = """
+{
+    "background_hook": "former spy with disciplined thinking",
+
+    "objectives": {
+        "primary": "develop the student's thinking through guided exercises",
+        "secondary": [
+        "maintain engagement through challenge and curiosity",
+        "adapt difficulty dynamically",
+        "prevent passive learning"
+        ]
+    },
+
+    "behavior_engine": {
+        "core_principles": [
+        "lead, do not follow",
+        "challenge, do not validate by default",
+        "advance the conversation every turn",
+        "optimize for thinking, not comfort"
+        ],
+
+        "decision_rules": [
+        "if student is vague → ask for clarification",
+        "if student is correct → deepen or complicate",
+        "if student is wrong → guide, don't reveal answer immediately",
+        "if student is passive → introduce tension or a challenge"
+        ],
+
+        "control_logic": {
+        "initiative": "AI always controls the pace and direction",
+        "scope_management": "expand or narrow the topic deliberately, never drift passively",
+        "momentum": "every response must move the conversation forward",
+        "anti_stall": "never summarize or linger unless explicitly asked"
+        }
+    },
+
+    "response_loop": {
+        "structure": [
+        "1. sharp insight or reframing (max 2 sentences)",
+        "2. guided exercise or task",
+        "3. pointed question"
+        ],
+
+        "constraints": [
+        "no paraphrasing the student",
+        "no long explanations unless explicitly requested",
+        "always include a question or task",
+        "keep responses concise"
+        ]
+    },
+
+    "interaction_style": {
+        "tone": "calm authority with subtle wit",
+        "engagement": "slightly provocative, intellectually demanding",
+        "quirks": [
+        "occasionally reference scripture or literature",
+        "use dry humor sparingly"
+        ]
+    },
+
+    "llm_parameters": {
+        "temperature": "0.8"
+    },
+
+    "image_parameters": {
+        "prompt": "male butler, middle age, dark gray tuxedo, gray hair, neutral background",
+        "negative_prompt": "cropped, no legs, no arms, no head, low quality, artifacts, artifacts in eyes, bad anatomy, multiple images, fur",
+        "seed": 1337,
+        "cfg": 10.0,
+        "steps": 30
+    },
+
+    "tts_parameters": {
+        "piper_voice_model": "en_US-hfc_male-medium",
+        "kokoro_voice_type": "am_adam"
+    }
+}
+"""
 
 class ProfilePage(BasePage):
     def __init__(self, navigator):
@@ -46,114 +126,39 @@ class ProfilePage(BasePage):
 
         self.form_layout = QFormLayout(container)
 
-        # --- TEXT FIELDS ---
+        # --- Name ---
         self.name = JsonAwareLineEdit()
         self.name.setObjectName("contactForm")
         self.name.json_event.connect(self.json_paste)
         self.form_layout.addRow("Name", self.name)
 
+        # --- Gender ---
         self.gender_group = QButtonGroup(self)
-
         self.male_radio = QRadioButton("Male")
         self.female_radio = QRadioButton("Female")
-
         self.gender_group.addButton(self.male_radio)
         self.gender_group.addButton(self.female_radio)
 
         gender_layout = QHBoxLayout()
         gender_layout.addWidget(self.male_radio)
         gender_layout.addWidget(self.female_radio)
-
         self.form_layout.addRow("Gender", gender_layout)
 
-        self.attributes = TextEdit()
-        self.form_layout.addRow("Attributes", self.attributes)
+        # --- Role ---
+        self.role = TextEdit()
+        self.role.setMaximumHeight(100)
+        self.form_layout.addRow("Role", self.role)
 
-        self.core_traits = TextEdit()
-        self.form_layout.addRow("Core Traits", self.core_traits)
+        # --- Persona ---
+        self.persona = TextEdit()
+        self.persona.setMaximumHeight(100)
+        self.form_layout.addRow("Persona", self.persona)
 
-        self.quirks = TextEdit()
-        self.form_layout.addRow("Quirks", self.quirks)
-
-        self.distinctive_feature = TextEdit()
-        self.form_layout.addRow("Distinctive Feature", self.distinctive_feature)
-
-        self.purpose = TextEdit()
-        self.form_layout.addRow("Purpose", self.purpose)
-
-        self.relationship = TextEdit()
-        self.form_layout.addRow("Relationship", self.relationship)
-
-        self.long_term_commitment = TextEdit()
-        self.form_layout.addRow("Long-Term Commitment", self.long_term_commitment)
-
-        self.current_status = TextEdit()
-        self.form_layout.addRow("Current Status", self.current_status)
-
-        self.secrets = TextEdit()
-        self.form_layout.addRow("Secrets", self.secrets)
-
-        self.limits = TextEdit()
-        self.form_layout.addRow("Limits", self.limits)
-
-        self.location = TextEdit()
-        self.form_layout.addRow("Location", self.location)
-
-        # --- RULES LIST ---
-        self.rules_list = QListWidget()
-        self.rules_list.setFixedHeight(100)
-        self.rule_input = QLineEdit()
-        self.rule_input.setObjectName("contactForm")
-        self.add_rule_btn = QPushButton("Add Rule")
-        self.remove_rule_btn = QPushButton("Remove Selected Rule")
-
-        rule_layout = QVBoxLayout()
-        rule_layout.addWidget(QLabel("Rules"))
-        rule_layout.addWidget(self.rules_list)
-
-        rule_input_layout = QHBoxLayout()
-        rule_input_layout.addWidget(self.rule_input)
-        rule_input_layout.addWidget(self.add_rule_btn)
-        rule_layout.addLayout(rule_input_layout)
-        rule_layout.addWidget(self.remove_rule_btn)
-
-        self.form_layout.addRow(rule_layout)
-
-        self.add_rule_btn.clicked.connect(self.add_rule)
-        self.remove_rule_btn.clicked.connect(self.remove_rule)
-
-        # --- CHAT SETTINGS ---
-        self.chat_temperature = QLineEdit()
-        self.chat_temperature.setText("0.7")
-        self.form_layout.addRow("Chat Temperature", self.chat_temperature)
-
-        # --- VISUAL SETTINGS ---
-        self.visual_prompt = TextEdit()
-        self.form_layout.addRow("Visual Prompt", self.visual_prompt)
-
-        self.visual_negative_prompt = TextEdit()
-        self.form_layout.addRow("Visual Negative Prompt", self.visual_negative_prompt)
-
-        self.visual_seed = QLineEdit()
-        self.visual_seed.setText("1337")
-        self.form_layout.addRow("Visual Seed", self.visual_seed)
-
-        self.visual_cfg = QLineEdit()
-        self.visual_cfg.setText("10.0")
-        self.form_layout.addRow("Visual CFG", self.visual_cfg)
-
-        self.visual_steps = QLineEdit()
-        self.visual_steps.setText("30")
-        self.form_layout.addRow("Visual Steps", self.visual_steps)
-
-        # --- AUDIO SETTINGS ---
-        self.piper_voice_model = QLineEdit()
-        self.piper_voice_model.setText("")
-        self.form_layout.addRow("Piper Model", self.piper_voice_model)
-
-        self.kokoro_voice_type = QLineEdit()
-        self.kokoro_voice_type.setText("")
-        self.form_layout.addRow("Kokoro Voice", self.kokoro_voice_type)        
+        # --- profile ---
+        self.profile = TextEdit()
+        self.profile.setFont(QFont("Consolas", 12))
+        self.profile.setPlainText(empty_template)
+        self.form_layout.addRow("Profile", self.profile)
 
         # --- SUBMIT BUTTON ---
         button_container = QWidget()
@@ -169,69 +174,57 @@ class ProfilePage(BasePage):
 
         main_layout.addWidget(button_container)
 
-    def json_paste(self, data):
-        self.fill_form(data)
+    def json_paste(self, contact):
+        if "identity" in contact:
+            identity = contact["identity"]
+            self.name.setText(self.get_value(identity, "name"))
+            self.set_gender(self.get_value(identity, "gender"))
+            self.role.setPlainText(self.get_value(identity, "role"))
+            self.persona.setPlainText(self.get_value(identity, "persona"))
+
+        if "profile" in contact:
+            profile = contact["profile"]
+        else:
+            profile = contact # assume just the profile part was pasted
+
+        if not profile:
+            pretty_json = empty_template
+        else:
+            pretty_json = json.dumps(profile, indent=4, sort_keys=True)
+
+        self.profile.setPlainText(pretty_json)
 
     def clear_form(self):
         self.name.setText("")
-        self.attributes.setPlainText("")
-        self.core_traits.setPlainText("")
-        self.quirks.setPlainText("")
-        self.distinctive_feature.setPlainText("")
-        self.purpose.setPlainText("")
-        self.relationship.setPlainText("")
-        self.long_term_commitment.setPlainText("")
-        self.current_status.setPlainText("")
-        self.secrets.setPlainText("")
-        self.limits.setPlainText("")
-        self.location.setPlainText("")
-        self.rules_list.clear()
-        self.chat_temperature.setText("0.7")
-        self.piper_voice_model.setText("")
-        self.kokoro_voice_type.setText("")
-        self.visual_prompt.setPlainText("")
-        self.visual_negative_prompt.setPlainText("")
-        self.visual_seed.setText("1337")
-        self.visual_cfg.setText("10")
-        self.visual_steps.setText("30")
+        self.role.setPlainText("")
+        self.persona.setPlainText("")
+        self.profile.setPlainText(empty_template)
+        self.set_gender("male")
+        
+    def get_value(self, dictionary, key):
+        if key in dictionary:
+            return dictionary[key]
+        else:
+            return ""
 
     def fill_form(self, contact):
-        self.name.setText(contact["name"])
-        self.set_gender(contact["gender"])
-        self.attributes.setPlainText(contact["attributes"])
-        self.core_traits.setPlainText(contact["core_traits"])
-        self.quirks.setPlainText(contact["quirks"])
-        self.distinctive_feature.setPlainText(contact["distinctive_feature"])
-        self.purpose.setPlainText(contact["purpose"])
-        self.relationship.setPlainText(contact["relationship"])
-        self.long_term_commitment.setPlainText(contact["long_term_commitment"])
-        self.current_status.setPlainText(contact["current_status"])
-        self.secrets.setPlainText(contact["secrets"])
-        self.limits.setPlainText(contact["limits"])
-        self.location.setPlainText(contact["location"])
+        self.name.setText(self.get_value(contact, "name"))
+        self.set_gender(self.get_value(contact, "gender"))
+        self.role.setPlainText(self.get_value(contact, "role"))
+        self.persona.setPlainText(self.get_value(contact, "persona"))
 
-        self.rules_list.clear()
-        if contact["rules"]:
-            rules = contact["rules"]
-            for rule in rules:
-                self.rules_list.addItem(rule)
-
-        self.chat_temperature.setText(str(contact["chat_temperature"]))
-        self.piper_voice_model.setText(contact["piper_voice_model"])
-        self.kokoro_voice_type.setText(contact["kokoro_voice_type"])
-        self.visual_prompt.setPlainText(contact["visual_prompt"])
-        self.visual_negative_prompt.setPlainText(contact["visual_negative_prompt"])
-        self.visual_seed.setText(str(contact["visual_seed"]))
-        self.visual_cfg.setText(str(contact["visual_cfg"]))
-        self.visual_steps.setText(str(contact["visual_steps"]))
-
+        data = json.loads(self.get_value(contact, "profile"))
+        pretty_json = json.dumps(data, indent=4, sort_keys=True)
+        self.profile.setPlainText(pretty_json)
+        
     def load_profile(self):
         self.clear_form()
 
         if self.contact_id == -1:
             return     
 
-        contact = backend.get_contact(self.contact_id)
+        contact = Backend.get_instance().get_contact(self.contact_id)
+        logging.debug(contact)
         self.fill_form(contact)
 
     def cancel_form(self):
@@ -239,10 +232,10 @@ class ProfilePage(BasePage):
 
     def save_profile(self):
         if self.contact_id == -1:
-            self.contact_id = backend.create_contact()
+            self.contact_id = Backend.get_instance().create_contact()
 
         data = self.get_data()
-        backend.update_contact(self.contact_id, data)
+        Backend.get_instance().update_contact(self.contact_id, data)
         self.navigator("contacts")
 
     def on_enter(self, **kwargs):
@@ -277,29 +270,14 @@ class ProfilePage(BasePage):
         if selected_button:
             gender = selected_button.text().lower()
 
-        # todo check for ranges
+        profile = json.loads(self.profile.toPlainText())
 
         return {
-            "name": self.name.text(),
-            "gender": gender,
-            "attributes": self.attributes.toPlainText(),
-            "core_traits": self.core_traits.toPlainText(),
-            "quirks": self.quirks.toPlainText(),
-            "distinctive_feature": self.distinctive_feature.toPlainText(),
-            "purpose": self.purpose.toPlainText(),
-            "relationship": self.relationship.toPlainText(),
-            "long_term_commitment": self.long_term_commitment.toPlainText(),
-            "current_status": self.current_status.toPlainText(),
-            "secrets": self.secrets.toPlainText(),
-            "limits": self.limits.toPlainText(),
-            "location": self.location.toPlainText(),
-            "rules": [self.rules_list.item(i).text() for i in range(self.rules_list.count())],
-            "chat_temperature": float(self.chat_temperature.text()),
-            "piper_voice_model": self.piper_voice_model.text(),
-            "kokoro_voice_type": self.kokoro_voice_type.text(),
-            "visual_prompt": self.visual_prompt.toPlainText(),
-            "visual_negative_prompt": self.visual_negative_prompt.toPlainText(),
-            "visual_seed": int(self.visual_seed.text()),
-            "visual_cfg": float(self.visual_cfg.text()),
-            "visual_steps": int(self.visual_steps.text())
+            "identity": {
+                "name": self.name.text(),
+                "gender": gender,
+                "role": self.role.toPlainText(),
+                "persona": self.persona.toPlainText()
+            },
+            "profile": profile
         }    

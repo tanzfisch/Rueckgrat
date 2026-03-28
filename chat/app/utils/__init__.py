@@ -1,4 +1,3 @@
-from .settings import Settings
-from .backend import Backend, backend
+from .backend import Backend
 
-__all__ = ["Settings", "Backend", "backend"]
+__all__ = ["Backend"]

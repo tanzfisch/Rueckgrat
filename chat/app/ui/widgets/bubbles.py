@@ -1,20 +1,28 @@
-from PySide6.QtWidgets import QWidget, QTextEdit, QVBoxLayout, QSizePolicy, QStyleOption, QStyle, QLabel
-from PySide6.QtGui import QPainter
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QWidget, QTextBrowser, QVBoxLayout, QSizePolicy, QStyleOption, QStyle, QLabel
+from PySide6.QtGui import QPainter, QDesktopServices
+from PySide6.QtCore import Qt, Signal, QTimer, QUrl
+import markdown
+import bleach
+import re
 
-class ChatBubbleTextEdit(QTextEdit):
-    def __init__(self, text="", parent=None):
-        super().__init__(text, parent)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setFrameShape(QTextEdit.Shape.NoFrame)
-        self.setObjectName("chatBubble")
-        self.setProperty("role", text)
-        self.setReadOnly(True)        
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+class TextBlock(QTextBrowser):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setOpenLinks(False)
+        self.anchorClicked.connect(
+            lambda url: QDesktopServices.openUrl(url)
+        )
 
     def wheelEvent(self, event):
-        event.ignore()
+        delta = event.angleDelta()
+
+        if delta.x() != 0:
+            # handle horizontal scrolling normally
+            super().wheelEvent(event)
+        else:
+            # ignore vertical scrolling
+            event.ignore()
 
 class ChatBubble(QWidget):
     def __init__(self, role, content):
@@ -22,19 +30,215 @@ class ChatBubble(QWidget):
 
         self.setObjectName("chatBubble")
         self.setProperty("role", role)
-        self.setAutoFillBackground(True)
+        
+        content_items = self._parse_content(content)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setAlignment(Qt.AlignTop)
 
-        self.text = ChatBubbleTextEdit(content)
-        self.text.document().contentsChanged.connect(self.adjust_height)
-        layout.addWidget(self.text)
+        for item in content_items:
+            if item["type"] == "text":
+                self._add_text(layout, item["value"], role)
+            elif item["type"] == "code":
+                self._add_code(layout, item["value"])
 
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+    def _add_code(self, layout, content: str):
+        text = TextBlock()
+        text.setReadOnly(True)
+        text.setObjectName("code")
+        text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        text.setHtml(self._handle_markdown(content))        
+        layout.addWidget(text)
 
-    def adjust_height(self):
-        doc = self.text.document()
-        self.text.setFixedHeight(int(doc.size().height()))
+        QTimer.singleShot(10, lambda t=text: self._resize_code_edit(t))
+        text.resizeEvent = lambda e: (TextBlock.resizeEvent(text, e), self._resize_code_edit(text))
+
+    def _resize_code_edit(self, text: TextBlock):
+        text.setFixedHeight(int(text.document().size().height()) + 20)
+
+    def _add_text(self, layout, content: str, role: str):
+        text = TextBlock()
+        text.setReadOnly(True)
+        text.setObjectName("text")
+        text.setProperty("role", role)
+        text.setLineWrapMode(TextBlock.WidgetWidth)
+        text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        text.setHtml(self._handle_markdown(content))
+
+        text.resizeEvent = lambda e: (TextBlock.resizeEvent(text, e), self._resize_text_edit(text))
+
+        layout.addWidget(text)
+
+    def _resize_text_edit(self, text: TextBlock):
+        text.setFixedHeight(int(text.document().size().height()))
+        text.verticalScrollBar().setValue(0)
+
+    def _parse_content(self, content: str) -> list[dict]:
+        parts = []
+        last_pos = 0
+
+        pattern = r'(```(?:\w+)?\s*\n.*?\n```)|(\[IMAGE:\s*(.*?)\])|(\[MOOD:\s*(.*?)\])'
+
+        for m in re.finditer(pattern, content, re.DOTALL):
+            if m.start() > last_pos:
+                parts.append({"type": "text", "value": content[last_pos:m.start()].strip()})
+
+            if m.group(1) is not None:      # code block with ``` kept
+                parts.append({"type": "code", "value": m.group(1)})
+            elif m.group(3) is not None:    # [IMAGE: ...]
+                parts.append({"type": "image", "value": m.group(3).strip()})
+            elif m.group(5) is not None:    # [MOOD: ...]
+                parts.append({"type": "mood", "value": m.group(5).strip()})
+
+            last_pos = m.end()
+
+        if last_pos < len(content):
+            parts.append({"type": "text", "value": content[last_pos:].strip()})
+
+        return parts
+
+    def _handle_markdown(self, content):
+        html_body = markdown.markdown(
+            content,
+            extensions=[
+                "extra",
+                "sane_lists",
+                "tables",
+                "fenced_code",
+                "nl2br",
+                "codehilite"
+            ],
+            extension_configs={
+                "codehilite": {
+                    "guess_lang": True,
+                    "linenums": False
+                }
+            }
+        )
+
+        html_body = bleach.linkify(html_body)
+
+        return f"""
+        <html>
+        <head>
+        <style>
+            body {{
+                background: transparent;
+                color: #E0E0E0;
+                font-size: 16px;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+                margin: 0;
+            }}
+
+            pre {{
+                background: transparent;
+            }}
+
+            code {{
+                background: transparent;
+                font-family: 'Courier New', monospace;
+                color: #00889d;
+            }}
+
+            em, i {{
+                color: #a0a0a0;
+            }}     
+
+            pre {{ line-height: 125%; }}
+            td.linenos .normal {{ color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }}
+            span.linenos {{ color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }}
+            td.linenos .special {{ color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }}
+            span.linenos.special {{ color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }}
+            .hll {{ background-color: #49483e }}
+            .c {{ color: #959077 }} /* Comment */
+            .err {{ color: #ED007E; background-color: #1E0010 }} /* Error */
+            .esc {{ color: #F8F8F2 }} /* Escape */
+            .g {{ color: #F8F8F2 }} /* Generic */
+            .k {{ color: #66D9EF }} /* Keyword */
+            .l {{ color: #AE81FF }} /* Literal */
+            .n {{ color: #F8F8F2 }} /* Name */
+            .o {{ color: #FF4689 }} /* Operator */
+            .x {{ color: #F8F8F2 }} /* Other */
+            .p {{ color: #F8F8F2 }} /* Punctuation */
+            .ch {{ color: #959077 }} /* Comment.Hashbang */
+            .cm {{ color: #959077 }} /* Comment.Multiline */
+            .cp {{ color: #959077 }} /* Comment.Preproc */
+            .cpf {{ color: #959077 }} /* Comment.PreprocFile */
+            .c1 {{ color: #959077 }} /* Comment.Single */
+            .cs {{ color: #959077 }} /* Comment.Special */
+            .gd {{ color: #FF4689 }} /* Generic.Deleted */
+            .ge {{ color: #F8F8F2; font-style: italic }} /* Generic.Emph */
+            .ges {{ color: #F8F8F2; font-weight: bold; font-style: italic }} /* Generic.EmphStrong */
+            .gr {{ color: #F8F8F2 }} /* Generic.Error */
+            .gh {{ color: #F8F8F2 }} /* Generic.Heading */
+            .gi {{ color: #A6E22E }} /* Generic.Inserted */
+            .go {{ color: #66D9EF }} /* Generic.Output */
+            .gp {{ color: #FF4689; font-weight: bold }} /* Generic.Prompt */
+            .gs {{ color: #F8F8F2; font-weight: bold }} /* Generic.Strong */
+            .gu {{ color: #959077 }} /* Generic.Subheading */
+            .gt {{ color: #F8F8F2 }} /* Generic.Traceback */
+            .kc {{ color: #66D9EF }} /* Keyword.Constant */
+            .kd {{ color: #66D9EF }} /* Keyword.Declaration */
+            .kn {{ color: #FF4689 }} /* Keyword.Namespace */
+            .kp {{ color: #66D9EF }} /* Keyword.Pseudo */
+            .kr {{ color: #66D9EF }} /* Keyword.Reserved */
+            .kt {{ color: #66D9EF }} /* Keyword.Type */
+            .ld {{ color: #E6DB74 }} /* Literal.Date */
+            .m {{ color: #AE81FF }} /* Literal.Number */
+            .s {{ color: #E6DB74 }} /* Literal.String */
+            .na {{ color: #A6E22E }} /* Name.Attribute */
+            .nb {{ color: #F8F8F2 }} /* Name.Builtin */
+            .nc {{ color: #A6E22E }} /* Name.Class */
+            .no {{ color: #66D9EF }} /* Name.Constant */
+            .nd {{ color: #A6E22E }} /* Name.Decorator */
+            .ni {{ color: #F8F8F2 }} /* Name.Entity */
+            .ne {{ color: #A6E22E }} /* Name.Exception */
+            .nf {{ color: #A6E22E }} /* Name.Function */
+            .nl {{ color: #F8F8F2 }} /* Name.Label */
+            .nn {{ color: #F8F8F2 }} /* Name.Namespace */
+            .nx {{ color: #A6E22E }} /* Name.Other */
+            .py {{ color: #F8F8F2 }} /* Name.Property */
+            .nt {{ color: #FF4689 }} /* Name.Tag */
+            .nv {{ color: #F8F8F2 }} /* Name.Variable */
+            .ow {{ color: #FF4689 }} /* Operator.Word */
+            .pm {{ color: #F8F8F2 }} /* Punctuation.Marker */
+            .w {{ color: #F8F8F2 }} /* Text.Whitespace */
+            .mb {{ color: #AE81FF }} /* Literal.Number.Bin */
+            .mf {{ color: #AE81FF }} /* Literal.Number.Float */
+            .mh {{ color: #AE81FF }} /* Literal.Number.Hex */
+            .mi {{ color: #AE81FF }} /* Literal.Number.Integer */
+            .mo {{ color: #AE81FF }} /* Literal.Number.Oct */
+            .sa {{ color: #E6DB74 }} /* Literal.String.Affix */
+            .sb {{ color: #E6DB74 }} /* Literal.String.Backtick */
+            .sc {{ color: #E6DB74 }} /* Literal.String.Char */
+            .dl {{ color: #E6DB74 }} /* Literal.String.Delimiter */
+            .sd {{ color: #E6DB74 }} /* Literal.String.Doc */
+            .s2 {{ color: #E6DB74 }} /* Literal.String.Double */
+            .se {{ color: #AE81FF }} /* Literal.String.Escape */
+            .sh {{ color: #E6DB74 }} /* Literal.String.Heredoc */
+            .si {{ color: #E6DB74 }} /* Literal.String.Interpol */
+            .sx {{ color: #E6DB74 }} /* Literal.String.Other */
+            .sr {{ color: #E6DB74 }} /* Literal.String.Regex */
+            .s1 {{ color: #E6DB74 }} /* Literal.String.Single */
+            .ss {{ color: #E6DB74 }} /* Literal.String.Symbol */
+            .bp {{ color: #F8F8F2 }} /* Name.Builtin.Pseudo */
+            .fm {{ color: #A6E22E }} /* Name.Function.Magic */
+            .vc {{ color: #F8F8F2 }} /* Name.Variable.Class */
+            .vg {{ color: #F8F8F2 }} /* Name.Variable.Global */
+            .vi {{ color: #F8F8F2 }} /* Name.Variable.Instance */
+            .vm {{ color: #F8F8F2 }} /* Name.Variable.Magic */
+            .il {{ color: #AE81FF }} /* Literal.Number.Integer.Long */
+
+        </style>
+        </head>
+        <body>{html_body}</body>
+        </html>
+        """
 
     def paintEvent(self, event):
         opt = QStyleOption()
@@ -42,27 +246,14 @@ class ChatBubble(QWidget):
         painter = QPainter(self)
         self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, painter, self)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.adjust_height()
-
 class OneLineBubble(QWidget):
     clicked = Signal(str, int)
 
     def __init__(self, username: str ="", id: int="-1"):
         super().__init__()
+        self.setAttribute(Qt.WA_StyledBackground, True)
 
-        self.id = int(id)
-
-        # TODO move this to style.qss
-        self.setStyleSheet("""
-            QWidget {
-                border-radius: 16px;
-                padding: 10px;
-                background-color: #3A3A3A;
-                color: white;
-            }
-        """)
+        self.id = int(id)        
 
         layout = QVBoxLayout(self)
         self.label = QLabel(username)
