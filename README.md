@@ -1,4 +1,4 @@
-# Rueckgrat
+# Rückgrat
 The intention is to give advanced users comfortable tools to have private AI conversations on their own hardware.
 
 It is primarily tuned to have interesting or even exciting conversation. It is not meant to be productive though there is a whole range of productive features available as well.
