@@ -22,6 +22,7 @@ class ConversationsPage(BasePage):
         self.container = QWidget()
         self.conversations_layout = QVBoxLayout(self.container)
         self.conversations_layout.setAlignment(Qt.AlignTop)
+        self.conversations_layout.setSpacing(8)
 
         self.scroll_area.setWidget(self.container)
         self.main_layout.addWidget(self.scroll_area)
@@ -63,14 +64,16 @@ class ConversationsPage(BasePage):
         conversations = Backend.get_instance().get_conversations(self.contact_id)
 
         start_bubble = OneLineBubble("+")
+        start_bubble.setFixedHeight(40)
         start_bubble.clicked.connect(self.create_conversation)
         self.conversations_layout.addWidget(start_bubble)
 
         for conversation in conversations:
             conversation_container = QWidget()
             conversation_layout = QHBoxLayout(conversation_container)
+            conversation_layout.setContentsMargins(0, 0, 0, 0)
 
-            bubble = OneLineBubble(conversation["brief"], conversation["id"])
+            bubble = OneLineBubble(conversation["title"], conversation["id"])
             bubble.clicked.connect(self.conversation_chosen)
             conversation_layout.addWidget(bubble)
             

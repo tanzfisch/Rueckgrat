@@ -110,15 +110,6 @@ case "$choice" in
     echo
     echo "Creating systemd service at $SERVICE_FILE ..."
 
-    # use at least one but not all CPUs
-    TOTAL_CPUS=$(nproc)
-    USE_CPUS=$(( TOTAL_CPUS -1 ))
-    if [ "$USE_CPUS" -lt 1 ]; then
-        USE_CPUS=1
-    fi
-    CPU_MAX=$(( USE_CPUS - 1 ))
-    CPUAFFINITY_LINE="CPUAffinity=0-$CPU_MAX"
-
 sudo bash -c "cat > $SERVICE_FILE" <<EOF
 [Unit]
 Description=llama.cpp LLM Server
@@ -128,13 +119,12 @@ After=network.target
 Type=simple
 User=$USER_NAME
 WorkingDirectory=$(dirname "$LLAMA_SERVER")
-$CPUAFFINITY_LINE
+
 ExecStart=$LLAMA_SERVER \\
     -m $MODEL_PATH \\
     --port $PORT \\
     --host 0.0.0.0 \\
     --chat-template chatml \\
-    --threads $USE_CPUS \\
     --n-gpu-layers -1
 
 Restart=always

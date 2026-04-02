@@ -92,6 +92,13 @@ empty_template = """
         ]
     },
 
+    "start_context": {
+      "location": "neutral empty room",
+      "user": "standing in front of assitant",
+      "assistant": "standing in front of user",
+      "topic": "no specific topic"
+    },    
+
     "llm_parameters": {
         "temperature": "0.8"
     },

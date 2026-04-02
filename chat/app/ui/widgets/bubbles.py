@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QTextBrowser, QVBoxLayout, QSizePolicy, QStyleOption, QStyle, QLabel
 from PySide6.QtGui import QPainter, QDesktopServices
-from PySide6.QtCore import Qt, Signal, QTimer, QUrl
+from PySide6.QtCore import Qt, Signal, QTimer
 import markdown
 import bleach
 import re

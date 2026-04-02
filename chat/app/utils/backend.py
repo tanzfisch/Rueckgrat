@@ -181,17 +181,22 @@ class Backend:
                     "contact_data": data
                 },                 
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Content-Type": "application/json"
                 },                                
                 timeout=10,
                 verify=self.verify,
             )
 
-            if response.status_code != 200:
+            if response.status_code in (200, 204):
+                return True
+            else:
                 logging.error(f"update contact - {response.status_code} {response.reason}")
+                return False
 
         except Exception as e:
             logging.error(f"failed to update_contact {repr(e)}")
+            return False
     
     def get_contact(self, contact_id: int):
         url = f"{self.url}/contact"
@@ -342,6 +347,62 @@ class Backend:
             logging.error(f"failed to get_conversations {repr(e)}")
 
         return []      
+
+    def get_conversation(self, conversation_id):
+        url = f"{self.url}/get_conversation"
+
+        try:
+            response = requests.get(
+                url,
+                headers={
+                    "Authorization": f"Bearer {self.access_token}"
+                },
+                json={
+                    "conversation_id": conversation_id
+                },
+                timeout=10,
+                verify=self.verify,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("conversation")
+            else:
+                logging.error(f"get_conversation - {response.status_code} {response.reason}")
+
+        except Exception as e:
+            logging.error(f"failed to get_conversation {repr(e)}")
+
+        return None
+
+    def update_conversation(self, conversation_id: int, brief: str, context: str):
+        url = f"{self.url}/update_conversation"
+
+        try:
+            response = requests.patch(
+                url,
+                headers={
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "conversation_id": conversation_id,
+                    "brief": brief,
+                    "context": context
+                },
+                timeout=10,
+                verify=self.verify,
+            )
+
+            if response.status_code in (200, 204):
+                return True
+            else:
+                logging.error(f"update_conversation - {response.status_code} {response.reason}")
+                return False
+
+        except Exception as e:
+            logging.error(f"failed to update_conversation {repr(e)}")
+            return False
 
     def get_messages(self, conversation_id):
         url = f"{self.url}/messages"

@@ -1,12 +1,15 @@
 import re
 from typing import Dict, Any, List
 
+import logging
+logger = logging.getLogger(__name__)
 
 class PromptCompiler:
-    def __init__(self, config: Dict[str, Any], user_name: str):
-        self.config = config
+    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any], user_name: str):
+        self.contact = contact
+        self.conversation = conversation
         self.user_name = user_name
-        self.profile = config.get("profile", {})
+        self.profile = contact.get("profile", {})
 
     # --------- Utilities ---------
     def _clean_text(self, text: str) -> str:
@@ -23,11 +26,14 @@ class PromptCompiler:
     # --------- Core Sections ---------
     def _build_identity(self) -> str:
         return f"""
-You are {self.config.get('name')}.
-Role: {self.config.get('role')}.
-Gender: {self.config.get('gender')}
-Persona traits: {self._clean_text(self.config.get('persona', ''))}
+You are {self.contact.get('name')}.
+Role: {self.contact.get('role')}.
+Gender: {self.contact.get('gender')}
+Persona traits: {self._clean_text(self.contact.get('persona', ''))}
 Background: {self._clean_text(self.profile.get('background_hook', ''))}
+Appearance: {self._clean_text(self.profile.get('physical_attributes', ''))}
+Body Language: {self._clean_text(self.profile.get('body_language', ''))}
+Style: {self._clean_text(self.profile.get('fashion_and_style', ''))}
 """.strip()
 
     def _build_behavior(self) -> str:
@@ -87,20 +93,32 @@ Structure:
 {chr(10).join(f"- {s}" for s in structure)}
 """.strip()
     
-    def _build_conversation_partner(self) -> str:
+    def _build_context(self) -> str:
+        context = self.conversation["context"]
+        location = context.get("location", "")
+        user = context.get("user", "")
+        assistant = context.get("assistant", "")
+        topic = context.get("topic", "")
+
         return f"""
+CONTEXT:
 You are talking to: {self.user_name}
+Location: {location}
+{self.user_name}: {user}
+You: {assistant}
+Topic: {topic}
+Place special attention to the context section. This is the current state of the conversation. The ground truth to what just happened. Prioritize the information from here over the conversation history
 """.strip()
 
     # --------- Public API ---------
-    def build(self) -> str:
+    def build_system_prompt(self) -> str:
         sections = [
             self._build_identity(),
             self._build_behavior(),
             self._build_style(),
             self._build_objectives(),
             self._build_response_loop(),
-            self._build_conversation_partner()
+            self._build_context()
         ]
 
         return "\n\n".join(sections)

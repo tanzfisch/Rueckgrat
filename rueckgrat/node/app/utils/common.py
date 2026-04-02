@@ -3,6 +3,7 @@ from pydantic import BaseModel
 class ChatRequest(BaseModel):
     messages: list[dict]
     temperature: float
+    low_accuracy: bool
 
 class ChatResponse(BaseModel):
     role: str

@@ -68,12 +68,15 @@ class LoginPage(BasePage):
         # --- Page 2: Password ---
         self.pass_page = QWidget()
         pass_layout = QVBoxLayout(self.pass_page)
+        pass_layout.setSpacing(8)
         pass_layout.addStretch()
 
         self.user_bubble = OneLineBubble()
+        self.user_bubble.setFixedHeight(40)
         pass_layout.addWidget(self.user_bubble)
 
         self.password_edit = QLineEdit()
+        self.password_edit.setContentsMargins(0, 0, 0, 0) 
         self.password_edit.setAlignment(Qt.AlignCenter)
         self.password_edit.setObjectName("login")
         self.password_edit.setEchoMode(QLineEdit.Password)
@@ -82,6 +85,7 @@ class LoginPage(BasePage):
 
         pass_container = QWidget()
         pass_button_layout = QHBoxLayout(pass_container)
+        pass_button_layout.setContentsMargins(0, 0, 0, 0)
         got_to_create_user_btn2 = QPushButton("Change User")
         got_to_create_user_btn2.clicked.connect(self.got_to_select_user)
         pass_button_layout.addWidget(got_to_create_user_btn2)

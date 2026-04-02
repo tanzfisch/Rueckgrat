@@ -84,12 +84,13 @@ class Infrastructure:
 
         return result
             
-    def chat(self, messages, temperature: float) -> Response:
+    def chat(self, messages, temperature: float, low_accuracy: bool = False) -> Response:
         url = f"http://{self.chat_server['host']}:{self.chat_server['port']}/chat"
         
         payload={
             "messages": messages,
-            "temperature": temperature
+            "temperature": temperature,
+            "low_accuracy": low_accuracy
         }
 
         try:

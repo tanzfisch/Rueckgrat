@@ -1,4 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Error: Docker is not installed or not in PATH"
+  exit 1
+fi
+
+docker network inspect my_network >/dev/null 2>&1 || docker network create my_network
 
 read -p "Do you want to install and run caddy as a service? (y/n): " answer
 if [[ $answer =~ ^[Yy]$ ]]; then

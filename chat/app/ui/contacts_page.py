@@ -1,9 +1,9 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea, QFrame, QSizePolicy, QPushButton, QHBoxLayout)
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtCore import Qt, Signal, QSize
 
 from app.ui import BasePage
-from app.ui.widgets import OneLineBubble, MessageBox
+from app.ui.widgets import OneLineBubble, MessageBox, Image
 from app.utils import Backend
 
 class ContactCard(QFrame):
@@ -14,21 +14,30 @@ class ContactCard(QFrame):
 
         self.contact_id = contact.get("id")
         self.setObjectName("contact_card")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)        
         self.setCursor(Qt.PointingHandCursor)
 
-        layout = QVBoxLayout(self)
+        layout = QHBoxLayout(self)
+        profile_image = Image("app/icons/profile_light_.png")
+        profile_image.setFixedSize(128, 128)
+        profile_image.setScaledContents(True)
+        layout.addWidget(profile_image)
+
+        wrapper = QWidget()
+        wrapper.setObjectName("transparent")
+        label_layout = QVBoxLayout(wrapper)
+        layout.addWidget(wrapper)
 
         name_label = QLabel(contact.get("name", ""))
-        layout.addWidget(name_label)
+        label_layout.addWidget(name_label)
 
         traits_label = QLabel(contact.get("role", ""))
         traits_label.setWordWrap(True)
-        layout.addWidget(traits_label)
+        label_layout.addWidget(traits_label)
 
         purpose_label = QLabel(contact.get("persona", ""))
         purpose_label.setWordWrap(True)
-        layout.addWidget(purpose_label)
+        label_layout.addWidget(purpose_label)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -46,6 +55,7 @@ class ContactsPage(BasePage):
 
         self.container = QWidget()
         self.contacts_layout = QVBoxLayout(self.container)
+        self.contacts_layout.setSpacing(8)
         self.contacts_layout.setAlignment(Qt.AlignTop)
 
         self.scroll_area.setWidget(self.container)
@@ -77,6 +87,7 @@ class ContactsPage(BasePage):
         for contact in contacts:
             contact_card_container = QWidget()
             contact_card_layout = QHBoxLayout(contact_card_container)            
+            contact_card_layout.setContentsMargins(0, 0, 0, 0)
 
             card = ContactCard(contact)
             card.clicked.connect(self.on_contact_clicked)
@@ -84,6 +95,8 @@ class ContactsPage(BasePage):
 
             button_container = QWidget()
             button_layout = QVBoxLayout(button_container)            
+            button_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+            button_layout.setContentsMargins(0, 0, 0, 0)
 
             edit_btn = QPushButton()
             edit_btn.setIcon(QIcon("app/icons/edit_light.png"))

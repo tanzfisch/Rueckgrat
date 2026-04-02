@@ -142,9 +142,7 @@ class ChatPage(BasePage):
         self.kokoro_voice=self.contact.get("kokoro_voice_type") or default_kokoro
         self.piper_model=self.contact.get("piper_voice_model") or default_piper
 
-        self.profile = json.loads(self.contact["profile"])
-
-        self.temperature = float(self.profile["llm_parameters"]["temperature"])
+        self.temperature = float(self.contact["profile"]["llm_parameters"]["temperature"])
 
     def on_leave(self):
         pass           

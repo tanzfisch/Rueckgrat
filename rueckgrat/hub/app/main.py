@@ -1,6 +1,7 @@
 import json
 import random
 import sys
+import re
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.security import HTTPBearer
@@ -16,9 +17,13 @@ from jose import jwt
 from datetime import datetime, timedelta, timezone
 import copy
 
+import logging
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logging.basicConfig(level=logging.DEBUG)
+
     app.state.infrastructure = Infrastructure()
     db_path = "/data/chat.db"
     app.state.db = ChatDB(db_path)
@@ -120,16 +125,6 @@ class ChatResponse(BaseModel):
     role: str
     content: str
 
-def crate_system_prompt(contact, user_name):
-    data = copy.deepcopy(contact)
-    data.pop("profile")
-    data["profile"] = json.loads(contact["profile"])
-
-    compiler = PromptCompiler(data, user_name)
-    result = compiler.build()
-
-    return result
-
 ########### system handling
 @app.get("/health")
 def health():
@@ -187,10 +182,30 @@ class ConversationsRequest(BaseModel):
     contact_id: int
 
 @app.get("/conversations")
-def get_conversations(conversations: ConversationsRequest, username: str = Depends(get_current_user)):
+def get_conversations(request: ConversationsRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    conversations = app.state.db.get_conversations(user_id, conversations.contact_id)
+    conversations = app.state.db.get_conversations(user_id, request.contact_id)
     return {"conversations": conversations}
+
+class ConversationRequest(BaseModel):
+    conversation_id: int
+
+@app.get("/get_conversation")
+def get_conversation(request: ConversationRequest, username: str = Depends(get_current_user)):
+    conversation = app.state.db.get_conversation(request.conversation_id)
+    return {"conversation": conversation}
+
+class UpdateConversationRequest(BaseModel):
+    conversation_id: int
+    brief: str
+    context: str
+
+@app.get("/update_conversation")
+def update_conversation(request: UpdateConversationRequest, username: str = Depends(get_current_user)):
+    if app.state.db.update_conversation(request.conversation_id, request.brief, request.context):
+        return {"status": "ok"}
+    else:
+        return {"status": "operation failed"}
 
 class CreateConversationRequest(BaseModel):
     contact_id: int
@@ -242,19 +257,157 @@ def cleanup_reply(reply: str, name: str):
     
     return reply
 
-def handle_chat_request(request: ChatRequest):
-    contact = app.state.db.get_contact_by_id(request.contact_id)
-    system_prompt = crate_system_prompt(contact, request.name)
-    payload = [{"role": "system", "content": system_prompt}]
+def update_context(context, messages: list):
+    messages_block = "\n".join([
+        f'- "{m["content"]}" (role: {m["role"]})'
+        for m in messages
+    ])
 
+    query = f"""
+    You maintain a SHORT running context for a conversation.
+
+    NEW MESSAGES:
+    {messages_block}
+
+    CURRENT CONTEXT:
+    {{
+        "location": "{context['location']}",
+        "user": "{context['user']}",
+        "assistant": "{context['assistant']}",
+        "topic": "{context['topic']}"
+    }}
+
+    INSTRUCTIONS:
+    - Process messages in order (top = oldest, bottom = newest)
+    - Update information if possible and overwrite if necessary
+    - Ammend if information is important
+    - Keep ALL fields SHORT (max 40 words each)
+    - Keep only the MOST IMPORTANT and RECENT info
+    - DROP anything irrelevant or outdated
+    - "topic" = 1 short phrase
+    - "user"/"assistant" = intent or role summary, also body position or movement, NOT dialogue
+    - "location" = only if explicitly mentioned
+
+    OUTPUT:
+    Return ONLY valid JSON in the same format.
+    """
+    payload = [{"role": "user", 
+                "content": query}]
+    response = app.state.infrastructure.chat(payload, 0.0, True)
+
+    if response.status_code == 200:
+        data = response.json()
+        try:
+            content = data.get("content", "")
+            match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
+            if not match:
+                return context
+            
+            reply = json.loads(match.group(1))
+
+            new_context = {
+                "location": reply["location"],
+                "user": reply["user"],
+                "assistant": reply["assistant"],
+                "topic": reply["topic"]
+            }            
+        except Exception as e:
+            logger.error(f"failed to update context: {e}")
+            return context   
+
+        return new_context
+
+    else:
+        data = response.json()
+        error = data.get("error", "")        
+        logger.error(f"failed to update context with: {error}")
+        return context
+
+def update_conversation(conversation_id: int):
+    logger.debug(f"update_conversation {conversation_id}")
+
+    # TODO update brief and title
+    conversation = app.state.db.get_conversation(conversation_id)
+    context = conversation["context"]
+    
+    messages = app.state.db.get_messages_by_conversation(conversation_id, 4)
+    context = update_context(context, messages)
+
+    conversation["title"] = context["topic"]
+
+    logger.debug(f"updated context {context}")
+
+    app.state.db.update_conversation(conversation_id, conversation["title"], conversation["brief"], json.dumps(context))
+
+def create_mood_image_prompt(contact, conversation):
+    context = conversation["context"]
+
+    profile = contact["profile"]
+    image_parameters = profile["image_parameters"]
+
+    person_a = f"Person A: {image_parameters}, {context['assistant']}"
+    person_b = f"Person B: {context['user']}" # TODO add description of user
+    person_b = ""
+    location = context["location"]
+
+    query = f"""
+    Create a detailed, vivid image prompt for an AI image generator based on:
+
+    Location: {location}
+    {person_a}
+    {person_b}
+
+    Flesh out the description richly with visual details, lighting, mood, composition, style, and specifics so it works well for image generators. Make it cohesive and immersive.
+    Output a single, ready-to-use image prompt.
+    Output only the generated prompt and nothing else.
+    """
+    payload = [{"role": "user", 
+                "content": query}]
+    response = app.state.infrastructure.chat(payload, 0.5)
+
+    if response.status_code == 200:
+        data = response.json()
+        try:
+            content = data.get("content", "")
+            return content
+        except Exception as e:
+            logger.error(f"failed to update context: {e}")
+
+        return ""
+
+    else:
+        data = response.json()
+        error = data.get("error", "")        
+        logger.error(f"failed to generate image prompt: {error}")
+        return ""
+
+def handle_chat_request(request: ChatRequest):
+    logger.debug(f"handle_chat_request {request}")
     app.state.db.add_message(request.conversation_id, request.role, request.content, request.name)
-    messages = app.state.db.get_messages_by_conversation(request.conversation_id, 30)
+    
+    update_conversation(request.conversation_id)
+
+    conversation = app.state.db.get_conversation(request.conversation_id)
+    contact = app.state.db.get_contact_by_id(request.contact_id)
+
+    #image = create_mood_image_prompt(contact, conversation)
+    #logger.debug(f"image prompt: {image}")
+
+    compiler = PromptCompiler(contact, conversation, request.name)
+    system_prompt = compiler.build_system_prompt()    
+
+    #logger.debug(f"\nsystem_prompt {system_prompt}")
+
+    payload = [{"role": "system", "content": system_prompt}]
+    
+    messages = app.state.db.get_messages_by_conversation(request.conversation_id, 20)
     for message in messages:
         content = message['content']
         payload.append({"role": message["role"], "content": content})
 
     size_in_bytes = sys.getsizeof(messages)
-    print(f"request from {request.name} of size: {size_in_bytes / 1000}k")
+    estimated_tokens = size_in_bytes / 4 * 1.25
+    logger.debug(f"request from {request.name} estimated token size: {estimated_tokens / 1000}k")
 
     response = app.state.infrastructure.chat(payload, request.temperature)
     if response.status_code == 200:
@@ -295,8 +448,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_text(json.dumps(response))
 
     except WebSocketDisconnect:
-        print("Client disconnected")
+        logger.info("Client disconnected")
 
     except Exception as e:
-        print(f"Error: websocket endpoint {repr(e)}")
+        logger.error(f"websocket endpoint failure {repr(e)}")
         await websocket.close(code=1011)

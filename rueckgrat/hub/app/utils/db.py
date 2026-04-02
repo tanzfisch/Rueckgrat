@@ -1,9 +1,12 @@
 import sqlite3
 import json
 
+import logging
+logger = logging.getLogger(__name__)
+
 class ChatDB:
     def __init__(self, db_path):
-        print(f"db path is: {db_path}")
+        logger.info(f"db path is: {db_path}")
 
         self.db_path = db_path
         conn = self.get_connection()
@@ -28,8 +31,9 @@ class ChatDB:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             contact_id INTEGER NOT NULL,
-            title TEXT,
-            brief TEXT DEFAULT "New Conversation",
+            title TEXT DEFAULT "...",
+            brief TEXT,
+            context TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -64,7 +68,7 @@ class ChatDB:
         conn.commit()
         conn.close()
 
-        print("Database initialized")
+        logger.info("Database initialized")
 
     def get_connection(self):
         conn = sqlite3.connect(self.db_path)
@@ -81,10 +85,10 @@ class ChatDB:
                     (username, passwd)
                 )
                 conn.commit()
-                print("created user")
+                logger.info("created user")
                 return cursor.lastrowid
             except sqlite3.IntegrityError:
-                raise ValueError("Username already exists")
+                logger.error("Username already exists")
 
     def remove_user(self, user_name: str):
         with self.get_connection() as conn:
@@ -153,7 +157,7 @@ class ChatDB:
                 return cursor.lastrowid
             
             except Exception as e:
-                print(f"Error: failed creating contact: {e}")
+                logger.error(f"failed creating contact: {e}")
                 
         return -1    
 
@@ -204,21 +208,21 @@ class ChatDB:
                 return cursor.lastrowid
 
             except sqlite3.IntegrityError as e:
-                print(f"Integrity error: {e}")
+                logger.error(f"Integrity error: {e}")
                 return None
 
             except Exception as e:
-                print(f"Error creating contact: {e}")
+                logger.error(f"creating contact: {e}")
                 return None
 
     def update_contact(self, user_id: int, contact_id: int, contact_json: dict):
 
         if not "identity" in contact_json:
-            print(f"Error: missing identity key")
+            logger.error(f"missing identity key")
             return False
 
         if not "profile" in contact_json:
-            print(f"Error: missing profile key")
+            logger.error(f"missing profile key")
             return False
 
         identity = contact_json["identity"]
@@ -268,11 +272,11 @@ class ChatDB:
                 return cursor.rowcount > 0
 
             except sqlite3.IntegrityError as e:
-                print(f"Integrity error: {e}")
+                logger.error(f"Integrity error: {e}")
                 return False
 
             except Exception as e:
-                print(f"Error updating contact: {e}")
+                logger.error(f"updating contact: {e}")
                 return False                
 
     def get_contact_by_id(self, contact_id: int):
@@ -307,10 +311,14 @@ class ChatDB:
                         # If parsing fails, return raw string as fallback
                         pass
 
+                profile = json.loads(contact["profile"])
+                contact.pop("profile")
+                contact["profile"] = profile
+
                 return contact
 
             except Exception as e:
-                print(f"Error retrieving contact: {e}")
+                logger.error(f"retrieving contact: {e}")
                 return None                
             
     def get_contacts(self, user_id: int):
@@ -345,12 +353,16 @@ class ChatDB:
                         except Exception:
                             pass  # fallback to raw string if malformed
 
+                    profile = json.loads(contact["profile"])
+                    contact.pop("profile")
+                    contact["profile"] = profile
+
                     contacts.append(contact)
 
                 return contacts
 
             except Exception as e:
-                print(f"Error: retrieving contacts: {e}")
+                logger.error(f"retrieving contacts: {e}")
                 return []        
 
     def get_conversations(self, user_id: int, contact_id: int):
@@ -360,7 +372,7 @@ class ChatDB:
                 cursor = conn.cursor()
 
                 cursor.execute("""
-                    SELECT id, user_id, contact_id, title, brief, created_at
+                    SELECT id, user_id, contact_id, title, brief, context, created_at
                     FROM conversations
                     WHERE user_id = ?
                     AND contact_id = ?
@@ -368,29 +380,98 @@ class ChatDB:
                 """, (user_id, contact_id))
 
                 rows = cursor.fetchall()
-                conversations = [dict(row) for row in rows]
-                return conversations                
+
+                conversations = []
+
+                for row in rows:
+                    conversation = dict(row)
+
+                    context = json.loads(conversation["context"])
+                    conversation.pop("context")
+                    conversation["context"] = context
+
+                    conversations.append(conversation)
+
+                return conversations
             
             except Exception as e:
-                print(f"Error: retrieving conversations: {e}")
+                logger.error(f"retrieving conversations: {e}")
                 
         return []             
             
-    def create_conversation(self, user_id: int, contact_id: int) -> int:
+    def get_conversation(self, conversation_id: int):
+        with self.get_connection() as conn:
+            try:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT id, user_id, contact_id, title, brief, context, created_at
+                    FROM conversations
+                    WHERE id = ?
+                """, (conversation_id,))
+
+                row = cursor.fetchone()
+
+                if not row:
+                    return None                
+
+                # Convert row → dict
+                conversation = dict(row)
+
+                context = json.loads(conversation["context"])
+                conversation.pop("context")
+                conversation["context"] = context
+
+                return conversation
+
+            except Exception as e:
+                logger.error(f"retrieving conversation: {e}")
+
+        return None
+    
+    def update_conversation(self, conversation_id: int, title: str, brief: str, context: str):
         with self.get_connection() as conn:
             try:
                 cursor = conn.cursor()
 
                 cursor.execute("""
-                    INSERT INTO conversations (user_id, contact_id)
-                    VALUES (?, ?)
-                """, (user_id, contact_id))
+                    UPDATE conversations
+                    SET title = ?, brief = ?, context = ?
+                    WHERE id = ?
+                """, (title, brief, context, conversation_id))
+
+                conn.commit()
+
+                return cursor.rowcount > 0  # True if a row was updated
+
+            except Exception as e:
+                logger.error(f"updating conversation: {e}")
+
+        return False    
+
+    def create_conversation(self, user_id: int, contact_id: int) -> int:
+        with self.get_connection() as conn:
+            try:
+                start_context = """{
+                    "location": "neutral empty room",
+                    "user": "standing in front of assitant",
+                    "assistant": "standing in front of user",
+                    "topic": "no specific topic"
+                }"""
+
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    INSERT INTO conversations (user_id, contact_id, context)
+                    VALUES (?, ?, ?)
+                """, (user_id, contact_id, start_context))
 
                 conn.commit()
                 return cursor.lastrowid
             
             except Exception as e:
-                print(f"Error: failed creating conversation: {e}")
+                logger.error(f"failed creating conversation: {e}")
                 
         return -1
     
@@ -409,7 +490,7 @@ class ChatDB:
                 return cursor.rowcount > 0  # True if something was deleted
             
             except Exception as e:
-                print(f"Error: failed deleting conversation: {e}")
+                logger.error(f"failed deleting conversation: {e}")
 
         return False
 
@@ -428,7 +509,7 @@ class ChatDB:
                 return cursor.rowcount > 0  # True if something was deleted
             
             except Exception as e:
-                print(f"Error: failed deleting contact: {e}")
+                logger.error(f"failed deleting contact: {e}")
 
         return False
 
@@ -452,13 +533,14 @@ class ChatDB:
 
                 return [dict(row) for row in cursor.fetchall()]
             except Exception as e:
-                print(f"Error: failed returning messages: {e}")         
+                logger.error(f"failed returning messages: {e}")         
 
     def add_message(self, conversation_id: int, role: str, content: str, name: str = "") -> int:
         valid_roles = {"user", "assistant", "system", "error"}
 
         if role not in valid_roles:
-            raise ValueError(f"Invalid role: {role}")
+            logger.error(f"Invalid role: {role}")
+            return None
 
         with self.get_connection() as conn:
             cursor = conn.cursor()

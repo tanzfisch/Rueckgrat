@@ -13,10 +13,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logging.basicConfig(level=logging.DEBUG)
+
     host = "host.docker.internal"
-
-    logging.basicConfig(level=logging.INFO)
-
     llamacpp_port = "8080" # TODO make configurable
     app.state.llamacpp = LLamaCppInterface(host, llamacpp_port)
 

@@ -1,0 +1,27 @@
+
+{
+  "servers": [
+    {
+      "host": "rueckgrat_node",
+      "port": 7346,
+      "services": [
+        {
+          "type": "llm",
+          "name": "rueckgrat_llama_cpp",
+          "port": 8080
+        }
+      ]
+    },
+    {
+      "host": "192.168.2.158",
+      "port": 7346,
+      "services":[
+        {
+          "type": "image",
+          "name": "ComfyUI",
+          "port": "8188"
+        }
+      ]
+    }    
+  ]
+}
