@@ -2,6 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /hub
 
+RUN useradd -m hubuser
+
+RUN mkdir -p /hub/db && chown -R hubuser:hubuser /hub/db
+RUN mkdir -p /hub/images && chown -R hubuser:hubuser /hub/images
+
 # Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -9,10 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy app
 COPY app app
 
-RUN mkdir -p /data && \
-    chown -R 1000:1000 /data
-
-COPY config config
+USER hubuser
 
 # Expose port
 EXPOSE 14223

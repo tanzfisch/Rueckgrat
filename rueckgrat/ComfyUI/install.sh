@@ -122,7 +122,7 @@ clone_or_pull https://github.com/ltdrdata/ComfyUI-Manager.git ComfyUI-Manager
 #clone_or_pull https://github.com/Gourieff/ComfyUI-ReActor.git ComfyUI-ReActor
 #"$PIP" install -r ComfyUI-ReActor/requirements.txt
 
-BASE_PATH="$CURRENT_DIR/../data/models/ComfyUI"
+BASE_PATH="$CURRENT_DIR/../models/ComfyUI"
 EXTRA_MODEL_PATHS="$CURRENT_DIR/ComfyUI/extra_model_paths.yaml"
 bash -c "cat > $EXTRA_MODEL_PATHS" <<EOF
 comfyui:

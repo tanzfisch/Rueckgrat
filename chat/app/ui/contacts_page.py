@@ -3,46 +3,12 @@ from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtCore import Qt, Signal, QSize
 
 from app.ui import BasePage
-from app.ui.widgets import OneLineBubble, MessageBox, Image
-from app.utils import Backend
+from app.ui.widgets import OneLineBubble, MessageBox, ContactCard
+from app.utils import Backend, Contact
+from pathlib import Path
 
-class ContactCard(QFrame):
-    clicked = Signal(int)
-
-    def __init__(self, contact):
-        super().__init__()
-
-        self.contact_id = contact.get("id")
-        self.setObjectName("contact_card")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)        
-        self.setCursor(Qt.PointingHandCursor)
-
-        layout = QHBoxLayout(self)
-        profile_image = Image("app/icons/profile_light_.png")
-        profile_image.setFixedSize(128, 128)
-        profile_image.setScaledContents(True)
-        layout.addWidget(profile_image)
-
-        wrapper = QWidget()
-        wrapper.setObjectName("transparent")
-        label_layout = QVBoxLayout(wrapper)
-        layout.addWidget(wrapper)
-
-        name_label = QLabel(contact.get("name", ""))
-        label_layout.addWidget(name_label)
-
-        traits_label = QLabel(contact.get("role", ""))
-        traits_label.setWordWrap(True)
-        label_layout.addWidget(traits_label)
-
-        purpose_label = QLabel(contact.get("persona", ""))
-        purpose_label.setWordWrap(True)
-        label_layout.addWidget(purpose_label)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.clicked.emit(self.contact_id)
-        super().mousePressEvent(event)
+from common import Logger
+logger = Logger(__name__).get_logger()
 
 class ContactsPage(BasePage):
     def __init__(self, navigator):
@@ -67,7 +33,7 @@ class ContactsPage(BasePage):
     def on_leave(self):
         pass          
 
-    def add_contact(self):        
+    def add_contact(self):
         self.navigator("profile", contact_id=-1)
 
     def load_contacts(self):
@@ -84,7 +50,14 @@ class ContactsPage(BasePage):
         add_contact_bubble.clicked.connect(self.add_contact)
         self.contacts_layout.addWidget(add_contact_bubble)
 
-        for contact in contacts:
+        for contact_dict in contacts:
+            contact = Contact(contact_dict)
+            profile_image_name = contact.get_latest_profile_image_name()
+        
+            profile_image_path = Path("cache/images") / profile_image_name
+            if not profile_image_path.exists():
+                Backend.get_instance().download(f"images/{profile_image_name}", "cache/images")
+
             contact_card_container = QWidget()
             contact_card_layout = QHBoxLayout(contact_card_container)            
             contact_card_layout.setContentsMargins(0, 0, 0, 0)
@@ -104,7 +77,7 @@ class ContactsPage(BasePage):
             edit_btn.setFixedSize(40, 40)
             button_layout.addWidget(edit_btn)
             edit_btn.clicked.connect(
-                lambda checked=False, contact_id=contact["id"]: 
+                lambda checked=False, contact_id=contact.get_id():
                 self.edit_contact(contact_id)
             )  
 
@@ -114,7 +87,7 @@ class ContactsPage(BasePage):
             delete_btn.setFixedSize(40, 40)
             button_layout.addWidget(delete_btn)
             delete_btn.clicked.connect(
-                lambda checked=False, contact_id=contact["id"]: 
+                lambda checked=False, contact_id=contact.get_id():
                 self.delete_contact(contact_id)
             )     
   

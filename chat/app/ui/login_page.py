@@ -9,8 +9,8 @@ from app.ui import BasePage
 from app.ui.widgets import OneLineBubble
 from app.utils import Backend
 
-import logging
-logger = logging.getLogger(__name__)
+from common import Logger
+logger = Logger(__name__).get_logger()
 
 class VCenterLabel(QWidget):
     def __init__(self, text):
@@ -180,7 +180,7 @@ class LoginPage(BasePage):
         if self.login_token != "":
             self.leave_login()
         else:
-            logging.error("login failed")
+            logger.error("login failed")
 
     def user_chosen(self, user_name, id):
 
@@ -195,4 +195,4 @@ class LoginPage(BasePage):
         if self.login_token != "":
             self.leave_login()
         else:
-            logging.error("login failed")
+            logger.error("login failed")

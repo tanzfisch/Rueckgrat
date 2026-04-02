@@ -4,7 +4,10 @@ from PySide6.QtCore import Qt, QSize
 
 from app.ui import BasePage
 from app.ui.widgets import MessageBox, OneLineBubble, ContactHeader
-from app.utils import Backend
+from app.utils import Backend, Contact
+
+from common import Logger
+logger = Logger(__name__).get_logger()
 
 class ConversationsPage(BasePage):
     def __init__(self, navigator):
@@ -32,15 +35,15 @@ class ConversationsPage(BasePage):
 
     def on_enter(self, **kwargs):
         self.contact_id = kwargs.get("contact_id")
-        contact = Backend.get_instance().get_contact(self.contact_id)
-        self.contact_header.set_name(contact["name"])
+        contact = Contact(Backend.get_instance().get_contact(self.contact_id))
+        self.contact_header.set_contact(contact)
 
         self.load_conversations()
 
     def on_leave(self):
         pass   
 
-    def conversation_chosen(self, conversation_brief, conversation_id):
+    def conversation_chosen(self, title: str, conversation_id: int):
         self.navigator("chat", contact_id=self.contact_id, conversation_id=conversation_id)
 
     def create_conversation(self):

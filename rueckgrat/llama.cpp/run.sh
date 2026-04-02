@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+echo "NOT implemented"
+exit 1
+
 docker stop rueckgrat_llama_cpp
 docker rm rueckgrat_llama_cpp
 
@@ -18,12 +21,9 @@ DOCKER_IMAGE="ghcr.io/ggml-org/llama.cpp:server"
 docker run -d \
     --name $CONTAINER_NAME \
     --gpus all \
-    --cpus $CPU_CORES \
-    --memory ${MEM_GB}g \
     --network rueckgrat-net-local \
     -v /media/martin/dev/dev/ai_models/models:/models \
     -p 8080:8080 $DOCKER_IMAGE \
     -m /models/meta-llama-3.1-8b-instruct-abliterated.Q6_K/meta-llama-3.1-8b-instruct-abliterated.Q6_K.gguf \
-    --threads $CPU_CORES \
-    --n-gpu-layers 32
+    --n-gpu-layers -1
 

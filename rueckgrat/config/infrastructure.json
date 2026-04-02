@@ -6,7 +6,7 @@
       "port": 7346,
       "services": [
         {
-          "type": "llm",
+          "type": "text_to_text",
           "name": "rueckgrat_llama_cpp",
           "port": 8080
         }
@@ -17,7 +17,7 @@
       "port": 7346,
       "services":[
         {
-          "type": "image",
+          "type": "text_to_image",
           "name": "ComfyUI",
           "port": "8188"
         }

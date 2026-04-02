@@ -1,19 +1,17 @@
 import re
 from typing import Dict, Any, List
 
-import logging
-logger = logging.getLogger(__name__)
+from app.common import Logger
+logger = Logger(__name__).get_logger()
 
 class PromptCompiler:
-    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any], user_name: str):
+    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_name: str = None):
         self.contact = contact
         self.conversation = conversation
         self.user_name = user_name
         self.profile = contact.get("profile", {})
 
-    # --------- Utilities ---------
     def _clean_text(self, text: str) -> str:
-        """Normalize broken spacing and commas."""
         if not isinstance(text, str):
             return text
         text = re.sub(r"\s+", " ", text)
@@ -23,7 +21,6 @@ class PromptCompiler:
     def _clean_list(self, items: List[str]) -> List[str]:
         return [self._clean_text(i) for i in items if i]
 
-    # --------- Core Sections ---------
     def _build_identity(self) -> str:
         return f"""
 You are {self.contact.get('name')}.
@@ -31,9 +28,8 @@ Role: {self.contact.get('role')}.
 Gender: {self.contact.get('gender')}
 Persona traits: {self._clean_text(self.contact.get('persona', ''))}
 Background: {self._clean_text(self.profile.get('background_hook', ''))}
-Appearance: {self._clean_text(self.profile.get('physical_attributes', ''))}
 Body Language: {self._clean_text(self.profile.get('body_language', ''))}
-Style: {self._clean_text(self.profile.get('fashion_and_style', ''))}
+Style: {self._clean_text(self.profile.get('style', ''))}
 """.strip()
 
     def _build_behavior(self) -> str:
@@ -94,23 +90,23 @@ Structure:
 """.strip()
     
     def _build_context(self) -> str:
-        context = self.conversation["context"]
+        context = self.conversation["context"] if self.conversation else ""
         location = context.get("location", "")
         user = context.get("user", "")
         assistant = context.get("assistant", "")
         topic = context.get("topic", "")
+        user_name = self.user_name if self.user_name else "User"
 
         return f"""
 CONTEXT:
-You are talking to: {self.user_name}
+You are talking to: {user_name}
 Location: {location}
-{self.user_name}: {user}
+{user_name}: {user}
 You: {assistant}
 Topic: {topic}
 Place special attention to the context section. This is the current state of the conversation. The ground truth to what just happened. Prioritize the information from here over the conversation history
 """.strip()
 
-    # --------- Public API ---------
     def build_system_prompt(self) -> str:
         sections = [
             self._build_identity(),
@@ -118,16 +114,6 @@ Place special attention to the context section. This is the current state of the
             self._build_style(),
             self._build_objectives(),
             self._build_response_loop(),
-            self._build_context()
+           # TODO later self._build_context()
         ]
-
         return "\n\n".join(sections)
-
-    def get_llm_parameters(self) -> Dict[str, Any]:
-        return self.profile.get("llm_parameters", {})
-
-    def get_image_parameters(self) -> Dict[str, Any]:
-        return self.profile.get("image_parameters", {})
-
-    def get_tts_parameters(self) -> Dict[str, Any]:
-        return self.profile.get("tts_parameters", {})

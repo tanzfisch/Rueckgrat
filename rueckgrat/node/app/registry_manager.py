@@ -25,7 +25,7 @@ def main():
 
     args = parser.parse_args()
 
-    registry = ModelRegistry("/models")
+    registry = ModelRegistry("/node/models")
 
     if args.command == "install":
         model_cfg = registry.get_model_cfg(args.name)
@@ -38,11 +38,11 @@ def main():
             print("Error: failed to install model")
             sys.exit(1)
 
-        print(f"Model \"{model_cfg['name']}\" installed.")
+        print(f"Model \"{args.name}\" installed.")
 
     elif args.command == "list":
         data = registry.get_registry()
-        for model_cfg in data.values():
+        for key, model_cfg in data.items():
             if args.type != "" and args.type != model_cfg["type"]:
                 continue
 
@@ -51,11 +51,11 @@ def main():
             if args.verbose:
                 if installed:
                     size_gb = registry.get_model_size(model_cfg)
-                    print(f"{model_cfg['name']:<100} - installed ({size_gb:.4f} GB)")
+                    print(f"{key:<100} - installed ({size_gb:.4f} GB)")
                 else:
-                    print(f"{model_cfg['name']:<100} - NOT installed")
+                    print(f"{key:<100} - NOT installed")
             else:
-                print(model_cfg['name'])
+                print(key)
     
     elif args.command == "startup_parameters":
         model_cfg = registry.get_model_cfg(args.name)

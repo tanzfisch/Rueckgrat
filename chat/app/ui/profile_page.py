@@ -1,16 +1,14 @@
 import json
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QFormLayout, QLineEdit, QRadioButton, QTextEdit, QPushButton, QButtonGroup,
-    QHBoxLayout, QScrollArea
-)
-from PySide6.QtCore import Signal, QRegularExpression, Qt
-from PySide6.QtGui import QTextCharFormat, QSyntaxHighlighter, QFont
+
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QFormLayout, QLineEdit, QRadioButton, QTextEdit, QPushButton, QButtonGroup, QHBoxLayout, QScrollArea)
+from PySide6.QtCore import Signal
+from PySide6.QtGui import QFont
 
 from app.ui import BasePage
 from app.utils import Backend
 
-import logging
-logger = logging.getLogger(__name__)
+from common import Logger
+logger = Logger(__name__).get_logger()
 
 class TextEdit(QTextEdit):
     def __init__(self):
@@ -32,9 +30,19 @@ class JsonAwareLineEdit(QLineEdit):
         except json.JSONDecodeError:
             pass
 
-empty_template = """
+template_profile = """
 {
     "background_hook": "former spy with disciplined thinking",
+    "body_language": "calm authority, confident posture, deliberate and precise gestures, maintains eye contact, shows engagement in conversations",
+    "style": "minimal accessories, understated elegance",
+
+    "appearance": {
+        "general": "middle age male, british",
+        "face": "brown eyes, eye glasses with thin black frame, well-groomed full-beard",
+        "hair": "short dark hair with gray at temples",
+        "skin": "",
+        "body_type": "lean build"
+    },
 
     "objectives": {
         "primary": "develop the student's thinking through guided exercises",
@@ -79,7 +87,8 @@ empty_template = """
         "no paraphrasing the student",
         "no long explanations unless explicitly requested",
         "always include a question or task",
-        "keep responses concise"
+        "avoid repeating phrases or restating the same idea",
+        "be concise and introduce new information in each sentence"
         ]
     },
 
@@ -88,29 +97,41 @@ empty_template = """
         "engagement": "slightly provocative, intellectually demanding",
         "quirks": [
         "occasionally reference scripture or literature",
-        "use dry humor sparingly"
+        "dry humor",
+        "likes to tip hit hat when making a point"
         ]
     },
 
     "start_context": {
-      "location": "neutral empty room",
-      "user": "standing in front of assitant",
-      "assistant": "standing in front of user",
-      "topic": "no specific topic"
-    },    
+      "location": "class room",
+      "topic": "no specific topic",
+
+      "user": {
+        "action": "sitting at desk facing teacher",
+        "head": "",
+        "upper_body": "white t-shirt",
+        "body": "blue jeans, black shoes"        
+      },
+
+      "assistant": {
+        "action": "standing by the white board",
+        "fashion_head": "",
+        "fashion_upper_body": "crisp white shirt, subtle gray tie",
+        "fashion_general": "professional and classic attire, well-tailored suit in darker tones"        
+      }
+    },
 
     "llm_parameters": {
-        "temperature": "0.8"
+        "temperature": "0.15",
+        "preffered_context_size": "10000"
     },
 
     "image_parameters": {
-        "prompt": "male butler, middle age, dark gray tuxedo, gray hair, neutral background",
-        "negative_prompt": "cropped, no legs, no arms, no head, low quality, artifacts, artifacts in eyes, bad anatomy, multiple images, fur",
         "seed": 1337,
-        "cfg": 10.0,
-        "steps": 30
+        "steps": 35,
+        "cfg": 8.0,
+        "model": "default"
     },
-
     "tts_parameters": {
         "piper_voice_model": "en_US-hfc_male-medium",
         "kokoro_voice_type": "am_adam"
@@ -164,7 +185,7 @@ class ProfilePage(BasePage):
         # --- profile ---
         self.profile = TextEdit()
         self.profile.setFont(QFont("Consolas", 12))
-        self.profile.setPlainText(empty_template)
+        self.profile.setPlainText(template_profile)
         self.form_layout.addRow("Profile", self.profile)
 
         # --- SUBMIT BUTTON ---
@@ -195,7 +216,7 @@ class ProfilePage(BasePage):
             profile = contact # assume just the profile part was pasted
 
         if not profile:
-            pretty_json = empty_template
+            pretty_json = template_profile
         else:
             pretty_json = json.dumps(profile, indent=4, sort_keys=True)
 
@@ -205,7 +226,7 @@ class ProfilePage(BasePage):
         self.name.setText("")
         self.role.setPlainText("")
         self.persona.setPlainText("")
-        self.profile.setPlainText(empty_template)
+        self.profile.setPlainText(template_profile)
         self.set_gender("male")
         
     def get_value(self, dictionary, key):
@@ -220,7 +241,7 @@ class ProfilePage(BasePage):
         self.role.setPlainText(self.get_value(contact, "role"))
         self.persona.setPlainText(self.get_value(contact, "persona"))
 
-        data = json.loads(self.get_value(contact, "profile"))
+        data = self.get_value(contact, "profile")
         pretty_json = json.dumps(data, indent=4, sort_keys=True)
         self.profile.setPlainText(pretty_json)
         
@@ -231,7 +252,6 @@ class ProfilePage(BasePage):
             return     
 
         contact = Backend.get_instance().get_contact(self.contact_id)
-        logging.debug(contact)
         self.fill_form(contact)
 
     def cancel_form(self):
