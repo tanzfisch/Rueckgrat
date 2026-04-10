@@ -33,6 +33,7 @@ class ChatBubble(QWidget):
     def __init__(self, role: str, content: str, image_filepath: str = None):
         super().__init__()
         self.image_filepath = image_filepath
+        self.image = None
 
         self.setObjectName("chatBubble")
         self.setProperty("role", role)
@@ -53,8 +54,16 @@ class ChatBubble(QWidget):
                 self._add_code(layout, item["value"])
 
     def setFixedWidth(self, width):
-        if self.image_filepath:
-            super().setFixedWidth(int(width * 0.7))
+        if self.image:
+            pixmap = self.image.pixmap
+            if pixmap:
+                aspect = pixmap.width() / pixmap.height()
+                if aspect > 1:
+                    super().setFixedWidth(int(width * 0.8))
+                else:
+                    super().setFixedWidth(int(width * 0.6))
+            else:
+                super().setFixedWidth(int(width * 0.6))
         else:
             super().setFixedWidth(width)
 
@@ -89,9 +98,9 @@ class ChatBubble(QWidget):
         layout.addWidget(text)
 
     def _add_image(self, layout, image_filepath: str):
-        image = Image(image_filepath)
-        image.setScaledContents(True)
-        layout.addWidget(image)
+        self.image = Image(image_filepath)
+        self.image.setScaledContents(True)
+        layout.addWidget(self.image)
 
     def _resize_text_edit(self, text: TextBlock):
         text.setFixedHeight(int(text.document().size().height()))

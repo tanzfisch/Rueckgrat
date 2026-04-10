@@ -2,6 +2,7 @@ from .job_queue import Job
 from typing import Dict, Any
 import json
 import re
+import random
 
 from app.common import Logger, ChatRequest, Utils
 logger = Logger(__name__).get_logger()
@@ -20,7 +21,7 @@ class UpdateContextJob(Job):
             context = Utils.get_nested_value(conversation, ["context"], "")
             if context == "":
                 context = Utils.get_nested_value(contact, ["profile", "start_context"], "")
-            messages = self.db.get_messages_by_conversation(self.request.conversation_id, 4)
+            messages = self.db.get_messages_by_conversation(self.request.conversation_id, 6)
 
             assistant_name = contact["name"]
             user_name = self.request.name
@@ -55,6 +56,7 @@ class UpdateContextJob(Job):
         {{
             "location": "{context['location']}",
             "topic": "{context['topic']}",
+            "summary": "",
 
             "user": {{
                 "action": "{context['user']['action']}",
@@ -74,16 +76,17 @@ class UpdateContextJob(Job):
         INSTRUCTIONS:
         - Process messages in order (top = oldest, bottom = newest)
         - Update information if possible and overwrite if necessary
-        - Ammend if information is important
+        - Ammend but only if it does not create redundancy
         - Keep ALL fields SHORT (max 40 words each)
         - Keep only the MOST IMPORTANT and RECENT info
         - DROP anything irrelevant or outdated
         - "topic" = 1 short phrase
         - "user"/"assistant" - "action" = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
         - "user"/"assistant" - "head" = items this person is wearing on the head
-        - "user"/"assistant" - "upper_body" = items this person is wearing on the upper body
-        - "user"/"assistant" - "body" = items this person is wearing but neither on the head nor upper body
+        - "user"/"assistant" - "upper_body" = items this person is wearing specifically on the upper body
+        - "user"/"assistant" - "body" = items this person is wearing on the body (not carrying)
         - "location" = environment, setting, only if explicitly mentioned
+        - "summary" = write a summary of the whole conversation and put it here
 
         OUTPUT:
         Return ONLY valid JSON in the same format.
@@ -91,7 +94,7 @@ class UpdateContextJob(Job):
         payload = [{"role": "user", 
                     "content": query}]
         
-        response_content = self.infrastructure.chat(payload, 0.0, True)
+        response_content = self.infrastructure.chat(payload, 0.0, random.randint(0, 100000), True)
         if response_content:
             match = re.search(r"```json\s*(.*?)\s*```", response_content, re.DOTALL)
             if not match:
@@ -105,6 +108,7 @@ class UpdateContextJob(Job):
             new_context = {
                 "location": Utils.get_nested_value(reply, ["location"]),
                 "topic": Utils.get_nested_value(reply, ["topic"]),
+                "summary": Utils.get_nested_value(reply, ["summary"]),
 
                 "user": {
                     "action": Utils.get_nested_value(reply, ["user", "action"]),

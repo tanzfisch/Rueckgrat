@@ -11,7 +11,7 @@ from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from app.utils import ChatDB, Infrastructure, ImagePromptCompiler, ImageType
+from app.utils import ChatDB, Infrastructure, ContactImagePromptCompiler, ImageType
 from app.jobs import JobQueue, MetaJob, ImageJob
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
@@ -156,7 +156,7 @@ def get_contact(request: ContactRequest, username: str = Depends(get_current_use
 @app.post("/contact")
 def create_contact(username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    contact_name = f"new_contact_{random.randint(0,10000)}"
+    contact_name = f"new_contact_{random.randint(0,100000)}"
     contact_id = app.state.db.create_contact(user_id, contact_name)
     return {"contact_id": contact_id}
 
@@ -165,13 +165,13 @@ class UpdateContactRequest(BaseModel):
     contact_data: dict
 
 @app.post("/update_contact")
-def create_contact(request: UpdateContactRequest, username: str = Depends(get_current_user)):
+def update_contact(request: UpdateContactRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
     app.state.db.update_contact(user_id, request.contact_id, request.contact_data)
     contact_data = app.state.db.get_contact_by_id(request.contact_id)
     image_parameters = contact_data["profile"]["image_parameters"]
 
-    compiler = ImagePromptCompiler(contact_data, None, ImageType.UpperBody, False, "natural smile, looking at camera")
+    compiler = ContactImagePromptCompiler(contact_data, None, ImageType.UpperBody, False, "natural smile, looking at camera")
     positive_prompt, negative_prompt = compiler.build()
 
     # generate profile image
@@ -300,51 +300,6 @@ async def download_file(file_path: str):
     )
 
 ########### websocket handling 
-def create_mood_image_prompt(contact, conversation):
-    context = conversation["context"]
-
-    profile = contact["profile"]
-    image_parameters = profile["image_parameters"]
-
-    person_a = f"Person A: {image_parameters['prompt']}, {context['assistant']}"
-    person_b = f"Person B: {context['user']}" # TODO add description of user
-    topic = f"Context: {context['topic']}"
-    location = context["location"]
-
-    query = f"""
-    Create a detailed, vivid image prompt for an AI image generator based on:
-
-    Location: {location}
-    {person_a}
-    {person_b}
-
-    {topic}
-
-    Flesh out the description richly with visual details, lighting, mood, composition, style, and specifics so it works well for image generators. Make it cohesive and immersive.
-    Output a single, ready-to-use image prompt.
-    Output only the generated prompt and nothing else.
-    """
-    payload = [{"role": "user", 
-                "content": query}]
-    logger.debug(f"input for generating image prompt {query}")
-    response = app.state.infrastructure.chat(payload, 0.2)
-
-    if response.status_code == 200:
-        data = response.json()
-        try:
-            content = data.get("content", "")
-            return content
-        except Exception as e:
-            logger.error(f"failed to update context: {e}")
-
-        return ""
-
-    else:
-        data = response.json()
-        error = data.get("error", "")        
-        logger.error(f"failed to generate image prompt: {error}")
-        return ""
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()

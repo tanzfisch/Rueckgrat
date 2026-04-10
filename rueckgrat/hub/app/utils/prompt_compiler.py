@@ -1,7 +1,7 @@
 import re
 from typing import Dict, Any, List
 
-from app.common import Logger
+from app.common import Logger, Utils
 logger = Logger(__name__).get_logger()
 
 class PromptCompiler:
@@ -10,6 +10,10 @@ class PromptCompiler:
         self.conversation = conversation
         self.user_name = user_name
         self.profile = contact.get("profile", {})
+
+        self.context = Utils.get_nested_value(conversation, ["context"], "")
+        if self.context == "":
+            self.context = Utils.get_nested_value(contact, ["profile", "start_context"], "")        
 
     def _clean_text(self, text: str) -> str:
         if not isinstance(text, str):
@@ -22,14 +26,15 @@ class PromptCompiler:
         return [self._clean_text(i) for i in items if i]
 
     def _build_identity(self) -> str:
+        style = f"\nYour personal style is {self._clean_text(self.profile.get('style', ''))}"
+
         return f"""
-You are {self.contact.get('name')}.
-Role: {self.contact.get('role')}.
-Gender: {self.contact.get('gender')}
-Persona traits: {self._clean_text(self.contact.get('persona', ''))}
-Background: {self._clean_text(self.profile.get('background_hook', ''))}
-Body Language: {self._clean_text(self.profile.get('body_language', ''))}
-Style: {self._clean_text(self.profile.get('style', ''))}
+You are {self.contact.get('name')} ({self.contact.get('gender')}).
+Your role is {self.contact.get('role')}.
+Your traits are {self._clean_text(self.contact.get('persona', ''))}
+Your background story is {self._clean_text(self.profile.get('background_hook', ''))}
+Your body language is {self._clean_text(self.profile.get('body_language', ''))}
+{style}
 """.strip()
 
     def _build_behavior(self) -> str:
@@ -89,31 +94,71 @@ Structure:
 {chr(10).join(f"- {s}" for s in structure)}
 """.strip()
     
+    def _build_instructions(self) -> str:
+        return f"""
+INSTRUCTIONS:
+- You may include the tag MOOD_GEN at the end of your response when an image of your self in that very moment would improve communication
+- You may include the tag GROUP_GEN at the end of your response when an image of you and the user in that very moment would improve communication
+"""
+
     def _build_context(self) -> str:
-        context = self.conversation["context"] if self.conversation else ""
-        location = context.get("location", "")
-        user = context.get("user", "")
-        assistant = context.get("assistant", "")
-        topic = context.get("topic", "")
+        
+        location = Utils.get_nested_value(self.context, ["location"], "unknown")
+        topic = Utils.get_nested_value(self.context, ["topic"], "unknown")
+        summary = Utils.get_nested_value(self.context, ["summary"], "")
+
+        user_stack = []
+        user_stack.append(Utils.get_nested_value(self.context, ["user", "action"], ""))
+        user_stack.append(Utils.get_nested_value(self.context, ["user", "head"], ""))
+
+        user_upper_body = Utils.get_nested_value(self.context, ["user", "upper_body"], "")
+        user_body = Utils.get_nested_value(self.context, ["user", "upper_body"], "")
+        if not user_upper_body and not user_body:
+            user_stack.append("naked")
+        else:
+            user_stack.append(user_upper_body)
+            user_stack.append(user_body)
+        user_stack.append(Utils.get_nested_value(self.context, ["user", "body"], ""))
+        user_prompt = ", ".join(x for x in user_stack if x)
+
+        assistant_stack = []
+        assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "action"], ""))
+        assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "head"], ""))
+        assistant_upper_body = Utils.get_nested_value(self.context, ["assistant", "upper_body"], "")
+        assistant_body = Utils.get_nested_value(self.context, ["assistant", "body"], "")
+        if not assistant_upper_body and not assistant_body:
+            assistant_stack.append("naked")
+        else:
+            assistant_stack.append(assistant_upper_body)
+            assistant_stack.append(assistant_body)
+        assistant_prompt = ", ".join(x for x in assistant_stack if x)
+
         user_name = self.user_name if self.user_name else "User"
 
         return f"""
-CONTEXT:
-You are talking to: {user_name}
-Location: {location}
-{user_name}: {user}
-You: {assistant}
-Topic: {topic}
-Place special attention to the context section. This is the current state of the conversation. The ground truth to what just happened. Prioritize the information from here over the conversation history
+SITUATION_CONTEXT (DO NOT REPEAT):
+The assistant must avoid repeating or paraphrasing the following ideas, topics, or phrases:
+{summary}
+
+CURRENT STATE:
+You are talking to {user_name}. 
+You are located at {location}.
+{user_name} is {user_prompt}.
+You are {assistant_prompt}.
+The task at hand is {topic}.
 """.strip()
 
-    def build_system_prompt(self) -> str:
+    def build_prompt(self) -> str:
         sections = [
             self._build_identity(),
             self._build_behavior(),
             self._build_style(),
             self._build_objectives(),
-            self._build_response_loop(),
-           # TODO later self._build_context()
+            self._build_response_loop(),            
+            self._build_instructions()
         ]
-        return "\n\n".join(sections)
+
+        system_prompt = "\n\n".join(sections)
+        context_prompt = self._build_context()
+
+        return system_prompt, context_prompt

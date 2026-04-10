@@ -42,7 +42,10 @@ def chat(request: ChatRequestLlama):
 @app.post("/image", response_model=ImageResponse)
 def chat(request: ImageRequest):
     logger.debug("got ImageRequest")
-    return app.state.comfyui.image(request)
+    response = app.state.comfyui.image(request)
+    if not response:
+        logger.error("failed to generate image with comfyui")
+    return response
 
 @app.get("/download/{file_path:path}")
 async def download_file(file_path: str):

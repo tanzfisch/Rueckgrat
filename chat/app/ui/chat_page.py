@@ -127,7 +127,6 @@ class ChatPage(BasePage):
 
         messages = Backend.get_instance().get_messages(self.conversation_id)
         for message in messages:
-            logger.debug(message)
             message_id = message["id"]
             attachements = Backend.get_instance().get_attachments(message_id)
             if attachements:
@@ -260,7 +259,7 @@ class ChatPage(BasePage):
     def _get_image(self, image_filename) -> str:
         image_path = Path("cache/images") / image_filename
         if not image_path.exists():
-            Backend.get_instance().download(f"images/{image_filename}", "cache/images")        
+            Backend.get_instance().download(f"images/{image_filename}", "cache/images")
 
         return image_path
 
@@ -271,8 +270,13 @@ class ChatPage(BasePage):
             role = chat["role"]
 
             if "assistant_image" in msg:
-                profile_image_path = self._get_image(msg["assistant_image"])
-                self.append_history(role, content, profile_image_path)
+                image = msg["assistant_image"]
+                image_path = Path("cache/images") / image["filename"]
+                self.append_history(role, content, image_path)
+            elif "image" in msg:
+                image = msg["image"]
+                image_path = Path("cache/images") / image["filename"]
+                self.append_history(role, content, image_path)
             else:
                 self.append_history(role, content)
 

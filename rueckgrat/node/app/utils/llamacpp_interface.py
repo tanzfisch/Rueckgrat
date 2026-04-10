@@ -13,6 +13,7 @@ class LLamaCppInterface:
         payload_low_accuracy = {
             "messages": request.messages,
             "temperature": request.temperature,
+            "seed": request.seed,
             "top_p": 0.8,
             "top_k": 20,
             "min_p": 0.0,

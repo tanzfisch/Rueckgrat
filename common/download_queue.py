@@ -1,6 +1,7 @@
 import os
 import json
 from queue import Queue
+import queue
 from concurrent.futures import ThreadPoolExecutor
 import threading
 from tqdm import tqdm
@@ -15,30 +16,50 @@ logger = Logger(__name__).get_logger()
 
 @dataclass
 class DownloadJob:
-    url: str
-    download_path: str
-    access_token: str
-    server_cert: str
-    force_download: bool=False
+    def __init__(self, url: str, download_path: str, access_token: str, server_cert: str, max_retry: int = 4, force_download: bool = False):
+        self.url = url
+        self.download_path = download_path
+        self.access_token = access_token
+        self.server_cert = server_cert
+        self.force_download = force_download
+        self.max_retry = max_retry
+
+    def __eq__(self, other):
+        if isinstance(other, DownloadJob):
+            return (self.url == other.url and
+                    self.download_path == other.download_path and
+                    self.access_token == other.access_token and
+                    self.server_cert == other.server_cert and
+                    self.force_download == other.force_download)
+        return False
 
 class DownloadQueue:
-    def __init__(self, max_parallel: int = 8, max_retry: int = 6, delay: int = 10):
-        self.max_retry = max_retry
+    def __init__(self, max_parallel: int = 8, delay: int = 10):
         self.delay = delay
         self.queue: Queue[DownloadJob] = Queue()        
+        self._queue_lock = threading.Lock()
         self.executor = ThreadPoolExecutor(max_workers=max_parallel)
         self._stop = threading.Event()
         threading.Thread(target=self._run, daemon=True).start()
 
-    def add(self, url: str, download_path: str, access_token: str, server_cert: str, force_download: bool=False):
+    def add(self, url: str, download_path: str, access_token: str, server_cert: str, max_retry: int = 4, force_download: bool=False):
         job = DownloadJob(
-            url=url, 
-            download_path=download_path, 
-            access_token=access_token, 
-            server_cert=server_cert, 
-            force_download=force_download
+            url=url,
+            download_path=download_path,
+            access_token=access_token,
+            server_cert=server_cert,
+            force_download=force_download,
+            max_retry = max_retry
         )
-        self.queue.put(job)
+
+        with self._queue_lock:
+            for existing_job in list(self.queue.queue):
+                if job == existing_job:
+                    print("Job already in the queue.")
+                    return
+
+            logger.debug(f"adding to download queue {url}")
+            self.queue.put(job)
 
     def stop(self):
         self._stop.set()
@@ -46,21 +67,24 @@ class DownloadQueue:
 
     def _run(self):
         while not self._stop.is_set():
-            job = self.queue.get()
-            future = self.executor.submit(self._execute, job)
-            future.add_done_callback(lambda f: self.queue.task_done())
+            try:
+                job = self.queue.get(timeout=0.5)
+                future = self.executor.submit(self._execute, job)
+                future.add_done_callback(lambda f: self.queue.task_done())
+            except queue.Empty:
+                continue
 
     def _execute(self, job: DownloadJob):
         try:
             success = False
-            for attempt in range(self.max_retry):
+            for attempt in range(job.max_retry + 1):
                 success = self._download(job.url, job.download_path, job.access_token, job.server_cert, job.force_download)
                 
                 if success:
                     break
                 
-                if attempt < self.max_retry - 1:
-                    time.sleep(self.delay)
+                if attempt < job.max_retry:
+                    time.sleep(self.delay * attempt)
                     logger.debug(f"retry download {job.url}")
 
             if not success:
@@ -111,10 +135,8 @@ class DownloadQueue:
             try:
                 data = response.json()
                 if "error" in data:
-                    logger.debug(f"failed to download with {data.get('error')}")
                     return False
             except ValueError:
-                logger.debug(f"failed to download with {json.dumps(data)}")
                 return False
 
         total_size = int(response.headers.get("content-length", 0))

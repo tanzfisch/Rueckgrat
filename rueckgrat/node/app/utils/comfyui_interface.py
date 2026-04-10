@@ -5,6 +5,7 @@ import os
 from PIL import Image
 import io
 from pathlib import Path
+import threading
 
 from app.common import Logger, ImageRequest, ImageResponse
 logger = Logger(__name__).get_logger()
@@ -74,6 +75,7 @@ base_text_to_image = """
 
 class ComfyUIInterface:
     def __init__(self, host: str, port: str, client_id: str):
+        self.lock = threading.Lock()
         self.host = host
         self.port = port
         self.client_id = client_id
@@ -91,10 +93,7 @@ class ComfyUIInterface:
 
     def image(self, request: ImageRequest) -> ImageResponse:
         output_file = self.output_dir / request.output
-
         model = request.model if not request.model or request.model != "default" else self.default_model        
-
-        logger.debug(f"model in use: {model}")
 
         if self.generate_image(
                 request.positive_prompt,
@@ -111,51 +110,52 @@ class ComfyUIInterface:
             return None
         
     def generate_image(self, positive_prompt: str, negative_prompt: str, output_file: str, seed: int, width: int, height: int, steps: int, cfg: float, model: str):
-        try:
-            prompt = json.loads(base_text_to_image)
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON: {e}")
-
-        try:
-            prompt["3"]["inputs"]["seed"] = seed
-            prompt["3"]["inputs"]["steps"] = steps
-            prompt["3"]["inputs"]["cfg"] = cfg
-            prompt["6"]["inputs"]["text"] = positive_prompt
-            prompt["7"]["inputs"]["text"] = negative_prompt
-            prompt["5"]["inputs"]["width"] = width
-            prompt["5"]["inputs"]["height"] = height
-            prompt["4"]["inputs"]["ckpt_name"] = model        
-        except Exception as e:
-            logger.error(f"faild to update prompt: {e}")
-
-        try:
-            ws = websocket.WebSocket()
-            ws.connect(self.url_ws)
-            images = self._get_images(ws, prompt)
-        except websocket.WebSocketException as e:
-            logger.error(f"WebSocket: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected: {e}")
-            return False
-        finally:
+        with self.lock:
             try:
-                ws.close()
-            except Exception:
-                pass
+                prompt = json.loads(base_text_to_image)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON: {e}")
+
+            try:
+                prompt["3"]["inputs"]["seed"] = seed
+                prompt["3"]["inputs"]["steps"] = steps
+                prompt["3"]["inputs"]["cfg"] = cfg
+                prompt["6"]["inputs"]["text"] = positive_prompt
+                prompt["7"]["inputs"]["text"] = negative_prompt
+                prompt["5"]["inputs"]["width"] = width
+                prompt["5"]["inputs"]["height"] = height
+                prompt["4"]["inputs"]["ckpt_name"] = model        
+            except Exception as e:
+                logger.error(f"faild to update prompt: {e}")
+
+            try:
+                ws = websocket.WebSocket()
+                ws.connect(self.url_ws)
+                images = self._get_images(ws, prompt)
+            except websocket.WebSocketException as e:
+                logger.error(f"WebSocket: {e}")
+                return False
+            except Exception as e:
+                logger.error(f"Unexpected: {e}")
+                return False
+            finally:
+                try:
+                    ws.close()
+                except Exception:
+                    pass
+                    return False
+
+            if not images:
+                logger.error("failed to generate images")
                 return False
 
-        if not images:
-            logger.error("failed to generate images")
-            return False
+            for node_id in images:
+                for image_data in images[node_id]:
+                    image = Image.open(io.BytesIO(image_data))
+                    image.save(output_file)
+                    logger.info(f"saved generated image: {output_file}")
 
-        for node_id in images:
-            for image_data in images[node_id]:
-                image = Image.open(io.BytesIO(image_data))
-                image.save(output_file)
-                logger.info(f"saved generated image: {output_file}")
-
-        return True
+            return True
 
     def _queue_prompt(self, prompt):
         logger.debug(f"queue prompt: {prompt}")
@@ -166,11 +166,11 @@ class ComfyUIInterface:
 
         try:
             with urllib.request.urlopen(req) as response:
-                resp_data = response.read()
                 try:
+                    resp_data = response.read()
                     return json.loads(resp_data)
                 except json.JSONDecodeError as e:
-                    logger.error(f"Failed to decode JSON response: {repr(e)} | Response: {resp_data}")
+                    logger.error(f"Failed to read response: {repr(e)} | Response: {resp_data}")
                     return None
 
         except urllib.error.HTTPError as e:

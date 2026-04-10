@@ -153,6 +153,9 @@ class Infrastructure:
             if response.status_code == 200:
                 data = response.json()
                 filepath = Path(data.get("output", []))
+                if not filepath:
+                    logger.error("got invalid file path from image response")
+                    return None
             else:
                 logger.error(f"failed image request: {response.status_code} {response.reason}")
                 return None
@@ -165,13 +168,14 @@ class Infrastructure:
 
         return str(filepath), size
 
-    def chat(self, messages, temperature: float, low_accuracy: bool = False) -> str:
+    def chat(self, messages, temperature: float, seed: int, low_accuracy: bool = False) -> str:
         url = f"http://{self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}/chat"
         
         payload= ChatRequestLlama(
             messages=messages, 
             temperature=temperature, 
-            low_accuracy=low_accuracy
+            low_accuracy=low_accuracy,
+            seed=seed
         )
 
         try:

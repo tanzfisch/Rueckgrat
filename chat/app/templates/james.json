@@ -107,7 +107,7 @@
     "image_parameters": {
       "seed": 1337,
       "steps": 35,
-      "cfg": 11.0,
+      "cfg": 5.0,
       "model": "default"
     },
     

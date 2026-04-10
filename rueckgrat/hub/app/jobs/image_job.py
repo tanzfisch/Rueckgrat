@@ -10,17 +10,26 @@ class ImageJob(Job):
         super().__init__()
         self.request = request
         self.infrastructure = infrastructure
+        self.response = {}
 
     def execute(self) -> None:
-        image_filename, size = self.infrastructure.image(self.request)
+        try:
+            image_filename, size = self.infrastructure.image(self.request)
 
-        if not image_filename or not size:
-            logger.error("failed to generate image")
+            if not image_filename: # or not size:
+                logger.error("failed to generate image")
 
-        self.response = {
-            "filename": image_filename,
-            "file_size": size
-        }
+            self.response = { 
+                "image": {
+                    "filename": image_filename,
+                    "file_size": size
+                }
+            }
+        except Exception as e:
+            logger.error(f"failed to execute ImageJob {repr(e)}")                    
 
     def result(self) -> Dict[str, Any]:
         return self.response
+    
+    def has_response(self) -> bool:
+        return True

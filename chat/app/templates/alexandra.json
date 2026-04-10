@@ -100,14 +100,14 @@
     },    
 
     "llm_parameters": {
-      "temperature": "0.20",
+      "temperature": "0.15",
       "preffered_context_size": "8000"
     },
 
     "image_parameters": {
       "seed": 2468,
       "steps": 35,
-      "cfg": 11.0,
+      "cfg": 5.0,
       "model": "default"
     },
     
