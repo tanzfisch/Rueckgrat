@@ -1,6 +1,9 @@
 #!/bin/bash
 
-caddy trust
+curl -k https://localhost
+
+docker cp rueckgrat-rueckgrat_caddy-1:/data/caddy/pki/authorities/local/root.crt ~/.ssh/caddy-root.crt
 
 source .venv/bin/activate
-python -c "from app.main import main; main()"
+PYTHONPATH=.. python -c "from app.main import main; main()"
+# python -c "from app.main import main; main()"

@@ -1,38 +1,41 @@
 import json
 import random
-import sys
-import re
-
+import asyncio
+import threading
+import os
+from tqdm import tqdm
+from fastapi.responses import StreamingResponse
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.security import HTTPBearer
-
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from app.utils import ChatDB, Infrastructure, PromptCompiler
-from pathlib import Path
+from app.utils import ChatDB, Infrastructure, ImagePromptCompiler, ImageType
+from app.jobs import JobQueue, MetaJob, ImageJob
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
 from datetime import datetime, timedelta, timezone
-import copy
 
-import logging
-logger = logging.getLogger(__name__)
+from app.common import Logger, ChatRequest, Utils, GetMessagesRequest, GetAttachmentsRequest, ImageRequest
+logger = Logger(__name__).get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logging.basicConfig(level=logging.DEBUG)
-
     app.state.infrastructure = Infrastructure()
-    db_path = "/data/chat.db"
-    app.state.db = ChatDB(db_path)
+    db_path = "/hub/db/chat.db"
+    app.state.db = ChatDB(db_path)    
+    app.state.job_queue = JobQueue()
 
-    print("Backend initialized")
+    logger.info("hub initialized")
 
     yield
 
-    print("Backend shut down")
+    app.state.job_queue.stop()
+
+    logger.info("hub shut down")
+
 
 app = FastAPI(lifespan=lifespan)
 security = HTTPBearer()
@@ -112,20 +115,11 @@ def login(data: LoginRequest):
 
     return {"access_token": token}
 
-########### chat handling
-class ChatRequest(BaseModel):
-    contact_id: int
-    conversation_id: int
-    role: str
-    name: str
-    content: str
-    temperature: float
-
-class ChatResponse(BaseModel):
-    role: str
-    content: str
-
 ########### system handling
+@app.get("/")
+def default():
+    return {"status": "ok"}
+
 @app.get("/health")
 def health():
     status = app.state.infrastructure.get_status()
@@ -140,6 +134,11 @@ def health():
 def get_contacts(username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
     contacts = app.state.db.get_contacts(user_id)
+
+    for contact in contacts:
+        images = app.state.db.get_contact_images(contact["id"])
+        contact["images"] = images
+
     return {"contacts": contacts}
 
 class ContactRequest(BaseModel):
@@ -148,13 +147,17 @@ class ContactRequest(BaseModel):
 @app.get("/contact")
 def get_contact(request: ContactRequest, username: str = Depends(get_current_user)):
     contact = app.state.db.get_contact_by_id(request.contact_id)
+
+    images = app.state.db.get_contact_images(contact["id"])
+    contact["images"] = images
+
     return {"contact": contact}    
 
 @app.post("/contact")
 def create_contact(username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
     contact_name = f"new_contact_{random.randint(0,10000)}"
-    contact_id = app.state.db.create_empty_contact(user_id, contact_name)
+    contact_id = app.state.db.create_contact(user_id, contact_name)
     return {"contact_id": contact_id}
 
 class UpdateContactRequest(BaseModel):
@@ -165,6 +168,33 @@ class UpdateContactRequest(BaseModel):
 def create_contact(request: UpdateContactRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
     app.state.db.update_contact(user_id, request.contact_id, request.contact_data)
+    contact_data = app.state.db.get_contact_by_id(request.contact_id)
+    image_parameters = contact_data["profile"]["image_parameters"]
+
+    compiler = ImagePromptCompiler(contact_data, None, ImageType.UpperBody, False, "natural smile, looking at camera")
+    positive_prompt, negative_prompt = compiler.build()
+
+    # generate profile image
+    image_request = ImageRequest(
+        positive_prompt = positive_prompt,
+        negative_prompt = negative_prompt,
+        seed = image_parameters.get("seed", 1337),
+        width = 600,
+        height = 600,
+        steps = image_parameters.get("steps", 40.0),
+        cfg = image_parameters.get("cfg", 8.0),
+        model = image_parameters.get("model", "default"),
+        output = ""
+    )
+    
+    image_gen_hash = Utils.hash_image_request(image_request)
+    output_file = f"{image_gen_hash}.png"
+    app.state.db.add_contact_image(request.contact_id, output_file, "profile")
+    image_request.output = output_file
+
+    job = ImageJob(image_request, app.state.infrastructure)
+    app.state.job_queue.add(job)
+
     return {"status": "ok"}
 
 class DeleteContactRequest(BaseModel):
@@ -195,18 +225,6 @@ def get_conversation(request: ConversationRequest, username: str = Depends(get_c
     conversation = app.state.db.get_conversation(request.conversation_id)
     return {"conversation": conversation}
 
-class UpdateConversationRequest(BaseModel):
-    conversation_id: int
-    brief: str
-    context: str
-
-@app.get("/update_conversation")
-def update_conversation(request: UpdateConversationRequest, username: str = Depends(get_current_user)):
-    if app.state.db.update_conversation(request.conversation_id, request.brief, request.context):
-        return {"status": "ok"}
-    else:
-        return {"status": "operation failed"}
-
 class CreateConversationRequest(BaseModel):
     contact_id: int
 
@@ -227,13 +245,15 @@ def delete_conversation(request: DeleteConversationRequest, username: str = Depe
         return {"status": "failed to delete conversation"}
 
 ########### messages handling
-class GetMessagesRequest(BaseModel):
-    conversation_id: int
-
 @app.get("/messages")
 def get_messages(request: GetMessagesRequest, username: str = Depends(get_current_user)):
-    messages = app.state.db.get_messages_by_conversation(request.conversation_id, 100)
+    messages = app.state.db.get_messages_by_conversation(request.conversation_id, request.max_messages)
     return {"messages": messages}
+
+@app.get("/attachments")
+def get_messages(request: GetAttachmentsRequest, username: str = Depends(get_current_user)):
+    attachments = app.state.db.get_attachments_for_message(request.message_id)
+    return {"attachments": attachments}
 
 ########### model handling
 class GetModelURLRequest(BaseModel):
@@ -249,105 +269,46 @@ def get_model_url(request: GetModelURLRequest, username: str = Depends(get_curre
         model_urls=sources
     )
 
+########### downloads
+@app.get("/download/{file_path:path}")
+async def download_file(file_path: str):
+    base_path = Path("/hub").resolve()
+    path = (base_path / file_path).resolve()
+
+    if not str(path).startswith(str(base_path)):
+        logger.error(f"invalid path {path}")
+        return {"error": "Invalid path"}
+
+    if not os.path.exists(path):
+        logger.error(f"file not found {path}")
+        return {"error": "File not found"}
+
+    file_size = os.path.getsize(path)
+    filename = path.name
+
+    def iterfile():
+        with open(path, "rb") as f:
+            with tqdm(total=file_size, unit="B", unit_scale=True, desc=filename) as pbar:
+                while chunk := f.read(1024 * 64):  # 64KB chunks
+                    yield chunk
+                    pbar.update(len(chunk))
+
+    return StreamingResponse(
+        iterfile(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
 ########### websocket handling 
-def cleanup_reply(reply: str, name: str):
-    prefix = f"{name}: "
-    if reply.startswith(prefix):
-        return reply.removeprefix(prefix)
-    
-    return reply
-
-def update_context(context, messages: list):
-    messages_block = "\n".join([
-        f'- "{m["content"]}" (role: {m["role"]})'
-        for m in messages
-    ])
-
-    query = f"""
-    You maintain a SHORT running context for a conversation.
-
-    NEW MESSAGES:
-    {messages_block}
-
-    CURRENT CONTEXT:
-    {{
-        "location": "{context['location']}",
-        "user": "{context['user']}",
-        "assistant": "{context['assistant']}",
-        "topic": "{context['topic']}"
-    }}
-
-    INSTRUCTIONS:
-    - Process messages in order (top = oldest, bottom = newest)
-    - Update information if possible and overwrite if necessary
-    - Ammend if information is important
-    - Keep ALL fields SHORT (max 40 words each)
-    - Keep only the MOST IMPORTANT and RECENT info
-    - DROP anything irrelevant or outdated
-    - "topic" = 1 short phrase
-    - "user"/"assistant" = intent or role summary, also body position or movement, NOT dialogue
-    - "location" = only if explicitly mentioned
-
-    OUTPUT:
-    Return ONLY valid JSON in the same format.
-    """
-    payload = [{"role": "user", 
-                "content": query}]
-    response = app.state.infrastructure.chat(payload, 0.0, True)
-
-    if response.status_code == 200:
-        data = response.json()
-        try:
-            content = data.get("content", "")
-            match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
-            if not match:
-                return context
-            
-            reply = json.loads(match.group(1))
-
-            new_context = {
-                "location": reply["location"],
-                "user": reply["user"],
-                "assistant": reply["assistant"],
-                "topic": reply["topic"]
-            }            
-        except Exception as e:
-            logger.error(f"failed to update context: {e}")
-            return context   
-
-        return new_context
-
-    else:
-        data = response.json()
-        error = data.get("error", "")        
-        logger.error(f"failed to update context with: {error}")
-        return context
-
-def update_conversation(conversation_id: int):
-    logger.debug(f"update_conversation {conversation_id}")
-
-    # TODO update brief and title
-    conversation = app.state.db.get_conversation(conversation_id)
-    context = conversation["context"]
-    
-    messages = app.state.db.get_messages_by_conversation(conversation_id, 4)
-    context = update_context(context, messages)
-
-    conversation["title"] = context["topic"]
-
-    logger.debug(f"updated context {context}")
-
-    app.state.db.update_conversation(conversation_id, conversation["title"], conversation["brief"], json.dumps(context))
-
 def create_mood_image_prompt(contact, conversation):
     context = conversation["context"]
 
     profile = contact["profile"]
     image_parameters = profile["image_parameters"]
 
-    person_a = f"Person A: {image_parameters}, {context['assistant']}"
+    person_a = f"Person A: {image_parameters['prompt']}, {context['assistant']}"
     person_b = f"Person B: {context['user']}" # TODO add description of user
-    person_b = ""
+    topic = f"Context: {context['topic']}"
     location = context["location"]
 
     query = f"""
@@ -357,13 +318,16 @@ def create_mood_image_prompt(contact, conversation):
     {person_a}
     {person_b}
 
+    {topic}
+
     Flesh out the description richly with visual details, lighting, mood, composition, style, and specifics so it works well for image generators. Make it cohesive and immersive.
     Output a single, ready-to-use image prompt.
     Output only the generated prompt and nothing else.
     """
     payload = [{"role": "user", 
                 "content": query}]
-    response = app.state.infrastructure.chat(payload, 0.5)
+    logger.debug(f"input for generating image prompt {query}")
+    response = app.state.infrastructure.chat(payload, 0.2)
 
     if response.status_code == 200:
         data = response.json()
@@ -381,75 +345,89 @@ def create_mood_image_prompt(contact, conversation):
         logger.error(f"failed to generate image prompt: {error}")
         return ""
 
-def handle_chat_request(request: ChatRequest):
-    logger.debug(f"handle_chat_request {request}")
-    app.state.db.add_message(request.conversation_id, request.role, request.content, request.name)
-    
-    update_conversation(request.conversation_id)
-
-    conversation = app.state.db.get_conversation(request.conversation_id)
-    contact = app.state.db.get_contact_by_id(request.contact_id)
-
-    #image = create_mood_image_prompt(contact, conversation)
-    #logger.debug(f"image prompt: {image}")
-
-    compiler = PromptCompiler(contact, conversation, request.name)
-    system_prompt = compiler.build_system_prompt()    
-
-    #logger.debug(f"\nsystem_prompt {system_prompt}")
-
-    payload = [{"role": "system", "content": system_prompt}]
-    
-    messages = app.state.db.get_messages_by_conversation(request.conversation_id, 20)
-    for message in messages:
-        content = message['content']
-        payload.append({"role": message["role"], "content": content})
-
-    size_in_bytes = sys.getsizeof(messages)
-    estimated_tokens = size_in_bytes / 4 * 1.25
-    logger.debug(f"request from {request.name} estimated token size: {estimated_tokens / 1000}k")
-
-    response = app.state.infrastructure.chat(payload, request.temperature)
-    if response.status_code == 200:
-        data = response.json()
-        reply = cleanup_reply(data.get("content", ""), contact["name"])
-        app.state.db.add_message(request.conversation_id, "assistant", reply, contact["name"])
-
-        return ChatResponse(
-            role="assistant",
-            content=reply
-        )
-    
-    else:
-        data = response.json()
-        error = data.get("error", "")
-        return ChatResponse(
-            role="error",
-            content=error
-        )   
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
 
-    try:
+    loop = asyncio.get_running_loop()
+    done_queue = asyncio.Queue()
+    closed = asyncio.Event()
+
+    async def safe_close(code: int = 1000):
+        if not closed.is_set():
+            closed.set()
+            try:
+                await websocket.close(code=code)
+            except RuntimeError:
+                # already closed at ASGI level
+                pass
+
+    def pump_done_jobs():
         while True:
-            text = await websocket.receive_text()
-            data = json.loads(text)
+            job = app.state.job_queue.get_done()
+            if closed.is_set():
+                break
+            loop.call_soon_threadsafe(done_queue.put_nowait, job)
 
-            #TODO check if this is a tool request
+    threading.Thread(target=pump_done_jobs, daemon=True).start()
 
-            if "chat" in data:
-                response = handle_chat_request(ChatRequest(**data["chat"]))
-                response = {"chat": response.model_dump()}
-                await websocket.send_text(json.dumps(response))
-            else:
-                response = json({"status" : "unknown request"})
-                await websocket.send_text(json.dumps(response))
+    async def receiver():
+        try:
+            while not closed.is_set():
+                text = await websocket.receive_text()
+                data = json.loads(text)                
 
-    except WebSocketDisconnect:
-        logger.info("Client disconnected")
+                if "chat" in data:
+                    chat_request = ChatRequest(**data["chat"])
+                    job = MetaJob(chat_request, app.state.db, app.state.infrastructure)
+                    app.state.job_queue.add(job)
+                else:
+                    await websocket.send_text(
+                        json.dumps({"status": "unknown request"})
+                    )
 
-    except Exception as e:
-        logger.error(f"websocket endpoint failure {repr(e)}")
-        await websocket.close(code=1011)
+        except WebSocketDisconnect:
+            print("Client disconnected (receiver)")
+            await safe_close()
+
+        except Exception as e:
+            logger.error(f"receiver failure {repr(e)}")
+            await safe_close(code=1011)
+
+    async def sender():
+        try:
+            while not closed.is_set():
+                job = await done_queue.get()
+
+                if closed.is_set():
+                    break
+
+                try:
+                    if job.has_response():
+                        await websocket.send_text(json.dumps(job.result()))
+                except RuntimeError:
+                    # happens if socket already closed underneath
+                    break
+
+        except WebSocketDisconnect:
+            print("Client disconnected (sender)")
+            await safe_close()
+
+        except Exception as e:
+            logger.error(f"sender failure {repr(e)}")
+            await safe_close(code=1011)
+
+    receiver_task = asyncio.create_task(receiver())
+    sender_task = asyncio.create_task(sender())
+
+    done, pending = await asyncio.wait(
+        [receiver_task, sender_task],
+        return_when=asyncio.FIRST_EXCEPTION
+    )
+
+    await safe_close()
+
+    for task in pending:
+        task.cancel()
+
+    await asyncio.gather(*pending, return_exceptions=True)        

@@ -11,8 +11,8 @@ from app.ui import LoginPage, ChatPage, ContactsPage, ConversationsPage, Profile
 from app.speech import Speech
 from app.utils.backend import Backend
 
-import logging
-logger = logging.getLogger(__name__)
+from common import Logger
+logger = Logger(__name__).get_logger()
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -47,7 +47,7 @@ class MainWindow(QMainWindow):
 
     def heartbeat(self):
         if not Backend.get_instance().check_health():
-            logging.error("system unhealthy")
+            logger.error("system unhealthy")
 
     def navigate(self, page_name, **kwargs):
         if self.current_page:
@@ -64,17 +64,24 @@ class MainWindow(QMainWindow):
         geo.moveCenter(center)
         self.move(geo.topLeft())
 
+async def async_main(app, window):
+    ws_task = asyncio.create_task(Backend.get_instance().start_websocket())
 
-async def async_main(app, window):    
-    asyncio.create_task(Backend.get_instance().start_websocket())
+    stop_event = asyncio.Event()
+    app.aboutToQuit.connect(stop_event.set)
 
-    await asyncio.Event().wait()  # keep loop alive
+    await stop_event.wait()
+
+    ws_task.cancel()
+    try:
+        await ws_task
+    except asyncio.CancelledError:
+        pass
 
 def main():
-    logging.basicConfig(level=logging.INFO)
-
     truststore.inject_into_ssl()
     atexit.register(Speech.kill_current_speech)
+    atexit.register(Backend.get_instance().shutdown)
 
     app = qasync.QApplication(sys.argv)
 
