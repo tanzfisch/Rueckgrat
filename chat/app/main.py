@@ -78,6 +78,19 @@ async def async_main(app, window):
     except asyncio.CancelledError:
         pass
 
+def get_image(image_filename) -> str:
+    image_path = Path("cache/images") / image_filename
+    logger.debug(f"check {image_path}")
+    if not image_path.exists():
+        logger.debug(f"download {image_path}")
+        Backend.get_instance().download(f"images/{image_filename}", "cache/images")
+
+def on_incomming_message(msg: dict):
+    logger.debug(f"on_incomming_message {msg}")
+    if "image" in msg:
+        image = msg["image"]
+        get_image(image["filename"])
+
 def main():
     truststore.inject_into_ssl()
     atexit.register(Speech.kill_current_speech)
@@ -92,7 +105,11 @@ def main():
     window = MainWindow()
     window.show()
 
+    Backend.get_instance().register_incomming_message(on_incomming_message)
+
     qasync.run(async_main(app, window))
+
+    Backend.get_instance().unregister_incomming_message(on_incomming_message)
 
 if __name__ == "__main__":
     main()

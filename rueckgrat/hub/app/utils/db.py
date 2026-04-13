@@ -470,7 +470,7 @@ class ChatDB:
 
         return None
     
-    def update_conversation(self, conversation_id: int, title: str, context: str):
+    def update_conversation(self, conversation_id: int, title: str, context: str) -> bool:
         with self.get_connection() as conn:
             try:
                 cursor = conn.cursor()
@@ -569,7 +569,7 @@ class ChatDB:
             except Exception as e:
                 logger.error(f"failed returning messages: {e}")         
 
-    def add_message(self, conversation_id: int, role: str, content: str, name: str = "") -> int:
+    def add_message(self, conversation_id: int, role: str, content: str, name: str) -> int:
         valid_roles = {"user", "assistant", "system", "error"}
 
         if role not in valid_roles:
@@ -586,6 +586,32 @@ class ChatDB:
 
             return cursor.lastrowid    
         
+    def update_message(self, message_id: int, role: str, content: str, name: str) -> bool:
+        valid_roles = {"user", "assistant", "system", "error"}
+
+        if role not in valid_roles:
+            logger.error(f"Invalid role: {role}")
+            return None
+
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    UPDATE messages 
+                    SET role = ?, name = ?, content = ?
+                    WHERE id = ?
+                """, (role, name, content, message_id))
+
+                conn.commit()
+
+                return cursor.rowcount > 0  # True if a row was updated       
+
+            except Exception as e:
+                logger.error(f"updating message: {e}")
+
+        return False
+
     def add_attachment(self, message_id: int, file_name: str, file_url: str, file_type: str, file_size: int) -> int:
         with self.get_connection() as conn:
             try:

@@ -17,6 +17,7 @@ class ChatRequestLlama(BaseModel):
     messages: list[dict]
     temperature: float
     low_accuracy: bool
+    seed: int
 
 class ImageRequest(BaseModel):
     positive_prompt: str

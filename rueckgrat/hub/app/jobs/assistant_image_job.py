@@ -1,18 +1,19 @@
 from .job_queue import Job
 from .image_job import ImageJob, ImageRequest
-from ..utils.image_prompt_compiler import ImagePromptCompiler, ImageType
+from ..utils.contact_image_prompt_compiler import ContactImagePromptCompiler, ImageType
 from typing import Dict, Any
 
 from app.common import Logger, ChatRequest, Utils
 logger = Logger(__name__).get_logger()
 
 class AssistantImageJob(Job):
-    def __init__(self, request: ChatRequest, db, infrastructure):
+    def __init__(self, request: ChatRequest, db, infrastructure, assitant_only: bool):
         super().__init__()
         self.request = request
         self.db = db
         self.infrastructure = infrastructure
         self.response = None
+        self.assitant_only = assitant_only
 
     def execute(self) -> None:
         contact_data = self.db.get_contact_by_id(self.request.contact_id)
@@ -21,7 +22,16 @@ class AssistantImageJob(Job):
         conversation = self.db.get_conversation(self.request.conversation_id)
         context = conversation["context"]        
 
-        compiler = ImagePromptCompiler(contact_data, context, ImageType.FullBody, False)
+        if self.assitant_only:
+            width = 720
+            height = 1280
+            user_present = False
+        else:
+            width = 1280
+            height = 720
+            user_present = True
+
+        compiler = ContactImagePromptCompiler(contact_data, context, ImageType.FullBody, user_present)
         positive_prompt, negative_prompt = compiler.build()
 
         # generate profile image
@@ -29,8 +39,8 @@ class AssistantImageJob(Job):
             positive_prompt = positive_prompt,
             negative_prompt = negative_prompt,
             seed = image_parameters.get("seed", 1337),
-            width = 720,
-            height = 1280,
+            width = width,
+            height = height,
             steps = image_parameters.get("steps", 40.0),
             cfg = image_parameters.get("cfg", 8.0),
             model = image_parameters.get("model", "default"),

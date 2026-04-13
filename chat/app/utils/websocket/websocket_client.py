@@ -51,6 +51,7 @@ class WebSocketClient:
             while self._running:
                 msg = await self.ws.recv()
                 if self.on_message:
+                    logger.debug(msg)
                     self.on_message(json.loads(msg))
         except Exception as e:
             logger.error(f"failed to receive ws: {repr(e)}")

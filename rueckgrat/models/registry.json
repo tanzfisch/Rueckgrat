@@ -106,7 +106,8 @@
   "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L": {
     "type": "llm",
     "compatibility": ["llama.cpp"],
-    "comment": "",
+    "comment": "very powerfull for it's size, certainly uncensored",
+    "good_value_range": "temp 0.05-0.15",
     "sources": [
       "https://huggingface.co/bartowski/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-GGUF/resolve/main/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L.gguf"
     ],
@@ -117,6 +118,7 @@
     "type": "image",
     "compatibility": ["ComfyUI"],
     "comment": "NSFW Tends to go too far when unwanted don't mix with SFW applications",
+    "good_value_range": "cfg 8-10, steps 20-40",
     "sources": [
       "https://huggingface.co/boopyfloopy/lustifyXL_v7/resolve/main/lustifySDXLNSFW_ggwpV7.safetensors"
     ],

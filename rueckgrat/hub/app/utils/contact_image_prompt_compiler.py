@@ -10,7 +10,7 @@ class ImageType(Enum):
     UpperBody = 2
     FullBody = 3
 
-class ImagePromptCompiler:
+class ContactImagePromptCompiler:
     def __init__(self, contact: Dict[str, Any], context: Dict[str, Any] = None, image_type: ImageType = ImageType.FullBody, user_present: bool = False, prompt: str = None):
         self.contact = contact
         self.profile = contact.get("profile", {})
@@ -101,16 +101,15 @@ class ImagePromptCompiler:
                 assistant_stack.append(Utils.get_nested_value(self.profile, ["start_context", "assistant", "action"], ""))
                 user_stack.append(Utils.get_nested_value(self.profile, ["start_context", "user", "action"], ""))
 
-            assistant = ", ".join(x for x in assistant_stack if x)
-            assistant = f"Person A: {assistant}"
+            assistant_prompt = ", ".join(x for x in assistant_stack if x)
+            assistant_prompt = f"Person A: {assistant_prompt}"
 
-            result = f"{assistant}\n"
+            result = f"{assistant_prompt}\n"
 
             if self.user_present:
-                user = ", ".join(x for x in user_stack if x)
-                if user:
-                    user = f"Person B: {user}"
-                    result += f"{user}\n"   
+                user_prompt = ", ".join(x for x in user_stack if x)
+                user_prompt = f"Person B: {user_prompt}"
+                result += f"{user_prompt}\n"
 
             return result
         except Exception as e:
@@ -138,11 +137,11 @@ class ImagePromptCompiler:
     def _build_negative_general(self) -> str:
         image_style = self.appearance["image_style"]
         if image_style == "natural":        
-            return "stylized image, artificial lighting, dramatic lighting, high contrast, vivid colors, oversaturated tones, glossy skin, smooth texture, flawless complexion, hyper-detailed, ultra sharp, HDR effect, cinematic look, perfect symmetry, exaggerated features, studio lighting, digital art style, 3D render look, polished, unreal perfection"
+            return "stylized image, artificial lighting, dramatic lighting, high contrast, vivid colors, oversaturated tones, glossy skin, smooth texture, flawless complexion, hyper-detailed, ultra sharp, HDR effect, cinematic look, perfect symmetry, exaggerated features, studio lighting, digital art style, 3D render look, polished, unreal perfection, text, mirror, artifacts in eyes"
         elif image_style == "studio":
-            return "over-processed, plastic, overly smooth skin, exaggerated highlights, hyper-realistic textures, studio lighting effects, artificial glow, airbrushed, unnatural colors, over-sharpened, commercial retouching, excessive contrast or saturation, heavy filters"
+            return "over-processed, plastic, overly smooth skin, exaggerated highlights, hyper-realistic textures, studio lighting effects, artificial glow, airbrushed, unnatural colors, over-sharpened, commercial retouching, excessive contrast or saturation, heavy filters, text, mirror, artifacts in eyes"
         else:
-            return "high quality, high detail, symmetrical anatomy"
+            return "high quality, high detail, symmetrical anatomy, text, mirror, artifacts in eyes"
     
     def _build_negative_focus(self) -> str:        
         if self.image_type == ImageType.Portrait:
@@ -171,9 +170,6 @@ Parameters: {self._build_positive_focus()}, {self._build_positive_general()}, {s
                 self._build_negative_focus()
             ]
             negative_prompt = ", ".join(negative_sections)
-
-            logger.debug(f"positive image prompt generated: {positive_prompt}")
-            logger.debug(f"negative image prompt generated: {negative_prompt}")
 
             return positive_prompt, negative_prompt
         except Exception as e:

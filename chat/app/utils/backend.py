@@ -46,9 +46,9 @@ class Backend:
     def shutdown(self):
         self.download_queue.stop()
 
-    def download(self, source_path: str, download_path: str):
+    def download(self, source_path: str, download_path: str, max_retry: int = 5):
         url = f"{self.url}/download/{source_path}"
-        self.download_queue.add(url, download_path, self.access_token, self.server_cert)
+        self.download_queue.add(url, download_path, self.access_token, self.server_cert, max_retry)
 
     @classmethod
     def get_instance(cls):
@@ -81,8 +81,11 @@ class Backend:
         await self.websocket_client.send_message(payload)
 
     def _on_incomming_websocket(self, msg: dict):
-        for func in self.on_incoming_message:
-            func(msg)
+        try:
+            for func in self.on_incoming_message:
+                func(msg)
+        except Exception as e:
+            logger.error(f"failed to handle incomming message: {repr(e)}")
 
     def unregister_incomming_message(self, callback: Callable[[dict], None]):
         self.on_incoming_message.remove(callback)

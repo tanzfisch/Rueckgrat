@@ -52,11 +52,15 @@ class ChatJob(Job):
             conversation = self.db.get_conversation(request.conversation_id)
 
             compiler = PromptCompiler(contact, conversation, request.name)
-            system_prompt = compiler.build_system_prompt()    
+            system_prompt, context_prompt = compiler.build_prompt()
+
+            logger.debug(f"system_prompt: {system_prompt}")
+            logger.debug(f"context_prompt: {context_prompt}")
 
             payload = [{"role": "system", "content": system_prompt}]
+            payload.append({"role": "system", "content": context_prompt})
             
-            messages = self.db.get_messages_by_conversation(request.conversation_id, 20)
+            messages = self.db.get_messages_by_conversation(request.conversation_id, 10)
             for message in messages:
                 content = message['content']
                 payload.append({"role": message["role"], "content": content})
@@ -65,7 +69,7 @@ class ChatJob(Job):
             estimated_tokens = size_in_bytes / 4 * 1.25
             logger.debug(f"request from {request.name} estimated token size: {estimated_tokens / 1000}k")
 
-            response_content = self.infrastructure.chat(payload, request.temperature)
+            response_content = self.infrastructure.chat(payload, request.temperature, request.conversation_id)
             if response_content:
                 reply = self._cleanup_reply(response_content, contact["name"])
                 
