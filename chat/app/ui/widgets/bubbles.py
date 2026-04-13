@@ -4,6 +4,11 @@ from PySide6.QtCore import Qt, Signal, QTimer
 import markdown
 import bleach
 import re
+from .image import Image
+
+from common import Logger
+logger = Logger(__name__).get_logger()
+
 
 class TextBlock(QTextBrowser):
     def __init__(self, parent=None):
@@ -25,8 +30,10 @@ class TextBlock(QTextBrowser):
             event.ignore()
 
 class ChatBubble(QWidget):
-    def __init__(self, role, content):
+    def __init__(self, role: str, content: str, image_filepath: str = None):
         super().__init__()
+        self.image_filepath = image_filepath
+        self.image = None
 
         self.setObjectName("chatBubble")
         self.setProperty("role", role)
@@ -37,11 +44,28 @@ class ChatBubble(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setAlignment(Qt.AlignTop)
 
+        if self.image_filepath:
+            self._add_image(layout, self.image_filepath)
+
         for item in content_items:
             if item["type"] == "text":
                 self._add_text(layout, item["value"], role)
             elif item["type"] == "code":
                 self._add_code(layout, item["value"])
+
+    def setFixedWidth(self, width):
+        if self.image:
+            pixmap = self.image.pixmap
+            if pixmap:
+                aspect = pixmap.width() / pixmap.height()
+                if aspect > 1:
+                    super().setFixedWidth(int(width * 0.8))
+                else:
+                    super().setFixedWidth(int(width * 0.6))
+            else:
+                super().setFixedWidth(int(width * 0.6))
+        else:
+            super().setFixedWidth(width)
 
     def _add_code(self, layout, content: str):
         text = TextBlock()
@@ -71,8 +95,12 @@ class ChatBubble(QWidget):
         text.setHtml(self._handle_markdown(content))
 
         text.resizeEvent = lambda e: (TextBlock.resizeEvent(text, e), self._resize_text_edit(text))
-
         layout.addWidget(text)
+
+    def _add_image(self, layout, image_filepath: str):
+        self.image = Image(image_filepath)
+        self.image.setScaledContents(True)
+        layout.addWidget(self.image)
 
     def _resize_text_edit(self, text: TextBlock):
         text.setFixedHeight(int(text.document().size().height()))
@@ -249,14 +277,14 @@ class ChatBubble(QWidget):
 class OneLineBubble(QWidget):
     clicked = Signal(str, int)
 
-    def __init__(self, username: str ="", id: int="-1"):
+    def __init__(self, text: str ="", id: int="-1"):
         super().__init__()
         self.setAttribute(Qt.WA_StyledBackground, True)
 
-        self.id = int(id)        
+        self.id = id
 
         layout = QVBoxLayout(self)
-        self.label = QLabel(username)
+        self.label = QLabel(text)
         self.label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.label)
 
@@ -268,4 +296,4 @@ class OneLineBubble(QWidget):
         self.id = id
 
     def mousePressEvent(self, event):
-        self.clicked.emit(str(self.label.text()), int(self.id)) 
+        self.clicked.emit(self.label.text(), self.id)

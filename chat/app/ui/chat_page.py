@@ -7,10 +7,11 @@ from PySide6.QtCore import Qt, QTimer, QSize, QPoint
 from app.ui import BasePage
 from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker
 from app.speech import Speech
-from app.utils import Backend
+from app.utils import Backend, Contact
+from pathlib import Path
 
-import logging
-logger = logging.getLogger(__name__)
+from common import Logger
+logger = Logger(__name__).get_logger()
 
 class HistoryContainer(QWidget):
     def resizeEvent(self, event):
@@ -89,8 +90,6 @@ class ChatPage(BasePage):
         chat_layout.addWidget(self.history_scroll_area)
         chat_layout.addWidget(input_container)        
 
-        Backend.get_instance().set_on_incomming_message(self.on_incomming_message)
-
     def openEmojiPicker(self):
         button_pos = self.emoji_button.mapToGlobal(QPoint(0, 0))
         result = EmojiPicker.open(button_pos)
@@ -121,31 +120,39 @@ class ChatPage(BasePage):
         self.contact_id = kwargs.get("contact_id")
         self.conversation_id = kwargs.get("conversation_id")
 
-        self.contact = Backend.get_instance().get_contact(self.contact_id)
-        self.contact_header.set_name(self.contact["name"])
+        self.contact = Contact(Backend.get_instance().get_contact(self.contact_id))
+        self.contact_header.set_contact(self.contact)
 
         self.clear_history()
 
         messages = Backend.get_instance().get_messages(self.conversation_id)
         for message in messages:
-            self.append_history(message["role"], message["content"])
+            message_id = message["id"]
+            attachements = Backend.get_instance().get_attachments(message_id)
+            if attachements:
+                image_path = self._get_image(attachements[0]["file_name"])
+                self.append_history(message["role"], message["content"], image_path)
+            else:
+                self.append_history(message["role"], message["content"])
 
         self.input_box.setFocus()
 
-        if self.contact["gender"] == "male":
+        if self.contact.get_gender() == "male":
             default_piper = "en_US-hfc_male-medium"
             default_kokoro = "af_adam"
         else:
             default_piper = "en_US-libritts_r-medium"
             default_kokoro = "af_bella"
 
-        self.kokoro_voice=self.contact.get("kokoro_voice_type") or default_kokoro
-        self.piper_model=self.contact.get("piper_voice_model") or default_piper
+        self.kokoro_voice=default_kokoro # TODOself.contact.get("kokoro_voice_type") or default_kokoro
+        self.piper_model=self.contact.get_voice_model() or default_piper
 
-        self.temperature = float(self.contact["profile"]["llm_parameters"]["temperature"])
+        self.temperature = float(self.contact.get_llm_temperature())
+
+        Backend.get_instance().register_incomming_message(self.on_incomming_message)
 
     def on_leave(self):
-        pass           
+        Backend.get_instance().unregister_incomming_message(self.on_incomming_message)
 
     def resizeEvent(self, event):
         self.adjust_input_box_height()
@@ -171,10 +178,6 @@ class ChatPage(BasePage):
             self.input_box.setVerticalScrollBarPolicy(
                 Qt.ScrollBarPolicy.ScrollBarAlwaysOff
             ) 
-
-    def open_create_contact_dialog(self):
-        # todo switch
-        yield
 
     def show_context_menu(self):
         menu = QMenu(self)
@@ -202,8 +205,8 @@ class ChatPage(BasePage):
             self.mic_toggle_btn.setIcon(QIcon("app/icons/mic_off_light.png"))
             # turn mic off
 
-    def append_history(self, role, content):
-        bubble = ChatBubble(role, content)
+    def append_history(self, role: str, content: str, image_filepath: str = None):
+        bubble = ChatBubble(role, content, image_filepath)
 
         wrapper = QWidget()
         wrapper_layout = QHBoxLayout(wrapper)
@@ -253,21 +256,34 @@ class ChatPage(BasePage):
         content = re.sub(r'\[IMAGE:[^\]]*\]', '', content).strip()    
         return content
 
-    def on_incomming_message(self, text):
-        data = json.loads(text)
+    def _get_image(self, image_filename) -> str:
+        image_path = Path("cache/images") / image_filename
+        if not image_path.exists():
+            Backend.get_instance().download(f"images/{image_filename}", "cache/images")
 
-        if "chat" in data:
-            chat = data["chat"]
+        return image_path
 
+    def on_incomming_message(self, msg: dict):
+        if "chat" in msg:
+            chat = msg["chat"]
             content = self._cleanup_content(chat["content"])
             role = chat["role"]
 
-            self.append_history(role, content)
+            if "assistant_image" in msg:
+                image = msg["assistant_image"]
+                image_path = Path("cache/images") / image["filename"]
+                self.append_history(role, content, image_path)
+            elif "image" in msg:
+                image = msg["image"]
+                image_path = Path("cache/images") / image["filename"]
+                self.append_history(role, content, image_path)
+            else:
+                self.append_history(role, content)
 
             try:
                 Speech.speak(self._cleanup_for_speech(content), voice=self.kokoro_voice, model=self.piper_model, interface="piper")
             except Exception as e:
-                logging.error(f"{e}")
+                logger.error(f"{e}")
 
     def send_message(self):
         message = self.input_box.toPlainText().strip()

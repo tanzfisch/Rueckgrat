@@ -1,17 +1,19 @@
-from app.utils import ChatRequest, ChatResponse
 import requests
 
-import logging
-logger = logging.getLogger(__name__)
+from app.common import Logger, ChatRequestLlama, ChatResponse
+logger = Logger(__name__).get_logger()
 
 class LLamaCppInterface:
     def __init__(self, host, port):
         self.url = f"http://{host}:{port}/v1/chat/completions"
 
-    def chat(self, request: ChatRequest) -> ChatResponse:
+        logger.debug(f"llama.cpp url: {self.url}")
+
+    def chat(self, request: ChatRequestLlama) -> ChatResponse:
         payload_low_accuracy = {
             "messages": request.messages,
             "temperature": request.temperature,
+            "seed": request.seed,
             "top_p": 0.8,
             "top_k": 20,
             "min_p": 0.0,

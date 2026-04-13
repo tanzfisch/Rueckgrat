@@ -1,0 +1,62 @@
+services:
+  rueckgrat_caddy:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+      - "443:443"
+      - "2019:2019"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - rueckgrat-net-local
+    restart: unless-stopped
+
+  rueckgrat_hub:
+    build:
+      context: ./hub
+      dockerfile: Dockerfile
+    ports:
+      - "14223:14223"
+    volumes:
+      - hub_db:/hub/db
+      - hub_images:/hub/images
+      - ./config:/hub/config
+      - ../common:/hub/app/common
+    networks:
+      - rueckgrat-net-local
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+  rueckgrat_node:
+    build:
+      context: ./node
+      dockerfile: Dockerfile
+    ports:
+      - "7346:7346"
+    volumes:
+      - node_images:/node/images
+      - ./config:/node/config
+      - ./models:/node/models
+      - ../common:/node/app/common
+    networks:
+      - rueckgrat-net-local
+    stdin_open: true
+    tty: true
+    restart: unless-stopped    
+    extra_hosts:
+      - "host.docker.internal:host-gateway"    
+
+networks:
+  rueckgrat-net-local:
+    external: true
+
+volumes:
+  caddy_data:
+  caddy_config:
+  node_images:
+  hub_db:
+  hub_images:

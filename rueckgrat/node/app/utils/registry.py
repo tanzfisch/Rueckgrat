@@ -22,13 +22,13 @@ class ModelRegistry:
         url = None
 
         if alternative_source:
-            test_url = f"http://{alternative_source}/download/{install_path}/{filename}"
+            test_url = f"http://{alternative_source}/download/models/{install_path}/{filename}"
             if self._url_exists(test_url):
                 url = test_url
 
         if not url:
             for server in self.servers:
-                test_url = f"http://{server['host']}:{server['port']}/download/{install_path}/{filename}"
+                test_url = f"http://{server['host']}:{server['port']}/download/models/{install_path}/{filename}"
                 if self._url_exists(test_url):
                     url = test_url
 

@@ -1,13 +1,23 @@
 from pydantic import BaseModel
 
 class ChatRequest(BaseModel):
-    messages: list[dict]
+    contact_id: int
+    conversation_id: int
+    role: str
+    name: str
+    content: str
     temperature: float
-    low_accuracy: bool
 
 class ChatResponse(BaseModel):
     role: str
     content: str
+    attachments: list[str] = []
+
+class ChatRequestLlama(BaseModel):
+    messages: list[dict]
+    temperature: float
+    low_accuracy: bool
+    seed: int
 
 class ImageRequest(BaseModel):
     positive_prompt: str
@@ -18,6 +28,14 @@ class ImageRequest(BaseModel):
     steps: int = 10
     cfg: float = 7.5
     model: str
+    output: str
 
 class ImageResponse(BaseModel):
-    output_url: str
+    output: str
+
+class GetMessagesRequest(BaseModel):
+    conversation_id: int
+    max_messages: int = 100
+
+class GetAttachmentsRequest(BaseModel):
+    message_id: int    

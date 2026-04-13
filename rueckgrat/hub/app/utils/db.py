@@ -1,14 +1,14 @@
 import sqlite3
 import json
 
-import logging
-logger = logging.getLogger(__name__)
+from app.common import Logger
+logger = Logger(__name__).get_logger()
 
 class ChatDB:
     def __init__(self, db_path):
-        logger.info(f"db path is: {db_path}")
-
         self.db_path = db_path
+
+        logger.info(f"db path is: {db_path}")
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -20,11 +20,22 @@ class ChatDB:
             gender TEXT CHECK(gender IN ('male', 'female')) DEFAULT NULL,
             role TEXT,
             persona TEXT,
-            profile TEXT,               
+            profile TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             UNIQUE(user_id, name)
         );""")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS contact_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            contact_id INTEGER NOT NULL,
+            type TEXT CHECK(type IN ('profile', 'gallery')) DEFAULT 'profile',
+            file_key TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+        );
+        """)
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
@@ -32,7 +43,6 @@ class ChatDB:
             user_id INTEGER NOT NULL,
             contact_id INTEGER NOT NULL,
             title TEXT DEFAULT "...",
-            brief TEXT,
             context TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 
@@ -51,6 +61,19 @@ class ChatDB:
 
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         )""")
+
+        # file_type e.g. 'image/png', 'application/pdf'
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id INTEGER NOT NULL,
+                file_name TEXT,
+                file_url TEXT,
+                file_type TEXT,                
+                file_size INTEGER,
+                FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+            )
+        """)
 
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_messages_conversation
@@ -143,7 +166,7 @@ class ChatDB:
             cursor.execute("SELECT id, username, created_at FROM users")
             return [dict(row) for row in cursor.fetchall()]        
 
-    def create_empty_contact(self, user_id: int, contact_name: str) -> int:
+    def create_contact(self, user_id: int, contact_name: str) -> int:
         with self.get_connection() as conn:
             try:
                 cursor = conn.cursor()
@@ -161,59 +184,75 @@ class ChatDB:
                 
         return -1    
 
-    def create_contact(self, user_id: int, contact_json: dict):
-        """
-        Create a new contact in the contacts table.
-
-        :param user_id: ID of the user who owns this contact
-        :param contact_json: Dictionary containing contact fields
-        """
-
-        allowed_fields = [
-            "name", "gender", "attributes", "core_traits", "quirks",
-            "distinctive_feature", "purpose", "relationship", "long_term_commitment",
-            "current_status", "secrets", "limits", "location",
-            "visual_prompt", "visual_negative_prompt", "visual_seed",
-            "visual_cfg", "visual_steps", "chat_temperature",
-            "rules", "piper_voice_model", "kokoro_voice_type"
-        ]
-
+    def add_contact_image(self, contact_id: int, file_name: str, image_type: str) -> int:
         with self.get_connection() as conn:
-            fields = ["user_id"]
-            values = [user_id]
-
-            for key in allowed_fields:
-                if key in contact_json:
-                    value = contact_json[key]
-
-                    # Serialize rules array to JSON string
-                    if key == "rules" and isinstance(value, list):
-                        value = json.dumps(value)
-
-                    fields.append(key)
-                    values.append(value)
-
-            placeholders = ",".join(["?"] * len(fields))
-            columns = ",".join(fields)
-
-            query = f"""
-                INSERT INTO contacts ({columns})
-                VALUES ({placeholders})
-            """
-
             try:
                 cursor = conn.cursor()
-                cursor.execute(query, values)
+
+                cursor.execute("""
+                    INSERT INTO contact_images (contact_id, type, file_key)
+                    VALUES (?, ?, ?)
+                """, (contact_id, image_type, file_name))
+
                 conn.commit()
                 return cursor.lastrowid
 
-            except sqlite3.IntegrityError as e:
-                logger.error(f"Integrity error: {e}")
-                return None
+            except Exception as e:
+                logger.error(f"Failed adding image for contact {contact_id}: {e}")
+        
+        return -1
+
+    def get_contact_images(self, contact_id: int, image_type: str = None) -> list[dict]:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+
+                if image_type:
+                    cursor.execute("""
+                        SELECT id, file_key, type, created_at
+                        FROM contact_images
+                        WHERE contact_id = ? AND type = ?
+                        ORDER BY created_at ASC
+                    """, (contact_id, image_type))
+                else:
+                    cursor.execute("""
+                        SELECT id, file_key, type, created_at
+                        FROM contact_images
+                        WHERE contact_id = ?
+                        ORDER BY created_at ASC
+                    """, (contact_id,))
+
+                rows = cursor.fetchall()
+
+                images = [
+                    {"id": row[0], "file_key": row[1], "type": row[2], "created_at": row[3]}
+                    for row in rows
+                ]
+
+                return images
 
             except Exception as e:
-                logger.error(f"creating contact: {e}")
-                return None
+                logger.error(f"Failed fetching images for contact {contact_id}: {e}")
+
+        return []
+
+    def remove_contact_image(self, image_id: int) -> bool:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    DELETE FROM contact_images
+                    WHERE id = ?
+                """, (image_id,))
+
+                conn.commit()
+                return cursor.rowcount > 0
+
+            except Exception as e:
+                logger.error(f"Failed removing image {image_id}: {e}")
+        
+        return False
 
     def update_contact(self, user_id: int, contact_id: int, contact_json: dict):
 
@@ -229,7 +268,7 @@ class ChatDB:
         profile = contact_json["profile"]
 
         allowed_fields = [
-            "name", "gender", "role", "persona", "profile"
+            "name", "gender", "role", "persona"
         ]
 
         with self.get_connection() as conn:
@@ -322,11 +361,6 @@ class ChatDB:
                 return None                
             
     def get_contacts(self, user_id: int):
-        """
-        Retrieve all contacts for a given user_id.
-        Returns a list of contact dictionaries.
-        """
-
         with self.get_connection() as conn:
             try:
                 conn.row_factory = sqlite3.Row
@@ -372,7 +406,7 @@ class ChatDB:
                 cursor = conn.cursor()
 
                 cursor.execute("""
-                    SELECT id, user_id, contact_id, title, brief, context, created_at
+                    SELECT id, user_id, contact_id, title, context, created_at
                     FROM conversations
                     WHERE user_id = ?
                     AND contact_id = ?
@@ -386,9 +420,14 @@ class ChatDB:
                 for row in rows:
                     conversation = dict(row)
 
-                    context = json.loads(conversation["context"])
-                    conversation.pop("context")
-                    conversation["context"] = context
+                    if conversation["context"] != "":
+                        try:
+                            context = json.loads(conversation["context"])
+                        except Exception as e:
+                            logger.error(f"failed to load json: {e}")
+
+                        conversation.pop("context")
+                        conversation["context"] = context
 
                     conversations.append(conversation)
 
@@ -406,7 +445,7 @@ class ChatDB:
                 cursor = conn.cursor()
 
                 cursor.execute("""
-                    SELECT id, user_id, contact_id, title, brief, context, created_at
+                    SELECT id, user_id, contact_id, title, context, created_at
                     FROM conversations
                     WHERE id = ?
                 """, (conversation_id,))
@@ -419,9 +458,10 @@ class ChatDB:
                 # Convert row → dict
                 conversation = dict(row)
 
-                context = json.loads(conversation["context"])
-                conversation.pop("context")
-                conversation["context"] = context
+                if conversation["context"] != "":
+                    context = json.loads(conversation["context"])
+                    conversation.pop("context")
+                    conversation["context"] = context
 
                 return conversation
 
@@ -430,16 +470,16 @@ class ChatDB:
 
         return None
     
-    def update_conversation(self, conversation_id: int, title: str, brief: str, context: str):
+    def update_conversation(self, conversation_id: int, title: str, context: str) -> bool:
         with self.get_connection() as conn:
             try:
                 cursor = conn.cursor()
 
                 cursor.execute("""
                     UPDATE conversations
-                    SET title = ?, brief = ?, context = ?
+                    SET title = ?, context = ?
                     WHERE id = ?
-                """, (title, brief, context, conversation_id))
+                """, (title, context, conversation_id))
 
                 conn.commit()
 
@@ -453,13 +493,7 @@ class ChatDB:
     def create_conversation(self, user_id: int, contact_id: int) -> int:
         with self.get_connection() as conn:
             try:
-                start_context = """{
-                    "location": "neutral empty room",
-                    "user": "standing in front of assitant",
-                    "assistant": "standing in front of user",
-                    "topic": "no specific topic"
-                }"""
-
+                start_context = ""
                 cursor = conn.cursor()
 
                 cursor.execute("""
@@ -522,7 +556,7 @@ class ChatDB:
                 cursor.execute("""
                     SELECT *
                     FROM (
-                        SELECT role, name, content, timestamp
+                        SELECT id, role, name, content, timestamp
                         FROM messages
                         WHERE conversation_id = ?
                         ORDER BY timestamp DESC
@@ -535,7 +569,7 @@ class ChatDB:
             except Exception as e:
                 logger.error(f"failed returning messages: {e}")         
 
-    def add_message(self, conversation_id: int, role: str, content: str, name: str = "") -> int:
+    def add_message(self, conversation_id: int, role: str, content: str, name: str) -> int:
         valid_roles = {"user", "assistant", "system", "error"}
 
         if role not in valid_roles:
@@ -551,3 +585,76 @@ class ChatDB:
             """, (conversation_id, role, name, content))
 
             return cursor.lastrowid    
+        
+    def update_message(self, message_id: int, role: str, content: str, name: str) -> bool:
+        valid_roles = {"user", "assistant", "system", "error"}
+
+        if role not in valid_roles:
+            logger.error(f"Invalid role: {role}")
+            return None
+
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    UPDATE messages 
+                    SET role = ?, name = ?, content = ?
+                    WHERE id = ?
+                """, (role, name, content, message_id))
+
+                conn.commit()
+
+                return cursor.rowcount > 0  # True if a row was updated       
+
+            except Exception as e:
+                logger.error(f"updating message: {e}")
+
+        return False
+
+    def add_attachment(self, message_id: int, file_name: str, file_url: str, file_type: str, file_size: int) -> int:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    INSERT INTO attachments (message_id, file_name, file_url, file_type, file_size)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (message_id, file_name, file_url, file_type, file_size))
+
+                conn.commit()
+                return cursor.lastrowid
+
+            except Exception as e:
+                logger.error(f"Failed adding attachment for message {message_id}: {e}")
+        
+        return -1
+    
+    def get_attachments_for_message(self, message_id: int) -> list:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT id, file_name, file_url, file_type, file_size
+                    FROM attachments
+                    WHERE message_id = ?
+                """, (message_id,))
+
+                rows = cursor.fetchall()
+
+                return [
+                    {
+                        "id": row[0],
+                        "file_name": row[1],
+                        "file_url": row[2],
+                        "file_type": row[3],
+                        "file_size": row[4],
+                    }
+                    for row in rows
+                ]
+
+            except Exception as e:
+                logger.error(f"Failed fetching attachments for message {message_id}: {e}")
+        
+        return []    

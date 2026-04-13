@@ -6,8 +6,8 @@ from threading import Lock
 from app.utils import Backend
 from pathlib import Path
 
-import logging
-logger = logging.getLogger(__name__)
+from common import Logger
+logger = Logger(__name__).get_logger()
 
 class Speech:
     _current_proc = None

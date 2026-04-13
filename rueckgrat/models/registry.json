@@ -1,6 +1,5 @@
 {
   "vosk-model-small-en-us-0.15": {
-    "name": "vosk-model-small-en-us-0.15",
     "type": "stt",
     "compatibility": ["vosk"],
     "sources": [
@@ -10,7 +9,6 @@
     "startup_parameters": ""
   },
   "Dolphin3.0-Llama3.1-8B-Q4_K_M": {
-    "name": "Dolphin3.0-Llama3.1-8B-Q4_K_M",
     "type": "llm",
     "compatibility": ["llama.cpp"],
     "comment": "Usefull for look up coding questions. Low level of censoring but still present",
@@ -22,7 +20,6 @@
     "startup_parameters": "--chat-template chatml"
   },
   "dolphin-2.9.3-mistral-nemo-12b.Q5_K_M": {
-    "name": "dolphin-2.9.3-mistral-nemo-12b.Q5_K_M",
     "type": "llm",
     "compatibility": ["llama.cpp"],
     "comment": "did not see any obvious censoring",
@@ -33,7 +30,6 @@
     "startup_parameters": "--chat-template chatml"
   },
   "meta-llama-3.1-8b-instruct-abliterated.Q6_K": {
-    "name": "meta-llama-3.1-8b-instruct-abliterated.Q6_K",
     "type": "llm",
     "compatibility": ["llama.cpp"],
     "comment": "No censoring found so far. Quite creative model.",
@@ -44,7 +40,6 @@
     "startup_parameters": ""
   },
   "L3.2-8X3B-MOE-Dark-Champion-Inst-18.4B-uncen-ablit_D_AU-Q3_k_m": {
-    "name": "L3.2-8X3B-MOE-Dark-Champion-Inst-18.4B-uncen-ablit_D_AU-Q3_k_m",
     "type": "llm",
     "compatibility": ["llama.cpp"],
     "comment": "No censoring found so far",
@@ -55,7 +50,6 @@
     "startup_parameters": ""
   },
   "Dolphin3.0-Llama3.1-8B-Q6_K": {
-    "name": "Dolphin3.0-Llama3.1-8B-Q6_K",
     "type": "llm",
     "compatibility": ["llama.cpp"],
     "comment": "not tested by author",
@@ -67,7 +61,6 @@
     "startup_parameters": ""
   },
   "en_US-libritts_r-medium": {
-    "name": "en_US-libritts_r-medium",
     "type": "tts",
     "compatibility": ["piper-tts"],
     "comment": "acceptable quality at high speed",
@@ -79,7 +72,6 @@
     "startup_parameters": ""
   },
   "en_US-amy-medium": {
-    "name": "en_US-amy-medium",
     "type": "tts",
     "compatibility": ["piper-tts"],
     "comment": "acceptable quality at high speed",
@@ -91,7 +83,6 @@
     "startup_parameters": ""
   },
   "en_US-hfc_male-medium": {
-    "name": "en_US-hfc_male-medium",
     "type": "tts",
     "compatibility": ["piper-tts"],
     "comment": "acceptable quality at high speed",
@@ -103,7 +94,6 @@
     "startup_parameters": ""
   },
   "dolphin3.0-mistral-24b-q4_k_m": {
-    "name": "dolphin3.0-mistral-24b-q4_k_m",
     "type": "llm",
     "compatibility": ["llama.cpp"],
     "comment": "",
@@ -114,10 +104,10 @@
     "startup_parameters": ""
   },
   "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L": {
-    "name": "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L",
     "type": "llm",
     "compatibility": ["llama.cpp"],
-    "comment": "",
+    "comment": "very powerfull for it's size, certainly uncensored",
+    "good_value_range": "temp 0.05-0.15",
     "sources": [
       "https://huggingface.co/bartowski/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-GGUF/resolve/main/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L.gguf"
     ],
@@ -125,16 +115,36 @@
     "startup_parameters": ""
   },
   "lustifySDXLNSFW_ggwpV7": {
-    "name": "lustifySDXLNSFW_ggwpV7",
     "type": "image",
     "compatibility": ["ComfyUI"],
-    "comment": "",
+    "comment": "NSFW Tends to go too far when unwanted don't mix with SFW applications",
+    "good_value_range": "cfg 8-10, steps 20-40",
     "sources": [
       "https://huggingface.co/boopyfloopy/lustifyXL_v7/resolve/main/lustifySDXLNSFW_ggwpV7.safetensors"
     ],
-    "install_path": "ComfyUI/checkpoints/lustifySDXLNSFW_ggwpV7",
+    "install_path": "ComfyUI/checkpoints",
     "startup_parameters": ""
-  }     
+  },
+  "DreamShaperXL_Turbo_V2-SFW": {
+    "type": "image",
+    "compatibility": ["ComfyUI"],
+    "comment": "SFW, default",
+    "sources": [
+      "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_V2-SFW.safetensors"
+    ],
+    "install_path": "ComfyUI/checkpoints",
+    "startup_parameters": ""
+  },
+  "DreamShaperXL_Turbo_v2_1": {
+    "type": "image",
+    "compatibility": ["ComfyUI"],
+    "comment": "NSFW but seems restricted but sometimes breaks out",
+    "sources": [
+      "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_v2_1.safetensors"
+    ],
+    "install_path": "ComfyUI/checkpoints",
+    "startup_parameters": ""
+  }    
 }
 
 
