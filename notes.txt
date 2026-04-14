@@ -18,4 +18,4 @@ sudo apt install -y nvidia-cuda-toolkit
 sudo apt install -y rocm-dev rocm-hip-runtime rocblas hipblas
 
 - for vulkan support
-sudo apt install -y mesa-vulkan-drivers vulkan-tools libvulkan-dev glslc
+sudo apt install -y mesa-vulkan-drivers vulkan-tools libvulkan-dev glslc spirv-headers

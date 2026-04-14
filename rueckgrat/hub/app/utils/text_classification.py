@@ -9,6 +9,8 @@ logger = Logger(__name__).get_logger()
 
 data = [
     # --- CONVERSATION ---        
+    ("Show me arround in Paris please!", ["conversation"]),
+    ("let's go on a tour in Munich", ["conversation"]),
     ("1,2,3,4,5,6,7,8,9,10", ["conversation"]),
     ("What is that in your hand", ["conversation"]),
     ("Yes I'd love if you join me", ["conversation"]),
@@ -697,9 +699,9 @@ class TextClassifier:
             probs = self.model.predict_proba(X_new)[0]
 
             thresholds = {
-                "image_generation_request": 0.5,
+                "image_generation_request": 0.6,
                 "websearch_request": 0.3,
-                "conversation": 0.3
+                "conversation": 0.2
             }
 
             predictions = [

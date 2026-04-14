@@ -17,7 +17,7 @@ package_available() {
 sudo apt update
 sudo apt install git python3 build-essential pkg-config
 
-if package_exists python3.13-dev; then
+if package_available python3.13-dev; then
   sudo apt install python3.13-dev
 else
   sudo apt install python3.11-dev
@@ -34,7 +34,7 @@ PYTHON="$VENV/bin/python"
 [ -d "$VENV" ] || python3 -m venv "$VENV"
 
 "$PIP" install --upgrade pip
-"$PIP" install -r "$CURRENT_DIR/requirements.txt"
+#"$PIP" install -r "$CURRENT_DIR/requirements.txt"
 
 # Helper function
 clone_or_pull() {
@@ -122,7 +122,7 @@ clone_or_pull https://github.com/ltdrdata/ComfyUI-Manager.git ComfyUI-Manager
 #clone_or_pull https://github.com/Gourieff/ComfyUI-ReActor.git ComfyUI-ReActor
 #"$PIP" install -r ComfyUI-ReActor/requirements.txt
 
-BASE_PATH="$CURRENT_DIR/../models/ComfyUI"
+BASE_PATH="$CURRENT_DIR/../../models/ComfyUI"
 EXTRA_MODEL_PATHS="$CURRENT_DIR/ComfyUI/extra_model_paths.yaml"
 bash -c "cat > $EXTRA_MODEL_PATHS" <<EOF
 comfyui:

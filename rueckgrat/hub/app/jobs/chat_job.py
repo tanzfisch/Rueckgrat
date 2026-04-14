@@ -54,8 +54,8 @@ class ChatJob(Job):
             compiler = PromptCompiler(contact, conversation, request.name)
             system_prompt, context_prompt = compiler.build_prompt()
 
-            logger.debug(f"system_prompt: {system_prompt}")
-            logger.debug(f"context_prompt: {context_prompt}")
+            logger.debug(f"system_prompt:\n{system_prompt}")
+            logger.debug(f"context_prompt:\n{context_prompt}")
 
             payload = [{"role": "system", "content": system_prompt}]
             payload.append({"role": "system", "content": context_prompt})

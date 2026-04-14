@@ -21,10 +21,10 @@ case "$choice" in
     DEFAULT_GPU_LAYERS=-1
     DEFAULT_CONTEXT_SIZE=4000
     USER_NAME=$USER    
-    # TODO
-    DEFAULT_MODEL_PATH="/home/martin/dev/Rueckgrat/rueckgrat/models/llm/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L.gguf"
+    # TODO select model
+    DEFAULT_MODEL_PATH="/home/martin/dev/Rueckgrat/models/llm/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L.gguf"
 
-    read -p "Enter llama.cpp user [${DEFAULT_SERVICE_NAME}]: " USER_SERVICE_NAME
+    read -p "Enter llama.cpp service name [${DEFAULT_SERVICE_NAME}]: " USER_SERVICE_NAME
     SERVICE_NAME="${USER_SERVICE_NAME:-$DEFAULT_SERVICE_NAME}"
 
     read -p "Enter llama.cpp port [${DEFAULT_PORT}]: " USER_PORT
@@ -36,7 +36,7 @@ case "$choice" in
     read -p "Enter gpu layer count (-1 for max) [${DEFAULT_GPU_LAYERS}]: " USER_GPU_LAYERS
     GPU_LAYERS="${USER_GPU_LAYERS:-$DEFAULT_GPU_LAYERS}"
 
-    read -p "Enter gpu layer count (-1 for max) [${DEFAULT_CONTEXT_SIZE}]: " USER_CONTEXT_SIZE
+    read -p "Enter context size (-1 for max) [${DEFAULT_CONTEXT_SIZE}]: " USER_CONTEXT_SIZE
     CONTEXT_SIZE="${USER_CONTEXT_SIZE:-$DEFAULT_CONTEXT_SIZE}"
 
     read -p "Enter llama.cpp service user [${USER_NAME}]: " USER_USER_NAME
