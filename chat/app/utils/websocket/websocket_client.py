@@ -16,6 +16,10 @@ class WebSocketClient:
         config = configparser.ConfigParser()
         config_path = Path("~/.config/Rueckgrat/rueckgrat.conf").expanduser()
 
+        if not config_path.exists():
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.touch()   
+
         with open(config_path, encoding="utf-8-sig") as f:
             config.read_file(f)        
 
