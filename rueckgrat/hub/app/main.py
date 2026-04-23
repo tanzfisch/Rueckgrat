@@ -23,6 +23,9 @@ logger = Logger(__name__).get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.dev_mode = os.getenv("DEV_MODE", "prod")
+    logger.info(f"running DEV_MODE={app.state.dev_mode}")
+
     app.state.infrastructure = Infrastructure()
     db_path = "/hub/db/chat.db"
     app.state.db = ChatDB(db_path)    
