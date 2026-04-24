@@ -101,7 +101,11 @@ class Backend:
         url = f"{self.url}/health"
 
         try:
-            response = requests.get(url, timeout=3, verify=self.server_cert)
+            response = requests.get(
+                url, 
+                timeout=9, 
+                verify=self.server_cert
+            )
 
             if response.status_code == 200:
                 data = response.json()
@@ -117,8 +121,8 @@ class Backend:
                 logger.error(f"lost connection to hub - {response.status_code} {response.reason}")
                 return False
                             
-        except Exception:
-            logger.error("failed to get health response from backend due to an exception")
+        except Exception as e:
+            logger.error(f"failed health check with: {repr(e)}")
             return False   
 
     def get_users(self):

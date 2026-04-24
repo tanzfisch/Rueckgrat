@@ -41,7 +41,7 @@ def chat(request: ChatRequestLlama):
     if app.state.dev_mode == "mockup":
         return ChatResponse(
             role = "assistant",
-            content = f"Echo: {request.content}",
+            content = f"Echo from mockup llama",
             attachments = []
         )
     else:

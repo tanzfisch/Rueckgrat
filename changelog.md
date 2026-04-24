@@ -13,3 +13,4 @@ Changelog
 - improved handling of image downloads
 - improved bubbles layout for different aspect ratios of images
 - added seed to llama.cpp interface
+- #35 added DEV_MODE. Set to mockup for easier development

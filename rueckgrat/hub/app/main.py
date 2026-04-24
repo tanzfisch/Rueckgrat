@@ -329,6 +329,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     threading.Thread(target=pump_done_jobs, daemon=True).start()
 
+    # recieve from client
     async def receiver():
         try:
             while not closed.is_set():
@@ -352,6 +353,7 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.error(f"receiver failure {repr(e)}")
             await safe_close(code=1011)
 
+    # send back to client
     async def sender():
         try:
             while not closed.is_set():

@@ -86,7 +86,7 @@ class Infrastructure:
             url = f"http://{server['host']}:{server['port']}/health"
 
             try:
-                response = requests.get(url, timeout=3)
+                response = requests.get(url, timeout=1)
 
                 ok = response.status_code == 200 \
                 and response.json() == {"status": "ok"} \
