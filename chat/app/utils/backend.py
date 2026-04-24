@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from app.utils.websocket import WebSocketClient
 from typing import Callable, List
+from .config import RueckgratConfig
 import configparser
 
 from common import Logger, DownloadQueue, ChatRequest, GetMessagesRequest
@@ -15,24 +16,12 @@ class Backend:
 
     def __init__(self):
         logger.debug("Backend init")
-        config = configparser.ConfigParser()
-        config_path = Path("~/.config/Rueckgrat/rueckgrat.conf").expanduser()
-        logger.info(f"reading config from {config_path}")
+        self.config = RueckgratConfig()
 
-        if not config_path.exists():
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            config_path.touch()     
+        self.server_cert = self.config.server_cert
 
-        with open(config_path, encoding="utf-8-sig") as f:
-            config.read_file(f)
-
-        self.host = config.get('frontend', 'rueckgrat_hub_host', fallback="localhost")
-        self.port = config.get('frontend', 'rueckgrat_hub_port', fallback="443")
-        self.server_cert = config.get('frontend', 'server_cert', fallback="no")
-        self.server_cert = os.path.expanduser(self.server_cert)
-
-        self.url = f"https://{self.host}:{self.port}"
-        self.uri = f"wss://{self.host}:{self.port}/ws"
+        self.url = f"https://{self.config.host}:{self.config.port}"
+        self.uri = f"wss://{self.config.host}:{self.config.port}/ws"
         self.access_token = ""        
 
         logger.info(f"using backend at {self.url}")
@@ -61,7 +50,7 @@ class Backend:
         return cls._instance
 
     async def start_websocket(self):
-        self.websocket_client = WebSocketClient(self.uri)
+        self.websocket_client = WebSocketClient(self.uri, self.server_cert)
         self.websocket_client.set_on_message(self._on_incomming_websocket)
         await self.websocket_client.connect()
 

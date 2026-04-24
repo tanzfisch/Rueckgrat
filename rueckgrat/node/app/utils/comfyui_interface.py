@@ -10,8 +10,6 @@ import threading
 from app.common import Logger, ImageRequest, ImageResponse
 logger = Logger(__name__).get_logger()
 
-INFRASTRUCTURE_CONFIG_PATH = Path("node/config/infrastructure.json")
-
 base_text_to_image = """
 {
     "3": {
