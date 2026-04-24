@@ -1,8 +1,13 @@
 Changelog
 =========
 
+0.3.0
+-----
+
+- #35 added DEV_MODE. Set to mockup for easier development
+
 0.2.0
-------
+-----
 
 - #3 image generation embedded in conversation
 - #13 added common module to share code amongst applications
@@ -13,4 +18,3 @@ Changelog
 - improved handling of image downloads
 - improved bubbles layout for different aspect ratios of images
 - added seed to llama.cpp interface
-- #35 added DEV_MODE. Set to mockup for easier development
