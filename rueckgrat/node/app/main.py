@@ -13,6 +13,8 @@ logger = Logger(__name__).get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.dev_mode = os.getenv("DEV_MODE", "prod")
+    logger.info(f"running DEV_MODE={app.state.dev_mode}")    
 
     host = "host.docker.internal"
     llamacpp_port = "8080" # TODO make configurable
@@ -36,16 +38,26 @@ def health():
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequestLlama):
-    logger.debug("got ChatRequest")
-    return app.state.llamacpp.chat(request)
+    if app.state.dev_mode == "mockup":
+        return ChatResponse(
+            role = "assistant",
+            content = f"Echo from mockup llama",
+            attachments = []
+        )
+    else:
+        return app.state.llamacpp.chat(request)
 
 @app.post("/image", response_model=ImageResponse)
-def chat(request: ImageRequest):
-    logger.debug("got ImageRequest")
-    response = app.state.comfyui.image(request)
-    if not response:
-        logger.error("failed to generate image with comfyui")
-    return response
+def image(request: ImageRequest):
+    if app.state.dev_mode == "mockup":
+        return ImageResponse(
+            output = "foo.png"
+        )
+    else:
+        response = app.state.comfyui.image(request)
+        if not response:
+            logger.error("failed to generate image with comfyui")
+        return response
 
 @app.get("/download/{file_path:path}")
 async def download_file(file_path: str):

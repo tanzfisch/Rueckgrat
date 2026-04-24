@@ -1,4 +1,3 @@
-import copy
 from .job_queue import Job
 from .classification_job import ClassificationJob
 from .chat_job import ChatJob
