@@ -12,19 +12,8 @@ from common import Logger
 logger = Logger(__name__).get_logger()
 
 class WebSocketClient:
-    def __init__(self, uri: str):
-        config = configparser.ConfigParser()
-        config_path = Path("~/.config/Rueckgrat/rueckgrat.conf").expanduser()
-
-        if not config_path.exists():
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            config_path.touch()   
-
-        with open(config_path, encoding="utf-8-sig") as f:
-            config.read_file(f)        
-
-        self.server_cert = config.get('frontend', 'server_cert', fallback="no")
-        self.server_cert = os.path.expanduser(self.server_cert)
+    def __init__(self, uri: str, server_cert: str):
+        self.server_cert = server_cert
 
         self.uri = uri
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
