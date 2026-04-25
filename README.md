@@ -48,4 +48,7 @@ Some utility code shared across modules
 
 # Development
 
-use DEV_MODE=mockup in .env for developing without any models
+## Tips
+
+* For better code completion run from root workspace scripts/setup_dev_venv.py and then open workspace from file project.code-workspace
+* use DEV_MODE=mockup in .env for developing without any models
