@@ -42,7 +42,7 @@ class RueckgratConfig:
         with open(self.config_path, encoding="utf-8-sig") as f:
             self.config.read_file(f)
 
-    def save(self):
+    def _save(self):
         """Persist current config back to disk."""
         with open(self.config_path, "w", encoding="utf-8") as f:
             self.config.write(f)

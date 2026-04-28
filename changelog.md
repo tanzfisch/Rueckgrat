@@ -7,6 +7,7 @@ Changelog
 - #35 added DEV_MODE. Set to mockup for easier development
 - #36 added RueckgratConfig for certralized config handling
 - #37 added code workspace
+- #5  added settings menu for client
 
 0.2.0
 -----

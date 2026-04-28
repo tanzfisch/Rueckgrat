@@ -3,12 +3,13 @@ from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtCore import Qt, QSize, Signal
 from app.utils import Contact
 from pathlib import Path
+from .settings import SettingsDialog
 
 class ContactHeader(QWidget):
     go_back = Signal()
     open_profile = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, selected_contact: bool=True, parent=None):
         super().__init__(parent)
 
         layout = QHBoxLayout(self)
@@ -29,9 +30,20 @@ class ContactHeader(QWidget):
 
         self.contact_name = QLabel("...")
 
-        layout.addWidget(self.back_btn)
-        layout.addWidget(self.profile_label)
-        layout.addWidget(self.contact_name)        
+        self.menu_btn = QPushButton()
+        self.menu_btn.setObjectName("flatButton")
+        self.menu_btn.setIcon(QIcon("app/icons/menu_light.png"))
+        self.menu_btn.setIconSize(QSize(24, 24))
+        self.menu_btn.setFixedSize(40, 40)
+        self.menu_btn.clicked.connect(self.handle_open_menu)
+
+        if selected_contact:
+            layout.addWidget(self.back_btn)
+            layout.addWidget(self.profile_label)
+            layout.addWidget(self.contact_name)     
+
+        layout.addStretch() 
+        layout.addWidget(self.menu_btn)   
 
     def set_contact(self, contact: Contact):
         self.contact = contact
@@ -47,3 +59,6 @@ class ContactHeader(QWidget):
 
     def handle_go_back(self):
         self.go_back.emit()
+
+    def handle_open_menu(self):
+        SettingsDialog.open()

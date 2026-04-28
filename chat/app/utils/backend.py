@@ -6,7 +6,6 @@ from pathlib import Path
 from app.utils.websocket import WebSocketClient
 from typing import Callable, List
 from .config import RueckgratConfig
-import configparser
 
 from common import Logger, DownloadQueue, ChatRequest, GetMessagesRequest
 logger = Logger(__name__).get_logger()
