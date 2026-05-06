@@ -3,7 +3,7 @@ from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtCore import Qt, Signal, QSize
 
 from app.ui import BasePage
-from app.ui.widgets import OneLineBubble, MessageBox, ContactCard
+from app.ui.widgets import OneLineBubble, MessageBox, ContactCard, ContactHeader
 from app.utils import Backend, Contact
 from pathlib import Path
 
@@ -16,6 +16,10 @@ class ContactsPage(BasePage):
 
         self.main_layout = QVBoxLayout(self)
 
+        self.contact_header = ContactHeader(False)
+        self.main_layout.addWidget(self.contact_header)
+
+        # contacts section
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
 
@@ -31,7 +35,7 @@ class ContactsPage(BasePage):
         self.load_contacts()
 
     def on_leave(self):
-        pass          
+        pass
 
     def add_contact(self):
         self.navigator("profile", contact_id=-1)

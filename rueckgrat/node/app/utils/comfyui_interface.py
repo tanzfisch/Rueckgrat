@@ -10,8 +10,6 @@ import threading
 from app.common import Logger, ImageRequest, ImageResponse
 logger = Logger(__name__).get_logger()
 
-INFRASTRUCTURE_CONFIG_PATH = Path("node/config/infrastructure.json")
-
 base_text_to_image = """
 {
     "3": {
@@ -32,7 +30,7 @@ base_text_to_image = """
     "4": {
         "class_type": "CheckpointLoaderSimple",
         "inputs": {
-            "ckpt_name": "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors"
+            "ckpt_name": "foo.safetensors"
         }
     },
     "5": {
@@ -158,7 +156,7 @@ class ComfyUIInterface:
             return True
 
     def _queue_prompt(self, prompt):
-        logger.debug(f"queue prompt: {prompt}")
+        logger.debug(f"generate image:\n{json.dumps(prompt, indent=4)}")
         payload = {"prompt": prompt, "client_id": self.client_id}
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(self.url_prompt, data=data, headers={'Content-Type': 'application/json'})

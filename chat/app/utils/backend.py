@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from app.utils.websocket import WebSocketClient
 from typing import Callable, List
-import configparser
+from .config import RueckgratConfig
 
 from common import Logger, DownloadQueue, ChatRequest, GetMessagesRequest
 logger = Logger(__name__).get_logger()
@@ -15,20 +15,12 @@ class Backend:
 
     def __init__(self):
         logger.debug("Backend init")
-        config = configparser.ConfigParser()
-        config_path = Path("~/.config/Rueckgrat/rueckgrat.conf").expanduser()
-        logger.info(f"reading config from {config_path}")
+        self.config = RueckgratConfig()
 
-        with open(config_path, encoding="utf-8-sig") as f:
-            config.read_file(f)
+        self.server_cert = self.config.server_cert
 
-        self.host = config.get('frontend', 'rueckgrat_hub_host', fallback="localhost")
-        self.port = config.get('frontend', 'rueckgrat_hub_port', fallback="443")
-        self.server_cert = config.get('frontend', 'server_cert', fallback="no")
-        self.server_cert = os.path.expanduser(self.server_cert)
-
-        self.url = f"https://{self.host}:{self.port}"
-        self.uri = f"wss://{self.host}:{self.port}/ws"
+        self.url = f"https://{self.config.host}:{self.config.port}"
+        self.uri = f"wss://{self.config.host}:{self.config.port}/ws"
         self.access_token = ""        
 
         logger.info(f"using backend at {self.url}")
@@ -57,7 +49,7 @@ class Backend:
         return cls._instance
 
     async def start_websocket(self):
-        self.websocket_client = WebSocketClient(self.uri)
+        self.websocket_client = WebSocketClient(self.uri, self.server_cert)
         self.websocket_client.set_on_message(self._on_incomming_websocket)
         await self.websocket_client.connect()
 
@@ -97,7 +89,11 @@ class Backend:
         url = f"{self.url}/health"
 
         try:
-            response = requests.get(url, timeout=3, verify=self.server_cert)
+            response = requests.get(
+                url, 
+                timeout=9, 
+                verify=self.server_cert
+            )
 
             if response.status_code == 200:
                 data = response.json()
@@ -113,8 +109,8 @@ class Backend:
                 logger.error(f"lost connection to hub - {response.status_code} {response.reason}")
                 return False
                             
-        except Exception:
-            logger.error("failed to get health response from backend due to an exception")
+        except Exception as e:
+            logger.error(f"failed health check with: {repr(e)}")
             return False   
 
     def get_users(self):

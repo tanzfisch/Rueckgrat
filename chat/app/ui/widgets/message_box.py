@@ -19,7 +19,7 @@ class MessageBox(QWidget):
         # Card widget
         self.card = QWidget()
         self.card.setObjectName("overlay_dialog")
-        self.card.setFixedWidth(parent.rect().width() * 0.6)
+        self.card.setFixedWidth(parent.rect().width() * 0.8)
 
         card_layout = QVBoxLayout(self.card)
         card_layout.setContentsMargins(20, 20, 20, 20)

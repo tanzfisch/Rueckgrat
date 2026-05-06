@@ -117,9 +117,9 @@ class ContactImagePromptCompiler:
 
     def _build_positive_focus(self) -> str:
         if self.image_type == ImageType.Portrait:
-            return "tight facial crop, face centered, full frame occupied by face, no body parts below the chin or above the forehead cut off unnaturally"
+            return "tight facial crop, face centered, full frame occupied by face, no body parts below the chin or above the forehead cut off unnaturally, detailed eyes"
         elif self.image_type == ImageType.UpperBody:
-            return "medium shot, waist-up portrait, subject framed from mid-torso to top of head, face and upper body fully visible, centered composition, balanced framing, chest and shoulders prominent, no full body, no cropped head, camera at chest level, portrait orientation"
+            return "medium shot, waist-up portrait, subject framed from mid-torso to top of head, face and upper body fully visible, centered composition, balanced framing, chest and shoulders prominent, no full body, no cropped head, camera at chest level, portrait orientation, detailed eyes"
         elif self.image_type == ImageType.FullBody:
             return "full body shot, head-to-toe visible, entire figure in frame, subject fully visible from top of head to feet, head clearly visible and not cropped, centered composition, balanced framing, full height portrait, camera pulled back, portrait orientation"
         
@@ -128,26 +128,26 @@ class ContactImagePromptCompiler:
     def _build_positive_general(self) -> str:
         image_style = self.appearance["image_style"]
         if image_style == "natural":
-            return "natural photograph, realistic lighting, soft natural light, subtle shadows, true-to-life colors, high quality, high detail, sharp focus, symmetrical anatomy, natural skin texture, visible pores, slight imperfections, candid feel, unposed, real-world camera look, depth of field, realistic lens perspective, no overprocessing, no HDR look, film-like color grading"
+            return "natural photograph, realistic lighting, soft natural light, subtle shadows, true-to-life colors, high quality, high detail, sharp focus, correct anatomy, natural skin texture, visible pores, slight imperfections, candid feel, unposed, real-world camera look, depth of field, realistic lens perspective, no overprocessing, no HDR look, film-like color grading"
         elif image_style == "studio":
-            return "realistic photograph, natural or soft diffused lighting, true-to-life colors, realistic skin texture with minor imperfections, subtle shadows, natural depth of field, sharp but not hyper-detailed focus, candidly framed, slight grain or film texture, neutral color grading, authentic textures and reflections, balanced composition without over-polishing, high-quality yet natural look"
+            return "realistic photograph, studio lighting effects, natural or soft diffused lighting, true-to-life colors, realistic skin texture with minor imperfections, correct anatomy, subtle shadows, natural depth of field, sharp but not hyper-detailed focus, candidly framed, slight grain or film texture, neutral color grading, authentic textures and reflections, balanced composition without over-polishing, high-quality yet natural look"
         else:
-            return "high quality, high detail, symmetrical anatomy"
+            return "high quality, high detail, correct anatomy"
         
     def _build_negative_general(self) -> str:
         image_style = self.appearance["image_style"]
         if image_style == "natural":        
             return "stylized image, artificial lighting, dramatic lighting, high contrast, vivid colors, oversaturated tones, glossy skin, smooth texture, flawless complexion, hyper-detailed, ultra sharp, HDR effect, cinematic look, perfect symmetry, exaggerated features, studio lighting, digital art style, 3D render look, polished, unreal perfection, text, mirror, artifacts in eyes"
         elif image_style == "studio":
-            return "over-processed, plastic, overly smooth skin, exaggerated highlights, hyper-realistic textures, studio lighting effects, artificial glow, airbrushed, unnatural colors, over-sharpened, commercial retouching, excessive contrast or saturation, heavy filters, text, mirror, artifacts in eyes"
+            return "over-processed, plastic, overly smooth skin, exaggerated highlights, hyper-realistic textures, artificial glow, airbrushed, unnatural colors, over-sharpened, commercial retouching, excessive contrast or saturation, heavy filters, text, mirror, artifacts in eyes"
         else:
-            return "high quality, high detail, symmetrical anatomy, text, mirror, artifacts in eyes"
+            return "high quality, high detail, wrong anatomy, text, mirror, artifacts in eyes"
     
     def _build_negative_focus(self) -> str:        
         if self.image_type == ImageType.Portrait:
-            return "full body, long shot, wide shot, medium shot, upper body only, torso dominant, subject too far away, small subject, zoomed out, cropped head, cut off top of head, out of frame face, partial face, face out of frame, extreme close-up, face too zoomed in, blurry face, distorted face, off-center composition, tilted framing"
+            return "full body, long shot, wide shot, medium shot, upper body only, torso dominant, subject too far away, small subject, zoomed out, cropped head, cut off top of head, out of frame face, partial face, face out of frame, extreme close-up, face too zoomed in, blurry face, distorted face, off-center composition, tilted framing, artifacts in eyes"
         elif self.image_type == ImageType.UpperBody:
-            return "full body, long shot, wide shot, extreme wide shot, head to toe, feet visible, cropped head, cut off head, out of frame head, extreme close-up, close-up face only, zoomed in face, partial face, off-center framing, tilted composition, subject too small, subject too far away, body out of frame, lower body dominant"
+            return "full body, long shot, wide shot, extreme wide shot, head to toe, feet visible, cropped head, cut off head, out of frame head, extreme close-up, close-up face only, zoomed in face, partial face, off-center framing, tilted composition, subject too small, subject too far away, body out of frame, lower body dominant, artifacts in eyes"
         elif self.image_type == ImageType.FullBody:
             return "cropped head, cut off head, out of frame head, missing head, partial body, upper body only, medium shot, close-up, extreme close-up, zoomed in, torso only, legs cut off, feet cut off, subject out of frame, poorly framed, off-center, tilted composition, subject too close, camera too close"
         

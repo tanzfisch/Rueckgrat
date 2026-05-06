@@ -5,7 +5,7 @@
 }
 
 localhost {
-    reverse_proxy /ws* http://rueckgrat_hub:14223 {
+    reverse_proxy /ws* http://hub:14223 {
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
@@ -13,5 +13,5 @@ localhost {
     }
 
     tls internal
-    reverse_proxy http://rueckgrat_hub:14223
+    reverse_proxy http://hub:14223
 }

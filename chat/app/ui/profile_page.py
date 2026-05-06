@@ -123,7 +123,7 @@ template_profile = """
 
     "llm_parameters": {
         "temperature": "0.15",
-        "preffered_context_size": "10000"
+        "preffered_context_size": "8000"
     },
 
     "image_parameters": {

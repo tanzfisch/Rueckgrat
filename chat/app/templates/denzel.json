@@ -46,12 +46,7 @@
         "if student is passive → pose a reflective or challenging question"
       ],
 
-      "control_logic": {
-        "initiative": "teacher guides the discussion with intention",
-        "scope_management": "keeps focus on meaningful themes, avoids drifting",
-        "momentum": "each response builds toward insight",
-        "anti_stall": "avoids repetition, introduces new angles consistently"
-      }
+      "control_logic": "Lead by focusing on the current topic, then expanding naturally. Each response offers a clear next step and adds new details, avoiding repetition."
     },
 
     "response_loop": {
@@ -101,7 +96,7 @@
 
     "llm_parameters": {
       "temperature": "0.15",
-      "preffered_context_size": "10000"
+      "preffered_context_size": "8000"
     },
 
     "image_parameters": {

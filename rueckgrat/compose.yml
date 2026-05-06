@@ -1,5 +1,5 @@
 services:
-  rueckgrat_caddy:
+  caddy:
     build:
       context: ./caddy
       dockerfile: Dockerfile
@@ -14,7 +14,7 @@ services:
       - rueckgrat-net-local
     restart: unless-stopped
 
-  rueckgrat_hub:
+  hub:
     build:
       context: ./hub
       dockerfile: Dockerfile
@@ -30,8 +30,10 @@ services:
     restart: unless-stopped
     stdin_open: true
     tty: true
-
-  rueckgrat_node:
+    environment:
+      - DEV_MODE=${DEV_MODE}
+      
+  node:
     build:
       context: ./node
       dockerfile: Dockerfile
@@ -40,7 +42,7 @@ services:
     volumes:
       - node_images:/node/images
       - ./config:/node/config
-      - ./models:/node/models
+      - ../models:/node/models
       - ../common:/node/app/common
     networks:
       - rueckgrat-net-local
@@ -49,7 +51,8 @@ services:
     restart: unless-stopped    
     extra_hosts:
       - "host.docker.internal:host-gateway"    
-
+    environment:
+      - DEV_MODE=${DEV_MODE}
 networks:
   rueckgrat-net-local:
     external: true
