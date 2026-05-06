@@ -34,7 +34,6 @@ PYTHON="$VENV/bin/python"
 [ -d "$VENV" ] || python3 -m venv "$VENV"
 
 "$PIP" install --upgrade pip
-#"$PIP" install -r "$CURRENT_DIR/requirements.txt"
 
 # Helper function
 clone_or_pull() {
