@@ -86,7 +86,7 @@ class UpdateContextJob(Job):
         - "user"/"assistant" - "upper_body" = items this person is wearing specifically on the upper body
         - "user"/"assistant" - "body" = items this person is wearing on the body (not carrying)
         - "location" = environment, setting, only if explicitly mentioned
-        - "summary" = write a summary of the whole conversation and put it here
+        - "summary" = write a detailed summary of the whole conversation and put it here (max 300 words)
 
         OUTPUT:
         Return ONLY valid JSON in the same format.

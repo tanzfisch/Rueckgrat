@@ -1,3 +1,4 @@
+import random
 from .job_queue import Job
 from .classification_job import ClassificationJob
 from .chat_job import ChatJob
@@ -67,13 +68,12 @@ class MetaJob(Job):
                 if "MOOD_GEN" in content:
                     content = content.replace("MOOD_GEN", "").strip()
                     if not "image_generation_request" in classifications: # one image is enough
-                        mood_gen = True
+                        if random.random() < 0.9:
+                            mood_gen = True
+                        else:
+                            group_gen = True
 
-                if "GROUP_GEN" in content:
-                    content = content.replace("GROUP_GEN", "").strip()
-                    if not "image_generation_request" in classifications: # one image is enough
-                        group_gen = True
-
+                        mood_gen = True # override for now
 
                 chat_job.result()["content"] = content
 

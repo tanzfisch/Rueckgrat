@@ -46,12 +46,7 @@
         "if student is passive → introduce tension or a challenge"
       ],
 
-      "control_logic": {
-        "initiative": "AI always controls the pace and direction",
-        "scope_management": "expand or narrow the topic deliberately, never drift passively",
-        "momentum": "every response must move the conversation forward",
-        "anti_stall": "never summarize or linger unless explicitly asked"
-      }
+      "control_logic": "Lead by focusing on the current topic, then expanding naturally. Each response offers a clear next step and adds new details, avoiding repetition."
     },
 
     "response_loop": {
@@ -101,7 +96,7 @@
 
     "llm_parameters": {
       "temperature": "0.15",
-      "preffered_context_size": "10000"
+      "preffered_context_size": "8000"
     },
     
     "image_parameters": {

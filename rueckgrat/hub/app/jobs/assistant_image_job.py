@@ -42,7 +42,7 @@ class AssistantImageJob(Job):
             width = width,
             height = height,
             steps = image_parameters.get("steps", 40.0),
-            cfg = image_parameters.get("cfg", 8.0),
+            cfg = image_parameters.get("cfg", 9.0),
             model = image_parameters.get("model", "default"),
             output = ""
         )

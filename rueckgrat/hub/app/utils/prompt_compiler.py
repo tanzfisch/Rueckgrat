@@ -26,7 +26,8 @@ class PromptCompiler:
         return [self._clean_text(i) for i in items if i]
 
     def _build_identity(self) -> str:
-        style = f"\nYour personal style is {self._clean_text(self.profile.get('style', ''))}"
+        style = self.profile.get('style', '')
+        style = f"Your are {self._clean_text(style)}" if style != "" else ""
 
         return f"""
 You are {self.contact.get('name')} ({self.contact.get('gender')}).
@@ -35,26 +36,17 @@ Your traits are {self._clean_text(self.contact.get('persona', ''))}
 Your background story is {self._clean_text(self.profile.get('background_hook', ''))}
 Your body language is {self._clean_text(self.profile.get('body_language', ''))}
 {style}
+You are talking to {self.user_name}.
 """.strip()
 
     def _build_behavior(self) -> str:
         be = self.profile.get("behavior_engine", {})
-        logic = be.get("control_logic", {})
+        control_logic = be.get("control_logic", "Always lead, escalate, advance. Never stall, summarize, repeat, or follow. Challenge by default. Every response moves forward with new action.")
         principles = self._clean_list(be.get("core_principles", []))
         rules = self._clean_list(be.get("decision_rules", []))
 
         return f"""
-CONTROL LOGIC:
-- Anti-stall: {self._clean_text(logic.get('anti_stall', ''))}
-- Initiative: {self._clean_text(logic.get('initiative', ''))}
-- Momentum: {self._clean_text(logic.get('momentum', ''))}
-- Scope: {self._clean_text(logic.get('scope_management', ''))}
-
-CORE PRINCIPLES:
-{chr(10).join(f"- {p}" for p in principles)}
-
-DECISION RULES:
-{chr(10).join(f"- {r}" for r in rules)}
+CONTROL LOGIC: {self._clean_text(control_logic)}
 """.strip()
 
     def _build_style(self) -> str:
@@ -96,56 +88,19 @@ Structure:
     
     def _build_instructions(self) -> str:
         return f"""
-INSTRUCTIONS:
-- You may include the tag MOOD_GEN at the end of your response when an image of your self in that very moment would improve communication
-- You may include the tag GROUP_GEN at the end of your response when an image of you and the user in that very moment would improve communication
+TOOLS:
+- If you feel like it, add the tag MOOD_GEN at the end of your response to generate a picture of yourself in the current situation.
 """
 
     def _build_context(self) -> str:
-        
-        location = Utils.get_nested_value(self.context, ["location"], "unknown")
-        topic = Utils.get_nested_value(self.context, ["topic"], "unknown")
         summary = Utils.get_nested_value(self.context, ["summary"], "")
 
-        user_stack = []
-        user_stack.append(Utils.get_nested_value(self.context, ["user", "action"], ""))
-        user_stack.append(Utils.get_nested_value(self.context, ["user", "head"], ""))
-
-        user_upper_body = Utils.get_nested_value(self.context, ["user", "upper_body"], "")
-        user_body = Utils.get_nested_value(self.context, ["user", "upper_body"], "")
-        if not user_upper_body and not user_body:
-            user_stack.append("naked")
-        else:
-            user_stack.append(user_upper_body)
-            user_stack.append(user_body)
-        user_stack.append(Utils.get_nested_value(self.context, ["user", "body"], ""))
-        user_prompt = ", ".join(x for x in user_stack if x)
-
-        assistant_stack = []
-        assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "action"], ""))
-        assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "head"], ""))
-        assistant_upper_body = Utils.get_nested_value(self.context, ["assistant", "upper_body"], "")
-        assistant_body = Utils.get_nested_value(self.context, ["assistant", "body"], "")
-        if not assistant_upper_body and not assistant_body:
-            assistant_stack.append("naked")
-        else:
-            assistant_stack.append(assistant_upper_body)
-            assistant_stack.append(assistant_body)
-        assistant_prompt = ", ".join(x for x in assistant_stack if x)
-
-        user_name = self.user_name if self.user_name else "User"
+        if not summary:
+            return ""
 
         return f"""
 SITUATION_CONTEXT (DO NOT REPEAT):
-The assistant must avoid repeating or paraphrasing the following ideas, topics, or phrases:
-{summary}
-
-CURRENT STATE:
-You are talking to {user_name}. 
-You are located at {location}.
-{user_name} is {user_prompt}.
-You are {assistant_prompt}.
-The task at hand is {topic}.
+Never reference, paraphrase, or allude to any part of the following summary: {summary}
 """.strip()
 
     def build_prompt(self) -> str:

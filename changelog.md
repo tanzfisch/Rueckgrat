@@ -8,6 +8,10 @@ Changelog
 - #36 added RueckgratConfig for certralized config handling
 - #37 added code workspace
 - #5  added settings menu for client
+- #28 improved some of the existing contact templates
+- added script to deploy docker image to remote location
+- some refactor across the board
+- some improvements to image generation prompts
 
 0.2.0
 -----

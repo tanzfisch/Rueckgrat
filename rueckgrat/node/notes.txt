@@ -1,6 +1,6 @@
 # To access the registry manager
 
-docker compose run --entrypoint /bin/bash --rm rueckgrat_node
+docker compose run --entrypoint /bin/bash --rm node
 
 # list models
 python -m app.registry_manager list -v

@@ -211,5 +211,4 @@ rueckgrat/llama.cpp/llama.cpp
 chat/models/
 chat/cache/
 
-rueckgrat/data
-rueckgrat/models
+models

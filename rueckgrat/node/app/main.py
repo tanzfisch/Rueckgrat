@@ -13,8 +13,10 @@ logger = Logger(__name__).get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.dev_mode = os.getenv("DEV_MODE", "prod")
-    logger.info(f"running DEV_MODE={app.state.dev_mode}")    
+    app.state.dev_mode = os.getenv("DEV_MODE", "")
+    if app.state.dev_mode == "":
+        app.state.dev_mode = "prod"
+    logger.info(f"running DEV_MODE={app.state.dev_mode}")
 
     host = "host.docker.internal"
     llamacpp_port = "8080" # TODO make configurable

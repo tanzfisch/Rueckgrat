@@ -2,7 +2,7 @@
 {
   "servers": [
     {
-      "host": "rueckgrat_node",
+      "host": "node",
       "port": 7346,
       "services": [
         {

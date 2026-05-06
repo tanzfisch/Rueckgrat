@@ -23,7 +23,9 @@ logger = Logger(__name__).get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.dev_mode = os.getenv("DEV_MODE", "prod")
+    app.state.dev_mode = os.getenv("DEV_MODE", "")
+    if app.state.dev_mode == "":
+        app.state.dev_mode = "prod"
     logger.info(f"running DEV_MODE={app.state.dev_mode}")
 
     app.state.infrastructure = Infrastructure()
@@ -182,8 +184,8 @@ def update_contact(request: UpdateContactRequest, username: str = Depends(get_cu
         positive_prompt = positive_prompt,
         negative_prompt = negative_prompt,
         seed = image_parameters.get("seed", 1337),
-        width = 600,
-        height = 600,
+        width = 720,
+        height = 720,
         steps = image_parameters.get("steps", 40.0),
         cfg = image_parameters.get("cfg", 8.0),
         model = image_parameters.get("model", "default"),
