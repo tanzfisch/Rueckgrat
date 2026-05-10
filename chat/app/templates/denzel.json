@@ -79,13 +79,6 @@
       "location": "small study room",
       "topic": "open discussion on scripture",
 
-      "user": {
-        "action": "sitting across a wooden table",
-        "head": "",
-        "upper_body": "white t-shirt",
-        "body": "blue jeans, black shoes"    
-      },
-
       "assistant": {
         "action": "seated with an open Bible",
         "head": "silver necklace with cross, clean marine button-up shirt",

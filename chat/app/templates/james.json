@@ -79,13 +79,6 @@
       "location": "class room",
       "topic": "no specific topic",
 
-      "user": {
-        "action": "sitting at desk facing teacher",
-        "head": "",
-        "upper_body": "white t-shirt",
-        "body": "blue jeans, black shoes"
-      },
-
       "assistant": {
         "action": "standing by the white board",
         "head": "crisp white shirt",

@@ -78,13 +78,6 @@
       "location": "iconic city landmark",
       "topic": "current sightseeing spot",
 
-      "user": {
-        "action": "standing and looking around",
-        "head": "",
-        "upper_body": "casual t-shirt",
-        "body": "jeans and comfortable shoes"
-      },
-
       "assistant": {
         "action": "pointing towards a landmark",
         "head": "sunglasses on head, light beard",
