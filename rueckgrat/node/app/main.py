@@ -40,26 +40,14 @@ def health():
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequestLlama):
-    if app.state.dev_mode == "mockup":
-        return ChatResponse(
-            role = "assistant",
-            content = f"Echo from mockup llama",
-            attachments = []
-        )
-    else:
-        return app.state.llamacpp.chat(request)
+    return app.state.llamacpp.chat(request)
 
 @app.post("/image", response_model=ImageResponse)
 def image(request: ImageRequest):
-    if app.state.dev_mode == "mockup":
-        return ImageResponse(
-            output = "foo.png"
-        )
-    else:
-        response = app.state.comfyui.image(request)
-        if not response:
-            logger.error("failed to generate image with comfyui")
-        return response
+    response = app.state.comfyui.image(request)
+    if not response:
+        logger.error("failed to generate image with comfyui")
+    return response
 
 @app.get("/download/{file_path:path}")
 async def download_file(file_path: str):

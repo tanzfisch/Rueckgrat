@@ -84,21 +84,26 @@ Structure:
 {chr(10).join(f"- {s}" for s in structure)}
 """.strip()
     
-    def _build_instructions(self) -> str:
-        return f"""
-TOOLS:
-- If you feel like it, add the tag MOOD_GEN at the end of your response to generate a picture of yourself in the current situation.
-"""
-
     def _build_context(self) -> str:
-        summary = Utils.get_nested_value(self.context, ["summary"], "")
+        location = Utils.get_nested_value(self.context, ["location"], "")
+        topic = Utils.get_nested_value(self.context, ["topic"], "")
 
-        if not summary:
-            return ""
+        user_action = Utils.get_nested_value(self.context, ["user", "action"], "")
+        user_head = Utils.get_nested_value(self.context, ["user", "head"], "")
+        user_upper_body = Utils.get_nested_value(self.context, ["user", "upper_body"], "")
+        user_body = Utils.get_nested_value(self.context, ["user", "body"], "")
+
+        assistant_action = Utils.get_nested_value(self.context, ["assistant", "action"], "")
+        assistant_head = Utils.get_nested_value(self.context, ["assistant", "head"], "")
+        assistant_upper_body = Utils.get_nested_value(self.context, ["assistant", "upper_body"], "")
+        assistant_body = Utils.get_nested_value(self.context, ["assistant", "body"], "")
 
         return f"""
-SITUATION_CONTEXT (DO NOT REPEAT):
-Never reference, paraphrase, or allude to any part of the following summary: {summary}
+SITUATION_CONTEXT:
+Location: {location}
+Topic: {topic}
+{self.user_name}: {user_action}, {user_head}, {user_upper_body}, {user_body}
+You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_body}
 """.strip()
 
     def build_prompt(self) -> str:
@@ -107,8 +112,7 @@ Never reference, paraphrase, or allude to any part of the following summary: {su
             self._build_behavior(),
             self._build_style(),
             self._build_objectives(),
-            self._build_response_loop(),            
-            self._build_instructions()
+            self._build_response_loop()
         ]
 
         system_prompt = "\n\n".join(sections)

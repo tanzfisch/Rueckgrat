@@ -6,6 +6,8 @@ Changelog
 
 - #38 generate new context for each new conversation
 - #32 improved resource handling
+- removed DEV_MODE again
+- #17 working on discovery and decided to stick with simple config file
 
 0.3.0
 -----

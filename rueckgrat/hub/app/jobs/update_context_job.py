@@ -186,7 +186,7 @@ class UpdateContextJob(Job):
                 }
             }
 
-            logger.debug(f"new_context {json.dumps(new_context, indent=4)}")
+            logger.debug(f"new context:\n{json.dumps(new_context, indent=4)}")
 
             return new_context
         else:

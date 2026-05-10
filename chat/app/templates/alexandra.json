@@ -92,14 +92,18 @@
         "upper_body": "athletic ",
         "body": "branded workout shoes"        
       }
-    },    
+    },
+
+    "behaviour_parameters": {
+      "mood_gen_chance": 0.3
+    },
 
     "llm_parameters": {
       "temperature": "0.15",
       "preffered_context_size": "8000"
     },
 
-    "image_parameters": {
+    "image_parameters": {      
       "seed": 2468,
       "steps": 35,
       "cfg": 5.0,

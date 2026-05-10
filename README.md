@@ -39,16 +39,43 @@ Services currently integrated
 
 Some utility code shared across modules
 
-# get started
+# getting started
 
-## install dependencies
+First decide which machine will be running hub, node or chat or if it is all running on one machine.
 
-* docker + compose
-* python 3 + venv
+## hub installation
+
+Run the following on your hub machine:
+
+```
+cd rueckgrat
+docker compose up --build hub caddy
+```
+
+This will build/launch the hub and caddy which is a proxy to handle https access to the hub.
+
+If you also want to run a node on that same machine go with.
+
+```
+docker compose up --build
+```
+
+## node installation
+
+Choose which service you want to run on rou node and run it's `install.sh` script. Currently available are:
+* llama.cpp
+* ComfyUI
+
+Run the node:
+
+```
+docker compose up --build node
+```
+
+## node installation
 
 # Development
 
 ## Tips
 
 * For better code completion run from root workspace scripts/setup_dev_venv.py and then open workspace from file project.code-workspace
-* use DEV_MODE=mockup in .env for developing without any models

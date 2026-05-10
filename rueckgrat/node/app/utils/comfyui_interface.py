@@ -1,4 +1,4 @@
-import websocket
+import websocket # -> websocket-client
 import json
 import urllib.request
 import os

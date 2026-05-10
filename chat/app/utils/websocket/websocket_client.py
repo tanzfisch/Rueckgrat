@@ -1,11 +1,8 @@
-import os
 import asyncio
 import json
 import websockets
 from typing import Callable, Optional
 from websockets.connection import State
-from pathlib import Path
-import configparser
 import ssl
 
 from common import Logger

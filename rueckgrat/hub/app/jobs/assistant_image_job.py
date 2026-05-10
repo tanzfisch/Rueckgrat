@@ -1,3 +1,4 @@
+import random
 from .job_queue import Job
 from .image_job import ImageJob, ImageRequest
 from ..utils.contact_image_prompt_compiler import ContactImagePromptCompiler, ImageType
@@ -22,14 +23,9 @@ class AssistantImageJob(Job):
         conversation = self.db.get_conversation(self.request.conversation_id)
         context = conversation["context"]        
 
-        if self.assitant_only:
-            width = 720
-            height = 1280
-            user_present = False
-        else:
-            width = 1280
-            height = 720
-            user_present = True
+        width = 720
+        height = 1280
+        user_present = False
 
         compiler = ContactImagePromptCompiler(contact_data, context, ImageType.FullBody, user_present)
         positive_prompt, negative_prompt = compiler.build()
