@@ -1,8 +1,8 @@
 
 {
-  "servers": [
+  "nodes": [
     {
-      "host": "node",
+      "host": "192.168.2.39",
       "port": 7346,
       "services": [
         {
@@ -19,9 +19,9 @@
         {
           "type": "text_to_image",
           "name": "ComfyUI",
-          "port": "8188"
+          "port": 8188
         }
       ]
-    }    
+    }
   ]
 }

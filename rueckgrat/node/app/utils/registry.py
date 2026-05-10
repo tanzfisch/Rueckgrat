@@ -27,8 +27,8 @@ class ModelRegistry:
                 url = test_url
 
         if not url:
-            for server in self.servers:
-                test_url = f"http://{server['host']}:{server['port']}/download/models/{install_path}/{filename}"
+            for node in self.nodes:
+                test_url = f"http://{node['host']}:{node['port']}/download/models/{install_path}/{filename}"
                 if self._url_exists(test_url):
                     url = test_url
 
@@ -86,10 +86,10 @@ class ModelRegistry:
         else:
             infrastructure = {}
 
-        if "servers" in infrastructure:
-            self.servers = infrastructure["servers"]
+        if "nodes" in infrastructure:
+            self.nodes = infrastructure["nodes"]
         else:
-            self.servers = []       
+            self.nodes = []       
 
     def _load_registry(self):
         if self.registry_file.exists():

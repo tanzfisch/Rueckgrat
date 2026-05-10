@@ -126,9 +126,9 @@ def default():
 @app.get("/health")
 def health():
     status = app.state.infrastructure.get_status()
-    for server in status.servers:
-        if not server.ok:
-            return {"status": "error", "message": f"{server.url} {server.error}"}
+    for node in status.nodes:
+        if not node.ok:
+            return {"status": "error", "message": f"{node.url} {node.error}"}
 
     return {"status": "ok"}
 
