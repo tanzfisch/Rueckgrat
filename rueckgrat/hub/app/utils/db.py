@@ -493,13 +493,13 @@ class ChatDB:
     def create_conversation(self, user_id: int, contact_id: int) -> int:
         with self.get_connection() as conn:
             try:
-                start_context = ""
+                profile_picture_context = ""
                 cursor = conn.cursor()
 
                 cursor.execute("""
                     INSERT INTO conversations (user_id, contact_id, context)
                     VALUES (?, ?, ?)
-                """, (user_id, contact_id, start_context))
+                """, (user_id, contact_id, profile_picture_context))
 
                 conn.commit()
                 return cursor.lastrowid

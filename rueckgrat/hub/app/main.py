@@ -194,11 +194,15 @@ def update_contact(request: UpdateContactRequest, username: str = Depends(get_cu
     
     image_gen_hash = Utils.hash_image_request(image_request)
     output_file = f"{image_gen_hash}.png"
+
     app.state.db.add_contact_image(request.contact_id, output_file, "profile")
     image_request.output = output_file
 
-    job = ImageJob(image_request, app.state.infrastructure)
-    app.state.job_queue.add(job)
+    # skip generation if it already exists
+    downloaded_file = Path(f"/hub/images/{output_file}")
+    if not downloaded_file.exists():
+        job = ImageJob(image_request, app.state.infrastructure)
+        app.state.job_queue.add(job)
 
     return {"status": "ok"}
 

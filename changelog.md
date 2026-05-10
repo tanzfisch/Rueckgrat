@@ -1,6 +1,12 @@
 Changelog
 =========
 
+0.4.0
+-----
+
+- #38 generate new context for each new conversation
+- #32 improved resource handling
+
 0.3.0
 -----
 
