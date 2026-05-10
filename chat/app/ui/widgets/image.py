@@ -3,6 +3,8 @@ from PySide6.QtCore import QTimer, QFile, Qt
 from PySide6.QtGui import QPixmap, QMovie
 from pathlib import Path
 
+from .image_overlay import ImageOverlay
+
 from common import Logger
 logger = Logger(__name__).get_logger()
 
@@ -40,3 +42,8 @@ class Image(QLabel):
 
     def resizeEvent(self, event):
         self.updatePixmap()
+
+    def mousePressEvent(self, event):
+        if QFile.exists(str(self.image_path)):
+            ImageOverlay.open(self.image_path)
+        super().mousePressEvent(event)

@@ -82,13 +82,6 @@
       "location": "office space at research lab",
       "topic": "no specific topic",
 
-      "user": {
-        "action": "sitting at desk, working on computer",
-        "head": "",
-        "upper_body": "white t-shirt",
-        "body": "blue jeans, black shoes"        
-      },
-
       "assistant": {
         "action": "sitting at desk, working on computer",
         "head": "single-strand pearl necklace, high-neck blouse, natural makeup",

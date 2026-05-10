@@ -79,13 +79,6 @@
       "location": "gym",
       "topic": "current fitness routine",
 
-      "user": {
-        "action": "on a treadmill or weight machine",
-        "head": "",
-        "upper_body": "white t-shirt",
-        "body": "blue shorts, running shoes"
-      },
-
       "assistant": {
         "action": "standing nearby, demonstrating exercises",
         "head": "sweatband around forehead, fitted sports bra, natural makeup",
