@@ -97,6 +97,10 @@
       }
     },
 
+    "behaviour_parameters": {
+      "mood_gen_chance": 0.3
+    },
+
     "llm_parameters": {
       "temperature": "0.15",
       "preffered_context_size": "8000"
@@ -104,7 +108,7 @@
 
     "image_parameters": {
         "seed": 1337,
-        "steps": 35,
+        "steps": 40,
         "cfg": 5.0,
         "model": "default"
     },

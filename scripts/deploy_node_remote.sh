@@ -2,18 +2,39 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 <image_name[:tag]> <target_host> <project_dir>"
-  echo "Example: $0 node:latest user@server ./project"
+  echo "Usage: $0 <project_dir> --target <target_host> --hubs <comma,separated,ips>"
+  echo "Example: $0 ./project --target user@server"
   exit 1
 }
 
-if [[ $# -ne 3 ]]; then
+if [[ $# -lt 1 ]]; then
   usage
 fi
 
-IMAGE="$1"
-TARGET="$2"
-PROJECT_DIR="$(cd "$3" && pwd)"
+PROJECT_DIR="$(cd "$1" && pwd)"
+shift
+
+TARGET=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --target)
+      [[ $# -ge 2 ]] || usage
+      TARGET="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1"
+      usage
+      ;;
+  esac
+done
+
+if [[ -z "$TARGET" ]]; then
+  echo "Missing required option: --target"
+  usage
+fi
+
 PROJECT_NAME="$(basename "$PROJECT_DIR")"
 REMOTE_DIR="/tmp/$PROJECT_NAME"
 
@@ -51,14 +72,11 @@ echo "Copying rueckgrat..."
 rsync -az --delete --info=progress2 -e "ssh ${SSH_OPTS[*]}" \
   "$PROJECT_DIR/rueckgrat/" "$TARGET:$REMOTE_DIR/rueckgrat/"
 
-echo "Sending docker image..."
-docker save "$IMAGE" | ssh "${SSH_OPTS[@]}" "$TARGET" "docker load"
-
 echo "Starting compose..."
 ssh "${SSH_OPTS[@]}" "$TARGET" "
   set -e
   cd '$REMOTE_DIR/rueckgrat'
-  docker compose up -d node
+  docker compose up -d --build node
 "
 
 echo "Deployment complete."

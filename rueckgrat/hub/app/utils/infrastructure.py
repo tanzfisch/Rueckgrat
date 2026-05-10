@@ -40,9 +40,9 @@ class ServerResult:
 @dataclass
 class StatusResult:
     def __init__(self, servers: list[ServerResult] = None):
-        self.servers = servers if servers else []
+        self.nodes = servers if servers else []
 
-    servers : list[ServerResult]
+    nodes : list[ServerResult]
 
 class Infrastructure:
     def __init__(self):
@@ -53,21 +53,21 @@ class Infrastructure:
         with open(INFRASTRUCTURE_CONFIG_PATH, "r") as f:
             data = json.load(f)
 
-        self.servers = data["servers"]
+        self.nodes = data["nodes"]
 
         self.node_with_text_to_text = None
         self.node_with_text_to_image = None
         self.node_with_model_storage = None # TODO
 
-        for server in self.servers:
-            if "services" in server:
-                services = server["services"]
+        for node in self.nodes:
+            if "services" in node:
+                services = node["services"]
                 for service in services:
                     if service["type"] == "text_to_text":
-                        self.node_with_text_to_text = server
+                        self.node_with_text_to_text = node
 
                     if service["type"] == "text_to_image":
-                        self.node_with_text_to_image = server
+                        self.node_with_text_to_image = node
 
         if not self.node_with_text_to_text:
             logger.error("couldn't find text_to_text generator in config")
@@ -82,8 +82,8 @@ class Infrastructure:
     def get_status(self) -> StatusResult:
         result = StatusResult()
 
-        for server in self.servers:             
-            url = f"http://{server['host']}:{server['port']}/health"
+        for node in self.nodes:
+            url = f"http://{node['host']}:{node['port']}/health"
 
             try:
                 response = requests.get(url, timeout=1)
@@ -93,12 +93,12 @@ class Infrastructure:
                 and response.headers.get("content-type", "").startswith("application/json")
 
                 if ok:
-                    result.servers.append(ServerResult(url, ok))
+                    result.nodes.append(ServerResult(url, ok))
                 else:
-                    result.servers.append(ServerResult(url, ok, error=response["status"]))
+                    result.nodes.append(ServerResult(url, ok, error=response["status"]))
                                 
             except Exception as e:
-                result.servers.append(ServerResult(url, False, error=repr(e)))
+                result.nodes.append(ServerResult(url, False, error=repr(e)))
 
         return result
 

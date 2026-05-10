@@ -4,10 +4,13 @@ import asyncio
 import threading
 import os
 from tqdm import tqdm
-from fastapi.responses import StreamingResponse
 from pathlib import Path
+
+from fastapi.responses import StreamingResponse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.security import HTTPBearer
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
@@ -23,11 +26,6 @@ logger = Logger(__name__).get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.dev_mode = os.getenv("DEV_MODE", "")
-    if app.state.dev_mode == "":
-        app.state.dev_mode = "prod"
-    logger.info(f"running DEV_MODE={app.state.dev_mode}")
-
     app.state.infrastructure = Infrastructure()
     db_path = "/hub/db/chat.db"
     app.state.db = ChatDB(db_path)    
@@ -128,9 +126,9 @@ def default():
 @app.get("/health")
 def health():
     status = app.state.infrastructure.get_status()
-    for server in status.servers:
-        if not server.ok:
-            return {"status": "error", "message": f"{server.url} {server.error}"}
+    for node in status.nodes:
+        if not node.ok:
+            return {"status": "error", "message": f"{node.url} {node.error}"}
 
     return {"status": "ok"}
 

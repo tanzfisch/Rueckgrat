@@ -151,15 +151,14 @@ class ContactImagePromptCompiler:
         return ""
 
     def _build_additional_prompt(self) -> str:
-        return self.prompt if self.prompt else ""
+        return f", {self.prompt}" if self.prompt else ""
 
     def build(self) -> str:
         try:
             positive_prompt = f"""
-{self._build_people()},
 Location: {self._build_location()}
-Topic: {self._build_topic()}
-Parameters: {self._build_positive_focus()}, {self._build_positive_general()}, {self._build_additional_prompt()}
+{self._build_people()},
+Parameters: {self._build_positive_focus()}, {self._build_positive_general()}{self._build_additional_prompt()}
             """
 
             negative_sections = [
