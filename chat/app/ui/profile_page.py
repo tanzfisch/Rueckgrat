@@ -102,7 +102,7 @@ template_profile = """
         ]
     },
 
-    "start_context": {
+    "profile_picture_context": {
       "location": "class room",
       "topic": "no specific topic",
 

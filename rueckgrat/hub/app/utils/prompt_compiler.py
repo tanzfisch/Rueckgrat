@@ -12,8 +12,6 @@ class PromptCompiler:
         self.profile = contact.get("profile", {})
 
         self.context = Utils.get_nested_value(conversation, ["context"], "")
-        if self.context == "":
-            self.context = Utils.get_nested_value(contact, ["profile", "start_context"], "")        
 
     def _clean_text(self, text: str) -> str:
         if not isinstance(text, str):
