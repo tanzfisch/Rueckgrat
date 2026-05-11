@@ -3,6 +3,7 @@ from typing import Dict, Any
 import json
 import re
 import random
+from ..utils.prompt_compiler import PromptCompiler
 
 from app.common import Logger, ChatRequest, Utils
 logger = Logger(__name__).get_logger()
@@ -33,137 +34,161 @@ class UpdateContextJob(Job):
         # Remove inline backtick code
         text = re.sub(r"`.*?`", "", text)
         return text.strip()
+    
+    def _remove_nothing(self, text):
+        text = text.replace("none", "")
+        text = text.replace("nothing", "")
+        return text
 
     def _update_context(self, context: str, messages: list):
-        messages_block = "\n".join([
-            f'- "{self._remove_code(m["content"])}" (role: {m["role"]})'
-            for m in messages
-        ])
+        try:
+            messages_block = "\n".join([
+                f'- "{self._remove_code(m["content"])}" (role: {m["role"]})'
+                for m in messages
+            ])
 
-        if context == "":
-            # fallback context
-            context = """
-            {
-                "location": "unkonwn"
-                "topic": "unkonwn",
+            payload = []
+            contact = self.db.get_contact_by_id(self.request.contact_id)
+            conversation = self.db.get_conversation(self.request.conversation_id)
+            compiler = PromptCompiler(contact, conversation, self.request.name)
+            system_prompt, context_prompt = compiler.build_prompt()
 
-                "user": {
-                "action": "unknown",
-                "head": "",
-                "upper_body": "casual t-shirt",
-                "body": "jeans and comfortable shoes"
-                },
+            payload.append({"role": "system", "content": system_prompt})
 
-                "assistant": {
-                "action": "unknown",
-                "head": "",
-                "upper_body": "casual t-shirt",
-                "body": "jeans and comfortable shoes"
-                }
-            }
-            """
+            if context == "":
+                # fallback context
+                context = """
+{
+    "location": "unkonwn"
+    "topic": "unkonwn",
 
-            query = f"""
-            Create a new context for a conversation.
+    "user": {
+    "action": "unknown",
+    "head": "",
+    "upper_body": "casual t-shirt",
+    "body": "jeans and comfortable shoes"
+    },
 
-            MESSAGES:
-            {messages_block}
+    "assistant": {
+    "action": "unknown",
+    "head": "",
+    "upper_body": "casual t-shirt",
+    "body": "jeans and comfortable shoes"
+    }
+}
+"""
 
-            EXAMPLE CONTEXT:
-            {{
-                "location": "Paris",
-                "topic": "sight seeing",
+                query = f"""
+Create a new context for a conversation.
 
-                "user": {{
-                    "action": "standing and looking around",
-                    "head": "",
-                    "upper_body": "casual t-shirt",
-                    "body": "jeans and comfortable shoes",
-                }},
+MESSAGES:
+{messages_block}
 
-                "assistant": {{
-                    "action": "pointing towards a landmark",
-                    "head": "sunglasses on head, light beard",
-                    "upper_body": "light button-up shirt with rolled sleeves",
-                    "body": "cargo pants and sturdy walking shoes",
-                }}
-            }}
+EXAMPLE CONTEXT:
+{{
+    "location": "Paris",
+    "topic": "sight seeing",
 
-            INSTRUCTIONS:
-            - Invent a situation where user and assistant found them selves in while including the given messages as well
-            - Fill in information as applicable
-            - Keep ALL fields SHORT (max 40 words each)
-            - "topic" = 1 short phrase
-            - "user"/"assistant"-"action" = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
-            - "user"/"assistant"-"head" = items this person is wearing on the head
-            - "user"/"assistant"-"upper_body" = items this person is wearing specifically on the upper body
-            - "user"/"assistant"-"body" = items this person is wearing on the body (not carrying)
-            - "location" = environment or setting
+    "user": {{
+        "action": "standing and looking around",
+        "head": "",
+        "upper_body": "casual t-shirt",
+        "body": "jeans and comfortable shoes",
+    }},
 
-            OUTPUT:
-            Return ONLY valid JSON in the given format.
-            """
-        else:
-            query = f"""
-            You maintain a running context for a conversation.
+    "assistant": {{
+        "action": "pointing towards a landmark",
+        "head": "sunglasses on head, light beard",
+        "upper_body": "light button-up shirt with rolled sleeves",
+        "body": "cargo pants and sturdy walking shoes",
+    }}
+}}
 
-            NEW MESSAGES:
-            {messages_block}
+INSTRUCTIONS:
+- Invent a situation where user and assistant found them selves in while including the given messages as well
+- Fill in information as applicable
+- Keep ALL fields SHORT (max 40 words each)
+- an empty string is perfectly valid and means the absence of things or actions
+- topic = 1 short phrase about what is happening
+- user|assistant/action = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
+- user|assistant/head = items this person is wearing on the head
+- user|assistant/upper_body = items this person is wearing specifically on the upper body or carrying in their hands
+- user|assistant/body = items this person is wearing on the body
+- location = environment or setting
 
-            CURRENT CONTEXT:
-            {{
-                "location": "{context['location']}",
-                "topic": "{context['topic']}",
-                "summary": "",
+OUTPUT:
+Return ONLY valid JSON in the given format.
+"""
+            else:
+                query = f"""
+You maintain a running context for a conversation.
 
-                "user": {{
-                    "action": "{context['user']['action']}",
-                    "head": "{context['user']['head']}",
-                    "upper_body": "{context['user']['upper_body']}",
-                    "body": "{context['user']['body']}",
-                }},
+LATEST MESSAGES:
+{messages_block}
 
-                "assistant": {{
-                    "action": "{context['assistant']['action']}",
-                    "head": "{context['assistant']['head']}",
-                    "upper_body": "{context['assistant']['upper_body']}",
-                    "body": "{context['assistant']['body']}",
-                }}
-            }}
+CURRENT CONTEXT:
+{{
+    "location": "{context['location']}",
+    "topic": "{context['topic']}",
+    "summary": "",
 
-            INSTRUCTIONS:
-            - Process messages in order (top = oldest, bottom = newest)
-            - Update information if possible and overwrite if necessary
-            - Ammend but only if it does not create redundancy
-            - Keep ALL fields SHORT (max 40 words each)
-            - Keep only the MOST IMPORTANT and RECENT info
-            - DROP anything irrelevant or outdated
-            - "topic" = 1 short phrase
-            - "user"/"assistant"-"action" = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
-            - "user"/"assistant"-"head" = items this person is wearing on the head
-            - "user"/"assistant"-"upper_body" = items this person is wearing specifically on the upper body
-            - "user"/"assistant"-"body" = items this person is wearing on the body (not carrying)
-            - "location" = environment, setting, only if explicitly mentioned
-            - "summary" = write a detailed summary of the whole conversation and put it here (max 300 words)
+    "user": {{
+        "action": "{context['user']['action']}",
+        "head": "{context['user']['head']}",
+        "upper_body": "{context['user']['upper_body']}",
+        "body": "{context['user']['body']}",
+    }},
 
-            OUTPUT:
-            Return ONLY valid JSON in the same format.
-            """
+    "assistant": {{
+        "action": "{context['assistant']['action']}",
+        "head": "{context['assistant']['head']}",
+        "upper_body": "{context['assistant']['upper_body']}",
+        "body": "{context['assistant']['body']}",
+    }}
+}}
 
-        payload = [{"role": "user", 
-                    "content": query}]
+INSTRUCTIONS:
+- figure out the latest state of the conversation and update the current context
+- focus on removing and adding items if mentioned in the conversation
+- do not invent items or actions
+- if an item was transfered between people remove it from the source
+- keep the information consitent, avoid redundancies or conflicting statements
+- Keep ALL fields SHORT (max 40 words each)
+- an empty string is perfectly valid and means the absence of things or actions
+- there is two people relevant in this conversation the user and the assistant identify which is which and update accordingly
+- topic = 1 short phrase about what is happening
+- user|assistant/action = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
+- user|assistant/head = items this person is wearing on the head
+- user|assistant/upper_body = items this person is wearing specifically on the upper body or carrying in their hands
+- user|assistant/body = items this person is wearing on the body
+- location = environment or setting
+- summary = write a detailed summary of the whole conversation and put it here (max 300 words)
+
+OUTPUT:
+Return ONLY valid JSON in the same format.
+"""
+
+            logger.debug(f"update context query:\n{query}")
+            payload.append({"role": "user", "content": query})
+        except Exception as e:
+            logger.error(f"failed to build query {repr(e)}")            
         
-        response_content = self.infrastructure.chat(payload, 0.0, random.randint(0, 100000), True)
+        response_content = self.infrastructure.chat(payload, 0.4, random.randint(0, 100000), True)
         if response_content:
             match = re.search(r"```json\s*(.*?)\s*```", response_content, re.DOTALL)
             if not match:
                 logger.error("failed to generate new context")
                 return context
             
+            result = match.group(1)
+            result = self._remove_nothing(result)
+            
             try:                
-                reply = json.loads(match.group(1))
+                reply = json.loads(result)
             except Exception as e:
-                logger.error(f"failed to load json: {e}")            
+                logger.error(f"failed to load json: {e}")      
+                logger.error("failed to generate new context.") 
+                return context    
 
             # making sure we can guarantee a certain json structure
             new_context = {
