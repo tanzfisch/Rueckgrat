@@ -5,6 +5,7 @@ import threading
 import os
 from tqdm import tqdm
 from pathlib import Path
+import time
 
 from fastapi.responses import StreamingResponse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
@@ -26,6 +27,8 @@ logger = Logger(__name__).get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    random.seed(time.time())
+    
     app.state.infrastructure = Infrastructure()
     db_path = "/hub/db/chat.db"
     app.state.db = ChatDB(db_path)    

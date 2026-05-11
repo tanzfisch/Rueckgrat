@@ -453,6 +453,7 @@ class ChatDB:
                 row = cursor.fetchone()
 
                 if not row:
+                    logger.error(f"can't find conversation with id {conversation_id}")
                     return None                
 
                 # Convert row → dict

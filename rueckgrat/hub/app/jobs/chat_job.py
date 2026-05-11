@@ -29,15 +29,15 @@ class ChatJob(Job):
         text = re.sub(r"`.*?`", "", text)
         return text.strip()
 
-    def _update_conversation(self, conversation_id: int, assistant_name: str, user_name: str):
+    def _update_conversation(self):
         udate_context_job = UpdateContextJob(self.request, self.db, self.infrastructure)
         self.create_and_add(udate_context_job)
         self.wait_for([udate_context_job])
         new_context = udate_context_job.result()
     
-        conversation = self.db.get_conversation(conversation_id)
+        conversation = self.db.get_conversation(self.request.conversation_id)
         conversation["title"] = new_context["topic"]
-        self.db.update_conversation(conversation_id, conversation["title"], json.dumps(new_context))
+        self.db.update_conversation(self.request.conversation_id, conversation["title"], json.dumps(new_context))
 
     def _cleanup_reply(self, reply: str, name: str):
         prefix = f"{name}: "
@@ -48,6 +48,11 @@ class ChatJob(Job):
 
     def _handle_chat_request(self, request: ChatRequest):        
         try:
+            # check if this is the beginning of the conversation and create a new conversation context
+            messages = self.db.get_messages_by_conversation(request.conversation_id, 10)
+            if len(messages) < 2:
+                self._update_conversation()
+
             contact = self.db.get_contact_by_id(request.contact_id)                
             conversation = self.db.get_conversation(request.conversation_id)
 
@@ -60,7 +65,6 @@ class ChatJob(Job):
             payload = [{"role": "system", "content": system_prompt}]
             payload.append({"role": "system", "content": context_prompt})
             
-            messages = self.db.get_messages_by_conversation(request.conversation_id, 10)
             for message in messages:
                 content = message['content']
                 payload.append({"role": message["role"], "content": content})
@@ -73,7 +77,7 @@ class ChatJob(Job):
             if response_content:
                 reply = self._cleanup_reply(response_content, contact["name"])
                 
-                self._update_conversation(request.conversation_id, contact["name"], request.name)
+                self._update_conversation()
                 return {
                     "role": "assistant",
                     "content": reply

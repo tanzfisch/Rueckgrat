@@ -87,7 +87,7 @@
     },
 
     "behaviour_parameters": {
-      "mood_gen_chance": 0.3
+      "mood_gen_chance": 1.0
     },
 
     "llm_parameters": {
