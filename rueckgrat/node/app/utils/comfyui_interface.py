@@ -84,14 +84,11 @@ class ComfyUIInterface:
         logger.debug(f"ComfyUI url ws: {self.url_ws}")
         logger.debug(f"ComfyUI url prompt: {self.url_prompt}")
 
-        self.default_model = "DreamShaperXL_Turbo_V2-SFW.safetensors"
-
         self.output_dir = Path("/node/images")
         os.makedirs(self.output_dir, exist_ok=True)
 
     def image(self, request: ImageRequest) -> ImageResponse:
         output_file = self.output_dir / request.output
-        model = request.model if not request.model or request.model != "default" else self.default_model        
 
         if self.generate_image(
                 request.positive_prompt,
@@ -102,7 +99,7 @@ class ComfyUIInterface:
                 request.height,
                 request.steps,
                 request.cfg,
-                model):
+                request.model):
             return ImageResponse(output=str(request.output))
         else:
             return None

@@ -114,6 +114,17 @@
     "install_path": "llm/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L",
     "startup_parameters": ""
   },
+  "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-bf16": {
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "",
+    "good_value_range": "temp 0.05-0.15",
+    "sources": [
+      "https://huggingface.co/bartowski/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-GGUF/resolve/main/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-bf16.gguf"
+    ],
+    "install_path": "llm/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-bf16",
+    "startup_parameters": ""
+  },
   "lustifySDXLNSFW_ggwpV7": {
     "type": "image",
     "compatibility": ["ComfyUI"],
@@ -174,7 +185,27 @@
     ],
     "install_path": "ComfyUI/checkpoints",
     "startup_parameters": ""
-  }  
+  },
+  "Qwen3.6-35B-A3B-UD-Q4_K_M": {
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested, coding model",
+    "sources": [
+      "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+    ],
+    "install_path": "llm/Qwen3.6-35B-A3B-UD-Q4_K_M",
+    "startup_parameters": ""
+  },
+  "Qwen3.6-35B-A3B-UD-Q4_K_S": {
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested, coding model",
+    "sources": [
+      "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q4_K_S.gguf"
+    ],
+    "install_path": "llm/Qwen3.6-35B-A3B-UD-Q4_K_S",
+    "startup_parameters": ""
+  }   
 }
 
 

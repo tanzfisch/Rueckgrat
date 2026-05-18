@@ -19,6 +19,12 @@ class RequestedImageJob(Job):
             compiler = GenericImagePromptCompiler(self.request.content, self.infrastructure, 10)
             positive_prompt, negative_prompt = compiler.build()
 
+            models = {
+                "default": "DreamShaperXL_Turbo_V2-SFW.safetensors",
+                "nsfw-default": "lustifySDXLNSFW_ggwpV7.safetensors"
+            }    
+            model = models["default"]
+
             # generate profile image
             image_request = ImageRequest(
                 positive_prompt = positive_prompt,
@@ -28,7 +34,7 @@ class RequestedImageJob(Job):
                 height = 720,
                 steps = 40.0,
                 cfg = 11.0,
-                model = "default",
+                model = model,
                 output = ""
             )
 

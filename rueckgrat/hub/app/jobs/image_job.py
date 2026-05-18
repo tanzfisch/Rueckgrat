@@ -1,4 +1,3 @@
-from pydantic import BaseModel
 from .job_queue import Job
 from typing import Dict, Any
 

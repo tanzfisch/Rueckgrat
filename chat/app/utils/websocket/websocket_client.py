@@ -23,12 +23,19 @@ class WebSocketClient:
     def is_connected(self):
         return self._running
     
-    async def connect(self):
+    async def connect(self, token: str):
         try:
             ssl_context = ssl.create_default_context()
             ssl_context.load_verify_locations(self.server_cert)
+
+            headers = [("Authorization", f"Bearer {token}")]   
             
-            self.ws = await websockets.connect(self.uri, ssl=ssl_context)
+            self.ws = await websockets.connect(
+                self.uri, 
+                ssl=ssl_context,
+                additional_headers=headers
+            )
+
             self._running = True
             asyncio.create_task(self._receive_loop())
         except Exception as e:

@@ -19,7 +19,7 @@ class ChatDB:
             name TEXT NOT NULL,
             gender TEXT CHECK(gender IN ('male', 'female')) DEFAULT NULL,
             role TEXT,
-            persona TEXT,
+            personality TEXT,
             profile TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -268,7 +268,7 @@ class ChatDB:
         profile = contact_json["profile"]
 
         allowed_fields = [
-            "name", "gender", "role", "persona"
+            "name", "gender", "role", "personality"
         ]
 
         with self.get_connection() as conn:

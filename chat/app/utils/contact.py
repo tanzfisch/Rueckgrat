@@ -1,5 +1,4 @@
-import json
-from common import Logger
+from common import Logger, Utils
 logger = Logger(__name__).get_logger()
 
 class Contact:
@@ -7,33 +6,35 @@ class Contact:
         self.data = data
 
     def get_id(self) -> int:
-        return self.data["id"]
+        return Utils.get_nested_value(self.data, ["id"], None)
 
     def get_name(self) -> str:
-        return self.data["name"]
+        return Utils.get_nested_value(self.data, ["name"], None)
 
     def get_role(self) -> str:
-        return self.data["role"]
+        return Utils.get_nested_value(self.data, ["role"], None)
 
     def get_persona(self) -> str:
-        return self.data["persona"]
+        return Utils.get_nested_value(self.data, ["personality"], None)
 
     def get_gender(self) -> str:
-        return self.data["gender"]
+        return Utils.get_nested_value(self.data, ["gender"], None)
 
     def get_voice_model(self) -> str:
-        return self.data.get("piper_voice_model", None)
+        return Utils.get_nested_value(self.data, ["piper_voice_model"], None)
 
     def get_llm_temperature(self) -> float:
-        return self.data["profile"]["llm_parameters"]["temperature"]
+        return Utils.get_nested_value(self.data, ["profile", "llm_parameters", "temperature"], None)
 
     def get_latest_profile_image_name(self) -> str:
-        images = self.data["images"]
+        images = Utils.get_nested_value(self.data, ["images"], None)
         if not images:
-            return ""
+            logger.error("no images in this profile")
+            return None
         
         profile_images = [img for img in images if img['type'] == 'profile']
         if not profile_images:
+            logger.error("no profile image in this profile")
             return None
         latest = max(profile_images, key=lambda img: img['created_at'])
         return latest["file_key"]
