@@ -5,6 +5,9 @@ from .emoji_picker import EmojiPicker
 from .image import Image
 from .contact_card import ContactCard
 from .image_overlay import ImageOverlay
+from .bubble_selector import BubbleSelector
+from .row_selector import RowSelector
+from .labeled_slider import LabeledSlider
 
 __all__ = [
     "MessageBox", 
@@ -14,5 +17,8 @@ __all__ = [
     "EmojiPicker", 
     "Image", 
     "ContactCard", 
-    "ImageOverlay"
+    "ImageOverlay",
+    "BubbleSelector",
+    "LabeledSlider",
+    "RowSelector"
 ]

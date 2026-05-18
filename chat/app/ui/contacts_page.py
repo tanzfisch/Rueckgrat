@@ -1,6 +1,8 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea, QFrame, QSizePolicy, QPushButton, QHBoxLayout)
-from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtCore import Qt, Signal, QSize
+import json
+
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QScrollArea, QPushButton, QHBoxLayout)
+from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt, QSize
 
 from app.ui import BasePage
 from app.ui.widgets import OneLineBubble, MessageBox, ContactCard, ContactHeader
@@ -16,7 +18,7 @@ class ContactsPage(BasePage):
 
         self.main_layout = QVBoxLayout(self)
 
-        self.contact_header = ContactHeader(False)
+        self.contact_header = ContactHeader(False, False)
         self.main_layout.addWidget(self.contact_header)
 
         # contacts section
@@ -38,7 +40,7 @@ class ContactsPage(BasePage):
         pass
 
     def add_contact(self):
-        self.navigator("profile", contact_id=-1)
+        self.navigator("profile_wizz", contact_id=-1)
 
     def load_contacts(self):
         # Clear existing widgets
@@ -57,10 +59,10 @@ class ContactsPage(BasePage):
         for contact_dict in contacts:
             contact = Contact(contact_dict)
             profile_image_name = contact.get_latest_profile_image_name()
-        
-            profile_image_path = Path("cache/images") / profile_image_name
-            if not profile_image_path.exists():
-                Backend.get_instance().download(f"images/{profile_image_name}", "cache/images", 0)
+            if profile_image_name:
+                profile_image_path = Path("cache/images") / profile_image_name
+                if not profile_image_path.exists():
+                    Backend.get_instance().download(f"images/{profile_image_name}", "cache/images", 0)
 
             contact_card_container = QWidget()
             contact_card_layout = QHBoxLayout(contact_card_container)            

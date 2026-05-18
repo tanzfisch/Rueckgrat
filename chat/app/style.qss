@@ -96,6 +96,12 @@ QPushButton:pressed {
     border: none;
 }
 
+QPushButton:checked {
+    background-color: #00424c;
+    outline: none;
+    border: none;
+}
+
 QTextEdit#contactForm {
     background-color: #1E1E1E;
     border: none;
@@ -145,6 +151,13 @@ QMenuBar, QMenu {
 
 QLabel {
     color: #E0E0E0;
+    font-size: 16px;
+    background-color: transparent;
+}
+
+QLabel#label_slider {
+    color: #606060;
+    font-size: 10px;
     background-color: transparent;
 }
 
@@ -228,4 +241,87 @@ QDoubleSpinBox {
     border: none;
     border-radius: 16px;
     padding: 2px;
+}
+
+QComboBox {
+    background-color: #1e1e1e;
+    color: white;
+    border: none;
+    border-radius: 16px;
+    padding: 0px 14px;
+    min-height: 40px;
+}
+
+QComboBox:focus {
+    border: 2px solid #00424c;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 28px;
+    background: transparent;
+}
+
+QComboBox::down-arrow {
+    image: none;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #cccccc;
+    margin-right: 20px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #252525;
+    color: white;
+    border: 1px solid #333333;
+    border-radius: 16px;
+    padding: 6px;
+    selection-background-color: #00424c;
+    selection-color: white;
+    outline: none;
+}
+
+QComboBox QAbstractItemView::item {
+    border-radius: 12px;
+    padding: 8px 12px;
+    margin: 2px;
+}
+
+QComboBox QAbstractItemView::item:selected {
+    background-color: #00424c;
+}
+
+QSlider {
+    min-height: 30px;
+}
+
+/* groove = slider bar */
+QSlider::groove:horizontal {
+    height: 30px;
+    background: #00424c;
+    border-radius: 10px;
+}
+
+/* filled portion */
+QSlider::sub-page:horizontal {
+    background: #0b6b78;
+    border-radius: 10px;
+}
+
+/* remaining portion */
+QSlider::add-page:horizontal {
+    background: #1f1f1f;
+    border-radius: 10px;
+}
+
+/* handle = draggable bubble */
+QSlider::handle:horizontal {
+    background: #06424a;
+
+    width: 20px;
+    height: 20px;
+
+    margin: -4px 0;   /* centers handle vertically */
+
+    border-radius: 16px;
 }

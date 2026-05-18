@@ -10,6 +10,7 @@ Changelog
 - #17 working on discovery and decided to stick with simple config file
 - #22 added image overlay
 - #41 improve context update for better consistency, each new conversation begins with a randomized context
+- #24 added character creation wizzard
 
 0.3.0
 -----

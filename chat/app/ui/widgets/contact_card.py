@@ -19,7 +19,10 @@ class ContactCard(QFrame):
         self.setCursor(Qt.PointingHandCursor)
 
         profile_image_name = self.contact.get_latest_profile_image_name()
-        profile_image_path = Path("cache/images") / profile_image_name
+        if profile_image_name:
+            profile_image_path = Path("cache/images") / profile_image_name
+        else:
+            profile_image_path = ""
                
         layout = QHBoxLayout(self)
         profile_image = Image(profile_image_path)

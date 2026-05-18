@@ -8,7 +8,9 @@ from app.common import Logger
 logger = Logger(__name__).get_logger()
 
 data = [
-    # --- CONVERSATION ---        
+    # --- CONVERSATION ---             
+    ("tell me the plan", ["conversation"]),
+    ("tell me about the plan", ["conversation"]),
     ("Show me arround in Paris please!", ["conversation"]),
     ("let's go on a tour in Munich", ["conversation"]),
     ("1,2,3,4,5,6,7,8,9,10", ["conversation"]),

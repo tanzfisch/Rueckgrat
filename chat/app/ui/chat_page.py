@@ -1,7 +1,6 @@
-import json
 import re
-from PySide6.QtWidgets import ( QWidget, QVBoxLayout, QTextEdit, QPushButton, QLabel, QHBoxLayout, QScrollArea, QMenu )
-from PySide6.QtGui import QIcon, QFont
+from PySide6.QtWidgets import ( QWidget, QVBoxLayout, QTextEdit, QPushButton, QHBoxLayout, QScrollArea, QMenu )
+from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, QTimer, QSize, QPoint
 
 from app.ui import BasePage
@@ -264,26 +263,26 @@ class ChatPage(BasePage):
         return image_path
 
     def on_incomming_message(self, msg: dict):
-        if "chat" in msg:
-            chat = msg["chat"]
-            content = self._cleanup_content(chat["content"])
-            role = chat["role"]
+        try:
+            if "chat" in msg:
+                chat = msg["chat"]
+                content = self._cleanup_content(chat["content"])
+                role = chat["role"]
 
-            if "assistant_image" in msg:
-                image = msg["assistant_image"]
-                image_path = Path("cache/images") / image["filename"]
-                self.append_history(role, content, image_path)
-            elif "image" in msg:
-                image = msg["image"]
-                image_path = Path("cache/images") / image["filename"]
-                self.append_history(role, content, image_path)
-            else:
-                self.append_history(role, content)
-
-            try:
+                if "assistant_image" in msg:
+                    image = msg["assistant_image"]
+                    image_path = Path("cache/images") / image["filename"]
+                    self.append_history(role, content, image_path)
+                elif "image" in msg:
+                    image = msg["image"]
+                    image_path = Path("cache/images") / image["filename"]
+                    self.append_history(role, content, image_path)
+                else:
+                    self.append_history(role, content)
+                
                 Speech.speak(self._cleanup_for_speech(content), voice=self.kokoro_voice, model=self.piper_model, interface="piper")
-            except Exception as e:
-                logger.error(f"{e}")
+        except Exception as e:
+            logger.error(f"failed to handle incomming message {e}")
 
     def send_message(self):
         message = self.input_box.toPlainText().strip()
@@ -292,4 +291,4 @@ class ChatPage(BasePage):
         self.input_box.clear()
 
         self.append_history("user", message)        
-        Backend.get_instance().async_chat(self.contact_id, self.conversation_id, "user", message, self.temperature)
+        Backend.get_instance().chat(self.contact_id, self.conversation_id, "user", message, self.temperature)

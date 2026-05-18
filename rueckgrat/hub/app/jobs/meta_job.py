@@ -25,6 +25,7 @@ class MetaJob(Job):
         try:
             logger.debug("execute meta job")
             mood_gen = False
+            group_gen = False
 
             logger.debug("classify...")
             classify = ClassificationJob(self.request.content)
@@ -66,8 +67,12 @@ class MetaJob(Job):
                 content = chat_job.result()["content"]
 
                 if not "image_generation_request" in classifications: # one image is enough
-                    mood_gen_chance = Utils.get_nested_value(contact, ["profile", "behaviour_parameters", "mood_gen_chance"], 0.1)
-                    if random.random() < mood_gen_chance:
+                    if "MOOD_GEN" in content:
+                        content = content.replace("MOOD_GEN", "").strip()
+                        mood_gen = True
+                    elif "GROUP_GEN" in content:
+                        content = content.replace("GROUP_GEN", "").strip()
+                        group_gen = True
                         mood_gen = True
 
                 # update db
@@ -77,13 +82,19 @@ class MetaJob(Job):
                     message_id = self.db.add_message(self.request.conversation_id, chat_job.result()["role"], content, contact_name)
 
                 # notify frontend
+                chat_job.result()["content"] = content
                 self.response["chat"] = chat_job.result()
                 
                 logger.debug("assistant response generated")
 
             if mood_gen:
                 logger.debug("generate mood image...")
-                assistant_image_job = AssistantImageJob(self.request, self.db, self.infrastructure, mood_gen)
+                assistant_image_job = AssistantImageJob(
+                    contact_id = self.request.contact_id,
+                    conversation_id = self.request.conversation_id, 
+                    db = self.db, 
+                    infrastructure = self.infrastructure
+                )
                 self.create_and_add(assistant_image_job)
                 self.wait_for([assistant_image_job])
                 image_job_result = assistant_image_job.result()

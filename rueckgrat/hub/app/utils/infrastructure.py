@@ -168,7 +168,7 @@ class Infrastructure:
 
         return str(filepath), size
 
-    def chat(self, messages, temperature: float, seed: int, low_accuracy: bool = False) -> str:
+    def chat(self, messages: list, temperature: float, seed: int, low_accuracy: bool = False) -> str:
         url = f"http://{self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}/chat"
         
         payload= ChatRequestLlama(
