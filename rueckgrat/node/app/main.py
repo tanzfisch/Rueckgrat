@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import uuid
 from pydantic import BaseModel
-from app.utils import ModelRegistry, LLamaCppInterface, ComfyUIInterface
+from app.utils import ModelRegistry, LLamaCppInterface, ComfyUIInterface, CleanupWorker
 
 from app.common import Logger, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse
 logger = Logger(__name__).get_logger()
@@ -26,9 +26,15 @@ async def lifespan(app: FastAPI):
     client_id = str(uuid.uuid4())
     app.state.comfyui = ComfyUIInterface(host, comfyui_port, client_id)
 
+    # keep image cache clean
+    app.state.cleanup_worker = CleanupWorker(folder="/node/images")
+    app.state.cleanup_worker.start()
+
     logger.info("Infrastructure initialized")
 
     yield
+
+    app.state.cleanup_worker.stop()
     
     logger.info("Infrastructure shut down")
 
