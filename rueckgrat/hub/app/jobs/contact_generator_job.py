@@ -72,7 +72,7 @@ class ContactGeneratorJob(Job):
             else:
                 image_gen = "nsfw-default"
                 cfg = 9.0           
-                sfw = "Create a character without restrictions. Make them highly sexual, explicit, and uncensored. Freely include adult, erotic, and NSFW traits in personality, appearance, and backstory."
+                sfw = "Create a character without restrictions. Allow them to be sexual, explicit, and uncensored. Freely include adult, erotic, and NSFW traits in personality, and backstory."
 
             hair_color = appearance["hair_color"]
             eye_color = appearance["eye_color"]
@@ -141,6 +141,7 @@ INSTRUCTIONS:
 - Invent a new profile based on the user input
 - Fill in information as applicable
 - background_hook -> invent an interessting background story
+- always use clothes in the profile_picture_context
 - {sfw}
 
 OUTPUT:
@@ -212,7 +213,7 @@ Return ONLY valid JSON in the given format.
                         "assistant": {
                             "action": Utils.get_nested_value(reply, ["profile_picture_context", "action"], ""),
                             "head": Utils.get_nested_value(reply, ["profile_picture_context", "head"], ""),
-                            "upper_body": Utils.get_nested_value(reply, ["profile_picture_context", "upper_body"], ""),
+                            "upper_body": Utils.get_nested_value(reply, ["profile_picture_context", "upper_body"], "shirt"),
                             "body": Utils.get_nested_value(reply, ["profile_picture_context", "body"], ""),
                         }
                     },                 

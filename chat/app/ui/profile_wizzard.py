@@ -259,8 +259,8 @@ class AppearancePage(QWidget):
         "underweight": "app/icons/body_underweight_light.png",
         "fit": "app/icons/body_normal_light.png",
         "curvy": "app/icons/body_overweight_light.png",
-        "obese": "app/icons/body_obese_light.png",
-        "morbidly obese": "app/icons/body_morbidly_obese_light.png",
+        "overweight": "app/icons/body_obese_light.png",
+        "obese": "app/icons/body_morbidly_obese_light.png",
     }    
 
     def __init__(self, parent=None):
