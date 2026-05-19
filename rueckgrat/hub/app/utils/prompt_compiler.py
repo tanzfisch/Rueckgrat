@@ -46,6 +46,7 @@ CONTROL LOGIC:
 - avoid repeating instructions
 - be concise and introduce new elements in each sentence
 - make up elborate, surprising and creative stories
+- don't end a response with guessing games, instead further the conversation with new ideas
 """.strip()
 
     def _build_style(self) -> str:

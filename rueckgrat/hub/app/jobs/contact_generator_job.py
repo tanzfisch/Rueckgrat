@@ -65,7 +65,7 @@ class ContactGeneratorJob(Job):
             role = profile["role"]
             personality = profile["personality"]
             objective = profile["objective"]
-            if profile["sfw"] == "sfw":
+            if profile["sfw"].lower() == "sfw":
                 image_gen = "default"
                 cfg = 5.0
                 sfw = "Create a safe-for-work character. Keep personality, appearance, and backstory fully appropriate, professional, and free of any sexual, explicit, or adult elements."
