@@ -11,6 +11,7 @@ Changelog
 - #22 added image overlay
 - #41 improve context update for better consistency, each new conversation begins with a randomized context
 - #24 added character creation wizzard
+- #39 refactor download handling and added image cache clean up worker
 
 0.3.0
 -----

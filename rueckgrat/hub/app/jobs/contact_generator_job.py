@@ -33,7 +33,7 @@ class ContactGeneratorJob(Job):
                 db = self.db, 
                 infrastructure = self.infrastructure, 
                 assitant_only = True,
-                image_type = ImageType.UpperBody,
+                image_type = ImageType.Portrait,
                 store_image_as = "profile",
                 width = 720,
                 height = 720,                
@@ -65,14 +65,14 @@ class ContactGeneratorJob(Job):
             role = profile["role"]
             personality = profile["personality"]
             objective = profile["objective"]
-            if profile["sfw"] == "sfw":
+            if profile["sfw"].lower() == "sfw":
                 image_gen = "default"
                 cfg = 5.0
                 sfw = "Create a safe-for-work character. Keep personality, appearance, and backstory fully appropriate, professional, and free of any sexual, explicit, or adult elements."
             else:
                 image_gen = "nsfw-default"
-                cfg = 9.0           
-                sfw = "Create a character without restrictions. Make them highly sexual, explicit, and uncensored. Freely include adult, erotic, and NSFW traits in personality, appearance, and backstory."
+                cfg = 8.5           
+                sfw = "Create a character without restrictions. Allow them to be sexual, explicit, and uncensored. Freely include adult, erotic, and NSFW traits in personality, and backstory."
 
             hair_color = appearance["hair_color"]
             eye_color = appearance["eye_color"]
@@ -131,8 +131,8 @@ EXAMPLE PROFILE:
       "assistant": {{
         "action": "standing nearby, demonstrating exercises",
         "head": "sweatband around forehead, fitted sports bra, natural makeup",
-        "upper_body": "athletic ",
-        "body": "branded workout shoes"        
+        "upper_body": "t-shirt",
+        "body": "leggins, branded workout shoes"        
       }}
     }}    
 }}
@@ -141,6 +141,7 @@ INSTRUCTIONS:
 - Invent a new profile based on the user input
 - Fill in information as applicable
 - background_hook -> invent an interessting background story
+- always use clothes in profile_picture_context/upper_body
 - {sfw}
 
 OUTPUT:
@@ -212,7 +213,7 @@ Return ONLY valid JSON in the given format.
                         "assistant": {
                             "action": Utils.get_nested_value(reply, ["profile_picture_context", "action"], ""),
                             "head": Utils.get_nested_value(reply, ["profile_picture_context", "head"], ""),
-                            "upper_body": Utils.get_nested_value(reply, ["profile_picture_context", "upper_body"], ""),
+                            "upper_body": Utils.get_nested_value(reply, ["profile_picture_context", "upper_body"], "shirt"),
                             "body": Utils.get_nested_value(reply, ["profile_picture_context", "body"], ""),
                         }
                     },                 

@@ -11,7 +11,7 @@ from typing import Optional
 from dataclasses import dataclass
 from ..jobs.image_job import ImageRequest
 
-from app.common import Logger, ChatRequestLlama
+from app.common import Logger, ChatRequestLlama, DownloadQueue
 logger = Logger(__name__).get_logger()
 
 INFRASTRUCTURE_CONFIG_PATH = Path("/hub/config/infrastructure.json")
@@ -79,6 +79,8 @@ class Infrastructure:
         else:
             logger.info(f"found text_to_image generator at {self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}")
 
+        self.download_queue = DownloadQueue()
+
     def get_status(self) -> StatusResult:
         result = StatusResult()
 
@@ -101,7 +103,7 @@ class Infrastructure:
                 result.nodes.append(ServerResult(url, False, error=repr(e)))
 
         return result
-
+    
     # TODO need to begin working on a common module that can be shared across applications
     def _download_file(self, url, filepath) -> int:
         if os.path.exists(filepath):
@@ -119,9 +121,9 @@ class Infrastructure:
                         f.write(chunk)
                         pbar.update(len(chunk))
 
-        return total_size
+        return total_size    
 
-    def _download_from_url(self, url: str, dst_path: str, force_download: bool=False) -> int:
+    def _download_from_url(self, url: str, dst_path: str) -> int:
         logger.debug(f"download {url} -> {dst_path}")
 
         target_path = Path("/node") / dst_path
@@ -139,15 +141,14 @@ class Infrastructure:
         if not self.node_with_text_to_image:
             logger.error("no text to image generator available")
             return None
-
-        url_download = f"http://{self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}/download"
+        
         url_image_request = f"http://{self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}/image"
 
         try:
             response = requests.post(
                 url_image_request,
                 json=image_request.model_dump(),
-                timeout=60,
+                timeout=120,
             )
         
             if response.status_code == 200:
@@ -162,11 +163,14 @@ class Infrastructure:
 
         except Exception as e:
             logger.error(f"failed to get a image response {repr(e)}")
-            return None
+            return None        
 
-        size = self._download_from_url(f"{url_download}/images/{filepath}", f"/hub/images")
+        return str(filepath)
 
-        return str(filepath), size
+    def download(self, source_path: str, download_path: str, callback=None):
+        url_download = f"http://{self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}/download"
+        url = f"{url_download}{source_path}"
+        self.download_queue.add(url=url, download_path=download_path, callback=callback)
 
     def chat(self, messages: list, temperature: float, seed: int, low_accuracy: bool = False) -> str:
         url = f"http://{self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}/chat"

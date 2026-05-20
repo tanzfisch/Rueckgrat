@@ -101,11 +101,10 @@ class MetaJob(Job):
 
                 image = image_job_result["image"]
                 image_filename = image["filename"]
-                image_size = image["file_size"]
                 image_url = f"images/{image_filename}"
 
                 # update db
-                self.db.add_attachment(message_id, image_filename, image_url, "image/png", image_size)
+                self.db.add_attachment(message_id, image_filename, image_url, "image/png", 0)
 
                 # notify frontend
                 self.response["image"] = image

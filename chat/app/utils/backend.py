@@ -41,7 +41,12 @@ class Backend:
 
     def download(self, source_path: str, download_path: str, max_retry: int = 5):
         url = f"{self.url}/download/{source_path}"
-        self.download_queue.add(url, download_path, self.access_token, self.server_cert, max_retry)
+        self.download_queue.add(
+            url=url, 
+            download_path=download_path, 
+            access_token=self.access_token, 
+            server_cert=self.server_cert, 
+            max_retry=max_retry)
 
     @classmethod
     def get_instance(cls):
