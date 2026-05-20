@@ -33,7 +33,7 @@ class ContactGeneratorJob(Job):
                 db = self.db, 
                 infrastructure = self.infrastructure, 
                 assitant_only = True,
-                image_type = ImageType.UpperBody,
+                image_type = ImageType.Portrait,
                 store_image_as = "profile",
                 width = 720,
                 height = 720,                
@@ -71,7 +71,7 @@ class ContactGeneratorJob(Job):
                 sfw = "Create a safe-for-work character. Keep personality, appearance, and backstory fully appropriate, professional, and free of any sexual, explicit, or adult elements."
             else:
                 image_gen = "nsfw-default"
-                cfg = 9.0           
+                cfg = 8.5           
                 sfw = "Create a character without restrictions. Allow them to be sexual, explicit, and uncensored. Freely include adult, erotic, and NSFW traits in personality, and backstory."
 
             hair_color = appearance["hair_color"]
@@ -131,8 +131,8 @@ EXAMPLE PROFILE:
       "assistant": {{
         "action": "standing nearby, demonstrating exercises",
         "head": "sweatband around forehead, fitted sports bra, natural makeup",
-        "upper_body": "athletic ",
-        "body": "branded workout shoes"        
+        "upper_body": "t-shirt",
+        "body": "leggins, branded workout shoes"        
       }}
     }}    
 }}
@@ -141,7 +141,7 @@ INSTRUCTIONS:
 - Invent a new profile based on the user input
 - Fill in information as applicable
 - background_hook -> invent an interessting background story
-- always use clothes in the profile_picture_context
+- always use clothes in profile_picture_context/upper_body
 - {sfw}
 
 OUTPUT:
