@@ -3,6 +3,7 @@ from typing import Dict, Any
 import json
 import re
 import random
+from ..utils.prompt_compiler import PromptCompiler
 
 from app.common import Logger, ChatRequest, Utils
 logger = Logger(__name__).get_logger()
@@ -16,16 +17,10 @@ class UpdateContextJob(Job):
 
     def execute(self) -> None:
         try:
-            contact = self.db.get_contact_by_id(self.request.contact_id)
             conversation = self.db.get_conversation(self.request.conversation_id)
             context = Utils.get_nested_value(conversation, ["context"], "")
-            if context == "":
-                context = Utils.get_nested_value(contact, ["profile", "start_context"], "")
             messages = self.db.get_messages_by_conversation(self.request.conversation_id, 6)
-
-            assistant_name = contact["name"]
-            user_name = self.request.name
-            self.updated_context = self._update_context(context, messages, assistant_name, user_name)
+            self.updated_context = self._update_context(context, messages)
         except Exception as e:
             logger.error(f"failed to update context {repr(e)}")
 
@@ -39,93 +34,184 @@ class UpdateContextJob(Job):
         # Remove inline backtick code
         text = re.sub(r"`.*?`", "", text)
         return text.strip()
+    
+    def _remove_nothing(self, text):
+        text = text.replace("none", "")
+        text = text.replace("nothing", "")
+        return text
 
-    def _update_context(self, context, messages: list, assistant_name: str, user_name: str):
-        messages_block = "\n".join([
-            f'- "{self._remove_code(m["content"])}" (role: {m["role"]})'
-            for m in messages
-        ])
+    def _update_context(self, context: str, messages: list):
+        try:
+            messages_block = "\n".join([
+                f'- "{self._remove_code(m["content"])}" (role: {m["role"]})'
+                for m in messages
+            ])
 
-        query = f"""
-        You maintain a running context for a conversation.
+            payload = []
+            contact = self.db.get_contact_by_id(self.request.contact_id)
+            conversation = self.db.get_conversation(self.request.conversation_id)
+            compiler = PromptCompiler(contact, conversation, self.request.name)
+            system_prompt, context_prompt = compiler.build_prompt()
 
-        NEW MESSAGES:
-        {messages_block}
+            payload.append({"role": "system", "content": system_prompt})
 
-        CURRENT CONTEXT:
-        {{
-            "location": "{context['location']}",
-            "topic": "{context['topic']}",
-            "summary": "",
+            if context == "":
+                # fallback context
+                context = """
+{
+    "location": "unkonwn"
+    "topic": "unkonwn",
 
-            "user": {{
-                "action": "{context['user']['action']}",
-                "head": "{context['user']['head']}",
-                "upper_body": "{context['user']['upper_body']}",
-                "body": "{context['user']['body']}",
-            }},
+    "user": {
+    "action": "unknown",
+    "head": "",
+    "upper_body": "casual t-shirt",
+    "body": "jeans and comfortable shoes"
+    },
 
-            "assistant": {{
-                "action": "{context['assistant']['action']}",
-                "head": "{context['assistant']['head']}",
-                "upper_body": "{context['assistant']['upper_body']}",
-                "body": "{context['assistant']['body']}",
-            }}
-        }}
+    "assistant": {
+    "action": "unknown",
+    "head": "",
+    "upper_body": "casual t-shirt",
+    "body": "jeans and comfortable shoes"
+    }
+}
+"""
 
-        INSTRUCTIONS:
-        - Process messages in order (top = oldest, bottom = newest)
-        - Update information if possible and overwrite if necessary
-        - Ammend but only if it does not create redundancy
-        - Keep ALL fields SHORT (max 40 words each)
-        - Keep only the MOST IMPORTANT and RECENT info
-        - DROP anything irrelevant or outdated
-        - "topic" = 1 short phrase
-        - "user"/"assistant" - "action" = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
-        - "user"/"assistant" - "head" = items this person is wearing on the head
-        - "user"/"assistant" - "upper_body" = items this person is wearing specifically on the upper body
-        - "user"/"assistant" - "body" = items this person is wearing on the body (not carrying)
-        - "location" = environment, setting, only if explicitly mentioned
-        - "summary" = write a detailed summary of the whole conversation and put it here (max 300 words)
+                query = f"""
+Create a new context for a conversation.
 
-        OUTPUT:
-        Return ONLY valid JSON in the same format.
-        """
-        payload = [{"role": "user", 
-                    "content": query}]
+MESSAGES:
+{messages_block}
+
+EXAMPLE CONTEXT:
+{{
+    "location": "Paris",
+    "topic": "sight seeing",
+
+    "user": {{
+        "action": "standing and looking around",
+        "head": "",
+        "upper_body": "casual t-shirt",
+        "body": "jeans and comfortable shoes",
+    }},
+
+    "assistant": {{
+        "action": "pointing towards a landmark",
+        "head": "sunglasses on head, light beard",
+        "upper_body": "light button-up shirt with rolled sleeves",
+        "body": "cargo pants and sturdy walking shoes",
+    }}
+}}
+
+INSTRUCTIONS:
+- Invent a situation where user and assistant found them selves in while including the given messages as well
+- Fill in information as applicable
+- Keep ALL fields SHORT (max 40 words each)
+- an empty string is perfectly valid and means the absence of things or actions
+- topic = 1 short phrase about what is happening
+- user|assistant/action = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
+- user|assistant/head = items this person is wearing on the head
+- user|assistant/upper_body = items this person is wearing specifically on the upper body or carrying in their hands
+- user|assistant/body = items this person is wearing on the body
+- location = environment or setting
+
+OUTPUT:
+Return ONLY valid JSON in the given format.
+"""
+            else:
+                query = f"""
+You maintain a running context for a conversation.
+
+LATEST MESSAGES:
+{messages_block}
+
+CURRENT CONTEXT:
+{{
+    "location": "{context['location']}",
+    "topic": "{context['topic']}",
+    "summary": "",
+
+    "user": {{
+        "action": "{context['user']['action']}",
+        "head": "{context['user']['head']}",
+        "upper_body": "{context['user']['upper_body']}",
+        "body": "{context['user']['body']}",
+    }},
+
+    "assistant": {{
+        "action": "{context['assistant']['action']}",
+        "head": "{context['assistant']['head']}",
+        "upper_body": "{context['assistant']['upper_body']}",
+        "body": "{context['assistant']['body']}",
+    }}
+}}
+
+INSTRUCTIONS:
+- figure out the latest state of the conversation and update the current context
+- focus on removing and adding items if mentioned in the conversation
+- do not invent items or actions
+- if an item was transfered between people remove it from the source
+- keep the information consitent, avoid redundancies or conflicting statements
+- Keep ALL fields SHORT (max 40 words each)
+- an empty string is perfectly valid and means the absence of things or actions
+- there is two people relevant in this conversation the user and the assistant identify which is which and update accordingly
+- topic = 1 short phrase about what is happening
+- user|assistant/action = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
+- user|assistant/head = items this person is wearing on the head
+- user|assistant/upper_body = items this person is wearing specifically on the upper body or carrying in their hands
+- user|assistant/body = items this person is wearing on the body
+- location = environment or setting
+- summary = write a detailed summary of the whole conversation and put it here (max 300 words)
+
+OUTPUT:
+Return ONLY valid JSON in the same format.
+"""
+
+            logger.debug(f"update context query:\n{query}")
+            payload.append({"role": "user", "content": query})
+        except Exception as e:
+            logger.error(f"failed to build query {repr(e)}")            
         
-        response_content = self.infrastructure.chat(payload, 0.0, random.randint(0, 100000), True)
+        response_content = self.infrastructure.chat(payload, 0.4, random.randint(0, 100000), True)
         if response_content:
             match = re.search(r"```json\s*(.*?)\s*```", response_content, re.DOTALL)
             if not match:
+                logger.error("failed to generate new context")
                 return context
             
+            result = match.group(1)
+            result = self._remove_nothing(result)
+            
             try:                
-                reply = json.loads(match.group(1))
+                reply = json.loads(result)
             except Exception as e:
-                logger.error(f"failed to load json: {e}")            
+                logger.error(f"failed to load json: {e}")      
+                logger.error("failed to generate new context.") 
+                return context    
 
+            # making sure we can guarantee a certain json structure
             new_context = {
-                "location": Utils.get_nested_value(reply, ["location"]),
-                "topic": Utils.get_nested_value(reply, ["topic"]),
-                "summary": Utils.get_nested_value(reply, ["summary"]),
+                "location": Utils.get_nested_value(reply, ["location"], "unknown"),
+                "topic": Utils.get_nested_value(reply, ["topic"], "unknown"),
+                "summary": Utils.get_nested_value(reply, ["summary"], ""),
 
                 "user": {
-                    "action": Utils.get_nested_value(reply, ["user", "action"]),
-                    "head": Utils.get_nested_value(reply, ["user", "head"]),
-                    "upper_body": Utils.get_nested_value(reply, ["user", "upper_body"]),
-                    "body": Utils.get_nested_value(reply, ["user", "body"]),
+                    "action": Utils.get_nested_value(reply, ["user", "action"], ""),
+                    "head": Utils.get_nested_value(reply, ["user", "head"], ""),
+                    "upper_body": Utils.get_nested_value(reply, ["user", "upper_body"], "casual t-shirt"),
+                    "body": Utils.get_nested_value(reply, ["user", "body"], "jeans and comfortable shoes"),
                 },
 
                 "assistant": {
-                    "action": Utils.get_nested_value(reply, ["assistant", "action"]),
-                    "head": Utils.get_nested_value(reply, ["assistant", "head"]),
-                    "upper_body": Utils.get_nested_value(reply, ["assistant", "upper_body"]),
-                    "body": Utils.get_nested_value(reply, ["assistant", "body"]),
+                    "action": Utils.get_nested_value(reply, ["assistant", "action"], ""),
+                    "head": Utils.get_nested_value(reply, ["assistant", "head"], ""),
+                    "upper_body": Utils.get_nested_value(reply, ["assistant", "upper_body"], "casual t-shirt"),
+                    "body": Utils.get_nested_value(reply, ["assistant", "body"], "jeans and comfortable shoes"),
                 }
             }
 
-            logger.debug(f"new_context {json.dumps(new_context, indent=4)}")
+            logger.debug(f"new context:\n{json.dumps(new_context, indent=4)}")
 
             return new_context
         else:

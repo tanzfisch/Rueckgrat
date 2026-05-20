@@ -114,11 +114,22 @@
     "install_path": "llm/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L",
     "startup_parameters": ""
   },
+  "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-bf16": {
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "",
+    "good_value_range": "temp 0.05-0.15",
+    "sources": [
+      "https://huggingface.co/bartowski/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-GGUF/resolve/main/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-bf16.gguf"
+    ],
+    "install_path": "llm/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-bf16",
+    "startup_parameters": ""
+  },
   "lustifySDXLNSFW_ggwpV7": {
     "type": "image",
     "compatibility": ["ComfyUI"],
     "comment": "NSFW Tends to go too far when unwanted don't mix with SFW applications",
-    "good_value_range": "cfg 8-10, steps 20-40",
+    "good_value_range": "cfg 7-10, steps 20-40",
     "sources": [
       "https://huggingface.co/boopyfloopy/lustifyXL_v7/resolve/main/lustifySDXLNSFW_ggwpV7.safetensors"
     ],
@@ -144,7 +155,57 @@
     ],
     "install_path": "ComfyUI/checkpoints",
     "startup_parameters": ""
-  }    
+  },
+  "sd3.5_large": {
+    "type": "image",
+    "compatibility": ["ComfyUI"],
+    "comment": "not tested",
+    "sources": [
+      "https://huggingface.co/stabilityai/stable-diffusion-3.5-large/resolve/main/sd3.5_large.safetensors"
+    ],
+    "install_path": "ComfyUI/checkpoints",
+    "startup_parameters": ""
+  },
+  "flux-dev-fp8": {
+    "type": "image",
+    "compatibility": ["ComfyUI"],
+    "comment": "not tested",
+    "sources": [
+      "https://huggingface.co/XLabs-AI/flux-dev-fp8/resolve/main/flux-dev-fp8.safetensors"
+    ],
+    "install_path": "ComfyUI/checkpoints",
+    "startup_parameters": ""
+  },
+  "flux-dev": {
+    "type": "image",
+    "compatibility": ["ComfyUI"],
+    "comment": "not tested",
+    "sources": [
+      "https://huggingface.co/SicariusSicariiStuff/FLUX.1-dev/resolve/main/flux1-dev.safetensors"
+    ],
+    "install_path": "ComfyUI/checkpoints",
+    "startup_parameters": ""
+  },
+  "Qwen3.6-35B-A3B-UD-Q4_K_M": {
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested, coding model",
+    "sources": [
+      "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+    ],
+    "install_path": "llm/Qwen3.6-35B-A3B-UD-Q4_K_M",
+    "startup_parameters": ""
+  },
+  "Qwen3.6-35B-A3B-UD-Q4_K_S": {
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested, coding model",
+    "sources": [
+      "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q4_K_S.gguf"
+    ],
+    "install_path": "llm/Qwen3.6-35B-A3B-UD-Q4_K_S",
+    "startup_parameters": ""
+  }   
 }
 
 

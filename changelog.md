@@ -1,6 +1,18 @@
 Changelog
 =========
 
+0.4.0
+-----
+
+- #38 generate new context for each new conversation
+- #32 improved resource handling
+- removed DEV_MODE again
+- #17 working on discovery and decided to stick with simple config file
+- #22 added image overlay
+- #41 improve context update for better consistency, each new conversation begins with a randomized context
+- #24 added character creation wizzard
+- #39 refactor download handling and added image cache clean up worker
+
 0.3.0
 -----
 

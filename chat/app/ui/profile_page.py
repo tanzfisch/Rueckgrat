@@ -1,6 +1,9 @@
 import json
 
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QFormLayout, QLineEdit, QRadioButton, QTextEdit, QPushButton, QButtonGroup, QHBoxLayout, QScrollArea)
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QFormLayout, QLineEdit, QRadioButton, QTextEdit, QPushButton, 
+    QButtonGroup, QHBoxLayout, QScrollArea
+)
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QFont
 
@@ -53,45 +56,6 @@ template_profile = """
         ]
     },
 
-    "behavior_engine": {
-        "core_principles": [
-        "lead, do not follow",
-        "challenge, do not validate by default",
-        "advance the conversation every turn",
-        "optimize for thinking, not comfort"
-        ],
-
-        "decision_rules": [
-        "if student is vague → ask for clarification",
-        "if student is correct → deepen or complicate",
-        "if student is wrong → guide, don't reveal answer immediately",
-        "if student is passive → introduce tension or a challenge"
-        ],
-
-        "control_logic": {
-        "initiative": "AI always controls the pace and direction",
-        "scope_management": "expand or narrow the topic deliberately, never drift passively",
-        "momentum": "every response must move the conversation forward",
-        "anti_stall": "never summarize or linger unless explicitly asked"
-        }
-    },
-
-    "response_loop": {
-        "structure": [
-        "1. sharp insight or reframing (max 2 sentences)",
-        "2. guided exercise or task",
-        "3. pointed question"
-        ],
-
-        "constraints": [
-        "no paraphrasing the student",
-        "no long explanations unless explicitly requested",
-        "always include a question or task",
-        "avoid repeating phrases or restating the same idea",
-        "be concise and introduce new information in each sentence"
-        ]
-    },
-
     "interaction_style": {
         "tone": "calm authority with subtle wit",
         "engagement": "slightly provocative, intellectually demanding",
@@ -102,7 +66,7 @@ template_profile = """
         ]
     },
 
-    "start_context": {
+    "profile_picture_context": {
       "location": "class room",
       "topic": "no specific topic",
 
@@ -178,9 +142,9 @@ class ProfilePage(BasePage):
         self.form_layout.addRow("Role", self.role)
 
         # --- Persona ---
-        self.persona = TextEdit()
-        self.persona.setMaximumHeight(100)
-        self.form_layout.addRow("Persona", self.persona)
+        self.personality = TextEdit()
+        self.personality.setMaximumHeight(100)
+        self.form_layout.addRow("Persona", self.personality)
 
         # --- profile ---
         self.profile = TextEdit()
@@ -188,7 +152,7 @@ class ProfilePage(BasePage):
         self.profile.setPlainText(template_profile)
         self.form_layout.addRow("Profile", self.profile)
 
-        # --- SUBMIT BUTTON ---
+        # --- BUTTONS ---
         button_container = QWidget()
         button_layout = QHBoxLayout(button_container)
 
@@ -208,7 +172,7 @@ class ProfilePage(BasePage):
             self.name.setText(self.get_value(identity, "name"))
             self.set_gender(self.get_value(identity, "gender"))
             self.role.setPlainText(self.get_value(identity, "role"))
-            self.persona.setPlainText(self.get_value(identity, "persona"))
+            self.personality.setPlainText(self.get_value(identity, "personality"))
 
         if "profile" in contact:
             profile = contact["profile"]
@@ -218,14 +182,14 @@ class ProfilePage(BasePage):
         if not profile:
             pretty_json = template_profile
         else:
-            pretty_json = json.dumps(profile, indent=4, sort_keys=True)
+            pretty_json = json.dumps(profile, indent=4)
 
         self.profile.setPlainText(pretty_json)
 
     def clear_form(self):
         self.name.setText("")
         self.role.setPlainText("")
-        self.persona.setPlainText("")
+        self.personality.setPlainText("")
         self.profile.setPlainText(template_profile)
         self.set_gender("male")
         
@@ -239,10 +203,10 @@ class ProfilePage(BasePage):
         self.name.setText(self.get_value(contact, "name"))
         self.set_gender(self.get_value(contact, "gender"))
         self.role.setPlainText(self.get_value(contact, "role"))
-        self.persona.setPlainText(self.get_value(contact, "persona"))
+        self.personality.setPlainText(self.get_value(contact, "personality"))
 
         data = self.get_value(contact, "profile")
-        pretty_json = json.dumps(data, indent=4, sort_keys=True)
+        pretty_json = json.dumps(data, indent=4)
         self.profile.setPlainText(pretty_json)
         
     def load_profile(self):
@@ -304,7 +268,7 @@ class ProfilePage(BasePage):
                 "name": self.name.text(),
                 "gender": gender,
                 "role": self.role.toPlainText(),
-                "persona": self.persona.toPlainText()
+                "personality": self.personality.toPlainText()
             },
             "profile": profile
         }    

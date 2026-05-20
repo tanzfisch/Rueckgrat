@@ -9,7 +9,7 @@ class ContactHeader(QWidget):
     go_back = Signal()
     open_profile = Signal()
 
-    def __init__(self, selected_contact: bool=True, parent=None):
+    def __init__(self, selected_contact: bool=True, back_button: bool=True, parent=None):
         super().__init__(parent)
 
         layout = QHBoxLayout(self)
@@ -37,8 +37,10 @@ class ContactHeader(QWidget):
         self.menu_btn.setFixedSize(40, 40)
         self.menu_btn.clicked.connect(self.handle_open_menu)
 
-        if selected_contact:
+        if back_button:
             layout.addWidget(self.back_btn)
+
+        if selected_contact:
             layout.addWidget(self.profile_label)
             layout.addWidget(self.contact_name)     
 

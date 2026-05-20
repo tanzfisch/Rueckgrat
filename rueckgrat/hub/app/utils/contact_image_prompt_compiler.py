@@ -28,7 +28,7 @@ class ContactImagePromptCompiler:
             if self.context:
                 return Utils.get_nested_value(self.context, ["location"], "")
             else:
-                return Utils.get_nested_value(self.profile, ["start_context", "location"], "")
+                return Utils.get_nested_value(self.profile, ["profile_picture_context", "location"], "")
         except Exception as e:
             logger.error(f"failed to build location {repr(e)}")
 
@@ -37,7 +37,7 @@ class ContactImagePromptCompiler:
             if self.context:
                 return Utils.get_nested_value(self.context, ["topic"], "")
             else:
-                return Utils.get_nested_value(self.profile, ["start_context", "topic"], "")
+                return Utils.get_nested_value(self.profile, ["profile_picture_context", "topic"], "")
         except Exception as e:
             logger.error(f"failed to build topic {repr(e)}")
 
@@ -69,8 +69,8 @@ class ContactImagePromptCompiler:
                     assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "head"], ""))
                     user_stack.append(Utils.get_nested_value(self.context, ["user", "head"], ""))
                 else:
-                    assistant_stack.append(Utils.get_nested_value(self.profile, ["start_context", "assistant", "head"], ""))
-                    user_stack.append(Utils.get_nested_value(self.profile, ["start_context", "user", "head"], ""))
+                    assistant_stack.append(Utils.get_nested_value(self.profile, ["profile_picture_context", "assistant", "head"], ""))
+                    user_stack.append(Utils.get_nested_value(self.profile, ["profile_picture_context", "user", "head"], ""))
 
             # upper body
             if self.image_type == ImageType.UpperBody or self.image_type == ImageType.FullBody:            
@@ -80,8 +80,7 @@ class ContactImagePromptCompiler:
                     assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "upper_body"], ""))
                     user_stack.append(Utils.get_nested_value(self.context, ["user", "upper_body"], ""))
                 else:
-                    assistant_stack.append(Utils.get_nested_value(self.profile, ["start_context", "assistant", "upper_body"], ""))
-                    user_stack.append(Utils.get_nested_value(self.profile, ["start_context", "user", "upper_body"], ""))
+                    assistant_stack.append(Utils.get_nested_value(self.profile, ["profile_picture_context", "assistant", "upper_body"], ""))
 
             # full body
             if self.image_type == ImageType.FullBody:
@@ -91,15 +90,13 @@ class ContactImagePromptCompiler:
                     assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "body"], ""))
                     user_stack.append(Utils.get_nested_value(self.context, ["user", "body"], ""))
                 else:
-                    assistant_stack.append(Utils.get_nested_value(self.profile, ["start_context", "assistant", "body"], ""))
-                    user_stack.append(Utils.get_nested_value(self.profile, ["start_context", "user", "body"], ""))
+                    assistant_stack.append(Utils.get_nested_value(self.profile, ["profile_picture_context", "assistant", "body"], ""))
 
             if self.context:
                 assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "action"], ""))
                 user_stack.append(Utils.get_nested_value(self.context, ["user", "action"], ""))
             else:
-                assistant_stack.append(Utils.get_nested_value(self.profile, ["start_context", "assistant", "action"], ""))
-                user_stack.append(Utils.get_nested_value(self.profile, ["start_context", "user", "action"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.profile, ["profile_picture_context", "assistant", "action"], ""))
 
             assistant_prompt = ", ".join(x for x in assistant_stack if x)
             assistant_prompt = f"Person A: {assistant_prompt}"
@@ -154,15 +151,14 @@ class ContactImagePromptCompiler:
         return ""
 
     def _build_additional_prompt(self) -> str:
-        return self.prompt if self.prompt else ""
+        return f", {self.prompt}" if self.prompt else ""
 
     def build(self) -> str:
         try:
             positive_prompt = f"""
-{self._build_people()},
 Location: {self._build_location()}
-Topic: {self._build_topic()}
-Parameters: {self._build_positive_focus()}, {self._build_positive_general()}, {self._build_additional_prompt()}
+{self._build_people()},
+Parameters: {self._build_positive_focus()}, {self._build_positive_general()}{self._build_additional_prompt()}
             """
 
             negative_sections = [

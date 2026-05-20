@@ -1,4 +1,3 @@
-from pydantic import BaseModel
 from .job_queue import Job
 from typing import Dict, Any
 
@@ -11,18 +10,26 @@ class ImageJob(Job):
         self.request = request
         self.infrastructure = infrastructure
         self.response = {}
+        self.waiting_for_download = True
+
+    def on_download_finished(self):
+        self.waiting_for_download = False
 
     def execute(self) -> None:
         try:
-            image_filename, size = self.infrastructure.image(self.request)
+            image_filename = self.infrastructure.image(self.request)
 
-            if not image_filename: # or not size:
+            if not image_filename:
                 logger.error("failed to generate image")
+
+            self.infrastructure.download(f"/images/{image_filename}", f"/hub/images", self.on_download_finished)
+
+            while self.waiting_for_download:
+                pass
 
             self.response = { 
                 "image": {
-                    "filename": image_filename,
-                    "file_size": size
+                    "filename": image_filename
                 }
             }
         except Exception as e:

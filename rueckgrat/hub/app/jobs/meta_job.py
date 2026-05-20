@@ -6,7 +6,7 @@ from .assistant_image_job import AssistantImageJob
 from .requested_image_job import RequestedImageJob
 from typing import Dict, Any
 
-from app.common import Logger, ChatRequest
+from app.common import Logger, ChatRequest, Utils
 logger = Logger(__name__).get_logger()
 
 class MetaJob(Job):
@@ -35,6 +35,7 @@ class MetaJob(Job):
             logger.debug(f"classifications found: {classifications}")
 
             contact = self.db.get_contact_by_id(self.request.contact_id)
+            contact_name = Utils.get_nested_value(contact, ["name"])
 
             if "image_generation_request" in classifications:
                 logger.debug("generate image...")
@@ -49,10 +50,10 @@ class MetaJob(Job):
                 image_url = f"images/{image_filename}"
 
                 # updat db
-                message_id = self.db.add_message(self.request.conversation_id, "assistant", "", contact["name"])        
+                message_id = self.db.add_message(self.request.conversation_id, "assistant", "", contact_name)        
                 self.db.add_attachment(message_id, image_filename, image_url, "image/png", image_size)
 
-                # notify frontend
+                # notify frontend # TODO maybe frontend should only be notified to pull the latest from the DB to prevent double handling
                 self.response["chat"] = { "role": "assistant","content": "" }
                 self.response["image"] = image
 
@@ -63,45 +64,47 @@ class MetaJob(Job):
                 chat_job = ChatJob(self.request, self.db, self.infrastructure)
                 self.create_and_add(chat_job)
                 self.wait_for([chat_job])
-
                 content = chat_job.result()["content"]
-                if "MOOD_GEN" in content:
-                    content = content.replace("MOOD_GEN", "").strip()
-                    if not "image_generation_request" in classifications: # one image is enough
-                        if random.random() < 0.9:
-                            mood_gen = True
-                        else:
-                            group_gen = True
 
-                        mood_gen = True # override for now
-
-                chat_job.result()["content"] = content
+                if not "image_generation_request" in classifications: # one image is enough
+                    if "MOOD_GEN" in content:
+                        content = content.replace("MOOD_GEN", "").strip()
+                        mood_gen = True
+                    elif "GROUP_GEN" in content:
+                        content = content.replace("GROUP_GEN", "").strip()
+                        group_gen = True
+                        mood_gen = True
 
                 # update db
                 if "image_generation_request" in classifications:
-                    self.db.update_message(message_id, chat_job.result()["role"], content, contact["name"])
+                    self.db.update_message(message_id, chat_job.result()["role"], content, contact_name)
                 else:
-                    message_id = self.db.add_message(self.request.conversation_id, chat_job.result()["role"], content, contact["name"])
+                    message_id = self.db.add_message(self.request.conversation_id, chat_job.result()["role"], content, contact_name)
 
                 # notify frontend
+                chat_job.result()["content"] = content
                 self.response["chat"] = chat_job.result()
                 
                 logger.debug("assistant response generated")
 
-            if mood_gen or group_gen:
+            if mood_gen:
                 logger.debug("generate mood image...")
-                assistant_image_job = AssistantImageJob(self.request, self.db, self.infrastructure, mood_gen)
+                assistant_image_job = AssistantImageJob(
+                    contact_id = self.request.contact_id,
+                    conversation_id = self.request.conversation_id, 
+                    db = self.db, 
+                    infrastructure = self.infrastructure
+                )
                 self.create_and_add(assistant_image_job)
                 self.wait_for([assistant_image_job])
                 image_job_result = assistant_image_job.result()
 
                 image = image_job_result["image"]
                 image_filename = image["filename"]
-                image_size = image["file_size"]
                 image_url = f"images/{image_filename}"
 
                 # update db
-                self.db.add_attachment(message_id, image_filename, image_url, "image/png", image_size)
+                self.db.add_attachment(message_id, image_filename, image_url, "image/png", 0)
 
                 # notify frontend
                 self.response["image"] = image

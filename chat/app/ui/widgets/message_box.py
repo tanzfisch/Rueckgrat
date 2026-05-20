@@ -8,15 +8,15 @@ class MessageBox(QWidget):
     def __init__(self, message="Are you sure?", parent=None):
         super().__init__(parent)
 
-        # Make overlay fill parent
+        if parent is None:
+            raise RuntimeError("Parent is required")
+
         self.setGeometry(parent.rect())
         self.setAttribute(Qt.WA_StyledBackground, True)
 
-        # Layout for centering
         main_layout = QVBoxLayout(self)
         main_layout.setAlignment(Qt.AlignCenter)
 
-        # Card widget
         self.card = QWidget()
         self.card.setObjectName("overlay_dialog")
         self.card.setFixedWidth(parent.rect().width() * 0.8)
@@ -53,7 +53,6 @@ class MessageBox(QWidget):
         self.close()
 
     def exec(self):
-        """Optional modal-like behavior"""
         loop = QEventLoop()
         self.result.connect(loop.quit)
         self.show()

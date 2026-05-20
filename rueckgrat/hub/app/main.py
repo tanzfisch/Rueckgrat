@@ -4,15 +4,18 @@ import asyncio
 import threading
 import os
 from tqdm import tqdm
-from fastapi.responses import StreamingResponse
 from pathlib import Path
+import time
+
+from fastapi.responses import StreamingResponse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.security import HTTPBearer
+
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from app.utils import ChatDB, Infrastructure, ContactImagePromptCompiler, ImageType
-from app.jobs import JobQueue, MetaJob, ImageJob
+from app.jobs import JobQueue, MetaJob, AssistantImageJob, ContactGeneratorJob
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
@@ -23,11 +26,8 @@ logger = Logger(__name__).get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.dev_mode = os.getenv("DEV_MODE", "")
-    if app.state.dev_mode == "":
-        app.state.dev_mode = "prod"
-    logger.info(f"running DEV_MODE={app.state.dev_mode}")
-
+    random.seed(time.time())
+    
     app.state.infrastructure = Infrastructure()
     db_path = "/hub/db/chat.db"
     app.state.db = ChatDB(db_path)    
@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 ########### user handling
 SECRET_KEY = "change_this_later"
@@ -85,8 +85,30 @@ def create_access_token(username: str):
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_current_user(credentials=Depends(security)):
-    token = credentials.credentials    
-    return decode_token(token)
+    if credentials is None:
+        return None 
+
+    try:
+        token = credentials.credentials
+        return decode_token(token)
+    except Exception:
+        return None
+
+async def get_current_user_ws(websocket: WebSocket):
+    auth_header = websocket.headers.get("authorization")
+    
+    if not auth_header:
+        await websocket.close(code=4001, reason="Missing token")
+        raise Exception("No auth")  # or return None if you prefer
+    
+    try:
+        scheme, token = auth_header.split()
+        if scheme.lower() != "bearer":
+            raise ValueError
+        return decode_token(token)
+    except Exception:
+        await websocket.close(code=4001, reason="Invalid token")
+        raise
 
 @app.get("/users")
 def get_users():
@@ -128,9 +150,9 @@ def default():
 @app.get("/health")
 def health():
     status = app.state.infrastructure.get_status()
-    for server in status.servers:
-        if not server.ok:
-            return {"status": "error", "message": f"{server.url} {server.error}"}
+    for node in status.nodes:
+        if not node.ok:
+            return {"status": "error", "message": f"{node.url} {node.error}"}
 
     return {"status": "ok"}
 
@@ -173,31 +195,17 @@ class UpdateContactRequest(BaseModel):
 def update_contact(request: UpdateContactRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
     app.state.db.update_contact(user_id, request.contact_id, request.contact_data)
-    contact_data = app.state.db.get_contact_by_id(request.contact_id)
-    image_parameters = contact_data["profile"]["image_parameters"]
-
-    compiler = ContactImagePromptCompiler(contact_data, None, ImageType.UpperBody, False, "natural smile, looking at camera")
-    positive_prompt, negative_prompt = compiler.build()
-
-    # generate profile image
-    image_request = ImageRequest(
-        positive_prompt = positive_prompt,
-        negative_prompt = negative_prompt,
-        seed = image_parameters.get("seed", 1337),
-        width = 720,
-        height = 720,
-        steps = image_parameters.get("steps", 40.0),
-        cfg = image_parameters.get("cfg", 8.0),
-        model = image_parameters.get("model", "default"),
-        output = ""
-    )
     
-    image_gen_hash = Utils.hash_image_request(image_request)
-    output_file = f"{image_gen_hash}.png"
-    app.state.db.add_contact_image(request.contact_id, output_file, "profile")
-    image_request.output = output_file
-
-    job = ImageJob(image_request, app.state.infrastructure)
+    job = AssistantImageJob(
+        contact_id = request.contact_id,
+        db = app.state.db, 
+        infrastructure = app.state.infrastructure, 
+        assitant_only = True,
+        image_type = ImageType.Portrait,
+        store_image_as = "profile",
+        width = 720,
+        height = 720,                
+    )        
     app.state.job_queue.add(job)
 
     return {"status": "ok"}
@@ -306,12 +314,14 @@ async def download_file(file_path: str):
 
 ########### websocket handling 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_current_user_ws)):
     await websocket.accept()
 
     loop = asyncio.get_running_loop()
     done_queue = asyncio.Queue()
     closed = asyncio.Event()
+    logger.debug(f"username: {username}")
+    user_id = app.state.db.get_user_id(username)
 
     async def safe_close(code: int = 1000):
         if not closed.is_set():
@@ -342,7 +352,18 @@ async def websocket_endpoint(websocket: WebSocket):
                     chat_request = ChatRequest(**data["chat"])
                     job = MetaJob(chat_request, app.state.db, app.state.infrastructure)
                     app.state.job_queue.add(job)
-                else:
+                elif "generate" in data:
+                    generate = data["generate"]
+                    if "generate_profile" in generate:
+                        job = ContactGeneratorJob(generate["generate_profile"], user_id, app.state.db, app.state.infrastructure)
+                        app.state.job_queue.add(job)
+                    else:
+                        logger.error(f"unknown generation request")
+                        await websocket.send_text(
+                            json.dumps({"status": "unknown generation request"})
+                        )
+                else:                    
+                    logger.error(f"unknown request {data}")
                     await websocket.send_text(
                         json.dumps({"status": "unknown request"})
                     )

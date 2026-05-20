@@ -19,7 +19,7 @@ class ChatDB:
             name TEXT NOT NULL,
             gender TEXT CHECK(gender IN ('male', 'female')) DEFAULT NULL,
             role TEXT,
-            persona TEXT,
+            personality TEXT,
             profile TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -268,7 +268,7 @@ class ChatDB:
         profile = contact_json["profile"]
 
         allowed_fields = [
-            "name", "gender", "role", "persona"
+            "name", "gender", "role", "personality"
         ]
 
         with self.get_connection() as conn:
@@ -453,6 +453,7 @@ class ChatDB:
                 row = cursor.fetchone()
 
                 if not row:
+                    logger.error(f"can't find conversation with id {conversation_id}")
                     return None                
 
                 # Convert row → dict
@@ -493,13 +494,13 @@ class ChatDB:
     def create_conversation(self, user_id: int, contact_id: int) -> int:
         with self.get_connection() as conn:
             try:
-                start_context = ""
+                profile_picture_context = ""
                 cursor = conn.cursor()
 
                 cursor.execute("""
                     INSERT INTO conversations (user_id, contact_id, context)
                     VALUES (?, ?, ?)
-                """, (user_id, contact_id, start_context))
+                """, (user_id, contact_id, profile_picture_context))
 
                 conn.commit()
                 return cursor.lastrowid

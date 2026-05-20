@@ -1,4 +1,3 @@
-import os
 import requests
 import asyncio
 import json
@@ -35,25 +34,45 @@ class Backend:
 
         self.download_queue = DownloadQueue()
 
+        self.ws_task = None
+
     def shutdown(self):
         self.download_queue.stop()
 
     def download(self, source_path: str, download_path: str, max_retry: int = 5):
         url = f"{self.url}/download/{source_path}"
-        self.download_queue.add(url, download_path, self.access_token, self.server_cert, max_retry)
+        self.download_queue.add(
+            url=url, 
+            download_path=download_path, 
+            access_token=self.access_token, 
+            server_cert=self.server_cert, 
+            max_retry=max_retry)
 
     @classmethod
     def get_instance(cls):
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
+    
+    async def _on_login_success(self, token: str):
+        self.ws_task = asyncio.create_task(self._start_websocket(token))
 
-    async def start_websocket(self):
+    async def stop_websocket(self):
+        self.ws_task.cancel()
+        try:
+            await self.ws_task
+        except asyncio.CancelledError:
+            pass
+
+    async def _start_websocket(self, token: str):
+        if hasattr(self, 'websocket_client') and self.websocket_client.is_connected():
+            return  # already running
+
         self.websocket_client = WebSocketClient(self.uri, self.server_cert)
         self.websocket_client.set_on_message(self._on_incomming_websocket)
-        await self.websocket_client.connect()
+        await self.websocket_client.connect(token)
 
-    def async_chat(self, contact_id: int, conversation_id: int, role: str, content: str, temperature: float):
+    def chat(self, contact_id: int, conversation_id: int, role: str, content: str, temperature: float):
          
         chat_request = ChatRequest(
             contact_id=contact_id,
@@ -67,9 +86,15 @@ class Backend:
         payload={
             "chat": chat_request.model_dump()
         }    
-        asyncio.get_event_loop().create_task(Backend.get_instance()._send_async_chat(json.dumps(payload)))
+        asyncio.get_event_loop().create_task(Backend.get_instance()._send_async_payload(json.dumps(payload)))
 
-    async def _send_async_chat(self, payload):
+    def generate(self, prompt: dict):
+        payload={
+            "generate": prompt
+        }    
+        asyncio.get_event_loop().create_task(Backend.get_instance()._send_async_payload(json.dumps(payload)))
+
+    async def _send_async_payload(self, payload):
         await self.websocket_client.send_message(payload)
 
     def _on_incomming_websocket(self, msg: dict):
@@ -180,7 +205,7 @@ class Backend:
         except Exception as e:
             logger.error(f"failed to create_contact {repr(e)}")
 
-        return -1          
+        return -1    
     
     def update_contact(self, contact_id: int, data: dict):
         url = f"{self.url}/update_contact"
@@ -462,7 +487,8 @@ class Backend:
 
             if response.status_code == 200:
                 data = response.json()
-                self.access_token = data.get("access_token", "")
+                self.access_token = data.get("access_token", "")              
+                asyncio.create_task(self._on_login_success(self.access_token))
                 return self.access_token
             else:
                 logger.error(f"login_user - {response.status_code} {response.reason}")

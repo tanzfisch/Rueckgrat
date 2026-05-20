@@ -4,7 +4,7 @@ from app.common import Logger, ChatRequestLlama, ChatResponse
 logger = Logger(__name__).get_logger()
 
 class LLamaCppInterface:
-    def __init__(self, host, port):
+    def __init__(self, host: str, port: int):
         self.url = f"http://{host}:{port}/v1/chat/completions"
 
         logger.debug(f"llama.cpp url: {self.url}")

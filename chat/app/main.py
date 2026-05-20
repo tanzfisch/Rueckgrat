@@ -4,10 +4,10 @@ from pathlib import Path
 import qasync
 import asyncio
 from qasync import QApplication
-from PySide6.QtWidgets import (QStackedWidget, QMainWindow)
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout)
 from PySide6.QtCore import QTimer
 import atexit
-from app.ui import LoginPage, ChatPage, ContactsPage, ConversationsPage, ProfilePage
+from app.ui import LoginPage, ChatPage, ContactsPage, ConversationsPage, ProfilePage, ProfileWizard
 from app.speech import Speech
 from app.utils.backend import Backend
 
@@ -20,21 +20,11 @@ class MainWindow(QMainWindow):
 
         self.resize(600, 1200)
 
-        self.stack = QStackedWidget()
-        self.setCentralWidget(self.stack)
+        central = QWidget()
+        self.main_layout = QVBoxLayout(central)
+        self.setCentralWidget(central)
 
-        # Create pages and store them in a dict
-        self.pages = {}
         self.current_page = None
-
-        self.pages["login"] = LoginPage(self.navigate)
-        self.pages["chat"] = ChatPage(self.navigate)
-        self.pages["contacts"] = ContactsPage(self.navigate)
-        self.pages["conversations"] = ConversationsPage(self.navigate)
-        self.pages["profile"] = ProfilePage(self.navigate)
-
-        for page in self.pages.values():
-            self.stack.addWidget(page)
 
         self.navigate("login")
 
@@ -45,16 +35,33 @@ class MainWindow(QMainWindow):
         self.heartbeat_timer.setInterval(10000)
         self.heartbeat_timer.start()        
 
+    def create_page(self, name: str):
+        if name == "login": 
+            return LoginPage(self.navigate)
+        if name == "chat":
+            return ChatPage(self.navigate)
+        if name == "contacts": 
+            return ContactsPage(self.navigate)
+        if name == "conversations": 
+            return ConversationsPage(self.navigate)
+        if name == "profile":
+            return ProfilePage(self.navigate)
+        if name == "profile_wizz": 
+            return ProfileWizard(self.navigate)    
+
     def heartbeat(self):
         if not Backend.get_instance().check_health():
             logger.error("system unhealthy")
 
-    def navigate(self, page_name, **kwargs):
+    def navigate(self, page_name: str, **kwargs):
         if self.current_page:
             self.current_page.on_leave()
+            self.main_layout.removeWidget(self.current_page)
+            self.current_page.deleteLater()
+            self.current_page = None
 
-        self.current_page = self.pages[page_name]
-        self.stack.setCurrentWidget(self.current_page)
+        self.current_page = self.create_page(page_name)
+        self.main_layout.addWidget(self.current_page)
         self.current_page.on_enter(**kwargs)
 
     def center_on_screen(self):
@@ -65,28 +72,32 @@ class MainWindow(QMainWindow):
         self.move(geo.topLeft())
 
 async def async_main(app, window):
-    ws_task = asyncio.create_task(Backend.get_instance().start_websocket())
+    #ws_task = asyncio.create_task(Backend.get_instance().start_websocket())
 
     stop_event = asyncio.Event()
     app.aboutToQuit.connect(stop_event.set)
 
     await stop_event.wait()
 
-    ws_task.cancel()
-    try:
-        await ws_task
-    except asyncio.CancelledError:
-        pass
+    #ws_task.cancel()
+    #try:
+    #    await ws_task
+    #except asyncio.CancelledError:
+    #    pass
+
+    Backend.get_instance().stop_websocket()
 
 def get_image(image_filename) -> str:
-    image_path = Path("cache/images") / image_filename
-    logger.debug(f"check {image_path}")
-    if not image_path.exists():
-        logger.debug(f"download {image_path}")
-        Backend.get_instance().download(f"images/{image_filename}", "cache/images")
+    try:
+        image_path = Path("cache/images") / image_filename
+        logger.debug(f"check {image_path}")
+        if not image_path.exists():
+            logger.debug(f"download {image_path}")
+            Backend.get_instance().download(f"images/{image_filename}", "cache/images")
+    except Exception as e:
+        logger.error(f"failed to handle incomming image: {repr(e)}")
 
 def on_incomming_message(msg: dict):
-    logger.debug(f"on_incomming_message {msg}")
     if "image" in msg:
         image = msg["image"]
         get_image(image["filename"])
