@@ -28,7 +28,7 @@ class ChatPage(BasePage):
 
         chat_layout = QVBoxLayout(self)
 
-        self.contact_header = ContactHeader()
+        self.contact_header = ContactHeader(navigator)
         self.contact_header.go_back.connect(self.on_go_back)
         chat_layout.addWidget(self.contact_header)
 

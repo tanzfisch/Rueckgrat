@@ -5,5 +5,18 @@ from .contacts_page import ContactsPage
 from .conversations_page import ConversationsPage
 from .profile_page import ProfilePage
 from .profile_wizzard import ProfileWizard
+from .settings_page import SettingsPage
 
-__all__ = ["OneLineBubble", "ProfilePage", "ChatBubble", "LoginDialog", "ConversationsPage", "BasePage", "LoginPage", "ChatPage", "ContactsPage", "ProfileWizard"]
+__all__ = [
+    "OneLineBubble", 
+    "ProfilePage", 
+    "ChatBubble", 
+    "LoginDialog", 
+    "ConversationsPage", 
+    "BasePage", 
+    "LoginPage", 
+    "ChatPage", 
+    "ContactsPage", 
+    "ProfileWizard",
+    "SettingsPage"
+]

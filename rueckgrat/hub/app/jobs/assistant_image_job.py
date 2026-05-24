@@ -4,18 +4,20 @@ from .image_job import ImageJob, ImageRequest
 from ..utils.contact_image_prompt_compiler import ContactImagePromptCompiler, ImageType
 from typing import Dict, Any
 
-from app.common import Logger, ChatRequest, Utils
+from app.common import Logger, Utils
 logger = Logger(__name__).get_logger()
 
 class AssistantImageJob(Job):
-    def __init__(self, contact_id: int, db, infrastructure, width: int = 720, height: int = 1280, conversation_id: int = None, assitant_only: bool = True, image_type: ImageType = ImageType.FullBody, store_image_as: str = "gallery"):
+    def __init__(self, user_id: int, contact_id: int, db, infrastructure, width: int = 720, height: int = 1280, conversation_id: int = None, show_assistant: bool = True, show_user: bool = False, image_type: ImageType = ImageType.FullBody, store_image_as: str = "gallery"):
         super().__init__()
+        self.user_id = user_id
         self.contact_id = contact_id
         self.conversation_id = conversation_id
         self.db = db
         self.infrastructure = infrastructure
         self.response = None
-        self.assitant_only = assitant_only
+        self.show_assistant = show_assistant
+        self.show_user = show_user
         self.image_type = image_type
         self.store_image_as = store_image_as
         self.width = width
@@ -23,6 +25,7 @@ class AssistantImageJob(Job):
 
     def execute(self) -> None:
         contact_data = self.db.get_contact_by_id(self.contact_id)
+        user_data = self.db.get_user_data(self.user_id)
         image_parameters = contact_data["profile"]["image_parameters"]
 
         if self.conversation_id:
@@ -31,9 +34,7 @@ class AssistantImageJob(Job):
         else:
             context = None
 
-        user_present = False
-
-        compiler = ContactImagePromptCompiler(contact_data, context, self.image_type, user_present)
+        compiler = ContactImagePromptCompiler(contact_data, user_data, context, self.image_type, self.show_assistant, self.show_user)
         positive_prompt, negative_prompt = compiler.build()
 
         models = {

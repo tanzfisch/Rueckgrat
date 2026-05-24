@@ -103,7 +103,7 @@ You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_bo
     def _build_tools(self) -> str:
         return f"""
 TOOLS:
-- You may include the tag MOOD_GEN at the end of your response when an image of yourself in that moment would improve communication. You may include GROUP_GEN when generating an image of you and the user together would enhance the experience.
+- You can take a picture of yourself, the user or both together in the current situation by including one of the following tags IMG_AI, IMG_USR or IMG_GRP at the end of your response. Use this if it helps improving communication.
 """
 
 

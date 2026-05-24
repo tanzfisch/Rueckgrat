@@ -1,4 +1,4 @@
-import re
+import json
 from typing import Dict, Any
 from enum import Enum
 
@@ -11,12 +11,14 @@ class ImageType(Enum):
     FullBody = 3
 
 class ContactImagePromptCompiler:
-    def __init__(self, contact: Dict[str, Any], context: Dict[str, Any] = None, image_type: ImageType = ImageType.FullBody, user_present: bool = False, prompt: str = None):
+    def __init__(self, contact: Dict[str, Any], user_data: Dict[str, Any], context: Dict[str, Any] = None, image_type: ImageType = ImageType.FullBody, show_assistant: bool = True, show_user: bool = False, prompt: str = None):
         self.contact = contact
+        self.user_data = user_data
         self.profile = contact.get("profile", {})
         self.appearance = self.profile.get("appearance", {})
         self.image_type = image_type
-        self.user_present = user_present
+        self.show_assistant = show_assistant
+        self.show_user = show_user        
         self.prompt = prompt
         self.context = context
 
@@ -43,27 +45,26 @@ class ContactImagePromptCompiler:
 
     def _build_people(self) -> str:
         try:
-            gender = Utils.get_nested_value(self.contact, ["gender"], "")            
-            general = Utils.get_nested_value(self.appearance, ["general"], "")
-            face = Utils.get_nested_value(self.appearance, ["face"], "")
-            hair = Utils.get_nested_value(self.appearance, ["hair"], "")
-            skin = Utils.get_nested_value(self.appearance, ["skin"], "")
-
-            upper_body = Utils.get_nested_value(self.appearance, ["upper_body"], "")
-            body = Utils.get_nested_value(self.appearance, ["body"], "")
-
             assistant_stack = []
             user_stack = []
 
             # portrait
             if self.image_type == ImageType.Portrait or self.image_type == ImageType.UpperBody or self.image_type == ImageType.FullBody:            
-                assistant_stack.append(gender)
-                assistant_stack.append(general)
-                assistant_stack.append(hair)
-                assistant_stack.append(face)
-                assistant_stack.append(skin)
+                assistant_stack.append(Utils.get_nested_value(self.contact, ["gender"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.appearance, ["general"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.appearance, ["hair"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.appearance, ["face"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.appearance, ["skin"], ""))
 
-                user_stack.append("male, caucasian, athletic, short blonde hair") # TODO need user settings
+                user_profile = json.loads(self.user_data["profile"])
+                user_gender = Utils.get_nested_value(user_profile, ["gender"], "")
+                user_age = Utils.get_nested_value(user_profile, ["age"], "")
+                user_hair_color = Utils.get_nested_value(user_profile, ["hair_color"], "")
+                user_eye_color = Utils.get_nested_value(user_profile, ["eye_color"], "")
+                user_ethnicity = Utils.get_nested_value(user_profile, ["ethnicity"], "")
+                user_body_type = Utils.get_nested_value(user_profile, ["body_type"], "")
+                user_def = f"{user_gender}, {user_age} year old, {user_body_type}, {user_ethnicity}, {user_hair_color} hair, {user_eye_color} eyes, "
+                user_stack.append(user_def)
 
                 if self.context:
                     assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "head"], ""))
@@ -74,7 +75,7 @@ class ContactImagePromptCompiler:
 
             # upper body
             if self.image_type == ImageType.UpperBody or self.image_type == ImageType.FullBody:            
-                assistant_stack.append(upper_body)
+                assistant_stack.append(Utils.get_nested_value(self.appearance, ["upper_body"], ""))
 
                 if self.context:
                     assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "upper_body"], ""))
@@ -84,7 +85,7 @@ class ContactImagePromptCompiler:
 
             # full body
             if self.image_type == ImageType.FullBody:
-                assistant_stack.append(body)
+                assistant_stack.append(Utils.get_nested_value(self.appearance, ["body"], ""))
 
                 if self.context:
                     assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "body"], ""))
@@ -98,12 +99,14 @@ class ContactImagePromptCompiler:
             else:
                 assistant_stack.append(Utils.get_nested_value(self.profile, ["profile_picture_context", "assistant", "action"], ""))
 
-            assistant_prompt = ", ".join(x for x in assistant_stack if x)
-            assistant_prompt = f"Person A: {assistant_prompt}"
+            result = ""
 
-            result = f"{assistant_prompt}\n"
+            if self.show_assistant:
+                assistant_prompt = ", ".join(x for x in assistant_stack if x)
+                assistant_prompt = f"Person A: {assistant_prompt}"
+                result += f"{assistant_prompt}\n"
 
-            if self.user_present:
+            if self.show_user:
                 user_prompt = ", ".join(x for x in user_stack if x)
                 user_prompt = f"Person B: {user_prompt}"
                 result += f"{user_prompt}\n"

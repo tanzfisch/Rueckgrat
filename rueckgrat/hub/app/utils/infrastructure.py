@@ -173,16 +173,16 @@ class Infrastructure:
         self.download_queue.add(url=url, download_path=download_path, callback=callback)
 
     def chat(self, messages: list, temperature: float, seed: int, low_accuracy: bool = False) -> str:
-        url = f"http://{self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}/chat"
-        
-        payload= ChatRequestLlama(
-            messages=messages, 
-            temperature=temperature, 
-            low_accuracy=low_accuracy,
-            seed=seed
-        )
-
         try:
+            url = f"http://{self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}/chat"
+            
+            payload= ChatRequestLlama(
+                messages=messages, 
+                temperature=temperature, 
+                low_accuracy=low_accuracy,
+                seed=seed
+            )
+
             response = requests.post(
                 url,
                 json=payload.model_dump(),
