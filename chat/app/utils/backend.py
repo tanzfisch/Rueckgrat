@@ -11,6 +11,8 @@ logger = Logger(__name__).get_logger()
 
 class Backend:
     _instance = None
+    user_id = -1
+    user_name = ""
 
     def __init__(self):
         logger.debug("Backend init")
@@ -35,6 +37,9 @@ class Backend:
         self.download_queue = DownloadQueue()
 
         self.ws_task = None
+
+    def get_user_name(self):
+        return self.user_name
 
     def shutdown(self):
         self.download_queue.stop()
@@ -158,6 +163,71 @@ class Backend:
             logger.error(f"failed to get_users {repr(e)}")
 
         return []
+
+    def get_user_data(self):
+        url = f"{self.url}/user_data"
+
+        try:
+            response = requests.get(
+                url,
+                json={
+                    "user_id": self.user_id
+                },                  
+                headers = {
+                    "Authorization": f"Bearer {self.access_token}"
+                },   
+                timeout=10,
+                verify=self.server_cert,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+
+                user_data = data.get("user_data", None)
+                if not user_data:
+                    return user_data
+
+                if user_data.get("profile"):
+                    profile = json.loads(user_data["profile"])
+                    user_data.pop("profile")
+                    user_data["profile"] = profile
+
+                return user_data
+            else:
+                logger.error(f"failed to get user data - {response.status_code} {response.reason}")
+
+        except Exception as e:
+            logger.error(f"failed to get user data {repr(e)}")
+
+        return {} 
+    
+    def update_user_data(self, data: dict):
+        url = f"{self.url}/update_user_data"
+
+        try:
+            response = requests.post(
+                url,
+                json={
+                    "user_id": self.user_id,
+                    "user_data": data
+                },                 
+                headers = {
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Content-Type": "application/json"
+                },                                
+                timeout=10,
+                verify=self.server_cert,
+            )
+
+            if response.status_code in (200, 204):
+                return True
+            else:
+                logger.error(f"failed to update user data {response.status_code} {response.reason}")
+                return False
+
+        except Exception as e:
+            logger.error(f"failed to update user data {repr(e)}")
+            return False    
 
     def get_contacts(self):
         url = f"{self.url}/contacts"
@@ -469,10 +539,10 @@ class Backend:
 
         return []
 
-    def login_user(self, user_name, user_passwd):
+    def login_user(self, user_name, user_passwd) -> bool:
         url = f"{self.url}/login"
         self.access_token = ""
-        self.user_name=user_name
+        self.user_name = ""
 
         try:
             response = requests.post(
@@ -487,16 +557,18 @@ class Backend:
 
             if response.status_code == 200:
                 data = response.json()
-                self.access_token = data.get("access_token", "")              
+                self.access_token = data.get("access_token", "")
                 asyncio.create_task(self._on_login_success(self.access_token))
-                return self.access_token
+                self.user_id = data.get("user_id", -1)
+                self.user_name = user_name
+                return True
             else:
-                logger.error(f"login_user - {response.status_code} {response.reason}")
+                logger.error(f"login failed {response.status_code} {response.reason}")
 
         except Exception as e:
-            logger.error(f"failed to login_user {repr(e)}")
+            logger.error(f"login failed {repr(e)}")
 
-        return ""
+        return False
 
     def get_model(self, model_name):
         url = f"{self.url}/model"

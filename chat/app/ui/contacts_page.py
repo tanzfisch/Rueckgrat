@@ -18,7 +18,7 @@ class ContactsPage(BasePage):
 
         self.main_layout = QVBoxLayout(self)
 
-        self.contact_header = ContactHeader(False, False)
+        self.contact_header = ContactHeader(navigator, False, False)
         self.main_layout.addWidget(self.contact_header)
 
         # contacts section
@@ -40,7 +40,7 @@ class ContactsPage(BasePage):
         pass
 
     def add_contact(self):
-        self.navigator("profile_wizz", contact_id=-1)
+        self.navigator("profile_wizz")
 
     def load_contacts(self):
         # Clear existing widgets

@@ -19,7 +19,7 @@ class ContactGeneratorJob(Job):
 
     def execute(self) -> None:
         try:   
-            name = self.user_input["profile"]["name"]         
+            name = self.user_input["profile"]["name"]
             if name == "":
                 raise ValueError("need contact name to create contact")
 
@@ -29,10 +29,10 @@ class ContactGeneratorJob(Job):
             self.db.update_contact(self.user_id, contact_id, new_contact)
 
             assistant_image_job = AssistantImageJob(
+                user_id = self.user_id,
                 contact_id = contact_id,
                 db = self.db, 
                 infrastructure = self.infrastructure, 
-                assitant_only = True,
                 image_type = ImageType.Portrait,
                 store_image_as = "profile",
                 width = 720,
@@ -56,16 +56,22 @@ class ContactGeneratorJob(Job):
         try:
             logger.debug(f"{json.dumps(user_input, indent=4)}")
 
-            profile = user_input["profile"]
-            appearance = user_input["appearance"]
+            profile_input = user_input["profile"]
+            personality_input = user_input["personality"]
 
-            name = profile["name"]
-            gender = profile["gender"]
-            age = profile["age"]
-            role = profile["role"]
-            personality = profile["personality"]
-            objective = profile["objective"]
-            if profile["sfw"].lower() == "sfw":
+            name = profile_input["name"]
+            gender = profile_input["gender"]
+            age = profile_input["age"]
+            hair_color = profile_input["hair_color"]
+            eye_color = profile_input["eye_color"]
+            ethnicity = profile_input["ethnicity"]
+            body_type = profile_input["body_type"]
+            backstory = f"\nBackstory: {profile_input['backstory']}"
+
+            role = personality_input["role"]
+            personality = personality_input["personality"]
+            objective = personality_input["objective"]
+            if personality_input["sfw"].lower() == "sfw":
                 image_gen = "default"
                 cfg = 5.0
                 sfw = "Create a safe-for-work character. Keep personality, appearance, and backstory fully appropriate, professional, and free of any sexual, explicit, or adult elements."
@@ -74,10 +80,6 @@ class ContactGeneratorJob(Job):
                 cfg = 8.5           
                 sfw = "Create a character without restrictions. Allow them to be sexual, explicit, and uncensored. Freely include adult, erotic, and NSFW traits in personality, and backstory."
 
-            hair_color = appearance["hair_color"]
-            eye_color = appearance["eye_color"]
-            ethnicity = appearance["ethnicity"]
-            body_type = appearance["body_type"]
 
             query = f"""
 Create a new profile.
@@ -86,7 +88,7 @@ USER INPUT:
 Name: {name}
 Gender: {gender}
 Age: {age}
-Role: {role}
+Role: {role}{backstory}
 Personality: {personality}
 Primary Objective: {objective}
 
@@ -140,109 +142,110 @@ EXAMPLE PROFILE:
 INSTRUCTIONS:
 - Invent a new profile based on the user input
 - Fill in information as applicable
-- background_hook -> invent an interessting background story
+- background_hook -> invent an interessting and elaborate background story (max 500 words)
 - always use clothes in profile_picture_context/upper_body
 - {sfw}
 
 OUTPUT:
-Return ONLY valid JSON in the given format.
+- Return ONLY valid JSON in the given format
+- keep each entry close to the lenght in the example
 """
             logger.debug(f"contact generator query:\n{query}")
             payload = [{"role": "system", "content": query}]
         except Exception as e:
             logger.error(f"failed to generate payload {repr(e)}")
 
-        response_content = self.infrastructure.chat(payload, 0.2, random.randint(0, 100000), True)
-
-        if response_content:
-            match = re.search(r"```json\s*(.*?)\s*```", response_content, re.DOTALL)
-            if not match:
+        for attempt in range(3):
+            response_content = self.infrastructure.chat(payload, 0.2, random.randint(0, 100000), True)
+            if response_content:
+                match = re.search(r"```json\s*(.*?)\s*```", response_content, re.DOTALL)
+                if match:
+                    break
+            if attempt == 2:
                 logger.error("failed to generate profile")
-                return None
+                logger.debug(f"broken response:\n{response_content}")
+                return None            
+
+        result = match.group(1)
             
-            result = match.group(1)
+        try:                
+            reply = json.loads(result)
+        except Exception as e:
+            logger.error(f"failed to load json: {e}")      
+            logger.error("failed to generate new context.") 
+            return None
             
-            try:                
-                reply = json.loads(result)
-            except Exception as e:
-                logger.error(f"failed to load json: {e}")      
-                logger.error("failed to generate new context.") 
-                return None
-            
-            # making sure we can guarantee a valid json structure
-            new_contact = {
-                "identity": {
-                    "name": name,
-                    "gender": gender,
-                    "role": role,
-                    "age": age,
-                    "personality": personality
+        # making sure we can guarantee a valid json structure
+        new_contact = {
+            "identity": {
+                "name": name,
+                "gender": gender,
+                "role": role,
+                "age": age,
+                "personality": personality
+            },
+
+            "profile": {
+                "background_hook": Utils.get_nested_value(reply, ["background_hook"], ""),
+                "body_language": Utils.get_nested_value(reply, ["body_language"], ""),
+                "style": Utils.get_nested_value(reply, ["style"], ""),
+                "sfw": personality_input["sfw"],
+
+                "appearance": {
+                    "image_style": "studio",
+                    "general": Utils.get_nested_value(reply, ["appearance", "general"], ""),
+                    "face": Utils.get_nested_value(reply, ["appearance", "face"], ""),
+                    "hair": Utils.get_nested_value(reply, ["appearance", "hair"], ""),
+                    "skin": Utils.get_nested_value(reply, ["appearance", "skin"], ""),
+                    "upper_body": Utils.get_nested_value(reply, ["appearance", "upper_body"], ""),
+                    "body": Utils.get_nested_value(reply, ["appearance", "body"], ""),
                 },
 
-                "profile": {
-                    "background_hook": Utils.get_nested_value(reply, ["background_hook"], ""),
-                    "body_language": Utils.get_nested_value(reply, ["body_language"], ""),
-                    "style": Utils.get_nested_value(reply, ["style"], ""),
-                    "sfw": profile["sfw"],
+                "objectives": {
+                    "primary": objective,
+                    "secondary": Utils.get_nested_value(reply, ["objectives", "secondary"], [])
+                },             
+                
+                "interaction_style": {
+                    "tone": Utils.get_nested_value(reply, ["interaction_style", "tone"], ""),
+                    "engagement": Utils.get_nested_value(reply, ["interaction_style", "engagement"], ""),
+                    "quirks": Utils.get_nested_value(reply, ["interaction_style", "quirks"], []),
+                },
 
-                    "appearance": {
-                        "image_style": "studio",
-                        "general": Utils.get_nested_value(reply, ["appearance", "general"], ""),
-                        "face": Utils.get_nested_value(reply, ["appearance", "face"], ""),
-                        "hair": Utils.get_nested_value(reply, ["appearance", "hair"], ""),
-                        "skin": Utils.get_nested_value(reply, ["appearance", "skin"], ""),
-                        "upper_body": Utils.get_nested_value(reply, ["appearance", "upper_body"], ""),
-                        "body": Utils.get_nested_value(reply, ["appearance", "body"], ""),
-                    },
+                "profile_picture_context": {
+                    "location": Utils.get_nested_value(reply, ["profile_picture_context", "location"], ""),
+                    "topic": Utils.get_nested_value(reply, ["profile_picture_context", "topic"], ""),
 
-                    "objectives": {
-                        "primary": objective,
-                        "secondary": Utils.get_nested_value(reply, ["objectives", "secondary"], [])
-                    },             
-                    
-                    "interaction_style": {
-                        "tone": Utils.get_nested_value(reply, ["interaction_style", "tone"], ""),
-                        "engagement": Utils.get_nested_value(reply, ["interaction_style", "engagement"], ""),
-                        "quirks": Utils.get_nested_value(reply, ["interaction_style", "quirks"], []),
-                    },
+                    "assistant": {
+                        "action": Utils.get_nested_value(reply, ["profile_picture_context", "action"], ""),
+                        "head": Utils.get_nested_value(reply, ["profile_picture_context", "head"], ""),
+                        "upper_body": Utils.get_nested_value(reply, ["profile_picture_context", "upper_body"], "shirt"),
+                        "body": Utils.get_nested_value(reply, ["profile_picture_context", "body"], ""),
+                    }
+                },                 
 
-                    "profile_picture_context": {
-                        "location": Utils.get_nested_value(reply, ["profile_picture_context", "location"], ""),
-                        "topic": Utils.get_nested_value(reply, ["profile_picture_context", "topic"], ""),
+                "behaviour_parameters": {
+                "mood_gen_chance": 0.3
+                },
 
-                        "assistant": {
-                            "action": Utils.get_nested_value(reply, ["profile_picture_context", "action"], ""),
-                            "head": Utils.get_nested_value(reply, ["profile_picture_context", "head"], ""),
-                            "upper_body": Utils.get_nested_value(reply, ["profile_picture_context", "upper_body"], "shirt"),
-                            "body": Utils.get_nested_value(reply, ["profile_picture_context", "body"], ""),
-                        }
-                    },                 
+                "llm_parameters": {
+                "temperature": "0.15",
+                "preffered_context_size": "8000"
+                },
 
-                    "behaviour_parameters": {
-                    "mood_gen_chance": 0.3
-                    },
+                "image_parameters": {      
+                "seed": random.randint(0,999999),
+                "steps": 40,
+                "cfg": cfg,
+                "model": image_gen
+                },
 
-                    "llm_parameters": {
-                    "temperature": "0.15",
-                    "preffered_context_size": "8000"
-                    },
+                "tts_parameters": {
+                    "piper_voice_model": "en_US-libritts_r-medium" if gender == "female" else "en_US-hfc_male-medium"
+                },
+            }
+        }     
 
-                    "image_parameters": {      
-                    "seed": random.randint(0,999999),
-                    "steps": 40,
-                    "cfg": cfg,
-                    "model": image_gen
-                    },
+        logger.debug(f"new contact:\n{json.dumps(new_contact, indent=4)}")
+        return new_contact
 
-                    "tts_parameters": {
-                        "piper_voice_model": "en_US-libritts_r-medium" if gender == "female" else "en_US-hfc_male-medium"
-                    },
-                }
-            }     
-
-            logger.debug(f"new contact:\n{json.dumps(new_contact, indent=4)}")
-            return new_contact
-        else:
-            logger.warning(f"failed to generate profile")
-            return None
-    

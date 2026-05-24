@@ -7,7 +7,7 @@ from qasync import QApplication
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout)
 from PySide6.QtCore import QTimer
 import atexit
-from app.ui import LoginPage, ChatPage, ContactsPage, ConversationsPage, ProfilePage, ProfileWizard
+from app.ui import LoginPage, ChatPage, ContactsPage, ConversationsPage, ProfilePage, ProfileWizard, SettingsPage
 from app.speech import Speech
 from app.utils.backend import Backend
 
@@ -48,6 +48,8 @@ class MainWindow(QMainWindow):
             return ProfilePage(self.navigate)
         if name == "profile_wizz": 
             return ProfileWizard(self.navigate)    
+        if name == "settings": 
+            return SettingsPage(self.navigate)    
 
     def heartbeat(self):
         if not Backend.get_instance().check_health():

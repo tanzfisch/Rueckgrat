@@ -14,7 +14,7 @@ from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from app.utils import ChatDB, Infrastructure, ContactImagePromptCompiler, ImageType
+from app.utils import ChatDB, Infrastructure, ImageType
 from app.jobs import JobQueue, MetaJob, AssistantImageJob, ContactGeneratorJob
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
@@ -115,6 +115,30 @@ def get_users():
     users = app.state.db.get_users()
     return {"users": users}
 
+@app.get("/user_data")
+def get_user_data(username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    user_data = app.state.db.get_user_data(user_id)
+    return {"user_data": user_data}  
+
+class UpdateUserDataRequest(BaseModel):
+    user_id: int
+    user_data: dict
+
+@app.post("/update_user_data")
+def update_contact(request: UpdateUserDataRequest, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if user_id != request.user_id:
+        return {"status": "wrong user"}
+
+    if app.state.db.update_user_data(
+        user_id = request.user_id,
+        user_data = request.user_data
+    ):
+        return {"status": "ok"}
+    else:
+        return {"status": "failed"}
+
 class UserCreate(BaseModel):
     user_name: str
     user_passwd: str
@@ -140,7 +164,10 @@ def login(data: LoginRequest):
 
     token = create_access_token(user["username"])
 
-    return {"access_token": token}
+    return {
+        "access_token": token,
+        "user_id": user["id"]
+    }
 
 ########### system handling
 @app.get("/")
@@ -197,6 +224,7 @@ def update_contact(request: UpdateContactRequest, username: str = Depends(get_cu
     app.state.db.update_contact(user_id, request.contact_id, request.contact_data)
     
     job = AssistantImageJob(
+        user_id = user_id,
         contact_id = request.contact_id,
         db = app.state.db, 
         infrastructure = app.state.infrastructure, 
@@ -350,7 +378,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
 
                 if "chat" in data:
                     chat_request = ChatRequest(**data["chat"])
-                    job = MetaJob(chat_request, app.state.db, app.state.infrastructure)
+                    job = MetaJob(user_id, chat_request, app.state.db, app.state.infrastructure)
                     app.state.job_queue.add(job)
                 elif "generate" in data:
                     generate = data["generate"]
