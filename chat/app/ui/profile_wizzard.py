@@ -2,10 +2,11 @@ import json
 import random
 
 from PySide6.QtWidgets import (
-    QVBoxLayout, QStackedLayout, QWidget, QPushButton, 
+    QVBoxLayout, QStackedLayout, QWidget, QPushButton, QLabel,
     QHBoxLayout, QLineEdit, QTextEdit, QFormLayout, QComboBox
 )
 from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt
 
 from app.utils import Backend
 from app.ui import BasePage
@@ -347,6 +348,18 @@ class PersonalityPage(QWidget):
         }        
 
         return result   
+    
+class ProgressPage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        progress_label = QLabel("Please wait...")
+        progress_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(progress_label)
 
 class ProfileWizard(BasePage):
     selected_role = ""
@@ -370,11 +383,11 @@ class ProfileWizard(BasePage):
         button_container = QWidget()
         button_layout = QHBoxLayout(button_container)
 
-        self.back_btn = QPushButton("Back")
+        self.back_btn = QPushButton("...")
         self.back_btn.clicked.connect(self.prev_page)
         button_layout.addWidget(self.back_btn)
 
-        self.next_btn = QPushButton("Next/Save") # TODO
+        self.next_btn = QPushButton("...") # TODO
         self.next_btn.clicked.connect(self.next_page)
         button_layout.addWidget(self.next_btn)
 
@@ -403,24 +416,25 @@ class ProfileWizard(BasePage):
             self.current_index += 1
             self.stack.setCurrentIndex(self.current_index)
             self.update_buttons()
-        else:
-            profile = self.profile_page.get_values()
+        
+            if self.current_index == 2:
+                profile = self.profile_page.get_values()
 
-            if not self.user_profile_mode:
-                personality = self.personality_page.get_values()
-                prompt = {
-                    "generate_profile": {
-                        "profile": profile,
-                        "personality": personality
+                if not self.user_profile_mode:
+                    personality = self.personality_page.get_values()
+                    prompt = {
+                        "generate_profile": {
+                            "profile": profile,
+                            "personality": personality
+                        }
                     }
-                }
-                Backend.get_instance().generate(prompt)
-            else:
-                data = {
-                    "profile": json.dumps(profile)
-                }
-                Backend.get_instance().update_user_data(data)
-                self.navigator("contacts")
+                    Backend.get_instance().generate(prompt)
+                else:
+                    data = {
+                        "profile": json.dumps(profile)
+                    }
+                    Backend.get_instance().update_user_data(data)
+                    self.navigator("contacts")
 
     def prev_page(self):
         if self.current_index > 0:
@@ -429,12 +443,21 @@ class ProfileWizard(BasePage):
             self.update_buttons()
 
     def update_buttons(self):
-        self.back_btn.setVisible(self.current_index != 0)
+        back_button = {
+            0: [False, ""],
+            1: [True, "Back"],
+            2: [False, ""]
+        }
+        self.back_btn.setVisible(back_button[self.current_index][0])
+        self.back_btn.setText(back_button[self.current_index][1])
 
-        if self.current_index == len(self.pages) - 1:
-            self.next_btn.setText("Finish")
-        else:
-            self.next_btn.setText("Next")
+        next_button = {
+            0: [True, "Next"],
+            1: [True, "Finish"],
+            2: [False, ""]
+        }
+        self.next_btn.setVisible(next_button[self.current_index][0])
+        self.next_btn.setText(next_button[self.current_index][1])
 
     def on_enter(self, **kwargs):
         self.user_profile_mode = kwargs.get("user_profile_mode", False)
@@ -458,6 +481,9 @@ class ProfileWizard(BasePage):
 
             self.personality_page = PersonalityPage()
             self.add_page(self.personality_page)
+
+            self.progress_page = ProgressPage()
+            self.add_page(self.progress_page)
 
         if not self.user_profile_mode:
             Backend.get_instance().register_incomming_message(self.on_incomming_message)
