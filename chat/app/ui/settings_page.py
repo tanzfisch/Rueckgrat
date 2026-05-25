@@ -109,10 +109,7 @@ class SettingsPage(BasePage):
         selector_layout = QVBoxLayout(selector_container)
         main_layout.addWidget(selector_container)
        
-        pages = {
-            "Profile": "",
-            "Network": ""
-        }
+        pages = ["Profile", "Network"]
 
         self.page_selector = RowSelector(pages, True, 1)
         self.page_selector.selection_changed.connect(self.on_page_changed)
