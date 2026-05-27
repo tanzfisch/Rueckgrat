@@ -7,6 +7,11 @@ Changelog
 - #43 introducing user profile data
 - #48 added simple progress page after contact gen
 
+0.4.1
+-----
+
+- #25 fixed misshanling of incomming messages
+
 0.4.0
 -----
 
