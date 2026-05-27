@@ -21,7 +21,7 @@ from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
-from app.common import Logger, ChatRequest, Utils, GetMessagesRequest, GetAttachmentsRequest, ImageRequest
+from app.common import Logger, ChatRequest, GetMessagesRequest
 logger = Logger(__name__).get_logger()
 
 @asynccontextmanager
@@ -115,7 +115,7 @@ def get_users():
     users = app.state.db.get_users()
     return {"users": users}
 
-@app.get("/user_data")
+@app.get("/users/me")
 def get_user_data(username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
     user_data = app.state.db.get_user_data(user_id)
@@ -125,7 +125,7 @@ class UpdateUserDataRequest(BaseModel):
     user_id: int
     user_data: dict
 
-@app.post("/update_user_data")
+@app.patch("/users/me")
 def update_contact(request: UpdateUserDataRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
     if user_id != request.user_id:
@@ -170,10 +170,6 @@ def login(data: LoginRequest):
     }
 
 ########### system handling
-@app.get("/")
-def default():
-    return {"status": "ok"}
-
 @app.get("/health")
 def health():
     status = app.state.infrastructure.get_status()
@@ -195,19 +191,15 @@ def get_contacts(username: str = Depends(get_current_user)):
 
     return {"contacts": contacts}
 
-class ContactRequest(BaseModel):
-    contact_id: int
-
-@app.get("/contact")
-def get_contact(request: ContactRequest, username: str = Depends(get_current_user)):
-    contact = app.state.db.get_contact_by_id(request.contact_id)
-
-    images = app.state.db.get_contact_images(contact["id"])
+@app.get("/contact/{contact_id}")
+def get_contact(contact_id: int, username: str = Depends(get_current_user)):
+    contact = app.state.db.get_contact_by_id(contact_id)
+    images = app.state.db.get_contact_images(contact_id)
     contact["images"] = images
 
-    return {"contact": contact}    
+    return {"contact": contact}
 
-@app.post("/contact")
+@app.post("/contacts")
 def create_contact(username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
     contact_name = f"new_contact_{random.randint(0,100000)}"
@@ -215,20 +207,18 @@ def create_contact(username: str = Depends(get_current_user)):
     return {"contact_id": contact_id}
 
 class UpdateContactRequest(BaseModel):
-    contact_id: int
     contact_data: dict
 
-@app.post("/update_contact")
-def update_contact(request: UpdateContactRequest, username: str = Depends(get_current_user)):
+@app.patch("/contacts/{contact_id}")
+def update_contact(contact_id: int, request: UpdateContactRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    app.state.db.update_contact(user_id, request.contact_id, request.contact_data)
+    app.state.db.update_contact(user_id, contact_id, request.contact_data)
     
     job = AssistantImageJob(
         user_id = user_id,
-        contact_id = request.contact_id,
+        contact_id = contact_id,
         db = app.state.db, 
         infrastructure = app.state.infrastructure, 
-        assitant_only = True,
         image_type = ImageType.Portrait,
         store_image_as = "profile",
         width = 720,
@@ -238,32 +228,23 @@ def update_contact(request: UpdateContactRequest, username: str = Depends(get_cu
 
     return {"status": "ok"}
 
-class DeleteContactRequest(BaseModel):
-    contact_id: int
-
-@app.post("/delete_contact")
-def delete_conversation(request: DeleteContactRequest, username: str = Depends(get_current_user)):
-    if app.state.db.delete_contact(request.contact_id):
+@app.delete("/contacts/{contact_id}")
+def delete_conversation(contact_id: int, username: str = Depends(get_current_user)):
+    if app.state.db.delete_contact(contact_id):
         return {"status": "ok"}
     else:
         return {"status": "failed to delete contact"}
 
 ########### conversations handling
-class ConversationsRequest(BaseModel):
-    contact_id: int
-
-@app.get("/conversations")
-def get_conversations(request: ConversationsRequest, username: str = Depends(get_current_user)):
+@app.get("/contacts/{contact_id}/conversations")
+def get_conversations(contact_id: int, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    conversations = app.state.db.get_conversations(user_id, request.contact_id)
+    conversations = app.state.db.get_conversations(user_id, contact_id)
     return {"conversations": conversations}
 
-class ConversationRequest(BaseModel):
-    conversation_id: int
-
-@app.get("/get_conversation")
-def get_conversation(request: ConversationRequest, username: str = Depends(get_current_user)):
-    conversation = app.state.db.get_conversation(request.conversation_id)
+@app.get("/conversations/{conversation_id}")
+def get_conversation(conversation_id: int, username: str = Depends(get_current_user)):
+    conversation = app.state.db.get_conversation(conversation_id)
     return {"conversation": conversation}
 
 class CreateConversationRequest(BaseModel):
@@ -275,46 +256,42 @@ def create_conversation(request: CreateConversationRequest, username: str = Depe
     conversation_id = app.state.db.create_conversation(user_id, request.contact_id)
     return {"conversation_id": conversation_id}
 
-class DeleteConversationRequest(BaseModel):
-    conversation_id: int
-
-@app.post("/delete_conversation")
-def delete_conversation(request: DeleteConversationRequest, username: str = Depends(get_current_user)):
-    if app.state.db.delete_conversation(request.conversation_id):
+@app.delete("/conversations/{conversation_id}")
+def delete_conversation(conversation_id: int, username: str = Depends(get_current_user)):
+    if app.state.db.delete_conversation(conversation_id):
         return {"status": "ok"}
     else:
         return {"status": "failed to delete conversation"}
 
-########### messages handling
-@app.get("/messages")
-def get_messages(request: GetMessagesRequest, username: str = Depends(get_current_user)):
-    messages = app.state.db.get_messages_by_conversation(request.conversation_id, request.max_messages)
+@app.get("/conversations/{conversation_id}/messages")
+def get_messages(conversation_id: int, request: GetMessagesRequest, username: str = Depends(get_current_user)):
+    messages = app.state.db.get_messages_by_conversation(conversation_id, request.max_messages)
     return {"messages": messages}
 
-@app.get("/attachments")
-def get_messages(request: GetAttachmentsRequest, username: str = Depends(get_current_user)):
-    attachments = app.state.db.get_attachments_for_message(request.message_id)
+@app.get("/messages/{message_id}/attachments")
+def get_messages(message_id: int, username: str = Depends(get_current_user)):
+    attachments = app.state.db.get_attachments_for_message(message_id)
     return {"attachments": attachments}
 
 ########### model handling
-class GetModelURLRequest(BaseModel):
-    model_name: str
-
 class GetModelURLResponse(BaseModel):
     model_urls: list[str]
 
-@app.get("/model", response_model=GetModelURLResponse)
-def get_model_url(request: GetModelURLRequest, username: str = Depends(get_current_user)):
-    sources = app.state.infrastructure.get_model_url(request.model_name)
+@app.get("/models/{model_name}/url", response_model=GetModelURLResponse)
+def get_model_url(model_name: str, username: str = Depends(get_current_user)):
+    sources = app.state.infrastructure.get_model_url(model_name)
     return GetModelURLResponse(
         model_urls=sources
     )
 
 ########### downloads
-@app.get("/download/{file_path:path}")
+@app.get("/downloads/{file_path:path}")
 async def download_file(file_path: str):
     base_path = Path("/hub").resolve()
     path = (base_path / file_path).resolve()
+
+    for item in os.listdir("/hub/models"):
+        print(item)    
 
     if not str(path).startswith(str(base_path)):
         logger.error(f"invalid path {path}")

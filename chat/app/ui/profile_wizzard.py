@@ -387,7 +387,7 @@ class ProfileWizard(BasePage):
         self.back_btn.clicked.connect(self.prev_page)
         button_layout.addWidget(self.back_btn)
 
-        self.next_btn = QPushButton("...") # TODO
+        self.next_btn = QPushButton("...")
         self.next_btn.clicked.connect(self.next_page)
         button_layout.addWidget(self.next_btn)
 
@@ -415,26 +415,25 @@ class ProfileWizard(BasePage):
         if self.current_index < len(self.pages) - 1:
             self.current_index += 1
             self.stack.setCurrentIndex(self.current_index)
-            self.update_buttons()
-        
-            if self.current_index == 2:
-                profile = self.profile_page.get_values()
+            self.update_buttons()        
+        else:
+            profile = self.profile_page.get_values()
 
-                if not self.user_profile_mode:
-                    personality = self.personality_page.get_values()
-                    prompt = {
-                        "generate_profile": {
-                            "profile": profile,
-                            "personality": personality
-                        }
+            if not self.user_profile_mode:
+                personality = self.personality_page.get_values()
+                prompt = {
+                    "generate_profile": {
+                        "profile": profile,
+                        "personality": personality
                     }
-                    Backend.get_instance().generate(prompt)
-                else:
-                    data = {
-                        "profile": json.dumps(profile)
-                    }
-                    Backend.get_instance().update_user_data(data)
-                    self.navigator("contacts")
+                }
+                Backend.get_instance().generate(prompt)
+            else:
+                data = {
+                    "profile": json.dumps(profile)
+                }
+                Backend.get_instance().update_user_data(data)
+                self.navigator("contacts")
 
     def prev_page(self):
         if self.current_index > 0:
@@ -482,8 +481,8 @@ class ProfileWizard(BasePage):
             self.personality_page = PersonalityPage()
             self.add_page(self.personality_page)
 
-            self.progress_page = ProgressPage()
-            self.add_page(self.progress_page)
+            #self.progress_page = ProgressPage()
+            #self.add_page(self.progress_page)
 
         if not self.user_profile_mode:
             Backend.get_instance().register_incomming_message(self.on_incomming_message)

@@ -55,7 +55,7 @@ def image(request: ImageRequest):
         logger.error("failed to generate image with comfyui")
     return response
 
-@app.get("/download/{file_path:path}")
+@app.get("/downloads/{file_path:path}")
 async def download_file(file_path: str):
     base_path = Path("/node").resolve()
     path = (base_path / file_path).resolve()
@@ -82,16 +82,13 @@ async def download_file(file_path: str):
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
-class GetModelURLRequest(BaseModel):
-    model_name: str
-
 class GetModelURLResponse(BaseModel):
     model_urls: list[str]
 
-@app.get("/model")
-def get_model_url(request: GetModelURLRequest):
+@app.get("/models/{model_name}/url")
+def get_model_url(model_name: str):
     registry = ModelRegistry("/node/models")
-    sources = registry.get_urls(request.model_name)
+    sources = registry.get_urls(model_name)
     return GetModelURLResponse(
         model_urls=sources
     )

@@ -1,4 +1,5 @@
 import requests
+from urllib.parse import urlparse
 import asyncio
 import json
 from pathlib import Path
@@ -44,8 +45,7 @@ class Backend:
     def shutdown(self):
         self.download_queue.stop()
 
-    def download(self, source_path: str, download_path: str, max_retry: int = 5):
-        url = f"{self.url}/download/{source_path}"
+    def download(self, url: str, download_path: str, max_retry: int = 5):
         self.download_queue.add(
             url=url, 
             download_path=download_path, 
@@ -165,7 +165,7 @@ class Backend:
         return []
 
     def get_user_data(self):
-        url = f"{self.url}/user_data"
+        url = f"{self.url}/users/me"
 
         try:
             response = requests.get(
@@ -202,10 +202,10 @@ class Backend:
         return {} 
     
     def update_user_data(self, data: dict):
-        url = f"{self.url}/update_user_data"
+        url = f"{self.url}/users/me"
 
         try:
-            response = requests.post(
+            response = requests.patch(
                 url,
                 json={
                     "user_id": self.user_id,
@@ -254,7 +254,7 @@ class Backend:
         return []
 
     def create_contact(self) -> int:
-        url = f"{self.url}/contact"
+        url = f"{self.url}/contacts"
 
         try:
             response = requests.post(
@@ -278,13 +278,12 @@ class Backend:
         return -1    
     
     def update_contact(self, contact_id: int, data: dict):
-        url = f"{self.url}/update_contact"
+        url = f"{self.url}/contacts/{contact_id}"
 
         try:
-            response = requests.post(
+            response = requests.patch(
                 url,
                 json={
-                    "contact_id": contact_id,
                     "contact_data": data
                 },                 
                 headers = {
@@ -306,14 +305,11 @@ class Backend:
             return False
     
     def get_contact(self, contact_id: int):
-        url = f"{self.url}/contact"
+        url = f"{self.url}/contact/{contact_id}"
 
         try:
             response = requests.get(
                 url,
-                json={
-                    "contact_id": contact_id
-                },                  
                 headers = {
                     "Authorization": f"Bearer {self.access_token}"
                 },   
@@ -385,16 +381,13 @@ class Backend:
         return -1     
     
     def delete_conversation(self, conversation_id: int):
-        url = f"{self.url}/delete_conversation"
+        url = f"{self.url}/conversations/{conversation_id}"
 
         try:
-            response = requests.post(
+            response = requests.delete(
                 url,
                 headers = {
                     "Authorization": f"Bearer {self.access_token}"
-                },                
-                json={
-                    "conversation_id": conversation_id
                 },                
                 timeout=10,
                 verify=self.server_cert,
@@ -407,16 +400,13 @@ class Backend:
             logger.error(f"failed to delete_conversation {repr(e)}")
     
     def delete_contact(self, contact_id: int):
-        url = f"{self.url}/delete_contact"
+        url = f"{self.url}/contacts/{contact_id}"
 
         try:
-            response = requests.post(
+            response = requests.delete(
                 url,
                 headers = {
                     "Authorization": f"Bearer {self.access_token}"
-                },                
-                json={
-                    "contact_id": contact_id
                 },                
                 timeout=10,
                 verify=self.server_cert,
@@ -429,7 +419,7 @@ class Backend:
             logger.error(f"failed to delete_contact {repr(e)}")
 
     def get_conversations(self, contact_id):
-        url = f"{self.url}/conversations"
+        url = f"{self.url}/contacts/{contact_id}/conversations"
 
         try:
             response = requests.get(
@@ -437,9 +427,6 @@ class Backend:
                 headers = {
                     "Authorization": f"Bearer {self.access_token}"
                 },
-                json={
-                    "contact_id": contact_id
-                },                  
                 timeout=10,
                 verify=self.server_cert,
             )
@@ -456,16 +443,13 @@ class Backend:
         return []      
 
     def get_conversation(self, conversation_id):
-        url = f"{self.url}/get_conversation"
+        url = f"{self.url}/conversations/{conversation_id}"
 
         try:
             response = requests.get(
                 url,
                 headers={
                     "Authorization": f"Bearer {self.access_token}"
-                },
-                json={
-                    "conversation_id": conversation_id
                 },
                 timeout=10,
                 verify=self.server_cert,
@@ -483,10 +467,9 @@ class Backend:
         return None
 
     def get_messages(self, conversation_id: int, max_message: int = 100):
-        url = f"{self.url}/messages"
+        url = f"{self.url}/conversations/{conversation_id}/messages"
 
         request = GetMessagesRequest(
-            conversation_id=conversation_id, 
             max_message=max_message
         )
 
@@ -513,7 +496,7 @@ class Backend:
         return []
 
     def get_attachments(self, message_id):
-        url = f"{self.url}/attachments"
+        url = f"{self.url}/messages/{message_id}/attachments"
 
         try:
             response = requests.get(
@@ -521,9 +504,6 @@ class Backend:
                 headers = {
                     "Authorization": f"Bearer {self.access_token}"
                 },
-                json={
-                    "message_id": message_id
-                },                  
                 timeout=10,
                 verify=self.server_cert,
             )
@@ -570,8 +550,8 @@ class Backend:
 
         return False
 
-    def get_model(self, model_name):
-        url = f"{self.url}/model"
+    def get_model(self, model_name: str, model_path: Path):
+        url = f"{self.url}/models/{model_name}/url"
 
         try:
             response = requests.get(
@@ -579,9 +559,6 @@ class Backend:
                 headers = {
                     "Authorization": f"Bearer {self.access_token}"
                 },
-                json={
-                    "model_name": model_name
-                },                  
                 timeout=10,
                 verify=self.server_cert,
             )
@@ -590,7 +567,7 @@ class Backend:
                 data = response.json()
                 sources = data.get("model_urls", [])
                 for source in sources:
-                    self.download(source, Path(model_name)) # TODO
+                    self.download(source, model_path)
                 
             else:
                 logger.error(f"get_model - {response.status_code} {response.reason}")
