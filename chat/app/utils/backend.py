@@ -45,6 +45,10 @@ class Backend:
     def shutdown(self):
         self.download_queue.stop()
 
+    def download_file(self, image_path: str, download_path: str, max_retry: int = 5):
+        url = f"{self.url}/downloads/{image_path}"
+        self.download(url, download_path, max_retry)
+
     def download(self, url: str, download_path: str, max_retry: int = 5):
         self.download_queue.add(
             url=url, 

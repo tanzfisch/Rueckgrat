@@ -62,7 +62,7 @@ class ContactsPage(BasePage):
             if profile_image_name:
                 profile_image_path = Path("cache/images") / profile_image_name
                 if not profile_image_path.exists():
-                    Backend.get_instance().download(f"images/{profile_image_name}", "cache/images", 0)
+                    Backend.get_instance().download_file(f"images/{profile_image_name}", "cache/images", 0)
 
             contact_card_container = QWidget()
             contact_card_layout = QHBoxLayout(contact_card_container)            

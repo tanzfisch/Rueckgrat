@@ -258,7 +258,7 @@ class ChatPage(BasePage):
     def _get_image(self, image_filename) -> str:
         image_path = Path("cache/images") / image_filename
         if not image_path.exists():
-            Backend.get_instance().download(f"images/{image_filename}", "cache/images")
+            Backend.get_instance().download_file(f"images/{image_filename}", "cache/images")
 
         return image_path
 

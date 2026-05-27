@@ -290,9 +290,6 @@ async def download_file(file_path: str):
     base_path = Path("/hub").resolve()
     path = (base_path / file_path).resolve()
 
-    for item in os.listdir("/hub/models"):
-        print(item)    
-
     if not str(path).startswith(str(base_path)):
         logger.error(f"invalid path {path}")
         return {"error": "Invalid path"}

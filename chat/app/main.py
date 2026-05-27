@@ -95,7 +95,7 @@ def get_image(image_filename) -> str:
         logger.debug(f"check {image_path}")
         if not image_path.exists():
             logger.debug(f"download {image_path}")
-            Backend.get_instance().download(f"images/{image_filename}", "cache/images")
+            Backend.get_instance().download_file(f"images/{image_filename}", "cache/images")
     except Exception as e:
         logger.error(f"failed to handle incomming image: {repr(e)}")
 
