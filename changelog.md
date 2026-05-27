@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.4.1
+-----
+
+- #25 fixed misshanling of incomming messages
+
 0.4.0
 -----
 
