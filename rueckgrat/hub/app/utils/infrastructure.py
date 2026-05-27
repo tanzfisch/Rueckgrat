@@ -168,8 +168,8 @@ class Infrastructure:
         return str(filepath)
 
     def download(self, source_path: str, download_path: str, callback=None):
-        url_download = f"http://{self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}/download"
-        url = f"{url_download}{source_path}"
+        # todo pick correct host
+        url = f"http://{self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}/downloads{source_path}"
         self.download_queue.add(url=url, download_path=download_path, callback=callback)
 
     def chat(self, messages: list, temperature: float, seed: int, low_accuracy: bool = False) -> str:
@@ -199,12 +199,12 @@ class Infrastructure:
         return None
 
     def get_model_url(self, model_name) -> Response:
-        url = f"http://{self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}/model"
+        # todo pick correct host
+        url = f"http://{self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}/models/{model_name}/url"
         
         try:
             response = requests.get(
                 url,
-                json={"model_name": model_name},
                 timeout=30,
             )
 

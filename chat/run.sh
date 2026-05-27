@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "get caddy cert ..."
-curl -k https://localhost
+curl -k https://localhost/health
 
 docker cp rueckgrat-caddy-1:/data/caddy/pki/authorities/local/root.crt ~/.ssh/caddy-root.crt
 

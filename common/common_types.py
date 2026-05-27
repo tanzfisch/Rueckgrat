@@ -34,8 +34,4 @@ class ImageResponse(BaseModel):
     output: str
 
 class GetMessagesRequest(BaseModel):
-    conversation_id: int
     max_messages: int = 100
-
-class GetAttachmentsRequest(BaseModel):
-    message_id: int    
