@@ -266,19 +266,21 @@ class ChatPage(BasePage):
         try:
             if "chat" in msg:
                 chat = msg["chat"]
-                content = self._cleanup_content(chat["content"])
-                role = chat["role"]
 
-                if "assistant_image" in msg:
-                    image = msg["assistant_image"]
-                    image_path = Path("cache/images") / image["filename"]
-                    self.append_history(role, content, image_path)
-                elif "image" in msg:
-                    image = msg["image"]
-                    image_path = Path("cache/images") / image["filename"]
-                    self.append_history(role, content, image_path)
-                else:
-                    self.append_history(role, content)
+                if chat["conversation_id"] == self.conversation_id:
+                    content = self._cleanup_content(chat["content"])
+                    role = chat["role"]
+
+                    if "assistant_image" in msg:
+                        image = msg["assistant_image"]
+                        image_path = Path("cache/images") / image["filename"]
+                        self.append_history(role, content, image_path)
+                    elif "image" in msg:
+                        image = msg["image"]
+                        image_path = Path("cache/images") / image["filename"]
+                        self.append_history(role, content, image_path)
+                    else:
+                        self.append_history(role, content)
                 
                 Speech.speak(self._cleanup_for_speech(content), voice=self.kokoro_voice, model=self.piper_model, interface="piper")
         except Exception as e:
