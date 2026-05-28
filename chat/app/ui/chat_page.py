@@ -1,10 +1,10 @@
 import re
-from PySide6.QtWidgets import ( QWidget, QVBoxLayout, QTextEdit, QPushButton, QHBoxLayout, QScrollArea, QMenu )
+from PySide6.QtWidgets import ( QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QScrollArea, QMenu )
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, QTimer, QSize, QPoint
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker
+from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker, PlainTextEdit
 from app.speech import Speech
 from app.utils import Backend, Contact
 from pathlib import Path
@@ -56,7 +56,7 @@ class ChatPage(BasePage):
         self.menu_button.clicked.connect(self.show_context_menu)
         input_layout.addWidget(self.menu_button, alignment=Qt.AlignmentFlag.AlignBottom)
 
-        self.input_box = QTextEdit()
+        self.input_box = PlainTextEdit()
         self.input_box.setObjectName("input_box")
         self.input_box.setPlaceholderText("Type here... (Ctrl+Enter to send)")
         self.input_box.setAcceptRichText(False)        

@@ -43,6 +43,14 @@ class ContactImagePromptCompiler:
         except Exception as e:
             logger.error(f"failed to build topic {repr(e)}")
 
+    def age_to_text(self, age: int):
+        if age < 18: return ""
+        elif age < 22: return "young"
+        elif age < 27: return "young adult"
+        elif age < 45: return "mature"
+        elif age < 60: return "middle-aged"
+        else: return "senior"
+
     def _build_people(self) -> str:
         try:
             assistant_stack = []
@@ -58,7 +66,7 @@ class ContactImagePromptCompiler:
 
                 user_profile = json.loads(self.user_data["profile"])
                 user_gender = Utils.get_nested_value(user_profile, ["gender"], "")
-                user_age = Utils.get_nested_value(user_profile, ["age"], "")
+                user_age = self.age_to_text(int(Utils.get_nested_value(user_profile, ["age"], "")))
                 user_hair_color = Utils.get_nested_value(user_profile, ["hair_color"], "")
                 user_eye_color = Utils.get_nested_value(user_profile, ["eye_color"], "")
                 user_ethnicity = Utils.get_nested_value(user_profile, ["ethnicity"], "")
