@@ -79,11 +79,13 @@ class ChatJob(Job):
                 
                 self._update_conversation()
                 return {
+                    "conversation_id": request.conversation_id,
                     "role": "assistant",
                     "content": reply
                 }
             else:
                 return {
+                    "conversation_id": request.conversation_id,
                     "role": "error",
                     "content": "failed to get chat response"
                 }

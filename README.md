@@ -1,4 +1,5 @@
 # Rueckgrat
+
 ai chat frontend &amp; backend
 
 The purpose is evolving. Currently the focus is on personal, private companion app. 
