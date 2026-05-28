@@ -17,6 +17,15 @@ class MetaJob(Job):
         self.db = db
         self.infrastructure = infrastructure     
 
+    def cleanup_content(self, content: str) -> str:
+        content = content.replace("<IMG_AI>", "").strip()
+        content = content.replace("IMG_AI", "").strip()
+        content = content.replace("<IMG_USR>", "").strip()
+        content = content.replace("IMG_USR", "").strip()
+        content = content.replace("<IMG_GRP>", "").strip()
+        content = content.replace("IMG_GRP", "").strip()
+        return content
+    
     def execute(self) -> None:
         self.response = {}
 
@@ -65,25 +74,22 @@ class MetaJob(Job):
                 chat_job = ChatJob(self.request, self.db, self.infrastructure)
                 self.create_and_add(chat_job)
                 self.wait_for([chat_job])
+
                 content = chat_job.result()["content"]
 
                 if not "image_generation_request" in classifications: # one image is enough
                     if "IMG_AI" in content:
-                        content = content.replace("<IMG_AI>", "").strip()
-                        content = content.replace("IMG_AI", "").strip()
                         img_ai = True
                     elif "IMG_USR" in content:
-                        content = content.replace("<IMG_USR>", "").strip()
-                        content = content.replace("IMG_USR", "").strip()
                         # TODO this currently does not work well
                         img_ai = True
                         #img_usr = True
                     elif "IMG_GRP" in content:
-                        content = content.replace("<IMG_GRP>", "").strip()
-                        content = content.replace("IMG_GRP", "").strip()
                         # TODO this currently does not work well
                         img_ai = True
                         #img_usr = True
+
+                content = self.cleanup_content(content)
 
                 # update db
                 if "image_generation_request" in classifications:

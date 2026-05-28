@@ -219,7 +219,8 @@
   "Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-ggml-model-Q4_K": {
     "type": "llm",
     "compatibility": ["llama.cpp"],
-    "comment": "not tested",
+    "comment": "uncensored, very creative but repeats it self quickly",
+    "good_value_range": "temp 0.6-1.0",
     "sources": [
       "https://huggingface.co/huihui-ai/Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-MTP-GGUF/resolve/main/Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-ggml-model-Q4_K.gguf"
     ],
@@ -239,7 +240,7 @@
   "NousResearch_Hermes-4.3-36B-Q4_K_M": {
     "type": "llm",
     "compatibility": ["llama.cpp"],
-    "comment": "not tested",
+    "comment": "uncensored, a bit slow but very creative, repeats it self quickly",
     "sources": [
       "https://huggingface.co/bartowski/NousResearch_Hermes-4.3-36B-GGUF/resolve/main/NousResearch_Hermes-4.3-36B-Q4_K_M.gguf"
     ],

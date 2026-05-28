@@ -163,24 +163,11 @@ OUTPUT:
         except Exception as e:
             logger.error(f"failed to generate payload {repr(e)}")
 
-        for attempt in range(3):
-            response_content = self.infrastructure.chat(payload, 0.2, random.randint(0, 100000), True)
-            if response_content:
-                match = re.search(r"```json\s*(.*?)\s*```", response_content, re.DOTALL)
-                if match:
-                    break
-            if attempt == 2:
-                logger.error("failed to generate profile")
-                logger.debug(f"broken response:\n{response_content}")
-                return None            
-
-        result = match.group(1)
+        response_content = self.infrastructure.chat(payload, 0.2, random.randint(0, 100000), True)
+        reply = Utils.json_loads(response_content)
             
-        try:                
-            reply = json.loads(result)
-        except Exception as e:
-            logger.error(f"failed to load json: {e}")      
-            logger.error("failed to generate new context.") 
+        if not reply:
+            logger.error(f"failed to generate new context from\n {response_content}") 
             return None
             
         # making sure we can guarantee a valid json structure

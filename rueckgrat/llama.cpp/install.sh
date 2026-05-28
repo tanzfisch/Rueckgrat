@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+# Resolve script directory
+CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LLM_DIR="$CURRENT_DIR/../../models/llm"
+
 echo
 git -C llama.cpp pull || git clone https://github.com/ggerganov/llama.cpp.git
 
@@ -21,8 +25,6 @@ case "$choice" in
     DEFAULT_GPU_LAYERS=-1
     DEFAULT_CONTEXT_SIZE=4000
     USER_NAME=$USER    
-    # TODO select model
-    DEFAULT_MODEL_PATH="/home/martin/dev/Rueckgrat/models/llm/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L.gguf"
 
     read -p "Enter llama.cpp service name [${DEFAULT_SERVICE_NAME}]: " USER_SERVICE_NAME
     SERVICE_NAME="${USER_SERVICE_NAME:-$DEFAULT_SERVICE_NAME}"
@@ -30,8 +32,19 @@ case "$choice" in
     read -p "Enter llama.cpp port [${DEFAULT_PORT}]: " USER_PORT
     PORT="${USER_PORT:-$DEFAULT_PORT}"
 
-    read -p "Enter model path [${DEFAULT_MODEL_PATH}]: " USER_MODEL_PATH
-    MODEL_PATH="${USER_MODEL_PATH:-$DEFAULT_MODEL_PATH}"
+    cd "$LLM_DIR" || { echo "Directory not found"; exit 1; }
+    folders=($(ls -d */ 2>/dev/null | sed 's/\/$//'))
+    [ ${#folders[@]} -eq 0 ] && { echo "No folders"; exit 1; }
+
+    for i in "${!folders[@]}"; do
+        echo "$((i+1))) ${folders[i]}"
+    done
+
+    read -p "Choose LLM: " choice
+    SELECTED_LLM_NAME="${folders[$((choice-1))]}"
+    MODEL_PATH="${LLM_DIR}/${SELECTED_LLM_NAME}/${SELECTED_LLM_NAME}.gguf"
+    echo "Selected llm: ${MODEL_PATH}"
+    cd "$CURRENT_DIR"
 
     read -p "Enter gpu layer count (-1 for max) [${DEFAULT_GPU_LAYERS}]: " USER_GPU_LAYERS
     GPU_LAYERS="${USER_GPU_LAYERS:-$DEFAULT_GPU_LAYERS}"
