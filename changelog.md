@@ -8,6 +8,7 @@ Changelog
 #48 added simple progress page after contact gen
 #31 refactored endpoints
 #55 fixed download logic after endpoints change
+#58 auto remove formatting when pasting text
 
 0.4.1
 -----

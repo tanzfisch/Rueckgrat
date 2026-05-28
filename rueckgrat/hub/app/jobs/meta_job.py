@@ -25,8 +25,8 @@ class MetaJob(Job):
 
         try:
             logger.debug("execute meta job")
-            img_ai = True
-            img_usr = True
+            img_ai = False
+            img_usr = False
 
             logger.debug("classify...")
             classify = ClassificationJob(self.request.content)
@@ -69,15 +69,21 @@ class MetaJob(Job):
 
                 if not "image_generation_request" in classifications: # one image is enough
                     if "IMG_AI" in content:
+                        content = content.replace("<IMG_AI>", "").strip()
                         content = content.replace("IMG_AI", "").strip()
                         img_ai = True
                     elif "IMG_USR" in content:
+                        content = content.replace("<IMG_USR>", "").strip()
                         content = content.replace("IMG_USR", "").strip()
-                        img_usr = True
-                    elif "IMG_GRP" in content:
-                        content = content.replace("IMG_GRP", "").strip()
+                        # TODO this currently does not work well
                         img_ai = True
-                        img_usr = True
+                        #img_usr = True
+                    elif "IMG_GRP" in content:
+                        content = content.replace("<IMG_GRP>", "").strip()
+                        content = content.replace("IMG_GRP", "").strip()
+                        # TODO this currently does not work well
+                        img_ai = True
+                        #img_usr = True
 
                 # update db
                 if "image_generation_request" in classifications:

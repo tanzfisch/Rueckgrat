@@ -7,6 +7,7 @@ from .contact_card import ContactCard
 from .image_overlay import ImageOverlay
 from .row_selector import RowSelector
 from .labeled_slider import LabeledSlider
+from .text_edit import PlainTextEdit
 
 __all__ = [
     "MessageBox", 
@@ -18,5 +19,6 @@ __all__ = [
     "ContactCard", 
     "ImageOverlay",
     "LabeledSlider",
-    "RowSelector"
+    "RowSelector",
+    "PlainTextEdit"
 ]

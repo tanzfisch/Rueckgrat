@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt
 
 from app.utils import Backend
 from app.ui import BasePage
-from app.ui.widgets import ContactHeader, LabeledSlider, RowSelector
+from app.ui.widgets import ContactHeader, LabeledSlider, RowSelector, PlainTextEdit
 
 from common import Logger
 logger = Logger(__name__).get_logger()
@@ -198,7 +198,7 @@ class ProfilePage(QWidget):
             self.body_type.select(self.profile["body_type"])
         self.form_layout.addRow("Body Type", self.body_type)
 
-        self.backstory = QTextEdit()
+        self.backstory = PlainTextEdit()
         self.backstory.setObjectName("contactForm")
         self.backstory.setFont(QFont("Consolas", 12))
         self.backstory.setPlaceholderText("Type optional backstory here ...")

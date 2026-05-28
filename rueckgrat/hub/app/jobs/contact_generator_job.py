@@ -52,6 +52,14 @@ class ContactGeneratorJob(Job):
     def has_response(self) -> bool:
         return True        
 
+    def age_to_text(self, age: int):
+        if age < 18: return ""
+        elif age < 22: return "young"
+        elif age < 27: return "young adult"
+        elif age < 45: return "mature"
+        elif age < 60: return "middle-aged"
+        else: return "senior"
+
     def _generate_contact(self, user_input: Dict[str, Any]) -> Dict[str, Any]:
         try:
             logger.debug(f"{json.dumps(user_input, indent=4)}")
@@ -61,7 +69,7 @@ class ContactGeneratorJob(Job):
 
             name = profile_input["name"]
             gender = profile_input["gender"]
-            age = profile_input["age"]
+            age = self.age_to_text(int(profile_input["age"]))
             hair_color = profile_input["hair_color"]
             eye_color = profile_input["eye_color"]
             ethnicity = profile_input["ethnicity"]
