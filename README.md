@@ -1,4 +1,4 @@
-# Rueckgrat
+# <img src="logo.png" width="50" alt="Logo">ückgrat
 
 ai chat frontend &amp; backend
 
