@@ -11,6 +11,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     role: str
     content: str
+    think: str = ""
     attachments: list[str] = []
 
 class ChatRequestLlama(BaseModel):

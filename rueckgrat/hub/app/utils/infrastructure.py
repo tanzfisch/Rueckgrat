@@ -186,7 +186,7 @@ class Infrastructure:
             response = requests.post(
                 url,
                 json=payload.model_dump(),
-                timeout=60,
+                timeout=120,
             )
         
             if response.status_code == 200:

@@ -242,7 +242,7 @@ class ChatPage(BasePage):
             for part in parts
         )
 
-    def _cleanup_content(self, content):
+    def _cleanup_content(self, content):        
         content = self._remove_excess_linebreaks(content)
 
         return content    

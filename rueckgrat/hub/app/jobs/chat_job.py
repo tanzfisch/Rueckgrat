@@ -91,4 +91,4 @@ class ChatJob(Job):
                 }
             
         except Exception as e:
-            logger.error(f"failed to handle cheat request {repr(e)}")
+            logger.error(f"failed to handle chat request {repr(e)}")

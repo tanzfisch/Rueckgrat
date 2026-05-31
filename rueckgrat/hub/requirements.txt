@@ -10,3 +10,4 @@ websockets
 wsproto
 tqdm
 scikit-learn
+json-repair
