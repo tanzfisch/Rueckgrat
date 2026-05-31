@@ -11,6 +11,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     role: str
     content: str
+    think: str = ""
     attachments: list[str] = []
 
 class ChatRequestLlama(BaseModel):
@@ -34,8 +35,4 @@ class ImageResponse(BaseModel):
     output: str
 
 class GetMessagesRequest(BaseModel):
-    conversation_id: int
     max_messages: int = 100
-
-class GetAttachmentsRequest(BaseModel):
-    message_id: int    

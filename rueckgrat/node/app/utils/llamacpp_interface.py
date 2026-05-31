@@ -1,4 +1,5 @@
 import requests
+import re
 
 from app.common import Logger, ChatRequestLlama, ChatResponse
 logger = Logger(__name__).get_logger()
@@ -8,6 +9,12 @@ class LLamaCppInterface:
         self.url = f"http://{host}:{port}/v1/chat/completions"
 
         logger.debug(f"llama.cpp url: {self.url}")
+
+    def extract_think_and_response(self, content):
+        match = re.search(r'<think>(.*?)</think>', content, re.DOTALL)
+        think = match.group(1).strip() if match else ''
+        response = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+        return think, response
 
     def chat(self, request: ChatRequestLlama) -> ChatResponse:
         payload_low_accuracy = {
@@ -115,21 +122,24 @@ class LLamaCppInterface:
                 self.url,
                 json=payload,
                 headers=headers,
-                timeout=30
+                timeout=120
             )
 
             response.raise_for_status()    
 
             if response.status_code == 200:
                 content = response.json()["choices"][0]["message"]["content"]
+                think, response = self.extract_think_and_response(content)
+
                 return ChatResponse(
-                    role="assistant",
-                    content=content
+                    role = "assistant",
+                    content = response,
+                    think = think
                 )
 
             return ChatResponse(
                 role="error",
-                content=f"Error: llama.cpp failed to respond ({response.status_code} {response.reason})"
+                content=f"Error: llama.cpp failed to respond ({response.status_code} {response.reason})",
             )
 
         except requests.exceptions.RequestException as e:

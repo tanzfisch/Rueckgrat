@@ -1,7 +1,9 @@
 import json
+import re
 import hashlib
 from .common_types import ImageRequest
 from typing import Any
+from json_repair import repair_json
 
 class Utils:
 
@@ -20,3 +22,19 @@ class Utils:
                 return default
             current = current[key]
         return current
+        
+    @classmethod
+    def json_loads(cls, text: str):
+        match = re.search(r'(\{.*\}|\[.*\])', text, re.DOTALL)
+        if not match:
+            return None
+        json_str = match.group(1)
+        
+        try:
+            return json.loads(json_str)
+        except:
+            try:
+                repaired = repair_json(json_str)
+                return json.loads(repaired)
+            except:
+                return None    

@@ -1,4 +1,5 @@
 import os
+import time
 import signal
 import subprocess
 import sys
@@ -29,12 +30,13 @@ class Speech:
         speech_task_path = f"{os.getcwd()}/app/speech/speech_task.py"
 
         if interface == "piper":
-            model_path = Path(f"models/{model}/{model}.onnx")
+            model_path = Path(f"models/{model}")
+            model_file_path = Path(f"models/{model}/{model}.onnx")
             if not model_path.exists():
-                Backend.get_instance().get_model(model)
+                Backend.get_instance().get_model(model, model_path)
 
             proc = subprocess.Popen(
-                [sys.executable, speech_task_path, "--interface", interface, "--text", text, "--model", model_path],
+                [sys.executable, speech_task_path, "--interface", interface, "--text", text, "--model", model_file_path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )

@@ -3,14 +3,14 @@ from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtCore import Qt, QSize, Signal
 from app.utils import Contact
 from pathlib import Path
-from .settings import SettingsDialog
 
 class ContactHeader(QWidget):
     go_back = Signal()
     open_profile = Signal()
 
-    def __init__(self, selected_contact: bool=True, back_button: bool=True, parent=None):
+    def __init__(self, navigator, selected_contact: bool=True, back_button: bool=True, parent=None):
         super().__init__(parent)
+        self.navigator = navigator
 
         layout = QHBoxLayout(self)
         layout.setAlignment(Qt.AlignLeft)
@@ -63,4 +63,4 @@ class ContactHeader(QWidget):
         self.go_back.emit()
 
     def handle_open_menu(self):
-        SettingsDialog.open()
+        self.navigator("settings")

@@ -1,6 +1,16 @@
 Changelog
 =========
 
+0.5.0
+-----
+
+- #43 introducing user profile data
+- #48 added simple progress page after contact gen
+- #31 refactored endpoints
+- #55 fixed download logic after endpoints change
+- #58 auto remove formatting when pasting text
+- handling of thinking responses
+
 0.4.1
 -----
 
@@ -11,7 +21,7 @@ Changelog
 
 - #38 generate new context for each new conversation
 - #32 improved resource handling
-- removed DEV_MODE again
+removed DEV_MODE again
 - #17 working on discovery and decided to stick with simple config file
 - #22 added image overlay
 - #41 improve context update for better consistency, each new conversation begins with a randomized context
@@ -26,9 +36,9 @@ Changelog
 - #37 added code workspace
 - #5  added settings menu for client
 - #28 improved some of the existing contact templates
-- added script to deploy docker image to remote location
-- some refactor across the board
-- some improvements to image generation prompts
+added script to deploy docker image to remote location
+some refactor across the board
+some improvements to image generation prompts
 
 0.2.0
 -----
@@ -36,9 +46,9 @@ Changelog
 - #3 image generation embedded in conversation
 - #13 added common module to share code amongst applications
 - #8 introduction of nested jobs processing user requests
-- improved context generation to reduce size (#1)
+improved context generation to reduce size (- #1)
 - #19 reduced complexity in text classification
-- improved promts for image, text and and context generation
-- improved handling of image downloads
-- improved bubbles layout for different aspect ratios of images
-- added seed to llama.cpp interface
+improved promts for image, text and and context generation
+improved handling of image downloads
+improved bubbles layout for different aspect ratios of images
+added seed to llama.cpp interface

@@ -1,5 +1,5 @@
 import random
-from typing import Dict, Any
+from typing import Dict, Any, Union, List
 from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QVBoxLayout
 from PySide6.QtCore import Signal, QSize
 from PySide6.QtGui import QIcon
@@ -10,7 +10,7 @@ logger = Logger(__name__).get_logger()
 class RowSelector(QWidget):
     selection_changed = Signal(str)
 
-    def __init__(self, options: Dict[str, Any], image_only: bool = True, max_columns = 5, parent=None):
+    def __init__(self, options: Union[Dict[str, Any], List[str]], image_only: bool = True, max_columns = 5, parent=None):
         super().__init__(parent)
 
         self.buttons = []
@@ -20,35 +20,60 @@ class RowSelector(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0,0,0,0)
 
-        for name, image in options.items():
-            if column >= max_columns:
-                container = QWidget()
-                layout.addWidget(container)
-                row = QHBoxLayout(container)
-                row.setContentsMargins(0,0,0,0)
-                column = 0
+        if isinstance(options, dict):
+            for name, image in options.items():
+                if column >= max_columns:
+                    container = QWidget()
+                    layout.addWidget(container)
+                    row = QHBoxLayout(container)
+                    row.setContentsMargins(0,0,0,0)
+                    column = 0
 
-            button = QPushButton()
+                button = QPushButton()
 
-            if image != "":
-                button.setIcon(QIcon(image))
-                button.setIconSize(QSize(40, 40))
-                if not image_only:
+                if image != "":
+                    button.setIcon(QIcon(image))
+                    button.setIconSize(QSize(40, 40))
+                    if not image_only:
+                        button.setText(name)
+                else:
                     button.setText(name)
-            else:
+
+                button.setProperty("value", name)
+
+
+                button.setCheckable(True)
+                    
+                button.clicked.connect(self.make_handler(button))
+                self.buttons.append(button)
+
+                row.addWidget(button)
+
+                column += 1
+        elif isinstance(options, list):
+            for name in options:
+                if column >= max_columns:
+                    container = QWidget()
+                    layout.addWidget(container)
+                    row = QHBoxLayout(container)
+                    row.setContentsMargins(0,0,0,0)
+                    column = 0
+
+                button = QPushButton()
+
                 button.setText(name)
+                button.setProperty("value", name)
+                button.setCheckable(True)
+                    
+                button.clicked.connect(self.make_handler(button))
+                self.buttons.append(button)
 
-            button.setProperty("value", name)
+                row.addWidget(button)
 
+                column += 1
+        else:
+            logger.error("invalid parameter type")
 
-            button.setCheckable(True)
-                
-            button.clicked.connect(self.make_handler(button))
-            self.buttons.append(button)
-
-            row.addWidget(button)
-
-            column += 1
 
     def update_images(self, options: Dict[str, Any]):
         for name, image in options.items():

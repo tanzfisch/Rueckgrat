@@ -10,12 +10,22 @@ from app.common import Logger, ChatRequest, Utils
 logger = Logger(__name__).get_logger()
 
 class MetaJob(Job):
-    def __init__(self, request: ChatRequest, db, infrastructure):
+    def __init__(self, user_id: int, request: ChatRequest, db, infrastructure):
         super().__init__()
+        self.user_id = user_id
         self.request = request
         self.db = db
         self.infrastructure = infrastructure     
 
+    def cleanup_content(self, content: str) -> str:
+        content = content.replace("<IMG_AI>", "").strip()
+        content = content.replace("IMG_AI", "").strip()
+        content = content.replace("<IMG_USR>", "").strip()
+        content = content.replace("IMG_USR", "").strip()
+        content = content.replace("<IMG_GRP>", "").strip()
+        content = content.replace("IMG_GRP", "").strip()
+        return content
+    
     def execute(self) -> None:
         self.response = {}
 
@@ -24,8 +34,8 @@ class MetaJob(Job):
 
         try:
             logger.debug("execute meta job")
-            mood_gen = False
-            group_gen = False
+            img_ai = False
+            img_usr = False
 
             logger.debug("classify...")
             classify = ClassificationJob(self.request.content)
@@ -64,16 +74,22 @@ class MetaJob(Job):
                 chat_job = ChatJob(self.request, self.db, self.infrastructure)
                 self.create_and_add(chat_job)
                 self.wait_for([chat_job])
+
                 content = chat_job.result()["content"]
 
                 if not "image_generation_request" in classifications: # one image is enough
-                    if "MOOD_GEN" in content:
-                        content = content.replace("MOOD_GEN", "").strip()
-                        mood_gen = True
-                    elif "GROUP_GEN" in content:
-                        content = content.replace("GROUP_GEN", "").strip()
-                        group_gen = True
-                        mood_gen = True
+                    if "IMG_AI" in content:
+                        img_ai = True
+                    elif "IMG_USR" in content:
+                        # TODO this currently does not work well
+                        img_ai = True
+                        #img_usr = True
+                    elif "IMG_GRP" in content:
+                        # TODO this currently does not work well
+                        img_ai = True
+                        #img_usr = True
+
+                content = self.cleanup_content(content)
 
                 # update db
                 if "image_generation_request" in classifications:
@@ -87,13 +103,25 @@ class MetaJob(Job):
                 
                 logger.debug("assistant response generated")
 
-            if mood_gen:
+            if img_ai or img_usr:
                 logger.debug("generate mood image...")
+
+                width = 720
+                height = 1280
+                if img_ai and img_usr:
+                    width = 1280
+                    height = 720
+
                 assistant_image_job = AssistantImageJob(
+                    user_id = self.user_id,
                     contact_id = self.request.contact_id,
                     conversation_id = self.request.conversation_id, 
                     db = self.db, 
-                    infrastructure = self.infrastructure
+                    infrastructure = self.infrastructure,
+                    show_assistant = img_ai,
+                    show_user = img_usr,
+                    width = width,
+                    height = height
                 )
                 self.create_and_add(assistant_image_job)
                 self.wait_for([assistant_image_job])

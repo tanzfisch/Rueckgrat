@@ -35,11 +35,6 @@ class UpdateContextJob(Job):
         text = re.sub(r"`.*?`", "", text)
         return text.strip()
     
-    def _remove_nothing(self, text):
-        text = text.replace("none", "")
-        text = text.replace("nothing", "")
-        return text
-
     def _update_context(self, context: str, messages: list):
         try:
             messages_block = "\n".join([
@@ -174,47 +169,38 @@ Return ONLY valid JSON in the same format.
             logger.error(f"failed to build query {repr(e)}")            
         
         response_content = self.infrastructure.chat(payload, 0.4, random.randint(0, 100000), True)
-        if response_content:
-            match = re.search(r"```json\s*(.*?)\s*```", response_content, re.DOTALL)
-            if not match:
-                logger.error("failed to generate new context")
-                return context
-            
-            result = match.group(1)
-            result = self._remove_nothing(result)
-            
-            try:                
-                reply = json.loads(result)
-            except Exception as e:
-                logger.error(f"failed to load json: {e}")      
-                logger.error("failed to generate new context.") 
-                return context    
-
-            # making sure we can guarantee a certain json structure
-            new_context = {
-                "location": Utils.get_nested_value(reply, ["location"], "unknown"),
-                "topic": Utils.get_nested_value(reply, ["topic"], "unknown"),
-                "summary": Utils.get_nested_value(reply, ["summary"], ""),
-
-                "user": {
-                    "action": Utils.get_nested_value(reply, ["user", "action"], ""),
-                    "head": Utils.get_nested_value(reply, ["user", "head"], ""),
-                    "upper_body": Utils.get_nested_value(reply, ["user", "upper_body"], "casual t-shirt"),
-                    "body": Utils.get_nested_value(reply, ["user", "body"], "jeans and comfortable shoes"),
-                },
-
-                "assistant": {
-                    "action": Utils.get_nested_value(reply, ["assistant", "action"], ""),
-                    "head": Utils.get_nested_value(reply, ["assistant", "head"], ""),
-                    "upper_body": Utils.get_nested_value(reply, ["assistant", "upper_body"], "casual t-shirt"),
-                    "body": Utils.get_nested_value(reply, ["assistant", "body"], "jeans and comfortable shoes"),
-                }
-            }
-
-            logger.debug(f"new context:\n{json.dumps(new_context, indent=4)}")
-
-            return new_context
-        else:
+        if not response_content:
             logger.warning(f"failed to update context")
             return context
+        
+        reply = Utils.json_loads(response_content)
+        if not reply:
+            logger.error(f"failed to generate new context from:\n{response_content}") 
+            return context
+
+        # making sure we can guarantee a certain json structure
+        new_context = {
+            "location": Utils.get_nested_value(reply, ["location"], "unknown"),
+            "topic": Utils.get_nested_value(reply, ["topic"], "unknown"),
+            "summary": Utils.get_nested_value(reply, ["summary"], ""),
+
+            "user": {
+                "action": Utils.get_nested_value(reply, ["user", "action"], ""),
+                "head": Utils.get_nested_value(reply, ["user", "head"], ""),
+                "upper_body": Utils.get_nested_value(reply, ["user", "upper_body"], "casual t-shirt"),
+                "body": Utils.get_nested_value(reply, ["user", "body"], "jeans and comfortable shoes"),
+            },
+
+            "assistant": {
+                "action": Utils.get_nested_value(reply, ["assistant", "action"], ""),
+                "head": Utils.get_nested_value(reply, ["assistant", "head"], ""),
+                "upper_body": Utils.get_nested_value(reply, ["assistant", "upper_body"], "casual t-shirt"),
+                "body": Utils.get_nested_value(reply, ["assistant", "body"], "jeans and comfortable shoes"),
+            }
+        }
+
+        logger.debug(f"new context:\n{json.dumps(new_context, indent=4)}")
+
+        return new_context
+
     

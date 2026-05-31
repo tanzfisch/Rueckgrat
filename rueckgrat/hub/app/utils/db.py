@@ -76,16 +76,18 @@ class ChatDB:
         """)
 
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_messages_conversation
-            ON messages(conversation_id, timestamp)
-        """)        
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )""")
 
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            CREATE TABLE IF NOT EXISTS user_data (
+            user_id INTEGER PRIMARY KEY,
+            profile TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
 
         conn.commit()
@@ -165,6 +167,70 @@ class ChatDB:
             cursor = conn.cursor()
             cursor.execute("SELECT id, username, created_at FROM users")
             return [dict(row) for row in cursor.fetchall()]        
+
+    def create_user_data(self, user_id: int, profile: str = None) -> bool:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO user_data (user_id, profile) VALUES (?, ?)",
+                    (user_id, profile)
+                )
+                conn.commit()
+                return True
+            except sqlite3.IntegrityError:
+                return False
+        
+    def update_user_data(self, user_id: int, user_data: dict):
+        allowed_fields = ["profile"]
+
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+
+                # Check if row exists
+                cursor.execute("SELECT 1 FROM user_data WHERE user_id = ?", (user_id,))
+                exists = cursor.fetchone() is not None
+
+                values = []
+                for key in allowed_fields:
+                    if key in user_data:
+                        values.append(user_data[key])
+
+                if not values:
+                    return False
+
+                if exists:
+                    set_clause = ", ".join(f"{key} = ?" for key in allowed_fields if key in user_data)
+                    query = f"UPDATE user_data SET {set_clause} WHERE user_id = ?"
+                    values.append(user_id)
+                else:
+                    cols = ["user_id"] + [k for k in allowed_fields if k in user_data]
+                    placeholders = ["?"] * len(cols)
+                    query = f"INSERT INTO user_data ({', '.join(cols)}) VALUES ({', '.join(placeholders)})"
+                    values.insert(0, user_id)
+
+                cursor.execute(query, values)
+                conn.commit()
+                return cursor.rowcount > 0
+
+            except Exception as e:
+                logger.error(f"failed updating user data {e}")
+                return False        
+
+    def delete_user_data(self, user_id: int) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM user_data WHERE user_id = ?", (user_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_user_data(self, user_id: int) -> dict:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT profile FROM user_data WHERE user_id = ?", (user_id,))
+            row = cursor.fetchone()
+            return {"profile": row[0]} if row else None
 
     def create_contact(self, user_id: int, contact_name: str) -> int:
         with self.get_connection() as conn:
@@ -307,7 +373,6 @@ class ChatDB:
                 cursor.execute(query, values)
                 conn.commit()
 
-                # Return True if a row was actually updated
                 return cursor.rowcount > 0
 
             except sqlite3.IntegrityError as e:
@@ -387,9 +452,12 @@ class ChatDB:
                         except Exception:
                             pass  # fallback to raw string if malformed
 
-                    profile = json.loads(contact["profile"])
-                    contact.pop("profile")
-                    contact["profile"] = profile
+                    if contact.get("profile"):
+                        profile = json.loads(contact["profile"])
+                        contact.pop("profile")
+                        contact["profile"] = profile
+                    else:
+                        continue
 
                     contacts.append(contact)
 
