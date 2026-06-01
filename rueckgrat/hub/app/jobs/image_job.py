@@ -10,10 +10,6 @@ class ImageJob(Job):
         self.request = request
         self.infrastructure = infrastructure
         self.response = {}
-        self.waiting_for_download = True
-
-    def on_download_finished(self):
-        self.waiting_for_download = False
 
     def execute(self) -> None:
         try:
@@ -22,12 +18,12 @@ class ImageJob(Job):
             if not image_filename:
                 logger.error("failed to generate image")
 
-            self.infrastructure.download(f"/images/{image_filename}", f"/hub/images", self.on_download_finished)
+            self.infrastructure.download(
+                source_path=f"/images/{image_filename}",
+                download_path=f"/hub/images",
+                asynchronous=False)
 
-            while self.waiting_for_download:
-                pass
-
-            self.response = { 
+            self.response = {
                 "image": {
                     "filename": image_filename
                 }

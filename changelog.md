@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.6.0
+-----
+
+- #57 added sync download for DownloadQueue
+
 0.5.0
 -----
 
@@ -9,7 +14,7 @@ Changelog
 - #31 refactored endpoints
 - #55 fixed download logic after endpoints change
 - #58 auto remove formatting when pasting text
-- handling of thinking responses
+- added handling of thinking responses
 
 0.4.1
 -----

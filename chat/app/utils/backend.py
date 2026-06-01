@@ -49,13 +49,23 @@ class Backend:
         url = f"{self.url}/downloads/{image_path}"
         self.download(url, download_path, max_retry)
 
-    def download(self, url: str, download_path: str, max_retry: int = 5):
-        self.download_queue.add(
-            url=url, 
-            download_path=download_path, 
-            access_token=self.access_token, 
-            server_cert=self.server_cert, 
-            max_retry=max_retry)
+    def download(self, url: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
+        if asynchronous:
+            self.download_queue.add(
+                url=url, 
+                download_path=download_path, 
+                access_token=self.access_token, 
+                server_cert=self.server_cert, 
+                max_retry=max_retry,
+                force_download=force_download,
+                callback=callback)
+        else:
+            self.download_queue.download(
+                url=url, 
+                download_path=download_path, 
+                access_token=self.access_token, 
+                server_cert=self.server_cert, 
+                force_download=force_download)
 
     @classmethod
     def get_instance(cls):

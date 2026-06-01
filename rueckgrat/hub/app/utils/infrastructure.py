@@ -167,10 +167,21 @@ class Infrastructure:
 
         return str(filepath)
 
-    def download(self, source_path: str, download_path: str, callback=None):
+    def download(self, source_path: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
         # todo pick correct host
         url = f"http://{self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}/downloads{source_path}"
-        self.download_queue.add(url=url, download_path=download_path, callback=callback)
+        if asynchronous:
+            self.download_queue.add(
+                url=url, 
+                download_path=download_path,
+                max_retry=max_retry,
+                force_download=force_download,
+                callback=callback)
+        else:
+            self.download_queue.download(
+                url=url, 
+                download_path=download_path, 
+                force_download=force_download)        
 
     def chat(self, messages: list, temperature: float, seed: int, low_accuracy: bool = False) -> str:
         try:
