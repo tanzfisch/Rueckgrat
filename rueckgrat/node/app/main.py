@@ -1,6 +1,6 @@
 import os
 from tqdm import tqdm
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -61,10 +61,10 @@ async def download_file(file_path: str):
     path = (base_path / file_path).resolve()
 
     if not str(path).startswith(str(base_path)):
-        return {"error": "Invalid path"}
+        raise HTTPException(status_code=400, detail="Invalid path")
 
     if not os.path.exists(path):
-        return {"error": "File not found"}
+        raise HTTPException(status_code=404, detail="File not found")
 
     file_size = os.path.getsize(path)
     filename = path.name

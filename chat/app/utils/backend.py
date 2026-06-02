@@ -581,6 +581,9 @@ class Backend:
             if response.status_code == 200:
                 data = response.json()
                 sources = data.get("model_urls", [])
+
+                logger.debug(f"found sources {sources}")
+
                 for source in sources:
                     self.download(
                         url=source,

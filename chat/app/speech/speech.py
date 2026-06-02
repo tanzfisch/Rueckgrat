@@ -32,7 +32,8 @@ class Speech:
         if interface == "piper":
             model_path = Path(f"models/{model}")
             model_file_path = Path(f"models/{model}/{model}.onnx")
-            if not model_path.exists():
+            model_json_file_path = Path(f"models/{model}/{model}.onnx.json")
+            if not model_file_path.exists() or not model_json_file_path.exists():
                 Backend.get_instance().get_model(model, model_path)
 
             proc = subprocess.Popen(
