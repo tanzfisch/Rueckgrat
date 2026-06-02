@@ -32,8 +32,10 @@ class ModelRegistry:
         if not url:
             for node in self.nodes:
                 test_url = f"http://{node['host']}:{node['port']}/downloads/models/{install_path}/{filename}"                
+                logger.debug(f"test url {test_url}")
                 if self._url_exists(test_url):
                     url = test_url
+                    logger.debug(f"{test_url} exists")
                     break
 
         if not url:
