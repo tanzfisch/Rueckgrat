@@ -127,8 +127,8 @@ class DownloadQueue:
             if target_filepath.exists() and force_download:
                 target_filepath.unlink(missing_ok=True)
 
-            logger.debug(f"Downloading {url} -> {target_filepath}")
-            return self._download_file(url, target_filepath, access_token, server_cert), target_filepath
+            if not self._download_file(url, target_filepath, access_token, server_cert):
+                logger.error(f"failed to download {url}")
         
         except Exception as e:
             logger.error(f"failed to download {url} {repr(e)}")
@@ -141,25 +141,30 @@ class DownloadQueue:
         if filepath.exists():
             return True
 
-        response = requests.get(
-            url, 
-            stream=True,
-            headers = {
-                "Authorization": f"Bearer {access_token}"
-            },             
-            verify=server_cert
-        )
-        response.raise_for_status()
+        try:
+            response = requests.get(
+                url, 
+                stream=True,
+                headers = {
+                    "Authorization": f"Bearer {access_token}"
+                },             
+                verify=server_cert
+            )
+            response.raise_for_status()
 
-        content_type = response.headers.get("Content-Type", "")
-        if "application/json" in content_type:
-            try:
-                data = response.json()
-                if "error" in data:
+            content_type = response.headers.get("Content-Type", "")
+            if "application/json" in content_type:
+                try:
+                    data = response.json()
+                    if "error" in data:
+                        return False
+                except ValueError:
                     return False
-            except ValueError:
-                return False
-
+                
+        except Exception as e:
+            logger.error(f"failed to download {url} {repr(e)}")
+            return False
+        
         total_size = int(response.headers.get("content-length", 0))
 
         with open(filepath, "wb") as file:
