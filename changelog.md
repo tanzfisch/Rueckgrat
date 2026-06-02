@@ -5,6 +5,7 @@ Changelog
 -----
 
 - #57 added sync download for DownloadQueue
+- #56 improved model download
 
 0.5.0
 -----
