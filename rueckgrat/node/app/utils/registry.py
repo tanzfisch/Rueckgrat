@@ -5,7 +5,10 @@ from urllib.parse import urlparse
 from pathlib import Path
 from tqdm import tqdm
 
-INFRASTRUCTURE_CONFIG_PATH = Path("node/config/infrastructure.json")
+from app.common import Logger
+logger = Logger(__name__).get_logger()
+
+INFRASTRUCTURE_CONFIG_PATH = Path("/node/config/infrastructure.json")
 
 class ModelRegistry:
 
@@ -17,28 +20,29 @@ class ModelRegistry:
         self._load_registry()
         self._load_infrastructure()        
 
-    def find_valid_url(self, source_url: str, install_path: str, alternative_source: str=None):
+    def find_valid_url(self, source_url: str, install_path: str, alternative_server: str=None):
         filename = Path(source_url).name
         url = None
 
-        if alternative_source:
-            test_url = f"http://{alternative_source}/download/models/{install_path}/{filename}"
-            if self._url_exists(test_url):
+        if alternative_server:
+            test_url = f"http://{alternative_server}/downloads/models/{install_path}/{filename}"
+            if self._url_exists(test_url):                
                 url = test_url
 
         if not url:
             for node in self.nodes:
-                test_url = f"http://{node['host']}:{node['port']}/download/models/{install_path}/{filename}"
+                test_url = f"http://{node['host']}:{node['port']}/downloads/models/{install_path}/{filename}"                
                 if self._url_exists(test_url):
                     url = test_url
+                    break
 
         if not url:
             if self._url_exists(source_url):
                 url = source_url
-
+                
         return url
 
-    def get_urls(self, model_name: str, alternative_source: str=None):
+    def get_urls(self, model_name: str, alternative_server: str=None):
         model_cfg = self.get_model_cfg(model_name)
         if not model_cfg:
             print(f"Error: model \"{model_name}\" not registered")
@@ -50,14 +54,13 @@ class ModelRegistry:
         result = []
 
         for source_url in sources:
-            url = self.find_valid_url(source_url, install_path, alternative_source)
+            url = self.find_valid_url(source_url, install_path, alternative_server)
             if url:
                 result.append(url)
 
         return result
 
-
-    def install_model(self, model_name: str, alternative_source: str=None, force_install: bool=False):
+    def install_model(self, model_name: str, alternative_server: str=None, force_install: bool=False):
         model_cfg = self.get_model_cfg(model_name)
         if not model_cfg:
             print(f"Error: model \"{model_name}\" not registered")
@@ -67,7 +70,7 @@ class ModelRegistry:
         install_path=model_cfg["install_path"]
 
         for source_url in sources:
-            url = self.find_valid_url(source_url, install_path, alternative_source)
+            url = self.find_valid_url(source_url, install_path, alternative_server)
 
             if not url:
                 print(f"Error: can't find download source for {model_name}")
@@ -141,9 +144,6 @@ class ModelRegistry:
 
     def _url_exists(self, url):
         try:
-            r = requests.head(url, allow_redirects=True, timeout=5)
-            if r.status_code < 400:
-                return True
             r = requests.get(url, stream=True, timeout=5)
             return r.status_code < 400
         except requests.RequestException:

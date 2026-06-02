@@ -65,7 +65,8 @@ class Backend:
                 download_path=download_path, 
                 access_token=self.access_token, 
                 server_cert=self.server_cert, 
-                force_download=force_download)
+                force_download=force_download
+            )
 
     @classmethod
     def get_instance(cls):
@@ -581,7 +582,11 @@ class Backend:
                 data = response.json()
                 sources = data.get("model_urls", [])
                 for source in sources:
-                    self.download(source, model_path)
+                    self.download(
+                        url=source,
+                        download_path=model_path,
+                        asynchronous=False
+                    )
                 
             else:
                 logger.error(f"get_model - {response.status_code} {response.reason}")
