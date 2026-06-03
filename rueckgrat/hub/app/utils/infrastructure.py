@@ -183,15 +183,16 @@ class Infrastructure:
                 download_path=download_path, 
                 force_download=force_download)        
 
-    def chat(self, messages: list, temperature: float, seed: int, low_accuracy: bool = False) -> str:
+    def chat(self, messages: list, temperature: float, seed: int, max_new_tokens: int = 512, context_size: int=8192) -> str:
         try:
             url = f"http://{self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}/chat"
             
             payload= ChatRequestLlama(
-                messages=messages, 
-                temperature=temperature, 
-                low_accuracy=low_accuracy,
-                seed=seed
+                messages=messages,
+                temperature=temperature,
+                seed=seed,
+                max_new_tokens=max_new_tokens,
+                context_size=context_size
             )
 
             response = requests.post(

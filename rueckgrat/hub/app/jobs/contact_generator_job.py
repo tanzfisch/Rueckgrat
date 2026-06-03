@@ -33,7 +33,7 @@ class ContactGeneratorJob(Job):
                 contact_id = contact_id,
                 db = self.db, 
                 infrastructure = self.infrastructure, 
-                image_type = ImageType.Portrait,
+                image_type = ImageType.UpperBody,
                 store_image_as = "profile",
                 width = 720,
                 height = 720,                
@@ -163,7 +163,7 @@ OUTPUT:
         except Exception as e:
             logger.error(f"failed to generate payload {repr(e)}")
 
-        response_content = self.infrastructure.chat(payload, 0.2, random.randint(0, 100000), True)
+        response_content = self.infrastructure.chat(payload, 0.2, random.randint(0, 100000))
         reply = Utils.json_loads(response_content)
             
         if not reply:

@@ -17,53 +17,7 @@ class LLamaCppInterface:
         return think, response
 
     def chat(self, request: ChatRequestLlama) -> ChatResponse:
-        payload_low_accuracy = {
-            "messages": request.messages,
-            "temperature": request.temperature,
-            "seed": request.seed,
-            "top_p": 0.8,
-            "top_k": 20,
-            "min_p": 0.0,
-            "do_sample": True,
-            "repetition_penalty": 1.05,
-            "no_repeat_ngram_size": 2,
-            "presence_penalty": 0.0,
-            "frequency_penalty": 0.0,
-            "typical_p": 1.0,
-            "tfs_z": 1.0,
-
-            # Disable complexity
-            "mirostat": 0,
-
-            # BIG speed gain here
-            "max_new_tokens": 100,
-            "max_tokens": 5000,
-
-            "stop": [
-                "<|start_header_id|>",
-                "<|end_header_id|>",
-                "<|im_end|>",
-                "<|im_start|>",
-                "assistant:",
-                ". assistant",
-                "\" assistant",
-                "user:",
-                ". user",
-                "\" user",
-                "\nuser",
-                "\nassistant"
-            ],
-
-            "n_ctx": 2048,
-            "rope_freq_base": 10000,
-            "rope_freq_scale": 1.0,
-            "n_batch": 128,
-
-            "num_experts_per_token": 1,
-            "stream": False
-        }
-
-        payload_high_accuracy = {
+        payload = {
             "messages": request.messages,
             "temperature": request.temperature,
             "top_p": 0.9,
@@ -80,8 +34,8 @@ class LLamaCppInterface:
             # More stable decoding
             "mirostat": 0,
 
-            "max_new_tokens": 300,
-            "max_tokens": 5000,
+            "max_new_tokens": request.max_new_tokens,
+            "max_tokens": request.context_size,
 
             "stop": [
                 "<|start_header_id|>",
@@ -98,7 +52,7 @@ class LLamaCppInterface:
                 "\nassistant"
             ],
 
-            "n_ctx": 8192,
+            "n_ctx": request.context_size,
             "rope_freq_base": 10000,
             "rope_freq_scale": 1.0,
 
@@ -107,11 +61,6 @@ class LLamaCppInterface:
             "num_experts_per_token": 2,
             "stream": False
         }
-
-        if request.low_accuracy:
-            payload = payload_low_accuracy
-        else:
-            payload = payload_high_accuracy
 
         headers = {
             "Content-Type": "application/json"
