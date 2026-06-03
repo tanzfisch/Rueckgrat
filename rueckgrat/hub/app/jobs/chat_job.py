@@ -75,7 +75,7 @@ class ChatJob(Job):
 
             response_content = self.infrastructure.chat(payload, request.temperature, request.conversation_id)
             if response_content:
-                reply = self._cleanup_reply(response_content, contact["name"])
+                reply = self._cleanup_reply(response_content, contact["identity"]["name"])
                 
                 self._update_conversation()
                 return {

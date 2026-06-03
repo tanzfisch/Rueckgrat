@@ -45,7 +45,7 @@ class MetaJob(Job):
             logger.debug(f"classifications found: {classifications}")
 
             contact = self.db.get_contact_by_id(self.request.contact_id)
-            contact_name = Utils.get_nested_value(contact, ["name"])
+            contact_name = Utils.get_nested_value(contact, ["identity", "name"])
 
             if "image_generation_request" in classifications:
                 logger.debug("generate image...")

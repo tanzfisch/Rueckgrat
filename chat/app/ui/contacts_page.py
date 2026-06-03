@@ -1,6 +1,8 @@
 import json
 
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QScrollArea, QPushButton, QHBoxLayout)
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QScrollArea, QPushButton, QHBoxLayout, QFileDialog
+)
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, QSize
 
@@ -39,9 +41,21 @@ class ContactsPage(BasePage):
     def on_leave(self):
         pass
 
-    def add_contact(self):
+    def _on_add_contact(self):
         self.navigator("profile_wizz")
 
+    def _on_import_contact(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Import Profile")
+        if path:
+            with open(path, 'r') as file:
+                try:
+                    data = json.load(file)
+                    contact_id = Backend.get_instance().create_contact()
+                    Backend.get_instance().update_contact(contact_id, data)
+                    self.navigator("contacts")
+                except Exception as e:
+                    logger.error(f"failed to load profile: {repr(e)}")
+        
     def load_contacts(self):
         # Clear existing widgets
         while self.contacts_layout.count():
@@ -52,9 +66,20 @@ class ContactsPage(BasePage):
 
         contacts = Backend.get_instance().get_contacts()
 
-        add_contact_bubble = OneLineBubble("+")
-        add_contact_bubble.clicked.connect(self.add_contact)
-        self.contacts_layout.addWidget(add_contact_bubble)
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setContentsMargins(0, 0, 0, 0)
+
+        add_btn = OneLineBubble("new")
+        add_btn.clicked.connect(self._on_add_contact)
+        buttons_layout.addWidget(add_btn)
+
+        import_btn = OneLineBubble("import")
+        import_btn.clicked.connect(self._on_import_contact)
+        buttons_layout.addWidget(import_btn)
+
+        container = QWidget()
+        container.setLayout(buttons_layout)
+        self.contacts_layout.addWidget(container)
 
         for contact_dict in contacts:
             contact = Contact(contact_dict)

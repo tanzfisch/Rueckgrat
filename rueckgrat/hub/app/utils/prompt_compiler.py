@@ -27,12 +27,20 @@ class PromptCompiler:
         style = self.profile.get('style', '')
         style = f"Your are {self._clean_text(style)}" if style != "" else ""
 
+        name = Utils.get_nested_value(self.contact, ["identity", "name"], "")
+        gender = Utils.get_nested_value(self.contact, ["identity", "gender"], "")
+        role = Utils.get_nested_value(self.contact, ["identity", "role"], "")
+        personality = self._clean_text(Utils.get_nested_value(self.contact, ["identity", "personality"], ""))
+
+        background_hook = self._clean_text(Utils.get_nested_value(self.profile, ["background_hook"], ""))
+        body_language = self._clean_text(Utils.get_nested_value(self.profile, ["body_language"], ""))
+
         return f"""
-You are {self.contact.get('name')} ({self.contact.get('gender')}).
-Your role is {self.contact.get('role')}.
-Your traits are {self._clean_text(self.contact.get('personality', ''))}
-Your background story is {self._clean_text(self.profile.get('background_hook', ''))}
-Your body language is {self._clean_text(self.profile.get('body_language', ''))}
+You are {name} ({gender}).
+Your role is {role}.
+Your traits are {personality}
+Your background story is {background_hook}
+Your body language is {body_language}
 {style}
 You are talking to {self.user_name}.
 """.strip()
