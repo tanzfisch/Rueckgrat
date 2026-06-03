@@ -5,8 +5,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui import BasePage
-from app.utils import RueckgratConfig, Backend
-from app.ui.widgets import RowSelector
+from app.utils import RueckgratConfig
+from app.ui.widgets import RowSelector, ContactHeader
 
 from common import Logger
 logger = Logger(__name__).get_logger()
@@ -102,12 +102,22 @@ class SettingsPage(BasePage):
     def __init__(self, navigator):
         super().__init__(navigator)
 
-        main_layout = QHBoxLayout(self)
+        main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20,20,20,20)
+
+        self.contact_header = ContactHeader(navigator, False, True)
+        self.contact_header.go_back.connect(self.on_go_back)
+        main_layout.addWidget(self.contact_header)        
+
+        sub_container = QWidget()
+        sub_layout = QHBoxLayout(sub_container)
+        sub_layout.setContentsMargins(20,20,20,20)
+
+        main_layout.addWidget(sub_container)
 
         selector_container = QWidget()
         selector_layout = QVBoxLayout(selector_container)
-        main_layout.addWidget(selector_container)
+        sub_layout.addWidget(selector_container)
        
         pages = ["Profile", "Network"]
 
@@ -119,7 +129,7 @@ class SettingsPage(BasePage):
         pages_container = QWidget()
         pages_layout = QVBoxLayout(pages_container)
         pages_layout.setContentsMargins(0,0,0,0)
-        main_layout.addWidget(pages_container)
+        sub_layout.addWidget(pages_container)
 
         self.stack = QStackedLayout()
         self.stack.setContentsMargins(0,0,0,0)
@@ -132,6 +142,9 @@ class SettingsPage(BasePage):
         self.stack.addWidget(self.network_page)
 
         self.stack.setCurrentWidget(self.profile_page)
+
+    def on_go_back(self):
+        self.navigator("contacts")        
 
     def on_page_changed(self, page_name: str):
         pages = {

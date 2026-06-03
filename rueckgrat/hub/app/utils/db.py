@@ -404,22 +404,17 @@ class ChatDB:
                 if not row:
                     return None
 
-                # Convert row → dict
                 contact = dict(row)
 
-                # Deserialize JSON fields
-                if contact.get("rules"):
-                    try:
-                        contact["rules"] = json.loads(contact["rules"])
-                    except Exception:
-                        # If parsing fails, return raw string as fallback
-                        pass
-
-                profile = json.loads(contact["profile"])
-                contact.pop("profile")
-                contact["profile"] = profile
-
-                return contact
+                return {
+                    "identity": {
+                        "name": contact["name"],
+                        "gender": contact["gender"],
+                        "role": contact["role"],
+                        "personality": contact["personality"]
+                    },
+                    "profile": json.loads(contact["profile"])
+                }
 
             except Exception as e:
                 logger.error(f"retrieving contact: {e}")

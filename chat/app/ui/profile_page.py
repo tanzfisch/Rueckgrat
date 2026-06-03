@@ -2,15 +2,16 @@ import json
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLineEdit, QRadioButton, QTextEdit, QPushButton, 
-    QButtonGroup, QHBoxLayout, QScrollArea
+    QButtonGroup, QHBoxLayout, QScrollArea, QFileDialog
 )
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QFont
 
 from app.ui import BasePage
+from app.ui.widgets import ContactHeader
 from app.utils import Backend
 
-from common import Logger
+from common import Logger, Utils
 logger = Logger(__name__).get_logger()
 
 class TextEdit(QTextEdit):
@@ -19,99 +20,19 @@ class TextEdit(QTextEdit):
 
         self.setObjectName("contactForm")
 
-class JsonAwareLineEdit(QLineEdit):
-    json_event = Signal(dict)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.textChanged.connect(self.on_text_changed)
-
-    def on_text_changed(self, text: str):
-        try:
-            data = json.loads(text)
-            self.json_event.emit(data)
-        except json.JSONDecodeError:
-            pass
-
-template_profile = """
-{
-    "background_hook": "former spy with disciplined thinking",
-    "body_language": "calm authority, confident posture, deliberate and precise gestures, maintains eye contact, shows engagement in conversations",
-    "style": "minimal accessories, understated elegance",
-
-    "appearance": {
-        "general": "middle age male, british",
-        "face": "brown eyes, eye glasses with thin black frame, well-groomed full-beard",
-        "hair": "short dark hair with gray at temples",
-        "skin": "",
-        "body_type": "lean build"
-    },
-
-    "objectives": {
-        "primary": "develop the student's thinking through guided exercises",
-        "secondary": [
-        "maintain engagement through challenge and curiosity",
-        "adapt difficulty dynamically",
-        "prevent passive learning"
-        ]
-    },
-
-    "interaction_style": {
-        "tone": "calm authority with subtle wit",
-        "engagement": "slightly provocative, intellectually demanding",
-        "quirks": [
-        "occasionally reference scripture or literature",
-        "dry humor",
-        "likes to tip hit hat when making a point"
-        ]
-    },
-
-    "profile_picture_context": {
-      "location": "class room",
-      "topic": "no specific topic",
-
-      "user": {
-        "action": "sitting at desk facing teacher",
-        "head": "",
-        "upper_body": "white t-shirt",
-        "body": "blue jeans, black shoes"        
-      },
-
-      "assistant": {
-        "action": "standing by the white board",
-        "fashion_head": "",
-        "fashion_upper_body": "crisp white shirt, subtle gray tie",
-        "fashion_general": "professional and classic attire, well-tailored suit in darker tones"        
-      }
-    },
-
-    "llm_parameters": {
-        "temperature": "0.15",
-        "preffered_context_size": "8000"
-    },
-
-    "image_parameters": {
-        "seed": 1337,
-        "steps": 35,
-        "cfg": 8.0,
-        "model": "default"
-    },
-    "tts_parameters": {
-        "piper_voice_model": "en_US-hfc_male-medium",
-        "kokoro_voice_type": "am_adam"
-    }
-}
-"""
-
 class ProfilePage(BasePage):
     def __init__(self, navigator):
         super().__init__(navigator)
 
-        main_layout = QVBoxLayout(self)
+        self.main_layout = QVBoxLayout(self)
+
+        self.contact_header = ContactHeader(navigator, False, True)
+        self.contact_header.go_back.connect(self.on_go_back)
+        self.main_layout.addWidget(self.contact_header)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        main_layout.addWidget(scroll)
+        self.main_layout.addWidget(scroll)
 
         container = QWidget()
         scroll.setWidget(container)
@@ -119,9 +40,8 @@ class ProfilePage(BasePage):
         self.form_layout = QFormLayout(container)
 
         # --- Name ---
-        self.name = JsonAwareLineEdit()
+        self.name = QLineEdit()
         self.name.setObjectName("contactForm")
-        self.name.json_event.connect(self.json_paste)
         self.form_layout.addRow("Name", self.name)
 
         # --- Gender ---
@@ -149,48 +69,43 @@ class ProfilePage(BasePage):
         # --- profile ---
         self.profile = TextEdit()
         self.profile.setFont(QFont("Consolas", 12))
-        self.profile.setPlainText(template_profile)
         self.form_layout.addRow("Profile", self.profile)
 
         # --- BUTTONS ---
         button_container = QWidget()
-        button_layout = QHBoxLayout(button_container)
+        main_layout = QVBoxLayout(button_container)
 
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.clicked.connect(self.cancel_form)
-        button_layout.addWidget(self.cancel_btn)
+        top_layout = QVBoxLayout()
+        main_layout.addLayout(top_layout)
 
-        self.submit_btn = QPushButton("Save Profile")
-        self.submit_btn.clicked.connect(self.save_profile)
-        button_layout.addWidget(self.submit_btn)
+        load_btn = QPushButton("Load")
+        load_btn.clicked.connect(self._on_load)
+        top_layout.addWidget(load_btn)
 
-        main_layout.addWidget(button_container)
+        export_btn = QPushButton("Export")
+        export_btn.clicked.connect(self._on_export)
+        top_layout.addWidget(export_btn)
 
-    def json_paste(self, contact):
-        if "identity" in contact:
-            identity = contact["identity"]
-            self.name.setText(self.get_value(identity, "name"))
-            self.set_gender(self.get_value(identity, "gender"))
-            self.role.setPlainText(self.get_value(identity, "role"))
-            self.personality.setPlainText(self.get_value(identity, "personality"))
+        bottom_layout = QHBoxLayout()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self._on_cancel)
+        bottom_layout.addWidget(cancel_btn)
 
-        if "profile" in contact:
-            profile = contact["profile"]
-        else:
-            profile = contact # assume just the profile part was pasted
+        submit_btn = QPushButton("Save Profile")
+        submit_btn.clicked.connect(self._on_save)
+        bottom_layout.addWidget(submit_btn)
+        main_layout.addLayout(bottom_layout)
 
-        if not profile:
-            pretty_json = template_profile
-        else:
-            pretty_json = json.dumps(profile, indent=4)
+        self.main_layout.addWidget(button_container)
 
-        self.profile.setPlainText(pretty_json)
+    def on_go_back(self):
+        self.navigator("contacts")        
 
     def clear_form(self):
         self.name.setText("")
         self.role.setPlainText("")
         self.personality.setPlainText("")
-        self.profile.setPlainText(template_profile)
+        self.profile.setPlainText("")
         self.set_gender("male")
         
     def get_value(self, dictionary, key):
@@ -200,12 +115,12 @@ class ProfilePage(BasePage):
             return ""
 
     def fill_form(self, contact):
-        self.name.setText(self.get_value(contact, "name"))
-        self.set_gender(self.get_value(contact, "gender"))
-        self.role.setPlainText(self.get_value(contact, "role"))
-        self.personality.setPlainText(self.get_value(contact, "personality"))
+        self.name.setText(Utils.get_nested_value(contact, ["identity", "name"], ""))
+        self.set_gender(Utils.get_nested_value(contact, ["identity", "gender"], ""))
+        self.role.setPlainText(Utils.get_nested_value(contact, ["identity", "role"], ""))
+        self.personality.setPlainText(Utils.get_nested_value(contact, ["identity", "personality"], ""))
 
-        data = self.get_value(contact, "profile")
+        data = Utils.get_nested_value(contact, ["profile"], "")
         pretty_json = json.dumps(data, indent=4)
         self.profile.setPlainText(pretty_json)
         
@@ -218,10 +133,24 @@ class ProfilePage(BasePage):
         contact = Backend.get_instance().get_contact(self.contact_id)
         self.fill_form(contact)
 
-    def cancel_form(self):
+    def _on_load(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Import Profile")
+        if path:
+            with open(path, 'r') as file:
+                data = json.load(file)
+                self.fill_form(data)
+
+    def _on_export(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export Profile")
+        if path:
+            with open(path, 'w') as file:
+                data = self.get_data()
+                json.dump(data, file, indent=4)
+
+    def _on_cancel(self):
         self.navigator("contacts")
 
-    def save_profile(self):
+    def _on_save(self):
         if self.contact_id == -1:
             self.contact_id = Backend.get_instance().create_contact()
 
@@ -230,7 +159,7 @@ class ProfilePage(BasePage):
         self.navigator("contacts")
 
     def on_enter(self, **kwargs):
-        self.contact_id = kwargs.get("contact_id")            
+        self.contact_id = kwargs.get("contact_id")
         self.load_profile()
 
     def on_leave(self):

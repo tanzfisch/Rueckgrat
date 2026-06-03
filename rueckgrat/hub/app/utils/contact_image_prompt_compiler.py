@@ -58,7 +58,7 @@ class ContactImagePromptCompiler:
 
             # portrait
             if self.image_type == ImageType.Portrait or self.image_type == ImageType.UpperBody or self.image_type == ImageType.FullBody:            
-                assistant_stack.append(Utils.get_nested_value(self.contact, ["gender"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.contact, ["identity", "gender"], ""))
                 assistant_stack.append(Utils.get_nested_value(self.appearance, ["general"], ""))
                 assistant_stack.append(Utils.get_nested_value(self.appearance, ["hair"], ""))
                 assistant_stack.append(Utils.get_nested_value(self.appearance, ["face"], ""))
