@@ -2,7 +2,6 @@ PySide6
 truststore
 piper-tts
 pathvalidate
-pykokoro 
 soundfile
 onnxruntime
 qasync

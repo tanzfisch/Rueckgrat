@@ -1,5 +1,4 @@
 import os
-import time
 import signal
 import subprocess
 import sys
@@ -22,33 +21,26 @@ class Speech:
                 cls._current_proc.wait()
 
     @classmethod
-    def speak(cls, text: str, interface: str="", voice: str="", model: str=""):
+    def speak(cls, text: str, model: str=""):
         if not text.strip():
             return
+        
+        #logger.debug(f"prep speach \"{text}\" with {model}")
 
         cls.kill_current_speech()
         speech_task_path = f"{os.getcwd()}/app/speech/speech_task.py"
 
-        if interface == "piper":
-            model_path = Path(f"models/{model}")
-            model_file_path = Path(f"models/{model}/{model}.onnx")
-            model_json_file_path = Path(f"models/{model}/{model}.onnx.json")
-            if not model_file_path.exists() or not model_json_file_path.exists():
-                Backend.get_instance().get_model(model, model_path)
+        model_path = Path(f"models/{model}")
+        model_file_path = Path(f"models/{model}/{model}.onnx")
+        model_json_file_path = Path(f"models/{model}/{model}.onnx.json")
+        if not model_file_path.exists() or not model_json_file_path.exists():
+            Backend.get_instance().get_model(model, model_path)
 
-            proc = subprocess.Popen(
-                [sys.executable, speech_task_path, "--interface", interface, "--text", text, "--model", model_file_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-        elif interface == "kokoro":
-            # TODO
-
-            proc = subprocess.Popen(
-                [sys.executable, speech_task_path, "--interface", interface, "--text", text, "--voice", voice],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
+        proc = subprocess.Popen(
+            [sys.executable, speech_task_path, "--text", text, "--model", model_file_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
 
         with cls._proc_lock:
             cls._current_proc = proc

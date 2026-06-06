@@ -10,11 +10,12 @@ from app.common import Logger, ChatRequest
 logger = Logger(__name__).get_logger()
 
 class ChatJob(Job):
-    def __init__(self, request: ChatRequest, db, infrastructure):
+    def __init__(self, request: ChatRequest, db, infrastructure, skills):
         super().__init__()
         self.request = request
         self.db = db
         self.infrastructure = infrastructure
+        self.skills = skills
 
     def execute(self) -> None:
         self.response = self._handle_chat_request(self.request)
@@ -39,13 +40,6 @@ class ChatJob(Job):
         conversation["title"] = new_context["topic"]
         self.db.update_conversation(self.request.conversation_id, conversation["title"], json.dumps(new_context))
 
-    def _cleanup_reply(self, reply: str, name: str):
-        prefix = f"{name}: "
-        if reply.startswith(prefix):
-            return reply.removeprefix(prefix)
-        
-        return reply
-
     def _handle_chat_request(self, request: ChatRequest):        
         try:
             # check if this is the beginning of the conversation and create a new conversation context
@@ -56,14 +50,14 @@ class ChatJob(Job):
             contact = self.db.get_contact_by_id(request.contact_id)                
             conversation = self.db.get_conversation(request.conversation_id)
 
-            compiler = PromptCompiler(contact, conversation, request.name)
+            compiler = PromptCompiler(contact, conversation, request.name, self.skills)
             system_prompt, context_prompt = compiler.build_prompt()
 
             logger.debug(f"system_prompt:\n{system_prompt}")
             logger.debug(f"context_prompt:\n{context_prompt}")
 
-            payload = [{"role": "system", "content": system_prompt}]
-            payload.append({"role": "system", "content": context_prompt})
+            payload = [{"role": "developer", "content": system_prompt}]
+            payload.append({"role": "developer", "content": context_prompt})
             
             for message in messages:
                 content = message['content']
@@ -75,19 +69,21 @@ class ChatJob(Job):
 
             response_content = self.infrastructure.chat(payload, request.temperature, request.conversation_id)
             if response_content:
-                reply = self._cleanup_reply(response_content, contact["identity"]["name"])
+                tool_calls, content = self.skills.extract_tool_calls(response_content)
                 
                 self._update_conversation()
                 return {
                     "conversation_id": request.conversation_id,
                     "role": "assistant",
-                    "content": reply
+                    "content": content,
+                    "tool_calls": tool_calls
                 }
             else:
                 return {
                     "conversation_id": request.conversation_id,
                     "role": "error",
-                    "content": "failed to get chat response"
+                    "content": "failed to get chat response",
+                    "tool_calls": []
                 }
             
         except Exception as e:

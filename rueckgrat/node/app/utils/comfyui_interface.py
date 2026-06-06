@@ -153,7 +153,8 @@ class ComfyUIInterface:
             return True
 
     def _queue_prompt(self, prompt):
-        logger.debug(f"generate image:\n{json.dumps(prompt, indent=4)}")
+        dumped = json.dumps(prompt, indent=4).replace('\\n', '\n')
+        logger.debug(f"generate image:\n{dumped}")
         payload = {"prompt": prompt, "client_id": self.client_id}
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(self.url_prompt, data=data, headers={'Content-Type': 'application/json'})

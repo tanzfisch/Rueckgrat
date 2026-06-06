@@ -159,7 +159,7 @@ OUTPUT:
 - keep each entry close to the lenght in the example
 """
             logger.debug(f"contact generator query:\n{query}")
-            payload = [{"role": "system", "content": query}]
+            payload = [{"role": "developer", "content": query}]
         except Exception as e:
             logger.error(f"failed to generate payload {repr(e)}")
 
