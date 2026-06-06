@@ -1,15 +1,18 @@
 import re
+import os
 from typing import Dict, Any, List
+from .skills import Skills
 
 from app.common import Logger, Utils
 logger = Logger(__name__).get_logger()
 
 class PromptCompiler:
-    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_name: str = None):
+    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_name: str = None, skills = None):
         self.contact = contact
         self.conversation = conversation
         self.user_name = user_name
         self.profile = contact.get("profile", {})
+        self.skills = skills
 
         self.context = Utils.get_nested_value(conversation, ["context"], "")
 
@@ -116,7 +119,12 @@ You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_bo
 TOOLS:
 - You can take a picture of yourself, the user or both together in the current situation by including one of the following tags IMG_AI, IMG_USR or IMG_GRP at the end of your response. Use this if it helps improving communication.
 """
-
+    
+    def _build_skills(self) -> str:
+        if self.skills:
+            return self.skills.get_skills_text()
+        else:
+            return ""
 
     def build_prompt(self) -> str:
         sections = [
@@ -124,7 +132,7 @@ TOOLS:
             self._build_behavior(),
             self._build_style(),
             self._build_objectives(),
-            self._build_tools()
+            self._build_skills()
         ]
 
         system_prompt = "\n\n".join(sections)

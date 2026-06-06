@@ -138,12 +138,9 @@ class ChatPage(BasePage):
 
         if self.contact.get_gender() == "male":
             default_piper = "en_US-hfc_male-medium"
-            default_kokoro = "af_adam"
         else:
             default_piper = "en_US-libritts_r-medium"
-            default_kokoro = "af_bella"
 
-        self.kokoro_voice=default_kokoro # TODOself.contact.get("kokoro_voice_type") or default_kokoro
         self.piper_model=self.contact.get_voice_model() or default_piper
 
         self.temperature = float(self.contact.get_llm_temperature())
@@ -227,7 +224,10 @@ class ChatPage(BasePage):
         scrollbar.setValue(scrollbar.maximum())
 
     def replay(self):
-        Speech.speak(self._cleanup_for_speech(self.replay_content), voice=self.kokoro_voice, model=self.piper_model, interface="piper")
+        Speech.speak(
+            text=self._cleanup_for_speech(self.replay_content), 
+            model=self.piper_model
+        )
 
     def _remove_excess_linebreaks(self, text: str) -> str:
         code_block_pattern = r"```.*?```"
@@ -271,18 +271,21 @@ class ChatPage(BasePage):
                     content = self._cleanup_content(chat["content"])
                     role = chat["role"]
 
-                    if "assistant_image" in msg:
-                        image = msg["assistant_image"]
+                    if "take_photo" in msg:
+                        image = msg["take_photo"]
                         image_path = Path("cache/images") / image["filename"]
                         self.append_history(role, content, image_path)
-                    elif "image" in msg:
-                        image = msg["image"]
+                    elif "generate_image" in msg:
+                        image = msg["generate_image"]
                         image_path = Path("cache/images") / image["filename"]
                         self.append_history(role, content, image_path)
                     else:
                         self.append_history(role, content)
                 
-                Speech.speak(self._cleanup_for_speech(content), voice=self.kokoro_voice, model=self.piper_model, interface="piper")
+                Speech.speak(
+                    text=self._cleanup_for_speech(content), 
+                    model=self.piper_model
+                )
         except Exception as e:
             logger.error(f"failed to handle incomming message {e}")
 

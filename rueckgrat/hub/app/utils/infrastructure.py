@@ -137,7 +137,7 @@ class Infrastructure:
 
         return self._download_file(url, target_filepath)
 
-    def image(self, image_request: ImageRequest) -> tuple[str, int]:
+    def image(self, image_request: ImageRequest) -> str:
         if not self.node_with_text_to_image:
             logger.error("no text to image generator available")
             return None
@@ -203,7 +203,7 @@ class Infrastructure:
         
             if response.status_code == 200:
                 data = response.json()
-                return data.get("content", [])
+                return data.get("content", "")
 
         except Exception as e:
             logger.error(f"failed to get a chat response {repr(e)}")

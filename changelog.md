@@ -7,6 +7,7 @@ Changelog
 - #57 added sync download for DownloadQueue
 - #56 improved model download
 - #49 replace llama.cpp service with docker model runner
+- #62 rethinking tools, skills and jobs
 
 0.5.0
 -----
