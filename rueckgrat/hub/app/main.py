@@ -220,7 +220,7 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
         contact_id = contact_id,
         db = app.state.db, 
         infrastructure = app.state.infrastructure, 
-        image_type = ImageType.Portrait,
+        image_type = ImageType.UpperBody,
         store_image_as = "profile",
         width = 720,
         height = 720,                
