@@ -72,12 +72,12 @@ class Infrastructure:
         if not self.node_with_text_to_text:
             logger.error("couldn't find text_to_text generator in config")
         else:
-            logger.info(f"found text_to_text generator at {self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}")
+            logger.debug(f"found text_to_text generator at {self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}")
 
         if not self.node_with_text_to_image:
             logger.warning("couldn't find text_to_image generator in config")
         else:
-            logger.info(f"found text_to_image generator at {self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}")
+            logger.debug(f"found text_to_image generator at {self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}")
 
         self.download_queue = DownloadQueue()
 
@@ -148,7 +148,7 @@ class Infrastructure:
             response = requests.post(
                 url_image_request,
                 json=image_request.model_dump(),
-                timeout=120,
+                timeout=240,
             )
         
             if response.status_code == 200:
@@ -198,7 +198,7 @@ class Infrastructure:
             response = requests.post(
                 url,
                 json=payload.model_dump(),
-                timeout=120,
+                timeout=240,
             )
         
             if response.status_code == 200:

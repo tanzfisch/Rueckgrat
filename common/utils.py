@@ -2,7 +2,7 @@ import json
 import re
 import hashlib
 from .common_types import ImageRequest
-from typing import Any
+from typing import Dict, Any, Union
 from json_repair import repair_json
 
 class Utils:
@@ -38,3 +38,12 @@ class Utils:
                 return json.loads(repaired)
             except:
                 return None    
+            
+    @classmethod
+    def pretty_print(cls, data: Union[Dict[str, Any], str]):
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                return data
+        return json.dumps(data, indent=4).replace('\\n', '\n')

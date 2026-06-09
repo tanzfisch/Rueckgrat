@@ -1,5 +1,6 @@
 import requests
 import re
+import json
 
 from app.common import Logger, ChatRequestLlama, ChatResponse
 logger = Logger(__name__).get_logger()
@@ -71,7 +72,7 @@ class LLamaCppInterface:
                 self.url,
                 json=payload,
                 headers=headers,
-                timeout=120
+                timeout=240
             )
 
             response.raise_for_status()    
@@ -86,13 +87,10 @@ class LLamaCppInterface:
                     think = think
                 )
 
-            return ChatResponse(
-                role="error",
-                content=f"Error: llama.cpp failed to respond ({response.status_code} {response.reason})",
-            )
-
+            return ChatResponse(role="error", content=f"llama.cpp error: {response.status_code} {response.reason}")
         except requests.exceptions.RequestException as e:
-            return ChatResponse(
-                role="error",
-                content=f"Error: llama.cpp failed to respond - {e}"
-            )
+            return ChatResponse(role="error", content=f"Request failed: {str(e)}")
+        except (KeyError, IndexError, json.JSONDecodeError) as e:
+            return ChatResponse(role="error", content=f"Invalid response: {str(e)}")
+        except Exception as e:
+            return ChatResponse(role="error", content=f"Unexpected error: {str(e)}")

@@ -1,18 +1,17 @@
 import re
-import os
 from typing import Dict, Any, List
-from .skills import Skills
+from app.tools.tool_registry import ToolRegistry
 
 from app.common import Logger, Utils
 logger = Logger(__name__).get_logger()
 
 class PromptCompiler:
-    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_name: str = None, skills = None):
+    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_name: str = None, tool_registry: ToolRegistry = None):
         self.contact = contact
         self.conversation = conversation
         self.user_name = user_name
         self.profile = contact.get("profile", {})
-        self.skills = skills
+        self.tool_registry = tool_registry
 
         self.context = Utils.get_nested_value(conversation, ["context"], "")
 
@@ -115,16 +114,16 @@ You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_bo
 """.strip()
 
     def _build_tools(self) -> str:
-        return f"""
-TOOLS:
-- You can take a picture of yourself, the user or both together in the current situation by including one of the following tags IMG_AI, IMG_USR or IMG_GRP at the end of your response. Use this if it helps improving communication.
-"""
-    
-    def _build_skills(self) -> str:
-        if self.skills:
-            return self.skills.get_skills_text()
+        if self.tool_registry:
+            return self.tool_registry.get_tools_prompt()
         else:
             return ""
+
+    def _build_instructions(self) -> str:
+        return """
+INSTRUCTIONS:
+* When you see a WEBSEARCH_RESULT section, use it as sources to back your final answer. Do not invent facts or stories.
+"""
 
     def build_prompt(self) -> str:
         sections = [
@@ -132,7 +131,8 @@ TOOLS:
             self._build_behavior(),
             self._build_style(),
             self._build_objectives(),
-            self._build_skills()
+            self._build_tools(),
+            self._build_instructions()
         ]
 
         system_prompt = "\n\n".join(sections)

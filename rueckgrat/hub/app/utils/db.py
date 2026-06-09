@@ -8,7 +8,7 @@ class ChatDB:
     def __init__(self, db_path):
         self.db_path = db_path
 
-        logger.info(f"db path is: {db_path}")
+        logger.debug(f"db path is: {db_path}")
         conn = self.get_connection()
         cursor = conn.cursor()
 

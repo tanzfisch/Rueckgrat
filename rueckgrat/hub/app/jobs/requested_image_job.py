@@ -45,7 +45,7 @@ class RequestedImageJob(Job):
             image_request.output = self.output_file
 
             image_job = ImageJob(image_request, self.infrastructure)
-            self.create_and_add(image_job)
+            self.add_sub_job(image_job)
             self.wait_for([image_job])
 
             self.response = image_job.result()

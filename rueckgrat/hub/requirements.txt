@@ -11,3 +11,5 @@ wsproto
 tqdm
 scikit-learn
 json-repair
+bs4
+tldextract

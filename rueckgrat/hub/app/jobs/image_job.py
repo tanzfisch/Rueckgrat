@@ -14,18 +14,20 @@ class ImageJob(Job):
     def execute(self) -> None:
         try:
             image_filename = self.infrastructure.image(self.request)
+            image_path = f"images/{image_filename}"
 
             if not image_filename:
                 logger.error("failed to generate image")
 
             self.infrastructure.download(
-                source_path=f"/images/{image_filename}",
+                source_path=f"/{image_path}", # todo why the extra /
                 download_path=f"/hub/images",
                 asynchronous=False)
 
             self.response = {
                 "image": {
-                    "filename": image_filename
+                    "filename": image_filename,
+                    "image_path": image_path
                 }
             }
         except Exception as e:
