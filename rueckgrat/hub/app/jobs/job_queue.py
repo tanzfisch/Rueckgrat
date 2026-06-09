@@ -20,12 +20,11 @@ class Job(ABC):
         if dep not in self._dependencies:
             self._dependencies.append(dep)
 
-    def create_and_add(self, new_job: "Job"):
+    def add_sub_job(self, new_job: "Job"):
         if self._queue is None:
             raise RuntimeError("queue no available")
         self._queue.add(new_job)
         self.add_dependency(new_job)
-        logger.debug(f"added new job {type(new_job).__name__}")
 
     def wait_for(self, jobs: List["Job"], timeout: Optional[float] = None) -> bool:
         if not jobs:
@@ -57,6 +56,14 @@ class JobQueue:
     def add(self, job: Job):
         job._queue = self
         self.queue.put(job)
+
+    def run(self, job: Job) -> bool:
+        job._queue = self
+        try:
+            self._execute_job(job)
+            return True
+        except Exception:
+            return False
 
     def _run(self):
         while not self._stop.is_set():

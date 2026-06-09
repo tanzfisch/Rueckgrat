@@ -10,12 +10,13 @@ from app.common import Logger, ChatRequest
 logger = Logger(__name__).get_logger()
 
 class ChatJob(Job):
-    def __init__(self, request: ChatRequest, db, infrastructure, skills):
+    def __init__(self, request: ChatRequest, db, infrastructure, tool_registry, tool_outputs = None):
         super().__init__()
         self.request = request
         self.db = db
         self.infrastructure = infrastructure
-        self.skills = skills
+        self.tool_registry = tool_registry
+        self.tool_outputs = tool_outputs
 
     def execute(self) -> None:
         self.response = self._handle_chat_request(self.request)
@@ -24,15 +25,13 @@ class ChatJob(Job):
         return self.response
     
     def _remove_code(self, text):
-        # Remove triple backtick code blocks
         text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
-        # Remove inline backtick code
         text = re.sub(r"`.*?`", "", text)
         return text.strip()
 
     def _update_conversation(self):
         udate_context_job = UpdateContextJob(self.request, self.db, self.infrastructure)
-        self.create_and_add(udate_context_job)
+        self.add_sub_job(udate_context_job)
         self.wait_for([udate_context_job])
         new_context = udate_context_job.result()
     
@@ -42,15 +41,17 @@ class ChatJob(Job):
 
     def _handle_chat_request(self, request: ChatRequest):        
         try:
-            # check if this is the beginning of the conversation and create a new conversation context
             messages = self.db.get_messages_by_conversation(request.conversation_id, 10)
-            if len(messages) < 2:
-                self._update_conversation()
 
-            contact = self.db.get_contact_by_id(request.contact_id)                
+            if not self.tool_outputs:
+                # check if this is the beginning of the conversation and create a new conversation context
+                if len(messages) < 2:
+                    self._update_conversation()
+
+            contact = self.db.get_contact_by_id(request.contact_id)
             conversation = self.db.get_conversation(request.conversation_id)
 
-            compiler = PromptCompiler(contact, conversation, request.name, self.skills)
+            compiler = PromptCompiler(contact, conversation, request.name, self.tool_registry if not self.tool_outputs else None)
             system_prompt, context_prompt = compiler.build_prompt()
 
             logger.debug(f"system_prompt:\n{system_prompt}")
@@ -63,13 +64,17 @@ class ChatJob(Job):
                 content = message['content']
                 payload.append({"role": message["role"], "content": content})
 
+            if self.tool_outputs:
+                logger.debug("adding tool outputs to chat query")
+                payload.append({"role": "developer", "content": self.tool_outputs})
+
             size_in_bytes = sys.getsizeof(messages)
             estimated_tokens = size_in_bytes / 4 * 1.25
             logger.debug(f"request from {request.name} estimated token size: {estimated_tokens / 1000}k")
 
             response_content = self.infrastructure.chat(payload, request.temperature, request.conversation_id)
             if response_content:
-                tool_calls, content = self.skills.extract_tool_calls(response_content)
+                tool_calls, content = self.tool_registry.extract_tool_calls(response_content)
                 
                 self._update_conversation()
                 return {

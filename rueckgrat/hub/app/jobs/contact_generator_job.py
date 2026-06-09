@@ -38,7 +38,7 @@ class ContactGeneratorJob(Job):
                 width = 720,
                 height = 720,                
             )
-            self.create_and_add(assistant_image_job)
+            self.add_sub_job(assistant_image_job)
 
             self.response = { 
                 "contact_id": contact_id

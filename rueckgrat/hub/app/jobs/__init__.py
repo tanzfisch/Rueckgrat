@@ -11,5 +11,6 @@ __all__ = [
     "ChatJob", 
     "ImageJob", 
     "MetaJob", 
-    "ContactGeneratorJob"
+    "ContactGeneratorJob",
+    "AssistantImageJob"
 ]

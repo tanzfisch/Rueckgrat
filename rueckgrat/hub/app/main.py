@@ -14,7 +14,8 @@ from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from app.utils import ChatDB, Infrastructure, ImageType, Skills
+from app.utils import ChatDB, Infrastructure, ImageType
+from app.tools import ToolRegistry
 from app.jobs import JobQueue, MetaJob, AssistantImageJob, ContactGeneratorJob
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
@@ -28,11 +29,16 @@ logger = Logger(__name__).get_logger()
 async def lifespan(app: FastAPI):
     random.seed(time.time())
     
-    app.state.skills = Skills("/hub/skills")
     app.state.infrastructure = Infrastructure()
     db_path = "/hub/db/chat.db"
     app.state.db = ChatDB(db_path)    
     app.state.job_queue = JobQueue()
+
+    app.state.tool_registry = ToolRegistry(
+        infrastructure=app.state.infrastructure,
+        db=app.state.db,
+        job_queue=app.state.job_queue
+    )
 
     logger.info("hub initialized")
 
@@ -353,7 +359,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
 
                 if "chat" in data:
                     chat_request = ChatRequest(**data["chat"])
-                    job = MetaJob(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.skills)
+                    job = MetaJob(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry)
                     app.state.job_queue.add(job)
                 elif "generate" in data:
                     generate = data["generate"]
