@@ -8,6 +8,7 @@ Changelog
 - #56 improved model download
 - #49 replace llama.cpp service with docker model runner
 - #62 rethinking tools, skills and jobs
+- #6  added websearch tool
 
 0.5.0
 -----
