@@ -153,6 +153,9 @@ QLabel {
     color: #E0E0E0;
     font-size: 16px;
     background-color: transparent;
+    padding: 0px; 
+    margin: 0px; 
+    border: none;
 }
 
 QLabel#label_slider {

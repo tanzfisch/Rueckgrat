@@ -1,6 +1,7 @@
 from typing import Dict,  Any
 from .tool import Tool
 from app.jobs.assistant_image_job import AssistantImageJob
+from app.utils.message_queue import MessageQueue
 
 from app.common import Logger
 logger = Logger(__name__).get_logger()
@@ -27,6 +28,7 @@ class TakePhotoTool(Tool):
             return None
 
         logger.debug(f"taking picture of \"{subject}\" ...")
+        MessageQueue().send_status_message("taking a picture")
 
         width = 720
         height = 1280

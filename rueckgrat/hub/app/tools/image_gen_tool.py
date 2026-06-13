@@ -1,6 +1,7 @@
 from typing import Dict,  Any
 from .tool import Tool
 from app.jobs.requested_image_job import RequestedImageJob
+from app.utils.message_queue import MessageQueue
 
 from app.common import Logger
 logger = Logger(__name__).get_logger()
@@ -20,7 +21,8 @@ class ImageGenTool(Tool):
         
         positive_prompt = self.tool_call["positive_prompt"]
 
-        logger.debug("generate image ...")
+        logger.debug("generating image ...")
+        MessageQueue().send_status_message(f"generating image")
         image_job = RequestedImageJob(positive_prompt, self.contact_id, self.db, self.infrastructure)
         self.add_sub_job(image_job)
         self.wait_for([image_job])

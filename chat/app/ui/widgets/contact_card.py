@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QFrame, QSizePolicy, QHBoxLayout)
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSize
 from .image import Image
 from app.utils import Contact
 from pathlib import Path
@@ -25,9 +25,7 @@ class ContactCard(QFrame):
             profile_image_path = ""
                
         layout = QHBoxLayout(self)
-        profile_image = Image(profile_image_path)
-        profile_image.setFixedSize(200, 200)
-        profile_image.setScaledContents(True)
+        profile_image = Image(image_path=profile_image_path, size=QSize(200,200))
         layout.addWidget(profile_image)
 
         wrapper = QWidget()

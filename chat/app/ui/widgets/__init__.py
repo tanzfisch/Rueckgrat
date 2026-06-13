@@ -8,6 +8,7 @@ from .image_overlay import ImageOverlay
 from .row_selector import RowSelector
 from .labeled_slider import LabeledSlider
 from .text_edit import PlainTextEdit
+from .status_widget import StatusWidget
 
 __all__ = [
     "MessageBox", 
@@ -20,5 +21,6 @@ __all__ = [
     "ImageOverlay",
     "LabeledSlider",
     "RowSelector",
-    "PlainTextEdit"
+    "PlainTextEdit",
+    "StatusWidget"
 ]
