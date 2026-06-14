@@ -305,6 +305,8 @@ class ChatPage(BasePage):
             logger.error(f"failed to handle incomming message {e}")
 
     def send_message(self):
+        self.status_widget.clear_status()
+        
         message = self.input_box.toPlainText().strip()
         if not message:
             return

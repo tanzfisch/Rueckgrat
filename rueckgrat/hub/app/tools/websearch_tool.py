@@ -222,16 +222,22 @@ class WebsearchTool(Tool):
             resp = requests.get(url, headers=headers)
             soup = BeautifulSoup(resp.text, 'html.parser')
             results = []
-            for g in soup.select('.result')[:num_results]:
+            seen = set()
+            for g in soup.select('.result')[:num_results * 2]:  # extra buffer
                 title = g.select_one('.result__title')
                 link = g.select_one('.result__url')
                 snippet = g.select_one('.result__snippet')
                 if title and link:
-                    results.append({
-                        'title': title.get_text(strip=True),
-                        'url': 'https:' + link.get('href') if link.get('href', '').startswith('//') else link.get('href') or '',
-                        'snippet': snippet.get_text(strip=True) if snippet else ''                        
-                    })
+                    url = 'https:' + link.get('href') if link.get('href', '').startswith('//') else link.get('href') or ''
+                    if url and url not in seen:
+                        seen.add(url)
+                        results.append({
+                            'title': title.get_text(strip=True),
+                            'url': url,
+                            'snippet': snippet.get_text(strip=True) if snippet else ''                        
+                        })
+                        if len(results) >= num_results:
+                            break
             return results
         except Exception as e:
             logger.error(f"failed websearch {repr(e)}")
@@ -250,8 +256,8 @@ class WebsearchTool(Tool):
             search_results = self._web_search(query, 10)
             jobs = []
             good_results = []
+            seen_urls = set()
             i = 0
-            batch_size = 1 # TODO let's not overburden the GPU with too many parallel requests just now
             threshold = 5
             target = 3
 
@@ -259,25 +265,29 @@ class WebsearchTool(Tool):
                 batch = search_results[i:i+5]
                 i += len(batch)
                 
+                batch_jobs = []
                 for result in batch:
                     url = result["url"]
                     extraction = self._extract_page(url)
                     if not extraction:
                         continue
 
-                    result["url"] = extraction["url"] # update with actual url
+                    actual_url = extraction["url"]
+                    if actual_url in seen_urls:
+                        continue
+                    seen_urls.add(actual_url)
 
-                    job = FindAnswerJob(
-                        question = query, 
-                        information = extraction["text"], 
-                        infrastructure = self.infrastructure
-                    )
+                    result["url"] = actual_url
+
+                    job = FindAnswerJob(question=query, information=extraction["text"], infrastructure=self.infrastructure)
                     self.add_sub_job(job)
+                    batch_jobs.append((result, job))
                     jobs.append((result, job))
                 
-                self.wait_for([j[1] for j in jobs[-len(batch):]])
+                if batch_jobs:
+                    self.wait_for([j[1] for j in batch_jobs])
                 
-                for result, job in jobs[-len(batch):]:
+                for result, job in batch_jobs:
                     url = result["url"]
                     source = self._get_org_name(url)
                     title = result["title"]

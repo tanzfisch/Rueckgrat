@@ -1,6 +1,9 @@
 from collections import deque
 import threading
 
+from app.common import Logger
+logger = Logger(__name__).get_logger()
+
 class MessageQueue:
     _instance = None
     _lock = threading.Lock()
@@ -34,6 +37,7 @@ class MessageQueue:
             self.queue.append(data)
 
     def send_url(self, url: str):
+        logger.debug(f"sending url {url}")
         with self.lock:
             self.queue.append({
                 "status": {

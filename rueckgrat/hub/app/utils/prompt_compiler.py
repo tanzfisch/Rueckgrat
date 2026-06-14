@@ -122,7 +122,7 @@ You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_bo
     def _build_instructions(self) -> str:
         return """
 INSTRUCTIONS:
-* When you see a WEBSEARCH_RESULT section, use it as sources to back your final answer. Do not invent facts or stories.
+* When a WEBSEARCH_RESULT section is provided, base your final answer solely on it. Do not invent or add any information. Answer concisely.
 """
 
     def build_prompt(self) -> str:

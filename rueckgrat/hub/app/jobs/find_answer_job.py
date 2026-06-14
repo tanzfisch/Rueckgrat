@@ -41,8 +41,8 @@ Respond with a json structure like this:
     "quality": 1-10
 }}
 
-Limit the answer to a maximum of 100 words.
-Than rate the quality of the source from 1 to 10.
+Give a concise answer (maximum of 100 words).
+Rate the quality of the source from 1 to 10 in terms of how well it answeres the question and how current the information is.
 """
             
             logger.debug(f"find answer query:\n{query}")
