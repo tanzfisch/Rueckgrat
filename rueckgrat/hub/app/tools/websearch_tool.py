@@ -2,6 +2,7 @@ from typing import Dict,  Any
 import re
 from .tool import Tool
 from app.jobs.find_answer_job import FindAnswerJob
+from app.utils.message_queue import MessageQueue
 import requests
 import datetime
 import tldextract
@@ -155,7 +156,8 @@ class WebsearchTool(Tool):
 
         return org_map.get(domain, domain)
 
-    def _extract_page(self, url):
+    def _extract_page(self, url) -> str:
+        resulting_url = url
         logger.debug(f"extract from page {url}")        
         try:
             headers = {
@@ -177,6 +179,7 @@ class WebsearchTool(Tool):
                         redirect_url = 'https://' + redirect_url.lstrip('/')
                     logger.debug(f"following redirect to {redirect_url}")
                     resp = requests.get(redirect_url, headers=headers, timeout=20, allow_redirects=True)
+                    resulting_url = redirect_url
                     resp.raise_for_status()
 
             soup = BeautifulSoup(resp.text, 'html.parser')
@@ -199,7 +202,7 @@ class WebsearchTool(Tool):
             images = [img.get('src') or img.get('data-src') or img.get('data-original') 
                     for img in soup.find_all('img') if img.get('src') or img.get('data-src')]
             
-            return {"text": text, "images": images}
+            return {"text": text, "images": images, "url": resulting_url}
         except Exception as e:
             logger.error(f"failed to extract {url}: {repr(e)}")
             return None
@@ -211,7 +214,7 @@ class WebsearchTool(Tool):
         ]
         return query + " " + " ".join(improvements)
 
-    def _web_search(self, query, num_results=5):
+    def _web_search(self, query, num_results):
         try:
             url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(query)}"
             logger.debug(f"search query: {url}")
@@ -241,16 +244,16 @@ class WebsearchTool(Tool):
                 logger.error("invalid websearch")
                 return None
             
+            MessageQueue().send_status_message(f"searching the web")
+            
             query = self.tool_call["query"]
-            search_results = self._web_search(query, 20)
+            search_results = self._web_search(query, 10)
             jobs = []
             good_results = []
             i = 0
             batch_size = 1 # TODO let's not overburden the GPU with too many parallel requests just now
             threshold = 5
             target = 3
-
-            logger.debug(f"search_results {search_results}")
 
             while i < len(search_results) and len(good_results) < target:
                 batch = search_results[i:i+5]
@@ -261,6 +264,9 @@ class WebsearchTool(Tool):
                     extraction = self._extract_page(url)
                     if not extraction:
                         continue
+
+                    result["url"] = extraction["url"] # update with actual url
+
                     job = FindAnswerJob(
                         question = query, 
                         information = extraction["text"], 
@@ -282,8 +288,10 @@ class WebsearchTool(Tool):
                             "answer": answer['answer'], 
                             "answer_quality": answer['quality'],
                             "source": source,
-                            "title": title
+                            "title": title,
+                            "url": url,
                         })
+                        MessageQueue().send_url(url)
                         if len(good_results) >= target:
                             break
                     else:

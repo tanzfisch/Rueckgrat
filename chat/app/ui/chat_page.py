@@ -1,10 +1,10 @@
 import re
-from PySide6.QtWidgets import ( QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QScrollArea, QMenu )
+from PySide6.QtWidgets import ( QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QScrollArea, QMenu, QLabel )
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, QTimer, QSize, QPoint
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker, PlainTextEdit
+from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker, PlainTextEdit, StatusWidget
 from app.speech import Speech
 from app.utils import Backend, Contact
 from pathlib import Path
@@ -87,7 +87,8 @@ class ChatPage(BasePage):
         input_layout.addWidget(send_btn, alignment=Qt.AlignmentFlag.AlignBottom)
         
         chat_layout.addWidget(self.history_scroll_area)
-        chat_layout.addWidget(input_container)        
+
+        chat_layout.addWidget(input_container)
 
     def openEmojiPicker(self):
         button_pos = self.emoji_button.mapToGlobal(QPoint(0, 0))
@@ -113,6 +114,15 @@ class ChatPage(BasePage):
 
     def clear_history(self):
         self.clear_layout(self.history_layout)
+
+        wrapper = QWidget()
+        wrapper_layout = QHBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        self.status_widget = StatusWidget()
+        self.status_widget.clear_status()
+        wrapper_layout.addWidget(self.status_widget, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.history_layout.addWidget(wrapper)
+
         self.history_layout.addStretch()
 
     def on_enter(self, **kwargs):
@@ -214,7 +224,7 @@ class ChatPage(BasePage):
             self.replay_content = content
             wrapper_layout.addWidget(bubble, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        self.history_layout.insertWidget(self.history_layout.count() - 1, wrapper)
+        self.history_layout.insertWidget(self.history_layout.count() - 2, wrapper)
         
         QTimer.singleShot(10, self.history_container.refreshSize)
         QTimer.singleShot(50, self.scroll_to_bottom)
@@ -264,6 +274,11 @@ class ChatPage(BasePage):
 
     def on_incomming_message(self, msg: dict):
         try:
+            logger.debug(f"on_incomming_message {msg}")
+
+            if "status" in msg:      
+                self.status_widget.on_status_message(msg["status"])
+
             if "chat" in msg:
                 chat = msg["chat"]
 
@@ -295,5 +310,5 @@ class ChatPage(BasePage):
             return
         self.input_box.clear()
 
-        self.append_history("user", message)        
+        self.append_history("user", message)
         Backend.get_instance().chat(self.contact_id, self.conversation_id, "user", message, self.temperature)

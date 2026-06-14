@@ -98,8 +98,7 @@ class ChatBubble(QWidget):
         layout.addWidget(text)
 
     def _add_image(self, layout, image_filepath: str):
-        self.image = Image(image_filepath)
-        self.image.setScaledContents(True)
+        self.image = Image(image_filepath)        
         layout.addWidget(self.image)
 
     def _resize_text_edit(self, text: TextBlock):

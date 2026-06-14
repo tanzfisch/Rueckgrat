@@ -9,6 +9,8 @@ Changelog
 - #49 replace llama.cpp service with docker model runner
 - #62 rethinking tools, skills and jobs
 - #6  added websearch tool
+- fixed issue with loading animation in Image class
+- #42 added status/progress updates to ui
 
 0.5.0
 -----

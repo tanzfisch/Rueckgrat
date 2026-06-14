@@ -4,6 +4,7 @@ from .tool import Tool
 from .image_gen_tool import ImageGenTool
 from .take_photo_tool import TakePhotoTool
 from .websearch_tool import WebsearchTool
+from app.utils.message_queue import MessageQueue
 
 from app.common import Logger, Utils
 logger = Logger(__name__).get_logger()
@@ -28,10 +29,10 @@ class ToolRegistry:
         if not tool_name in self.tools:
             logger.warning(f"unknown tool: {tool_name}")
             return None
-        
+                
         logger.debug(f"executing:\n{Utils.pretty_print(tool_call)}")
 
-        ToolCls = self.tools[tool_name]
+        ToolCls = self.tools[tool_name]        
         tool_job = ToolCls(
             db=self.db,
             infrastructure=self.infrastructure,
