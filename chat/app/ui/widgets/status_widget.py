@@ -12,14 +12,6 @@ class StatusWidget(QWidget):
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0,0,0,0); 
         self.layout.setSpacing(10)
-    
-        self.btn_layout = QHBoxLayout()
-        self.btn_layout.setSpacing(0)
-        self.btn_layout.setAlignment(Qt.AlignRight)
-        self.layout.addLayout(self.btn_layout)  
-
-        self.label = QLabel()
-        self.layout.addWidget(self.label)
 
         self.gif_label = QLabel()
         self.gif_label.setContentsMargins(0, 0, 0, 0)
@@ -30,6 +22,14 @@ class StatusWidget(QWidget):
         self.movie.setSpeed(40)
         self.gif_label.setMovie(self.movie)
         self.layout.addWidget(self.gif_label)
+
+        self.label = QLabel()
+        self.layout.addWidget(self.label)
+
+        self.btn_layout = QHBoxLayout()
+        self.btn_layout.setSpacing(0)
+        self.btn_layout.setAlignment(Qt.AlignRight)
+        self.layout.addLayout(self.btn_layout)  
 
         self.layout.addStretch()
 
