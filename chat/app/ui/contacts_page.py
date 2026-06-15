@@ -50,8 +50,8 @@ class ContactsPage(BasePage):
             with open(path, 'r') as file:
                 try:
                     data = json.load(file)
-                    contact_id = Backend.get_instance().create_contact()
-                    Backend.get_instance().update_contact(contact_id, data)
+                    contact_id = Backend.create_contact()
+                    Backend.update_contact(contact_id, data)
                     self.navigator("contacts")
                 except Exception as e:
                     logger.error(f"failed to load profile: {repr(e)}")
@@ -64,7 +64,7 @@ class ContactsPage(BasePage):
             if widget:
                 widget.deleteLater()
 
-        contacts = Backend.get_instance().get_contacts()
+        contacts = Backend.get_contacts()
 
         buttons_layout = QHBoxLayout()
         buttons_layout.setContentsMargins(0, 0, 0, 0)
@@ -87,7 +87,7 @@ class ContactsPage(BasePage):
             if profile_image_name:
                 profile_image_path = Path("cache/images") / profile_image_name
                 if not profile_image_path.exists():
-                    Backend.get_instance().download_file(f"images/{profile_image_name}", "cache/images", 0)
+                    Backend.download_file(f"images/{profile_image_name}", "cache/images", 0)
 
             contact_card_container = QWidget()
             contact_card_layout = QHBoxLayout(contact_card_container)            
@@ -133,7 +133,7 @@ class ContactsPage(BasePage):
 
     def delete_contact(self, contact_id):
         if MessageBox.open("Are you sure you want to delete this contact?"):
-            Backend.get_instance().delete_contact(contact_id)
+            Backend.delete_contact(contact_id)
 
         self.load_contacts()        
 

@@ -129,15 +129,15 @@ class ChatPage(BasePage):
         self.contact_id = kwargs.get("contact_id")
         self.conversation_id = kwargs.get("conversation_id")
 
-        self.contact = Contact(Backend.get_instance().get_contact(self.contact_id))
+        self.contact = Contact(Backend.get_contact(self.contact_id))
         self.contact_header.set_contact(self.contact)
 
         self.clear_history()
 
-        messages = Backend.get_instance().get_messages(self.conversation_id)
+        messages = Backend.get_messages(self.conversation_id)
         for message in messages:
             message_id = message["id"]
-            attachements = Backend.get_instance().get_attachments(message_id)
+            attachements = Backend.get_attachments(message_id)
             if attachements:
                 image_path = self._get_image(attachements[0]["file_name"])
                 self.append_history(message["role"], message["content"], image_path)
@@ -155,10 +155,10 @@ class ChatPage(BasePage):
 
         self.temperature = float(self.contact.get_llm_temperature())
 
-        Backend.get_instance().register_incomming_message(self.on_incomming_message)
+        Backend.register_incomming_message(self.on_incomming_message)
 
     def on_leave(self):
-        Backend.get_instance().unregister_incomming_message(self.on_incomming_message)
+        Backend.unregister_incomming_message(self.on_incomming_message)
 
     def resizeEvent(self, event):
         self.adjust_input_box_height()
@@ -268,7 +268,7 @@ class ChatPage(BasePage):
     def _get_image(self, image_filename) -> str:
         image_path = Path("cache/images") / image_filename
         if not image_path.exists():
-            Backend.get_instance().download_file(f"images/{image_filename}", "cache/images")
+            Backend.download_file(f"images/{image_filename}", "cache/images")
 
         return image_path
 
@@ -313,4 +313,4 @@ class ChatPage(BasePage):
         self.input_box.clear()
 
         self.append_history("user", message)
-        Backend.get_instance().chat(self.contact_id, self.conversation_id, "user", message, self.temperature)
+        Backend.chat(self.contact_id, self.conversation_id, "user", message, self.temperature)

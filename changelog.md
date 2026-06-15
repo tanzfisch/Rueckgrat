@@ -11,6 +11,8 @@ Changelog
 - #6  added websearch tool
 - fixed issue with loading animation in Image class
 - #42 added status/progress updates to ui
+- #65 prompt user for server config on first startup
+- made chat client run on windows
 
 0.5.0
 -----

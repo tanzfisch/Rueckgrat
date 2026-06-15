@@ -11,161 +11,156 @@ from common import Logger, DownloadQueue, ChatRequest, GetMessagesRequest
 logger = Logger(__name__).get_logger()
 
 class Backend:
-    _instance = None
     user_id = -1
     user_name = ""
+    access_token = ""
+    on_incoming_message: List[Callable[[dict], None]] = []
+    download_queue = DownloadQueue()
+    ws_task = None
+    websocket_client = None
 
-    def __init__(self):
-        logger.debug("Backend init")
-        self.config = RueckgratConfig()
+    @classmethod
+    def init(cls, config):
+        cls.config = config
+        
+        cls.url = f"https://{cls.config.host}:{cls.config.port}"
+        cls.uri = f"wss://{cls.config.host}:{cls.config.port}/ws"
 
-        self.server_cert = self.config.server_cert
+        cls.server_cert = cls.config.server_cert
 
-        self.url = f"https://{self.config.host}:{self.config.port}"
-        self.uri = f"wss://{self.config.host}:{self.config.port}/ws"
-        self.access_token = ""        
-
-        logger.info(f"using backend at {self.url}")
-        logger.info(f"websocket at {self.uri}")
-        logger.info(f"server_cert {self.server_cert}")
-
-        if self.server_cert == "no":
-            self.server_cert = False
+        if cls.server_cert == "no":
+            cls.server_cert = False
             logger.warning('No server certificate found. Connection will be insecure')
+        elif cls.server_cert and isinstance(cls.server_cert, str):
+            cls.server_cert = Path(cls.server_cert)
 
-        self.on_incoming_message: List[Callable[[dict], None]] = []
+        logger.info(f"using backend at {cls.url}")
+        logger.info(f"websocket at {cls.uri}")
+        logger.info(f"server_cert {cls.server_cert}")
 
-        self.download_queue = DownloadQueue()
+    @classmethod
+    def get_user_name(cls):
+        return cls.user_name
 
-        self.ws_task = None
+    @classmethod
+    def shutdown(cls):
+        cls.download_queue.stop()
 
-    def get_user_name(self):
-        return self.user_name
+    @classmethod
+    def download_file(cls, image_path: str, download_path: str, max_retry: int = 5):
+        url = f"{cls.url}/downloads/{image_path}"
+        cls.download(url, download_path, max_retry)
 
-    def shutdown(self):
-        self.download_queue.stop()
-
-    def download_file(self, image_path: str, download_path: str, max_retry: int = 5):
-        url = f"{self.url}/downloads/{image_path}"
-        self.download(url, download_path, max_retry)
-
-    def download(self, url: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
+    @classmethod
+    def download(cls, url: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
         if asynchronous:
-            self.download_queue.add(
+            cls.download_queue.add(
                 url=url, 
                 download_path=download_path, 
-                access_token=self.access_token, 
-                server_cert=self.server_cert, 
+                access_token=cls.access_token, 
+                server_cert=cls.server_cert, 
                 max_retry=max_retry,
                 force_download=force_download,
                 callback=callback)
         else:
-            self.download_queue.download(
+            cls.download_queue.download(
                 url=url, 
                 download_path=download_path, 
-                access_token=self.access_token, 
-                server_cert=self.server_cert, 
+                access_token=cls.access_token, 
+                server_cert=cls.server_cert, 
                 force_download=force_download
             )
 
     @classmethod
-    def get_instance(cls):
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-    
-    async def _on_login_success(self, token: str):
-        self.ws_task = asyncio.create_task(self._start_websocket(token))
+    async def _on_login_success(cls, token: str):
+        cls.ws_task = asyncio.create_task(cls._start_websocket(token))
 
-    async def stop_websocket(self):
-        self.ws_task.cancel()
-        try:
-            await self.ws_task
-        except asyncio.CancelledError:
-            pass
+    @classmethod
+    async def stop_websocket(cls):
+        if cls.ws_task:
+            cls.ws_task.cancel()
+            try:
+                await cls.ws_task
+            except asyncio.CancelledError:
+                pass
 
-    async def _start_websocket(self, token: str):
-        if hasattr(self, 'websocket_client') and self.websocket_client.is_connected():
-            return  # already running
+    @classmethod
+    async def _start_websocket(cls, token: str):
+        if cls.websocket_client and cls.websocket_client.is_connected():
+            return
+        cls.websocket_client = WebSocketClient(cls.uri, cls.server_cert)
+        cls.websocket_client.set_on_message(cls._on_incomming_websocket)
+        await cls.websocket_client.connect(token)
 
-        self.websocket_client = WebSocketClient(self.uri, self.server_cert)
-        self.websocket_client.set_on_message(self._on_incomming_websocket)
-        await self.websocket_client.connect(token)
-
-    def chat(self, contact_id: int, conversation_id: int, role: str, content: str, temperature: float):
-         
+    @classmethod
+    def chat(cls, contact_id: int, conversation_id: int, role: str, content: str, temperature: float):
         chat_request = ChatRequest(
             contact_id=contact_id,
             conversation_id=conversation_id,
             role=role,
-            name=self.user_name,
+            name=cls.user_name,
             content=content,
             temperature=temperature
         )
+        payload = {"chat": chat_request.model_dump()}
+        asyncio.get_event_loop().create_task(cls._send_async_payload(json.dumps(payload)))
 
-        payload={
-            "chat": chat_request.model_dump()
-        }    
-        asyncio.get_event_loop().create_task(Backend.get_instance()._send_async_payload(json.dumps(payload)))
+    @classmethod
+    def generate(cls, prompt: dict):
+        payload = {"generate": prompt}
+        asyncio.get_event_loop().create_task(cls._send_async_payload(json.dumps(payload)))
 
-    def generate(self, prompt: dict):
-        payload={
-            "generate": prompt
-        }    
-        asyncio.get_event_loop().create_task(Backend.get_instance()._send_async_payload(json.dumps(payload)))
+    @classmethod
+    async def _send_async_payload(cls, payload):
+        if cls.websocket_client:
+            await cls.websocket_client.send_message(payload)
 
-    async def _send_async_payload(self, payload):
-        await self.websocket_client.send_message(payload)
-
-    def _on_incomming_websocket(self, msg: dict):
+    @classmethod
+    def _on_incomming_websocket(cls, msg: dict):
         try:
-            for func in self.on_incoming_message:
+            for func in cls.on_incoming_message:
                 func(msg)
         except Exception as e:
             logger.error(f"failed to handle incomming message: {repr(e)}")
 
-    def unregister_incomming_message(self, callback: Callable[[dict], None]):
-        self.on_incoming_message.remove(callback)
+    @classmethod
+    def unregister_incomming_message(cls, callback: Callable[[dict], None]):
+        if callback in cls.on_incoming_message:
+            cls.on_incoming_message.remove(callback)
 
-    def register_incomming_message(self, callback: Callable[[dict], None]):
-        self.on_incoming_message.append(callback)
+    @classmethod
+    def register_incomming_message(cls, callback: Callable[[dict], None]):
+        cls.on_incoming_message.append(callback)
 
-    def check_health(self):
-        url = f"{self.url}/health"
-
+    @classmethod
+    def check_health(cls):
+        url = f"{cls.url}/health"
         try:
-            response = requests.get(
-                url, 
-                timeout=9, 
-                verify=self.server_cert
-            )
-
+            response = requests.get(url, timeout=9, verify=cls.server_cert)
             if response.status_code == 200:
                 data = response.json()
                 status = data.get("status", "error")
                 if status == "error":
-                    message = data.get("message", "")
-                    logger.error(f"failed to check health of the system: {message}")
+                    logger.error(f"failed to check health: {data.get('message', '')}")
                     return False
-
                 logger.debug("system is healthy")
                 return True
             else:
-                logger.error(f"lost connection to hub - {response.status_code} {response.reason}")
+                logger.error(f"lost connection - {response.status_code}")
                 return False
-                            
         except Exception as e:
-            logger.error(f"failed health check with: {repr(e)}")
-            return False   
+            logger.error(f"failed health check: {repr(e)}")
+            return False
 
-    def get_users(self):
-        url = f"{self.url}/users"
+    @classmethod
+    def get_users(cls):
+        url = f"{cls.url}/users"
 
         try:
             response = requests.get(
                 url,
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:
@@ -179,20 +174,21 @@ class Backend:
 
         return []
 
-    def get_user_data(self):
-        url = f"{self.url}/users/me"
+    @classmethod
+    def get_user_data(cls):
+        url = f"{cls.url}/users/me"
 
         try:
             response = requests.get(
                 url,
                 json={
-                    "user_id": self.user_id
+                    "user_id": cls.user_id
                 },                  
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {cls.access_token}"
                 },   
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:
@@ -216,22 +212,23 @@ class Backend:
 
         return {} 
     
-    def update_user_data(self, data: dict):
-        url = f"{self.url}/users/me"
+    @classmethod
+    def update_user_data(cls, data: dict):
+        url = f"{cls.url}/users/me"
 
         try:
             response = requests.patch(
                 url,
                 json={
-                    "user_id": self.user_id,
+                    "user_id": cls.user_id,
                     "user_data": data
                 },                 
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}",
+                    "Authorization": f"Bearer {cls.access_token}",
                     "Content-Type": "application/json"
                 },                                
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code in (200, 204):
@@ -244,17 +241,18 @@ class Backend:
             logger.error(f"failed to update user data {repr(e)}")
             return False    
 
-    def get_contacts(self):
-        url = f"{self.url}/contacts"
+    @classmethod
+    def get_contacts(cls):
+        url = f"{cls.url}/contacts"
 
         try:
             response = requests.get(
                 url,
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {cls.access_token}"
                 },   
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:
@@ -268,17 +266,18 @@ class Backend:
 
         return []
 
-    def create_contact(self) -> int:
-        url = f"{self.url}/contacts"
+    @classmethod
+    def create_contact(cls) -> int:
+        url = f"{cls.url}/contacts"
 
         try:
             response = requests.post(
                 url,
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {cls.access_token}"
                 },                
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:                
@@ -292,8 +291,9 @@ class Backend:
 
         return -1    
     
-    def update_contact(self, contact_id: int, data: dict):
-        url = f"{self.url}/contacts/{contact_id}"
+    @classmethod
+    def update_contact(cls, contact_id: int, data: dict):
+        url = f"{cls.url}/contacts/{contact_id}"
 
         try:
             response = requests.patch(
@@ -302,11 +302,11 @@ class Backend:
                     "contact_data": data
                 },                 
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}",
+                    "Authorization": f"Bearer {cls.access_token}",
                     "Content-Type": "application/json"
                 },                                
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code in (200, 204):
@@ -318,18 +318,19 @@ class Backend:
         except Exception as e:
             logger.error(f"failed to update_contact {repr(e)}")
             return False
-    
-    def get_contact(self, contact_id: int):
-        url = f"{self.url}/contact/{contact_id}"
+
+    @classmethod
+    def get_contact(cls, contact_id: int):
+        url = f"{cls.url}/contact/{contact_id}"
 
         try:
             response = requests.get(
                 url,
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {cls.access_token}"
                 },   
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:
@@ -343,8 +344,9 @@ class Backend:
 
         return {} 
 
-    def create_user(self, user_name, user_passwd) -> int:
-        url = f"{self.url}/users"
+    @classmethod
+    def create_user(cls, user_name, user_passwd) -> int:
+        url = f"{cls.url}/users"
 
         try:
             response = requests.post(
@@ -354,7 +356,7 @@ class Backend:
                     "user_passwd": user_passwd
                 },                
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:
@@ -367,21 +369,22 @@ class Backend:
             logger.error(f"failed to create_user {repr(e)}")
 
         return -1
-    
-    def create_conversation(self, contact_id: int) -> int:
-        url = f"{self.url}/conversations"
+
+    @classmethod
+    def create_conversation(cls, contact_id: int) -> int:
+        url = f"{cls.url}/conversations"
 
         try:
             response = requests.post(
                 url,
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {cls.access_token}"
                 },                
                 json={
                     "contact_id": contact_id
                 },                
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:                
@@ -394,18 +397,19 @@ class Backend:
             logger.error(f"failed to create_conversation {repr(e)}")
 
         return -1     
-    
-    def delete_conversation(self, conversation_id: int):
-        url = f"{self.url}/conversations/{conversation_id}"
+
+    @classmethod
+    def delete_conversation(cls, conversation_id: int):
+        url = f"{cls.url}/conversations/{conversation_id}"
 
         try:
             response = requests.delete(
                 url,
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {cls.access_token}"
                 },                
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code != 200:                
@@ -413,18 +417,19 @@ class Backend:
 
         except Exception as e:
             logger.error(f"failed to delete_conversation {repr(e)}")
-    
-    def delete_contact(self, contact_id: int):
-        url = f"{self.url}/contacts/{contact_id}"
+
+    @classmethod
+    def delete_contact(cls, contact_id: int):
+        url = f"{cls.url}/contacts/{contact_id}"
 
         try:
             response = requests.delete(
                 url,
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {cls.access_token}"
                 },                
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code != 200:                
@@ -433,17 +438,18 @@ class Backend:
         except Exception as e:
             logger.error(f"failed to delete_contact {repr(e)}")
 
-    def get_conversations(self, contact_id):
-        url = f"{self.url}/contacts/{contact_id}/conversations"
+    @classmethod
+    def get_conversations(cls, contact_id):
+        url = f"{cls.url}/contacts/{contact_id}/conversations"
 
         try:
             response = requests.get(
                 url,
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {cls.access_token}"
                 },
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:
@@ -457,17 +463,18 @@ class Backend:
 
         return []      
 
-    def get_conversation(self, conversation_id):
-        url = f"{self.url}/conversations/{conversation_id}"
+    @classmethod
+    def get_conversation(cls, conversation_id):
+        url = f"{cls.url}/conversations/{conversation_id}"
 
         try:
             response = requests.get(
                 url,
                 headers={
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {cls.access_token}"
                 },
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:
@@ -481,8 +488,9 @@ class Backend:
 
         return None
 
-    def get_messages(self, conversation_id: int, max_message: int = 100):
-        url = f"{self.url}/conversations/{conversation_id}/messages"
+    @classmethod
+    def get_messages(cls, conversation_id: int, max_message: int = 100):
+        url = f"{cls.url}/conversations/{conversation_id}/messages"
 
         request = GetMessagesRequest(
             max_message=max_message
@@ -492,11 +500,11 @@ class Backend:
             response = requests.get(
                 url,
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {cls.access_token}"
                 },
                 json=request.model_dump(),
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:
@@ -510,17 +518,18 @@ class Backend:
 
         return []
 
-    def get_attachments(self, message_id):
-        url = f"{self.url}/messages/{message_id}/attachments"
+    @classmethod
+    def get_attachments(cls, message_id):
+        url = f"{cls.url}/messages/{message_id}/attachments"
 
         try:
             response = requests.get(
                 url,
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {cls.access_token}"
                 },
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:
@@ -534,10 +543,11 @@ class Backend:
 
         return []
 
-    def login_user(self, user_name, user_passwd) -> bool:
-        url = f"{self.url}/login"
-        self.access_token = ""
-        self.user_name = ""
+    @classmethod
+    def login_user(cls, user_name, user_passwd) -> bool:
+        url = f"{cls.url}/login"
+        cls.access_token = ""
+        cls.user_name = ""
 
         try:
             response = requests.post(
@@ -547,15 +557,15 @@ class Backend:
                     "user_passwd": user_passwd
                 },                
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:
                 data = response.json()
-                self.access_token = data.get("access_token", "")
-                asyncio.create_task(self._on_login_success(self.access_token))
-                self.user_id = data.get("user_id", -1)
-                self.user_name = user_name
+                cls.access_token = data.get("access_token", "")
+                asyncio.create_task(cls._on_login_success(cls.access_token))
+                cls.user_id = data.get("user_id", -1)
+                cls.user_name = user_name
                 return True
             else:
                 logger.error(f"login failed {response.status_code} {response.reason}")
@@ -565,17 +575,18 @@ class Backend:
 
         return False
 
-    def get_model(self, model_name: str, model_path: Path):
-        url = f"{self.url}/models/{model_name}/url"
+    @classmethod
+    def get_model(cls, model_name: str, model_path: Path):
+        url = f"{cls.url}/models/{model_name}/url"
 
         try:
             response = requests.get(
                 url,
                 headers = {
-                    "Authorization": f"Bearer {self.access_token}"
+                    "Authorization": f"Bearer {cls.access_token}"
                 },
                 timeout=10,
-                verify=self.server_cert,
+                verify=cls.server_cert,
             )
 
             if response.status_code == 200:
@@ -585,7 +596,7 @@ class Backend:
                 logger.debug(f"found sources {sources}")
 
                 for source in sources:
-                    self.download(
+                    cls.download(
                         url=source,
                         download_path=model_path,
                         asynchronous=False

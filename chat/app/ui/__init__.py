@@ -6,6 +6,7 @@ from .conversations_page import ConversationsPage
 from .profile_page import ProfilePage
 from .profile_wizzard import ProfileWizard
 from .settings_page import SettingsPage
+from .initial_settings_page import InitialSettingsPage
 
 __all__ = [
     "OneLineBubble", 
@@ -18,5 +19,6 @@ __all__ = [
     "ChatPage", 
     "ContactsPage", 
     "ProfileWizard",
-    "SettingsPage"
+    "SettingsPage",
+    "InitialSettingsPage"
 ]

@@ -16,6 +16,7 @@ class RueckgratConfig:
     }
 
     def __init__(self, path="~/.config/Rueckgrat/rueckgrat.conf"):
+        self.found_config = False
         self.config_path = Path(path).expanduser()
         self.config = configparser.ConfigParser()
         logger.info(f"Reading config from {self.config_path}")
@@ -23,9 +24,12 @@ class RueckgratConfig:
         self._ensure_file()
         self._load()
 
+    def has_config(self):
+        return self.found_config
+
     def _ensure_file(self):
         """Create config file with defaults if it doesn't exist."""
-        if not self.config_path.exists():
+        if not self.config_path.exists():            
             logger.info("Config file not found, creating with defaults")
 
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -36,6 +40,8 @@ class RueckgratConfig:
 
             with open(self.config_path, "w", encoding="utf-8") as f:
                 self.config.write(f)
+        else:
+            self.found_config = True
 
     def _load(self):
         """Load config from file."""
