@@ -7,12 +7,15 @@ from PySide6.QtWidgets import (
 from app.ui import BasePage
 from app.utils import RueckgratConfig
 from app.ui.widgets import RowSelector, ContactHeader
+from PySide6.QtCore import Signal
 
 from common import Logger
 logger = Logger(__name__).get_logger()
 
-
 class NetworkSettingsPage(QWidget):
+    ok_clicked = Signal()
+    cancel_clicked = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -62,11 +65,13 @@ class NetworkSettingsPage(QWidget):
         self.config.host = self.host_input.text()
         self.config.port = self.port_input.text()
         self.config.server_cert = self.cert_input.text()
+        self.ok_clicked.emit()
 
     def _cancel(self):
         self.host_input.setText(self.config.host)
         self.port_input.setText(self.config.port)
         self.cert_input.setText(self.config.server_cert)
+        self.cancel_clicked.emit()
 
     def _browse_cert(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Certificate")

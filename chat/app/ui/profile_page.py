@@ -130,7 +130,7 @@ class ProfilePage(BasePage):
         if self.contact_id == -1:
             return     
 
-        contact = Backend.get_instance().get_contact(self.contact_id)
+        contact = Backend.get_contact(self.contact_id)
         self.fill_form(contact)
 
     def _on_load(self):
@@ -152,10 +152,10 @@ class ProfilePage(BasePage):
 
     def _on_save(self):
         if self.contact_id == -1:
-            self.contact_id = Backend.get_instance().create_contact()
+            self.contact_id = Backend.create_contact()
 
         data = self.get_data()
-        Backend.get_instance().update_contact(self.contact_id, data)
+        Backend.update_contact(self.contact_id, data)
         self.navigator("contacts")
 
     def on_enter(self, **kwargs):

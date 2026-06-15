@@ -35,7 +35,7 @@ class ConversationsPage(BasePage):
 
     def on_enter(self, **kwargs):
         self.contact_id = kwargs.get("contact_id")
-        contact = Contact(Backend.get_instance().get_contact(self.contact_id))
+        contact = Contact(Backend.get_contact(self.contact_id))
         self.contact_header.set_contact(contact)
 
         self.load_conversations()
@@ -47,12 +47,12 @@ class ConversationsPage(BasePage):
         self.navigator("chat", contact_id=self.contact_id, conversation_id=conversation_id)
 
     def create_conversation(self):
-        conversation_id = Backend.get_instance().create_conversation(self.contact_id)
+        conversation_id = Backend.create_conversation(self.contact_id)
         self.navigator("chat", contact_id=self.contact_id, conversation_id=conversation_id)
 
     def delete_conversation(self, conversation_id):
         if MessageBox.open("Are you sure you want to delete this conversation?"):
-            Backend.get_instance().delete_conversation(conversation_id)
+            Backend.delete_conversation(conversation_id)
 
         self.load_conversations()
 
@@ -64,7 +64,7 @@ class ConversationsPage(BasePage):
             if widget:
                 widget.deleteLater()
 
-        conversations = Backend.get_instance().get_conversations(self.contact_id)
+        conversations = Backend.get_conversations(self.contact_id)
 
         start_bubble = OneLineBubble("+")
         start_bubble.setFixedHeight(40)
