@@ -55,6 +55,9 @@ class DownloadQueue:
         self._stop = threading.Event()
         threading.Thread(target=self._run, daemon=True).start()
 
+    def download(self, url: str, download_path: str, access_token: str = "", server_cert: str = "", force_download: bool=False) -> bool:
+        return self._download(url, download_path, access_token, server_cert, force_download)
+
     def add(self, url: str, download_path: str, access_token: str = "", server_cert: str = "", max_retry: int = 4, force_download: bool=False, callback=None):
         job = DownloadJob(
             url=url,
@@ -92,7 +95,7 @@ class DownloadQueue:
         try:
             success = False
             for attempt in range(job.max_retry + 1):
-                success, filename = self._download(job.url, job.download_path, job.access_token, job.server_cert, job.force_download)
+                success = self._download(job.url, job.download_path, job.access_token, job.server_cert, job.force_download)
                 
                 if success:
                     job.execute_callbacks()
@@ -110,7 +113,7 @@ class DownloadQueue:
         except Exception as e:
             logger.error(f"DownloadJob failed: {e}")
 
-    def _download(self, url: str, download_path: str, access_token: str, server_cert: str, force_download: bool=False) -> Tuple[bool, str]:
+    def _download(self, url: str, download_path: str, access_token: str, server_cert: str, force_download: bool=False) -> bool:
         try:
             target_path = Path(download_path)
             target_path.mkdir(parents=True, exist_ok=True)
@@ -124,8 +127,8 @@ class DownloadQueue:
             if target_filepath.exists() and force_download:
                 target_filepath.unlink(missing_ok=True)
 
-            logger.debug(f"Downloading {url} -> {target_filepath}")
-            return self._download_file(url, target_filepath, access_token, server_cert), target_filepath
+            if not self._download_file(url, target_filepath, access_token, server_cert):
+                logger.error(f"failed to download {url}")
         
         except Exception as e:
             logger.error(f"failed to download {url} {repr(e)}")
@@ -138,25 +141,30 @@ class DownloadQueue:
         if filepath.exists():
             return True
 
-        response = requests.get(
-            url, 
-            stream=True,
-            headers = {
-                "Authorization": f"Bearer {access_token}"
-            },             
-            verify=server_cert
-        )
-        response.raise_for_status()
+        try:
+            response = requests.get(
+                url, 
+                stream=True,
+                headers = {
+                    "Authorization": f"Bearer {access_token}"
+                },             
+                verify=server_cert
+            )
+            response.raise_for_status()
 
-        content_type = response.headers.get("Content-Type", "")
-        if "application/json" in content_type:
-            try:
-                data = response.json()
-                if "error" in data:
+            content_type = response.headers.get("Content-Type", "")
+            if "application/json" in content_type:
+                try:
+                    data = response.json()
+                    if "error" in data:
+                        return False
+                except ValueError:
                     return False
-            except ValueError:
-                return False
-
+                
+        except Exception as e:
+            logger.error(f"failed to download {url} {repr(e)}")
+            return False
+        
         total_size = int(response.headers.get("content-length", 0))
 
         with open(filepath, "wb") as file:

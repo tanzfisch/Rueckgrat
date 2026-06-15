@@ -72,12 +72,12 @@ class Infrastructure:
         if not self.node_with_text_to_text:
             logger.error("couldn't find text_to_text generator in config")
         else:
-            logger.info(f"found text_to_text generator at {self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}")
+            logger.debug(f"found text_to_text generator at {self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}")
 
         if not self.node_with_text_to_image:
             logger.warning("couldn't find text_to_image generator in config")
         else:
-            logger.info(f"found text_to_image generator at {self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}")
+            logger.debug(f"found text_to_image generator at {self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}")
 
         self.download_queue = DownloadQueue()
 
@@ -137,7 +137,7 @@ class Infrastructure:
 
         return self._download_file(url, target_filepath)
 
-    def image(self, image_request: ImageRequest) -> tuple[str, int]:
+    def image(self, image_request: ImageRequest) -> str:
         if not self.node_with_text_to_image:
             logger.error("no text to image generator available")
             return None
@@ -148,7 +148,7 @@ class Infrastructure:
             response = requests.post(
                 url_image_request,
                 json=image_request.model_dump(),
-                timeout=120,
+                timeout=240,
             )
         
             if response.status_code == 200:
@@ -167,31 +167,43 @@ class Infrastructure:
 
         return str(filepath)
 
-    def download(self, source_path: str, download_path: str, callback=None):
+    def download(self, source_path: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
         # todo pick correct host
         url = f"http://{self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}/downloads{source_path}"
-        self.download_queue.add(url=url, download_path=download_path, callback=callback)
+        if asynchronous:
+            self.download_queue.add(
+                url=url, 
+                download_path=download_path,
+                max_retry=max_retry,
+                force_download=force_download,
+                callback=callback)
+        else:
+            self.download_queue.download(
+                url=url, 
+                download_path=download_path, 
+                force_download=force_download)        
 
-    def chat(self, messages: list, temperature: float, seed: int, low_accuracy: bool = False) -> str:
+    def chat(self, messages: list, temperature: float, seed: int, max_new_tokens: int = 512, context_size: int=8192) -> str:
         try:
             url = f"http://{self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}/chat"
             
             payload= ChatRequestLlama(
-                messages=messages, 
-                temperature=temperature, 
-                low_accuracy=low_accuracy,
-                seed=seed
+                messages=messages,
+                temperature=temperature,
+                seed=seed,
+                max_new_tokens=max_new_tokens,
+                context_size=context_size
             )
 
             response = requests.post(
                 url,
                 json=payload.model_dump(),
-                timeout=120,
+                timeout=240,
             )
         
             if response.status_code == 200:
                 data = response.json()
-                return data.get("content", [])
+                return data.get("content", "")
 
         except Exception as e:
             logger.error(f"failed to get a chat response {repr(e)}")

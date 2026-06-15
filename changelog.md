@@ -1,6 +1,19 @@
 Changelog
 =========
 
+0.6.0
+-----
+
+- #57 added sync download for DownloadQueue
+- #56 improved model download
+- #49 replace llama.cpp service with docker model runner
+- #62 rethinking tools, skills and jobs
+- #6  added websearch tool
+- fixed issue with loading animation in Image class
+- #42 added status/progress updates to ui
+- #65 prompt user for server config on first startup
+- made chat client run on windows
+
 0.5.0
 -----
 
@@ -9,7 +22,7 @@ Changelog
 - #31 refactored endpoints
 - #55 fixed download logic after endpoints change
 - #58 auto remove formatting when pasting text
-- handling of thinking responses
+- added handling of thinking responses
 
 0.4.1
 -----

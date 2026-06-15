@@ -1,5 +1,4 @@
 import os
-import time
 import signal
 import subprocess
 import sys
@@ -9,6 +8,7 @@ from pathlib import Path
 
 from common import Logger
 logger = Logger(__name__).get_logger()
+
 
 class Speech:
     _current_proc = None
@@ -22,32 +22,29 @@ class Speech:
                 cls._current_proc.wait()
 
     @classmethod
-    def speak(cls, text: str, interface: str="", voice: str="", model: str=""):
+    def speak(cls, text: str, model: str = ""):
         if not text.strip():
             return
 
-        cls.kill_current_speech()
-        speech_task_path = f"{os.getcwd()}/app/speech/speech_task.py"
+        logger.debug(f"prep speech \"{text}\" with {model}")
 
-        if interface == "piper":
+        try:
+            cls.kill_current_speech()
+            speech_task_path = f"{os.getcwd()}/app/speech/speech_task.py"
+
             model_path = Path(f"models/{model}")
             model_file_path = Path(f"models/{model}/{model}.onnx")
-            if not model_path.exists():
-                Backend.get_instance().get_model(model, model_path)
+            model_json_file_path = Path(f"models/{model}/{model}.onnx.json")
+            if not model_file_path.exists() or not model_json_file_path.exists():
+                Backend.get_model(model, model_path)
 
             proc = subprocess.Popen(
-                [sys.executable, speech_task_path, "--interface", interface, "--text", text, "--model", model_file_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-        elif interface == "kokoro":
-            # TODO
-
-            proc = subprocess.Popen(
-                [sys.executable, speech_task_path, "--interface", interface, "--text", text, "--voice", voice],
+                [sys.executable, speech_task_path, "--text", text, "--model", model_file_path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
 
-        with cls._proc_lock:
-            cls._current_proc = proc
+            with cls._proc_lock:
+                cls._current_proc = proc
+        except Exception as e:
+            logger.error(f"failed to run speech generation {e}")

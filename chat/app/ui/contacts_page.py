@@ -1,6 +1,8 @@
 import json
 
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QScrollArea, QPushButton, QHBoxLayout)
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QScrollArea, QPushButton, QHBoxLayout, QFileDialog
+)
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, QSize
 
@@ -39,9 +41,21 @@ class ContactsPage(BasePage):
     def on_leave(self):
         pass
 
-    def add_contact(self):
+    def _on_add_contact(self):
         self.navigator("profile_wizz")
 
+    def _on_import_contact(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Import Profile")
+        if path:
+            with open(path, 'r') as file:
+                try:
+                    data = json.load(file)
+                    contact_id = Backend.create_contact()
+                    Backend.update_contact(contact_id, data)
+                    self.navigator("contacts")
+                except Exception as e:
+                    logger.error(f"failed to load profile: {repr(e)}")
+        
     def load_contacts(self):
         # Clear existing widgets
         while self.contacts_layout.count():
@@ -50,11 +64,22 @@ class ContactsPage(BasePage):
             if widget:
                 widget.deleteLater()
 
-        contacts = Backend.get_instance().get_contacts()
+        contacts = Backend.get_contacts()
 
-        add_contact_bubble = OneLineBubble("+")
-        add_contact_bubble.clicked.connect(self.add_contact)
-        self.contacts_layout.addWidget(add_contact_bubble)
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setContentsMargins(0, 0, 0, 0)
+
+        add_btn = OneLineBubble("new")
+        add_btn.clicked.connect(self._on_add_contact)
+        buttons_layout.addWidget(add_btn)
+
+        import_btn = OneLineBubble("import")
+        import_btn.clicked.connect(self._on_import_contact)
+        buttons_layout.addWidget(import_btn)
+
+        container = QWidget()
+        container.setLayout(buttons_layout)
+        self.contacts_layout.addWidget(container)
 
         for contact_dict in contacts:
             contact = Contact(contact_dict)
@@ -62,7 +87,7 @@ class ContactsPage(BasePage):
             if profile_image_name:
                 profile_image_path = Path("cache/images") / profile_image_name
                 if not profile_image_path.exists():
-                    Backend.get_instance().download_file(f"images/{profile_image_name}", "cache/images", 0)
+                    Backend.download_file(f"images/{profile_image_name}", "cache/images", 0)
 
             contact_card_container = QWidget()
             contact_card_layout = QHBoxLayout(contact_card_container)            
@@ -108,7 +133,7 @@ class ContactsPage(BasePage):
 
     def delete_contact(self, contact_id):
         if MessageBox.open("Are you sure you want to delete this contact?"):
-            Backend.get_instance().delete_contact(contact_id)
+            Backend.delete_contact(contact_id)
 
         self.load_contacts()        
 

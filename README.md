@@ -44,9 +44,9 @@ Some utility code shared across modules
 
 First decide which machine will be running hub, node or chat or if it is all running on one machine.
 
-## hub installation
+## hub setup
 
-Run the following on your hub machine:
+In order to only run the hub on a machine execute:
 
 ```
 cd rueckgrat
@@ -58,22 +58,37 @@ This will build/launch the hub and caddy which is a proxy to handle https access
 If you also want to run a node on that same machine go with.
 
 ```
-docker compose up --build
+docker compose up --build hub node caddy
 ```
 
-## node installation
+## node setup
 
-Choose which service you want to run on rou node and run it's `install.sh` script. Currently available are:
-* llama.cpp
-* ComfyUI
-
-Run the node:
-
+to run llama.cpp server on a node run 
 ```
-docker compose up --build node
+cd rueckgrat
+docker compose up --build llama-server
 ```
 
-## node installation
+ro tun ComfyUI on your node execute:
+```
+ComfyUI/install.sh
+```
+
+## chat client setup
+
+to run the chat from linux
+```
+cd chat
+./install.sh
+./run.sh
+```
+
+to run the chat from windows
+```
+cd chat
+.\install.ps1
+.\run.ps1
+```
 
 # Development
 

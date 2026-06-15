@@ -1,15 +1,17 @@
 import re
 from typing import Dict, Any, List
+from app.tools.tool_registry import ToolRegistry
 
 from app.common import Logger, Utils
 logger = Logger(__name__).get_logger()
 
 class PromptCompiler:
-    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_name: str = None):
+    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_name: str = None, tool_registry: ToolRegistry = None):
         self.contact = contact
         self.conversation = conversation
         self.user_name = user_name
         self.profile = contact.get("profile", {})
+        self.tool_registry = tool_registry
 
         self.context = Utils.get_nested_value(conversation, ["context"], "")
 
@@ -27,12 +29,20 @@ class PromptCompiler:
         style = self.profile.get('style', '')
         style = f"Your are {self._clean_text(style)}" if style != "" else ""
 
+        name = Utils.get_nested_value(self.contact, ["identity", "name"], "")
+        gender = Utils.get_nested_value(self.contact, ["identity", "gender"], "")
+        role = Utils.get_nested_value(self.contact, ["identity", "role"], "")
+        personality = self._clean_text(Utils.get_nested_value(self.contact, ["identity", "personality"], ""))
+
+        background_hook = self._clean_text(Utils.get_nested_value(self.profile, ["background_hook"], ""))
+        body_language = self._clean_text(Utils.get_nested_value(self.profile, ["body_language"], ""))
+
         return f"""
-You are {self.contact.get('name')} ({self.contact.get('gender')}).
-Your role is {self.contact.get('role')}.
-Your traits are {self._clean_text(self.contact.get('personality', ''))}
-Your background story is {self._clean_text(self.profile.get('background_hook', ''))}
-Your body language is {self._clean_text(self.profile.get('body_language', ''))}
+You are {name} ({gender}).
+Your role is {role}.
+Your traits are {personality}
+Your background story is {background_hook}
+Your body language is {body_language}
 {style}
 You are talking to {self.user_name}.
 """.strip()
@@ -104,11 +114,16 @@ You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_bo
 """.strip()
 
     def _build_tools(self) -> str:
-        return f"""
-TOOLS:
-- You can take a picture of yourself, the user or both together in the current situation by including one of the following tags IMG_AI, IMG_USR or IMG_GRP at the end of your response. Use this if it helps improving communication.
-"""
+        if self.tool_registry:
+            return self.tool_registry.get_tools_prompt()
+        else:
+            return ""
 
+    def _build_instructions(self) -> str:
+        return """
+INSTRUCTIONS:
+* When a WEBSEARCH_RESULT section is provided, base your final answer solely on it. Do not invent or add any information. Answer concisely.
+"""
 
     def build_prompt(self) -> str:
         sections = [
@@ -116,7 +131,8 @@ TOOLS:
             self._build_behavior(),
             self._build_style(),
             self._build_objectives(),
-            self._build_tools()
+            self._build_tools(),
+            self._build_instructions()
         ]
 
         system_prompt = "\n\n".join(sections)

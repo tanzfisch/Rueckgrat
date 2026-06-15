@@ -14,24 +14,31 @@ from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from app.utils import ChatDB, Infrastructure, ImageType
+from app.utils import ChatDB, Infrastructure, ImageType, MessageQueue
+from app.tools import ToolRegistry
 from app.jobs import JobQueue, MetaJob, AssistantImageJob, ContactGeneratorJob
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
-from app.common import Logger, ChatRequest, GetMessagesRequest
+from app.common import Logger, ChatRequest, GetMessagesRequest, Utils
 logger = Logger(__name__).get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     random.seed(time.time())
-    
+        
     app.state.infrastructure = Infrastructure()
     db_path = "/hub/db/chat.db"
-    app.state.db = ChatDB(db_path)    
+    app.state.db = ChatDB(db_path)
     app.state.job_queue = JobQueue()
+
+    app.state.tool_registry = ToolRegistry(
+        infrastructure=app.state.infrastructure,
+        db=app.state.db,
+        job_queue=app.state.job_queue
+    )
 
     logger.info("hub initialized")
 
@@ -219,7 +226,7 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
         contact_id = contact_id,
         db = app.state.db, 
         infrastructure = app.state.infrastructure, 
-        image_type = ImageType.Portrait,
+        image_type = ImageType.UpperBody,
         store_image_as = "profile",
         width = 720,
         height = 720,                
@@ -348,11 +355,11 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
         try:
             while not closed.is_set():
                 text = await websocket.receive_text()
-                data = json.loads(text)                
+                data = json.loads(text)
 
                 if "chat" in data:
                     chat_request = ChatRequest(**data["chat"])
-                    job = MetaJob(user_id, chat_request, app.state.db, app.state.infrastructure)
+                    job = MetaJob(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry)
                     app.state.job_queue.add(job)
                 elif "generate" in data:
                     generate = data["generate"]
@@ -378,21 +385,17 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
             logger.error(f"receiver failure {repr(e)}")
             await safe_close(code=1011)
 
-    # send back to client
     async def sender():
         try:
             while not closed.is_set():
-                job = await done_queue.get()
-
-                if closed.is_set():
-                    break
-
-                try:
-                    if job.has_response():
-                        await websocket.send_text(json.dumps(job.result()))
-                except RuntimeError:
-                    # happens if socket already closed underneath
-                    break
+                message = MessageQueue().pop_message()
+                if message:
+                    try:
+                        await websocket.send_text(json.dumps(message))
+                    except RuntimeError:
+                        break
+                else:
+                    await asyncio.sleep(0.01)  # or use a proper event/queue
 
         except WebSocketDisconnect:
             print("Client disconnected (sender)")
@@ -402,11 +405,24 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
             logger.error(f"sender failure {repr(e)}")
             await safe_close(code=1011)
 
+    # send back to client
+    async def finish_job():
+        while not closed.is_set():
+            job = await done_queue.get()
+
+            if closed.is_set():
+                break
+
+            if job.has_response():
+                logger.debug(f"sending result {Utils.pretty_print(job.result())}")
+                MessageQueue().send_data(job.result())
+
     receiver_task = asyncio.create_task(receiver())
+    finish_job_task = asyncio.create_task(finish_job())
     sender_task = asyncio.create_task(sender())
 
     done, pending = await asyncio.wait(
-        [receiver_task, sender_task],
+        [receiver_task, sender_task, finish_job_task],
         return_when=asyncio.FIRST_EXCEPTION
     )
 

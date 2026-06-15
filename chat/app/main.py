@@ -7,28 +7,32 @@ from qasync import QApplication
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout)
 from PySide6.QtCore import QTimer
 import atexit
-from app.ui import LoginPage, ChatPage, ContactsPage, ConversationsPage, ProfilePage, ProfileWizard, SettingsPage
+from app.ui import LoginPage, ChatPage, ContactsPage, ConversationsPage, ProfilePage, ProfileWizard, SettingsPage, InitialSettingsPage
 from app.speech import Speech
 from app.utils.backend import Backend
+from app.utils.config import RueckgratConfig
+import platform
 
 from common import Logger
 logger = Logger(__name__).get_logger()
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, hasConfig: bool):
         super().__init__()
-
         self.resize(600, 1200)
 
         central = QWidget()
         self.main_layout = QVBoxLayout(central)
         self.setCentralWidget(central)
 
+        self.center_on_screen()
+
         self.current_page = None
 
-        self.navigate("login")
-
-        self.center_on_screen()
+        if hasConfig:
+            self.navigate("login")
+        else:
+            self.navigate("initial_settings")
 
         self.heartbeat_timer = QTimer()
         self.heartbeat_timer.timeout.connect(self.heartbeat)
@@ -50,9 +54,11 @@ class MainWindow(QMainWindow):
             return ProfileWizard(self.navigate)    
         if name == "settings": 
             return SettingsPage(self.navigate)    
+        if name == "initial_settings":
+            return InitialSettingsPage(self.navigate)    
 
     def heartbeat(self):
-        if not Backend.get_instance().check_health():
+        if not Backend.check_health():
             logger.error("system unhealthy")
 
     def navigate(self, page_name: str, **kwargs):
@@ -74,20 +80,11 @@ class MainWindow(QMainWindow):
         self.move(geo.topLeft())
 
 async def async_main(app, window):
-    #ws_task = asyncio.create_task(Backend.get_instance().start_websocket())
-
     stop_event = asyncio.Event()
     app.aboutToQuit.connect(stop_event.set)
-
     await stop_event.wait()
 
-    #ws_task.cancel()
-    #try:
-    #    await ws_task
-    #except asyncio.CancelledError:
-    #    pass
-
-    Backend.get_instance().stop_websocket()
+    Backend.stop_websocket()
 
 def get_image(image_filename) -> str:
     try:
@@ -95,7 +92,7 @@ def get_image(image_filename) -> str:
         logger.debug(f"check {image_path}")
         if not image_path.exists():
             logger.debug(f"download {image_path}")
-            Backend.get_instance().download_file(f"images/{image_filename}", "cache/images")
+            Backend.download_file(f"images/{image_filename}", "cache/images")
     except Exception as e:
         logger.error(f"failed to handle incomming image: {repr(e)}")
 
@@ -105,9 +102,14 @@ def on_incomming_message(msg: dict):
         get_image(image["filename"])
 
 def main():
+    logger.debug(f"platform: {platform.system()}")
+    
+    config = RueckgratConfig()
+    Backend.init(config)
+
     truststore.inject_into_ssl()
     atexit.register(Speech.kill_current_speech)
-    atexit.register(Backend.get_instance().shutdown)
+    atexit.register(Backend.shutdown)
 
     app = qasync.QApplication(sys.argv)
 
@@ -115,14 +117,14 @@ def main():
     with open(qss_path) as f:
         app.setStyleSheet(f.read())
 
-    window = MainWindow()
+    window = MainWindow(config.has_config())
     window.show()
 
-    Backend.get_instance().register_incomming_message(on_incomming_message)
+    Backend.register_incomming_message(on_incomming_message)
 
     qasync.run(async_main(app, window))
 
-    Backend.get_instance().unregister_incomming_message(on_incomming_message)
+    Backend.unregister_incomming_message(on_incomming_message)
 
 if __name__ == "__main__":
     main()

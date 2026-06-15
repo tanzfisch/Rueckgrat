@@ -15,12 +15,11 @@ class ContactImagePromptCompiler:
         self.contact = contact
         self.user_data = user_data
         self.profile = contact.get("profile", {})
-        self.appearance = self.profile.get("appearance", {})
         self.image_type = image_type
         self.show_assistant = show_assistant
         self.show_user = show_user        
         self.prompt = prompt
-        self.context = context
+        self.context = context        
 
         if not self.context:
             logger.warning("got no context yet")
@@ -58,11 +57,11 @@ class ContactImagePromptCompiler:
 
             # portrait
             if self.image_type == ImageType.Portrait or self.image_type == ImageType.UpperBody or self.image_type == ImageType.FullBody:            
-                assistant_stack.append(Utils.get_nested_value(self.contact, ["gender"], ""))
-                assistant_stack.append(Utils.get_nested_value(self.appearance, ["general"], ""))
-                assistant_stack.append(Utils.get_nested_value(self.appearance, ["hair"], ""))
-                assistant_stack.append(Utils.get_nested_value(self.appearance, ["face"], ""))
-                assistant_stack.append(Utils.get_nested_value(self.appearance, ["skin"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.contact, ["identity", "gender"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "general"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "hair"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "face"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "skin"], ""))
 
                 user_profile = json.loads(self.user_data["profile"])
                 user_gender = Utils.get_nested_value(user_profile, ["gender"], "")
@@ -79,11 +78,10 @@ class ContactImagePromptCompiler:
                     user_stack.append(Utils.get_nested_value(self.context, ["user", "head"], ""))
                 else:
                     assistant_stack.append(Utils.get_nested_value(self.profile, ["profile_picture_context", "assistant", "head"], ""))
-                    user_stack.append(Utils.get_nested_value(self.profile, ["profile_picture_context", "user", "head"], ""))
 
             # upper body
             if self.image_type == ImageType.UpperBody or self.image_type == ImageType.FullBody:            
-                assistant_stack.append(Utils.get_nested_value(self.appearance, ["upper_body"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "upper_body"], ""))
 
                 if self.context:
                     assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "upper_body"], ""))
@@ -93,7 +91,7 @@ class ContactImagePromptCompiler:
 
             # full body
             if self.image_type == ImageType.FullBody:
-                assistant_stack.append(Utils.get_nested_value(self.appearance, ["body"], ""))
+                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "body"], ""))
 
                 if self.context:
                     assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "body"], ""))
@@ -134,7 +132,7 @@ class ContactImagePromptCompiler:
         return ""
 
     def _build_positive_general(self) -> str:
-        image_style = self.appearance["image_style"]
+        image_style = Utils.get_nested_value(self.profile, ["appearance", "image_style"], "")
         if image_style == "natural":
             return "natural photograph, realistic lighting, soft natural light, subtle shadows, true-to-life colors, high quality, high detail, sharp focus, correct anatomy, natural skin texture, visible pores, slight imperfections, candid feel, unposed, real-world camera look, depth of field, realistic lens perspective, no overprocessing, no HDR look, film-like color grading"
         elif image_style == "studio":
@@ -143,7 +141,7 @@ class ContactImagePromptCompiler:
             return "high quality, high detail, correct anatomy"
         
     def _build_negative_general(self) -> str:
-        image_style = self.appearance["image_style"]
+        image_style = Utils.get_nested_value(self.profile, ["appearance", "image_style"], "")
         if image_style == "natural":        
             return "stylized image, artificial lighting, dramatic lighting, high contrast, vivid colors, oversaturated tones, glossy skin, smooth texture, flawless complexion, hyper-detailed, ultra sharp, HDR effect, cinematic look, perfect symmetry, exaggerated features, studio lighting, digital art style, 3D render look, polished, unreal perfection, text, mirror, artifacts in eyes"
         elif image_style == "studio":

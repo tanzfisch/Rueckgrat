@@ -48,7 +48,7 @@ class UpdateContextJob(Job):
             compiler = PromptCompiler(contact, conversation, self.request.name)
             system_prompt, context_prompt = compiler.build_prompt()
 
-            payload.append({"role": "system", "content": system_prompt})
+            payload.append({"role": "developer", "content": system_prompt})
 
             if context == "":
                 # fallback context
@@ -100,7 +100,7 @@ EXAMPLE CONTEXT:
 }}
 
 INSTRUCTIONS:
-- Invent a situation where user and assistant found them selves in while including the given messages as well
+- Invent a detailed narrative situation where user and assistant are immersed together, with the given messages as central, heavily weighted dialogue, plot drivers, and key exchanges.
 - Fill in information as applicable
 - Keep ALL fields SHORT (max 40 words each)
 - an empty string is perfectly valid and means the absence of things or actions

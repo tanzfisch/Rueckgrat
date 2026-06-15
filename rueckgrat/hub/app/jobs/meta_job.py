@@ -1,145 +1,90 @@
-import random
 from .job_queue import Job
-from .classification_job import ClassificationJob
 from .chat_job import ChatJob
-from .assistant_image_job import AssistantImageJob
-from .requested_image_job import RequestedImageJob
+from app.utils.message_queue import MessageQueue
 from typing import Dict, Any
 
 from app.common import Logger, ChatRequest, Utils
 logger = Logger(__name__).get_logger()
 
 class MetaJob(Job):
-    def __init__(self, user_id: int, request: ChatRequest, db, infrastructure):
+    def __init__(self, user_id: int, request: ChatRequest, db, infrastructure, tool_registry):
         super().__init__()
         self.user_id = user_id
         self.request = request
         self.db = db
         self.infrastructure = infrastructure     
-
-    def cleanup_content(self, content: str) -> str:
-        content = content.replace("<IMG_AI>", "").strip()
-        content = content.replace("IMG_AI", "").strip()
-        content = content.replace("<IMG_USR>", "").strip()
-        content = content.replace("IMG_USR", "").strip()
-        content = content.replace("<IMG_GRP>", "").strip()
-        content = content.replace("IMG_GRP", "").strip()
-        return content
-    
+        self.tool_registry = tool_registry
+            
     def execute(self) -> None:
         self.response = {}
 
-        logger.debug("recieved message request")
+        logger.debug("store incomming message")
         self.db.add_message(self.request.conversation_id, self.request.role, self.request.content, self.request.name)
 
         try:
-            logger.debug("execute meta job")
-            img_ai = False
-            img_usr = False
-
-            logger.debug("classify...")
-            classify = ClassificationJob(self.request.content)
-            self.create_and_add(classify)
-            self.wait_for([classify])
-            classifications = classify.result()["classifications"]
-            logger.debug(f"classifications found: {classifications}")
-
+            MessageQueue().send_status_message("thinking")
             contact = self.db.get_contact_by_id(self.request.contact_id)
-            contact_name = Utils.get_nested_value(contact, ["name"])
+            chat_job = ChatJob(self.request, self.db, self.infrastructure, self.tool_registry)
+            self.add_sub_job(chat_job)
+            self.wait_for([chat_job])
+            chat_response = chat_job.result()
+            logger.debug(f"chat response:\n{Utils.pretty_print(chat_response)}")
+            
+            tool_calls = chat_response["tool_calls"]
 
-            if "image_generation_request" in classifications:
-                logger.debug("generate image...")
-                image_job = RequestedImageJob(self.request, self.db, self.infrastructure)
-                self.create_and_add(image_job)
-                self.wait_for([image_job])
-                image_job_result = image_job.result()
-
-                image = image_job_result["image"]
-                image_filename = image["filename"]
-                image_size = image["file_size"]
-                image_url = f"images/{image_filename}"
-
-                # updat db
-                message_id = self.db.add_message(self.request.conversation_id, "assistant", "", contact_name)        
-                self.db.add_attachment(message_id, image_filename, image_url, "image/png", image_size)
-
-                # notify frontend # TODO maybe frontend should only be notified to pull the latest from the DB to prevent double handling
-                self.response["chat"] = { "role": "assistant","content": "" }
-                self.response["image"] = image
-
-                logger.debug("image generated")
-
-            if "conversation" in classifications:
-                logger.debug("gen assistant response...")                
-                chat_job = ChatJob(self.request, self.db, self.infrastructure)
-                self.create_and_add(chat_job)
-                self.wait_for([chat_job])
-
-                content = chat_job.result()["content"]
-
-                if not "image_generation_request" in classifications: # one image is enough
-                    if "IMG_AI" in content:
-                        img_ai = True
-                    elif "IMG_USR" in content:
-                        # TODO this currently does not work well
-                        img_ai = True
-                        #img_usr = True
-                    elif "IMG_GRP" in content:
-                        # TODO this currently does not work well
-                        img_ai = True
-                        #img_usr = True
-
-                content = self.cleanup_content(content)
-
-                # update db
-                if "image_generation_request" in classifications:
-                    self.db.update_message(message_id, chat_job.result()["role"], content, contact_name)
-                else:
-                    message_id = self.db.add_message(self.request.conversation_id, chat_job.result()["role"], content, contact_name)
-
-                # notify frontend
-                chat_job.result()["content"] = content
-                self.response["chat"] = chat_job.result()
-                
-                logger.debug("assistant response generated")
-
-            if img_ai or img_usr:
-                logger.debug("generate mood image...")
-
-                width = 720
-                height = 1280
-                if img_ai and img_usr:
-                    width = 1280
-                    height = 720
-
-                assistant_image_job = AssistantImageJob(
-                    user_id = self.user_id,
-                    contact_id = self.request.contact_id,
-                    conversation_id = self.request.conversation_id, 
-                    db = self.db, 
-                    infrastructure = self.infrastructure,
-                    show_assistant = img_ai,
-                    show_user = img_usr,
-                    width = width,
-                    height = height
+            for tool_call in tool_calls:                
+                self.tool_registry.execute(
+                    user_id=self.user_id,
+                    contact_id=self.request.contact_id,
+                    conversation_id=self.request.conversation_id,
+                    response=self.response,
+                    tool_call=tool_call
                 )
-                self.create_and_add(assistant_image_job)
-                self.wait_for([assistant_image_job])
-                image_job_result = assistant_image_job.result()
 
-                image = image_job_result["image"]
-                image_filename = image["filename"]
-                image_url = f"images/{image_filename}"
+            # handle tool outputs
+            tool_response = ""
 
-                # update db
-                self.db.add_attachment(message_id, image_filename, image_url, "image/png", 0)
+            if "websearch_results" in self.response:
+                websearch_results = self.response["websearch_results"]
+                self.response.pop("websearch_results")
+                if len(websearch_results) > 0:
+                    tool_response += f"\nWebsearch results in order of accuracy: "
+                    for websearch_result in websearch_results:                        
+                        tool_response += f"\n{websearch_result['title']} - {websearch_result['answer']} - source {websearch_result['source']}"
+                else:
+                    logger.error("empty tool response from websearch")
 
-                # notify frontend
-                self.response["image"] = image
+            if tool_response != "":
+                tool_response = f"{chat_response['content']}\n\nWEBSEARCH_RESULT{tool_response}\n"
 
-                logger.debug("mood image generated")
+                logger.debug(f"tool response:\n{tool_response}")
+
+                MessageQueue().send_status_message("finalize answer ...")
+                chat_job = ChatJob(self.request, self.db, self.infrastructure, self.tool_registry, tool_response)
+                self.add_sub_job(chat_job)
+                self.wait_for([chat_job])
+                chat_response = chat_job.result()                
+                logger.debug(f"tool based chat response:\n{Utils.pretty_print(chat_response)}")
+
+            self.response["chat"] = chat_response
+            contact_name = Utils.get_nested_value(contact, ["identity", "name"])            
+            message_id = self.db.add_message(self.request.conversation_id, "assistant", self.response["chat"]["content"], contact_name)
+
+            if message_id:
+                if "take_photo" in self.response:
+                    image_filename = self.response["take_photo"]["filename"]
+                    image_url = self.response["take_photo"]["image_path"]
+                    self.db.add_attachment(message_id, image_filename, image_url, "image/png", 0)        
+
+                if "generate_image" in self.response:
+                    image_filename = self.response["generate_image"]["filename"]
+                    image_url = self.response["generate_image"]["image_path"]
+                    self.db.add_attachment(message_id, image_filename, image_url, "image/png", 0)
+            
+            logger.debug("assistant response generated")
 
             logger.debug("... done")
+            MessageQueue().set_status("done")
 
         except Exception as e:
             logger.error(f"failed to execute MetaJob {repr(e)}")

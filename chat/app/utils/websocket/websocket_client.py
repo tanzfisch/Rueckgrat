@@ -5,7 +5,7 @@ from typing import Callable, Optional
 from websockets.connection import State
 import ssl
 
-from common import Logger
+from common import Logger, Utils
 logger = Logger(__name__).get_logger()
 
 class WebSocketClient:
@@ -48,7 +48,7 @@ class WebSocketClient:
             while self._running:
                 msg = await self.ws.recv()
                 if self.on_message:
-                    logger.debug(msg)
+                    logger.debug(Utils.pretty_print(msg))
                     self.on_message(json.loads(msg))
         except Exception as e:
             logger.error(f"failed to receive ws: {repr(e)}")

@@ -1,10 +1,10 @@
 import re
-from PySide6.QtWidgets import ( QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QScrollArea, QMenu )
+from PySide6.QtWidgets import ( QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QScrollArea, QMenu, QLabel )
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, QTimer, QSize, QPoint
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker, PlainTextEdit
+from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker, PlainTextEdit, StatusWidget
 from app.speech import Speech
 from app.utils import Backend, Contact
 from pathlib import Path
@@ -87,7 +87,8 @@ class ChatPage(BasePage):
         input_layout.addWidget(send_btn, alignment=Qt.AlignmentFlag.AlignBottom)
         
         chat_layout.addWidget(self.history_scroll_area)
-        chat_layout.addWidget(input_container)        
+
+        chat_layout.addWidget(input_container)
 
     def openEmojiPicker(self):
         button_pos = self.emoji_button.mapToGlobal(QPoint(0, 0))
@@ -113,21 +114,30 @@ class ChatPage(BasePage):
 
     def clear_history(self):
         self.clear_layout(self.history_layout)
+
+        wrapper = QWidget()
+        wrapper_layout = QHBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        self.status_widget = StatusWidget()
+        self.status_widget.clear_status()
+        wrapper_layout.addWidget(self.status_widget, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.history_layout.addWidget(wrapper)
+
         self.history_layout.addStretch()
 
     def on_enter(self, **kwargs):
         self.contact_id = kwargs.get("contact_id")
         self.conversation_id = kwargs.get("conversation_id")
 
-        self.contact = Contact(Backend.get_instance().get_contact(self.contact_id))
+        self.contact = Contact(Backend.get_contact(self.contact_id))
         self.contact_header.set_contact(self.contact)
 
         self.clear_history()
 
-        messages = Backend.get_instance().get_messages(self.conversation_id)
+        messages = Backend.get_messages(self.conversation_id)
         for message in messages:
             message_id = message["id"]
-            attachements = Backend.get_instance().get_attachments(message_id)
+            attachements = Backend.get_attachments(message_id)
             if attachements:
                 image_path = self._get_image(attachements[0]["file_name"])
                 self.append_history(message["role"], message["content"], image_path)
@@ -138,20 +148,17 @@ class ChatPage(BasePage):
 
         if self.contact.get_gender() == "male":
             default_piper = "en_US-hfc_male-medium"
-            default_kokoro = "af_adam"
         else:
             default_piper = "en_US-libritts_r-medium"
-            default_kokoro = "af_bella"
 
-        self.kokoro_voice=default_kokoro # TODOself.contact.get("kokoro_voice_type") or default_kokoro
         self.piper_model=self.contact.get_voice_model() or default_piper
 
         self.temperature = float(self.contact.get_llm_temperature())
 
-        Backend.get_instance().register_incomming_message(self.on_incomming_message)
+        Backend.register_incomming_message(self.on_incomming_message)
 
     def on_leave(self):
-        Backend.get_instance().unregister_incomming_message(self.on_incomming_message)
+        Backend.unregister_incomming_message(self.on_incomming_message)
 
     def resizeEvent(self, event):
         self.adjust_input_box_height()
@@ -217,7 +224,7 @@ class ChatPage(BasePage):
             self.replay_content = content
             wrapper_layout.addWidget(bubble, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        self.history_layout.insertWidget(self.history_layout.count() - 1, wrapper)
+        self.history_layout.insertWidget(self.history_layout.count() - 2, wrapper)
         
         QTimer.singleShot(10, self.history_container.refreshSize)
         QTimer.singleShot(50, self.scroll_to_bottom)
@@ -227,7 +234,10 @@ class ChatPage(BasePage):
         scrollbar.setValue(scrollbar.maximum())
 
     def replay(self):
-        Speech.speak(self._cleanup_for_speech(self.replay_content), voice=self.kokoro_voice, model=self.piper_model, interface="piper")
+        Speech.speak(
+            text=self._cleanup_for_speech(self.replay_content), 
+            model=self.piper_model
+        )
 
     def _remove_excess_linebreaks(self, text: str) -> str:
         code_block_pattern = r"```.*?```"
@@ -258,12 +268,17 @@ class ChatPage(BasePage):
     def _get_image(self, image_filename) -> str:
         image_path = Path("cache/images") / image_filename
         if not image_path.exists():
-            Backend.get_instance().download_file(f"images/{image_filename}", "cache/images")
+            Backend.download_file(f"images/{image_filename}", "cache/images")
 
         return image_path
 
     def on_incomming_message(self, msg: dict):
         try:
+            logger.debug(f"on_incomming_message {msg}")
+
+            if "status" in msg:      
+                self.status_widget.on_status_message(msg["status"])
+
             if "chat" in msg:
                 chat = msg["chat"]
 
@@ -271,26 +286,31 @@ class ChatPage(BasePage):
                     content = self._cleanup_content(chat["content"])
                     role = chat["role"]
 
-                    if "assistant_image" in msg:
-                        image = msg["assistant_image"]
+                    if "take_photo" in msg:
+                        image = msg["take_photo"]
                         image_path = Path("cache/images") / image["filename"]
                         self.append_history(role, content, image_path)
-                    elif "image" in msg:
-                        image = msg["image"]
+                    elif "generate_image" in msg:
+                        image = msg["generate_image"]
                         image_path = Path("cache/images") / image["filename"]
                         self.append_history(role, content, image_path)
                     else:
                         self.append_history(role, content)
                 
-                Speech.speak(self._cleanup_for_speech(content), voice=self.kokoro_voice, model=self.piper_model, interface="piper")
+                Speech.speak(
+                    text=self._cleanup_for_speech(content), 
+                    model=self.piper_model
+                )
         except Exception as e:
             logger.error(f"failed to handle incomming message {e}")
 
     def send_message(self):
+        self.status_widget.clear_status()
+        
         message = self.input_box.toPlainText().strip()
         if not message:
             return
         self.input_box.clear()
 
-        self.append_history("user", message)        
-        Backend.get_instance().chat(self.contact_id, self.conversation_id, "user", message, self.temperature)
+        self.append_history("user", message)
+        Backend.chat(self.contact_id, self.conversation_id, "user", message, self.temperature)

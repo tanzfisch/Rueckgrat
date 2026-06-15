@@ -17,8 +17,9 @@ class ChatResponse(BaseModel):
 class ChatRequestLlama(BaseModel):
     messages: list[dict]
     temperature: float
-    low_accuracy: bool
     seed: int
+    max_new_tokens: int
+    context_size: int
 
 class ImageRequest(BaseModel):
     positive_prompt: str

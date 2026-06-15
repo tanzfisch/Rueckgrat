@@ -49,6 +49,18 @@ services:
     restart: unless-stopped    
     extra_hosts:
       - "host.docker.internal:host-gateway"    
+
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-${LLAMA_CPP_SERVER}
+    container_name: llama-server
+    privileged: true
+    volumes:
+      - ../models:/models
+    ports:
+      - "${LLAMA_CPP_PORT}:${LLAMA_CPP_PORT}"
+    restart: unless-stopped
+    command: -m ${LLAMA_CPP_MODEL} --host 0.0.0.0 --ctx-size ${LLAMA_CPP_MAX_CONTEXT} --n-gpu-layers ${LLAMA_CPP_GPU_LAYERS}
+
 networks:
   rueckgrat-net-local:
     external: true

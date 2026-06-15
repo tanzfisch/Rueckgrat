@@ -33,12 +33,12 @@ class ContactGeneratorJob(Job):
                 contact_id = contact_id,
                 db = self.db, 
                 infrastructure = self.infrastructure, 
-                image_type = ImageType.Portrait,
+                image_type = ImageType.UpperBody,
                 store_image_as = "profile",
                 width = 720,
                 height = 720,                
             )
-            self.create_and_add(assistant_image_job)
+            self.add_sub_job(assistant_image_job)
 
             self.response = { 
                 "contact_id": contact_id
@@ -159,11 +159,11 @@ OUTPUT:
 - keep each entry close to the lenght in the example
 """
             logger.debug(f"contact generator query:\n{query}")
-            payload = [{"role": "system", "content": query}]
+            payload = [{"role": "developer", "content": query}]
         except Exception as e:
             logger.error(f"failed to generate payload {repr(e)}")
 
-        response_content = self.infrastructure.chat(payload, 0.2, random.randint(0, 100000), True)
+        response_content = self.infrastructure.chat(payload, 0.2, random.randint(0, 100000))
         reply = Utils.json_loads(response_content)
             
         if not reply:
