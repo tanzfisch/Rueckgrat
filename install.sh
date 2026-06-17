@@ -50,15 +50,18 @@ install_pkg() {
 echo "📥 Checking repository..."
 
 if [[ -d ".git" ]]; then
-    echo "✅ Already inside Rueckgrat repository."
+    echo "✅ Already inside the Rueckgrat repository."
 elif [[ -d "Rueckgrat-temp" ]]; then
-    echo "✅ Found 'Rueckgrat-temp', entering..."
+    echo "✅ Found 'Rueckgrat-temp' directory."
     cd Rueckgrat-temp
 else
     echo "📥 Cloning fresh copy..."
-    git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-temp
+    
+    # Clone as current user (important!)
+    sudo -u "$USER" git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-temp
+    
     cd Rueckgrat-temp
-    echo "✅ Cloned successfully."
+    echo "✅ Repository cloned successfully."
 fi
 
 # ==================== COMPONENT SELECTION ====================
