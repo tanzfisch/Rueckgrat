@@ -63,17 +63,22 @@ fi
 
 # ==================== COMPONENT SELECTION ====================
 echo ""
-read -p "Install Chat Client? (y/N): " install_chat
-read -p "Install Hub? (y/N): " install_hub
-read -p "Install Node? (y/N): " install_node
 
-# Explicitly declare variables to satisfy 'set -u'
+# Pre-declare all variables to prevent unbound variable errors under `set -u`
+install_chat=""
+install_hub=""
+install_node=""
+install_llama=""
+
 INSTALL_HUB=false
 INSTALL_NODE=false
 INSTALL_LLAMA=false
 INSTALL_CHAT=false
 
-# Safe checks with default value
+read -p "Install Chat Client? (y/N): " install_chat
+read -p "Install Hub? (y/N): " install_hub
+read -p "Install Node? (y/N): " install_node
+
 [[ "${install_hub:-}"  =~ ^[Yy]$ ]] && INSTALL_HUB=true
 [[ "${install_node:-}" =~ ^[Yy]$ ]] && INSTALL_NODE=true
 [[ "${install_chat:-}" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
@@ -81,11 +86,6 @@ INSTALL_CHAT=false
 if $INSTALL_NODE; then
   read -p "Install llama-server (recommended)? (Y/n): " install_llama
   [[ -z "${install_llama:-}" || "${install_llama:-}" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
-fi
-
-if ! $INSTALL_HUB && ! $INSTALL_NODE && ! $INSTALL_CHAT; then
-    echo "❌ Nothing selected. Exiting."
-    exit 0
 fi
 
 # ==================== DOCKER (only if needed) ====================
