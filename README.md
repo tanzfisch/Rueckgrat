@@ -1,90 +1,112 @@
-# <img src="logo.png" width="50" alt="Logo">ückgrat
+# <img src="logo.png" width="50" alt="Logo"> ückgrat
 
-ai chat frontend &amp; backend
+**AI chat frontend & backend** — focused on personal, private companion apps.
 
-The purpose is evolving. Currently the focus is on personal, private companion app. 
+The purpose is evolving. Currently the main focus is a **private, local-first AI companion** with strong multimodal capabilities.
 
-Status: it's in the early stages. Lots of features still missing, unstable and non trivial to install.
-For more details check the [change log](https://github.com/tanzfisch/Rueckgrat/blob/master/changelog.md).
+**Status**: Early stage — many features still missing, some instability expected.  
+See the [changelog](https://github.com/tanzfisch/Rueckgrat/blob/master/changelog.md) for details.
 
-# Features
+## Features
 
-* in chat image genration on demand without context to the conversation. Just write something like "Can you please draw me a picture of an ape riding a horse"
-* in chat image generation by AI showing it self in action or user and AI in action (currently barely any continuity of character)
-* chatting with which ever llm is installed
-* text to speach on client side using piper
-* inventory system that tracks the clothing and items on characters (experimental)
+- In-chat image generation on demand (no context loss)
+- AI self-visualization and character-aware image generation
+- Chat with any locally installed LLM
+- Client-side text-to-speech using Piper
+- Experimental inventory system (tracks clothing/items on characters)
 
-For future features check [issues](https://github.com/tanzfisch/Rueckgrat/issues).
+For planned features, check the [Issues](https://github.com/tanzfisch/Rueckgrat/issues).
 
-# modules
+## Modules
 
-## Chat
+### Chat
+The beautiful cross-platform frontend (login, contacts, chat).
 
-The chat frontend. Loging, create a contact, chat.
-Tip: for quickly creating a contact copy paste the content of one of the tamplates in chat/app/templates in to the name field of the form
+**Tip**: Quickly create a contact by copying the content of one of the templates in `chat/app/templates/` into the name field.
 
-## Hub
+### Hub
+Central server. Handles authentication, database, and orchestrates communication between clients and nodes. Includes **Caddy** for automatic HTTPS.
 
-This is the server the client communicates to. I contains the database and controls the communication of the system.
+### Node
+Scalable backend workers. Each node can provide services (LLM inference, image generation, etc.) to the Hub.
 
-## Node
+Currently integrated:
+- **llama-server** (recommended — native performance)
+- **ComfyUI** (image generation)
 
-There can be a number of nodes. Each node offers a service (inference, image generation etc.) the Hub can use.
+### common
+Shared utilities across modules.
 
-Services currently integrated
-* llama.cpp as service (docker container is too slow)
-* ComfyUI as service
+## Getting Started (Recommended)
 
-## common
+The easiest way to install Rueckgrat is using the new **universal one-line installer**, which works on **all major Linux distributions** (Ubuntu, Debian, Fedora, Arch, openSUSE, etc.).
 
-Some utility code shared across modules
-
-# getting started
-
-First decide which machine will be running hub, node or chat or if it is all running on one machine.
-
-## hub setup
-
-In order to only run the hub on a machine execute:
-
+```bash
+# From any directory
+bash <(curl -fsSL https://raw.githubusercontent.com/tanzfisch/Rueckgrat/master/install.sh)
 ```
+
+Or clone first and run:
+
+```bash
+git clone https://github.com/tanzfisch/Rueckgrat.git
+cd Rueckgrat
+./install.sh
+```
+
+The installer will:
+
+* Ask which components you want (Chat Client / Hub / Node)
+* Automatically install Docker (if needed)
+* Install Caddy
+* Handle previous installations
+* Start the selected services
+
+## Manual Setup (Advanced)
+1. Hub only
+
+```bash
 cd rueckgrat
-docker compose up --build hub caddy
+docker compose up --build -d hub caddy
 ```
 
-This will build/launch the hub and caddy which is a proxy to handle https access to the hub.
+2. Hub + Node on same machine
 
-If you also want to run a node on that same machine go with.
-
-```
-docker compose up --build hub node caddy
-```
-
-## node setup
-
-to run llama.cpp server on a node run 
-```
+```bash
 cd rueckgrat
-docker compose up --build llama-server
+docker compose up --build -d hub node caddy
 ```
 
-ro tun ComfyUI on your node execute:
-```
-ComfyUI/install.sh
+3. Node only (on a separate machine)
+
+```bash
+cd rueckgrat
+docker compose up --build -d node
 ```
 
-## chat client setup
+For llama-server:
 
-to run the chat from linux
+```bash
+docker compose up --build -d llama-server
 ```
+
+For ComfyUI:
+
+```bash
+cd ComfyUI && ./install.sh
+```
+
+Chat Client
+
+```bash
 cd chat
 ./install.sh
 ./run.sh
 ```
 
-to run the chat from windows
-```
+Chat Client (Windows)
+
+```powershell
 cd chat
 .\install.ps1
 .\run.ps1
@@ -94,4 +116,7 @@ cd chat
 
 ## Tips
 
-* For better code completion run from root workspace scripts/setup_dev_venv.py and then open workspace from file project.code-workspace
+- For better code completion: Run python scripts/setup_dev_venv.py from the root, then open the workspace via project.code-workspace.
+
+
+✨ Feedback and contributions are very welcome!
