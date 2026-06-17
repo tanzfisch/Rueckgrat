@@ -21,3 +21,11 @@ sudo apt install -y rocm-dev rocm-hip-runtime rocblas hipblas
 
 - for vulkan support
 sudo apt install -y mesa-vulkan-drivers vulkan-tools libvulkan-dev glslc spirv-headers
+
+
+# get caddy certificte from docker container
+
+echo "get caddy cert ..."
+curl -k https://localhost/health
+
+docker cp rueckgrat-caddy-1:/data/caddy/pki/authorities/local/root.crt ~/.ssh/caddy-root.crt
