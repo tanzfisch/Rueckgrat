@@ -1,97 +1,69 @@
 # <img src="logo.png" width="50" alt="Logo">ückgrat
 
-ai chat frontend &amp; backend
+**AI chat frontend & backend** — focused on personal, private companion apps.
 
-The purpose is evolving. Currently the focus is on personal, private companion app. 
+The purpose is evolving. Currently the main focus is a **private, local-first AI companion** with strong multimodal capabilities.
 
-Status: it's in the early stages. Lots of features still missing, unstable and non trivial to install.
-For more details check the [change log](https://github.com/tanzfisch/Rueckgrat/blob/master/changelog.md).
+**Status**: Early stage — many features still missing, some instability expected.  
+See the [changelog](https://github.com/tanzfisch/Rueckgrat/blob/master/changelog.md) for details.
 
-# Features
+## Features
 
-* in chat image genration on demand without context to the conversation. Just write something like "Can you please draw me a picture of an ape riding a horse"
-* in chat image generation by AI showing it self in action or user and AI in action (currently barely any continuity of character)
-* chatting with which ever llm is installed
-* text to speach on client side using piper
-* inventory system that tracks the clothing and items on characters (experimental)
+Everything is in its early stages. Don't expect too much and mostly the quality depends on the models you run underneath
 
-For future features check [issues](https://github.com/tanzfisch/Rueckgrat/issues).
+- all python based
+- full Linux support (Chat client only for Windows)
+- In-chat image generation on demand 
+- AI self-visualization and character-aware image generation
+- Chat with any locally installed LLM
+- Client-side text-to-speech using Piper (subject to change)
+- code highlighting
+- Tools 
+    - websearch searches the web when requested or needed
+    - image_gen general image generation by user request or by it self
+    - take_photo takes a "photo" of self, user or both based on current context
+ 
+Currently supported os are:
+* Debian ✅
+* Ubuntu (not tested)
+* Fedora (not tested)
+* Arch (not tested)
+* openSUSE (not tested)
+* Windows ✅ (client only)
 
-# modules
+I recommend a miniumm of 24b llm (ie cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L which I worked with the most) otherwise it will not be able to handle json generation correctly and consitantly.
 
-## Chat
+For planned features, check the [Issues](https://github.com/tanzfisch/Rueckgrat/issues).
 
-The chat frontend. Loging, create a contact, chat.
-Tip: for quickly creating a contact copy paste the content of one of the tamplates in chat/app/templates in to the name field of the form
+## Getting Started (Recommended)
 
-## Hub
+The easiest way to install Rueckgrat on Linux is using the one-line installer
 
-This is the server the client communicates to. I contains the database and controls the communication of the system.
-
-## Node
-
-There can be a number of nodes. Each node offers a service (inference, image generation etc.) the Hub can use.
-
-Services currently integrated
-* llama.cpp as service (docker container is too slow)
-* ComfyUI as service
-
-## common
-
-Some utility code shared across modules
-
-# getting started
-
-First decide which machine will be running hub, node or chat or if it is all running on one machine.
-
-## hub setup
-
-In order to only run the hub on a machine execute:
-
-```
-cd rueckgrat
-docker compose up --build hub caddy
+```bash
+curl -fsSL https://raw.githubusercontent.com/tanzfisch/Rueckgrat/master/install.sh
 ```
 
-This will build/launch the hub and caddy which is a proxy to handle https access to the hub.
+Or clone first and run:
 
-If you also want to run a node on that same machine go with.
-
-```
-docker compose up --build hub node caddy
-```
-
-## node setup
-
-to run llama.cpp server on a node run 
-```
-cd rueckgrat
-docker compose up --build llama-server
-```
-
-ro tun ComfyUI on your node execute:
-```
-ComfyUI/install.sh
-```
-
-## chat client setup
-
-to run the chat from linux
-```
-cd chat
+```bash
+git clone https://github.com/tanzfisch/Rueckgrat.git
+cd Rueckgrat
 ./install.sh
-./run.sh
 ```
 
-to run the chat from windows
-```
-cd chat
+The installer will:
+
+* Ask which components you want (Chat Client / Hub / Node)
+* Automatically install Docker (if needed)
+* Install Caddy
+* Removes previous installations (on user request)
+* Start the selected services
+
+For a Windows Chat Client
+
+```powershell
+git clone https://github.com/tanzfisch/Rueckgrat.git
+cd Rueckgrat\chat
 .\install.ps1
 .\run.ps1
 ```
-
-# Development
-
-## Tips
-
-* For better code completion run from root workspace scripts/setup_dev_venv.py and then open workspace from file project.code-workspace
