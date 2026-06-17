@@ -9,11 +9,18 @@ See the [changelog](https://github.com/tanzfisch/Rueckgrat/blob/master/changelog
 
 ## Features
 
-- In-chat image generation on demand (no context loss)
+Everything is in its early stages. Don't expect too much and mostly the quality depends on the models you run underneath
+
+- In-chat image generation on demand 
 - AI self-visualization and character-aware image generation
 - Chat with any locally installed LLM
 - Client-side text-to-speech using Piper
-- Experimental inventory system (tracks clothing/items on characters)
+- Tools 
+    - websearch searches the web when requested or needed
+    - image_gen general image generation by user request or by it self
+    - take_photo takes a "photo" of self, user or both based on current context
+
+I recommend a miniumm of 24b llm (ie cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L which I worked with the most) otherwise it will not be able to handle json generation correctly and consitantly.
 
 For planned features, check the [Issues](https://github.com/tanzfisch/Rueckgrat/issues).
 
