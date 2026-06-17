@@ -140,7 +140,7 @@ if $INSTALL_HUB || $INSTALL_NODE; then
 
     if [[ $RUNNING_CONTAINERS -gt 0 ]]; then
         echo "⚠️  Found running Rueckgrat containers."
-        read -p "Stop and remove previous installation? (y/N): " clean_install
+        read -p "Stop and remove previous installation? (y/N): " -r clean_install </dev/tty
         if [[ "$clean_install" =~ ^[Yy]$ ]]; then
             echo "🛑 Cleaning up..."
             docker ps -q --filter "name=rueckgrat" | xargs -r docker stop 2>/dev/null || true
@@ -172,7 +172,7 @@ if $INSTALL_NODE; then
     echo "📦 Installing / Starting Node..."
 
     if ! $INSTALL_HUB; then
-        read -p "Hub IP/hostname (default: localhost): " HUB_ADDR
+        read -p "Hub IP/hostname (default: localhost): " -r HUB_ADDR </dev/tty
         HUB_ADDR=${HUB_ADDR:-localhost}
 
         pushd rueckgrat > /dev/null
