@@ -274,8 +274,6 @@ class ChatPage(BasePage):
 
     def on_incomming_message(self, msg: dict):
         try:
-            logger.debug(f"on_incomming_message {msg}")
-
             if "status" in msg:      
                 self.status_widget.on_status_message(msg["status"])
 
