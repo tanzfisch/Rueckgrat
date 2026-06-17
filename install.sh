@@ -32,7 +32,6 @@ INSTALL_CHAT=false
 [[ "$install_node" =~ ^[Yy]$ ]] && INSTALL_NODE=true
 [[ "$install_chat" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
 
-# Extra question for llama-server if Node is selected
 if $INSTALL_NODE; then
   read -p "Install llama-server (recommended for LLM)? (Y/n): " install_llama
   [[ -z "$install_llama" || "$install_llama" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
@@ -43,8 +42,34 @@ if ! $INSTALL_HUB && ! $INSTALL_NODE && ! $INSTALL_CHAT; then
   exit 0
 fi
 
-echo "📦 update system packages..."
-sudo apt-get update -y
+# ==================== VOLUME CHECK (before starting services) ====================
+if $INSTALL_HUB || $INSTALL_NODE; then
+  echo ""
+  echo "🔍 Checking for existing Rueckgrat installation..."
+
+  RUNNING_CONTAINERS=$(docker ps -q --filter "name=rueckgrat" 2>/dev/null | wc -l)
+
+  if [[ $RUNNING_CONTAINERS -gt 0 ]]; then
+    echo "⚠️  Found running Rueckgrat containers. There is no guarantee they are compatible with the new installation."
+    read -p "Do you want to stop and remove the previous installation? (y/N): " clean_install
+    
+    if [[ "$clean_install" =~ ^[Yy]$ ]]; then
+      echo "🛑 Stopping all Rueckgrat containers..."
+      docker ps -q --filter "name=rueckgrat" | xargs -r docker stop 2>/dev/null || true
+      
+      echo "🗑️  Removing containers..."
+      docker ps -a -q --filter "name=rueckgrat" | xargs -r docker rm -f 2>/dev/null || true
+      
+      echo "🗑️  Removing old volumes..."
+      for vol in rueckgrat_caddy_data rueckgrat_caddy_config rueckgrat_node_images rueckgrat_hub_db rueckgrat_hub_images; do
+        docker volume rm "$vol" 2>/dev/null || true
+      done
+      echo "✅ Previous installation cleaned up."
+    else
+      echo "✅ Keeping previous installation (reusing volumes and containers)."
+    fi
+  fi
+fi
 
 # ==================== HUB ====================
 if $INSTALL_HUB; then
@@ -52,7 +77,8 @@ if $INSTALL_HUB; then
 
   # Install Caddy if not present
   if ! command -v caddy &> /dev/null; then
-      echo "Installing Caddy..."
+      echo "📦 Installing Caddy..."
+      sudo apt-get update -y
       sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
       curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
       curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
@@ -60,7 +86,7 @@ if $INSTALL_HUB; then
       sudo apt install caddy -y
   fi  
 
-  cd rueckgrat
+  pushd rueckgrat > /dev/null
 
     if [[ -f .env.example ]]; then
       cp -n .env.example .env 2>/dev/null || true
@@ -70,7 +96,7 @@ if $INSTALL_HUB; then
     fi
 
   docker compose up --build -d hub caddy || echo "❌ Docker compose failed (is Docker running?)"
-  cd -
+  popd > /dev/null
 fi
 
 # ==================== NODE ====================
@@ -84,7 +110,7 @@ if $INSTALL_NODE; then
     read -p "Hub IP or hostname (default: localhost): " HUB_ADDR
     HUB_ADDR=${HUB_ADDR:-localhost}
 
-    cd rueckgrat
+    pushd rueckgrat > /dev/null
     if [[ -f .env.example ]]; then
       if [[ ! -f .env ]]; then
         cp .env.example .env
@@ -95,26 +121,26 @@ if $INSTALL_NODE; then
     else
       echo "❌ .env.example not found. Please configure HUB_IP manually."
     fi
-    cd -
+    popd > /dev/null
   fi
 
-  cd rueckgrat
+  pushd rueckgrat > /dev/null
   docker compose up --build -d node || {
     echo "❌  Docker compose failed (is Docker running?)"
-    cd -
+    popd > /dev/null
     exit 1         
   }
-  cd -
+  popd > /dev/null
   
   if $INSTALL_LLAMA; then
     echo "📦 Installing / Starting llama-server..."
-    cd rueckgrat
+    pushd rueckgrat > /dev/null
     docker compose up --build -d llama-server || {
       echo "❌  Docker compose failed (is Docker running?)"
-      cd - 
+      popd > /dev/null 
       exit 1         
     }
-    cd -
+    popd > /dev/null
   fi
   
   echo "💡 Tip: For ComfyUI run 'cd ComfyUI && ./install.sh' separately if needed."
@@ -123,14 +149,14 @@ fi
 # ==================== CHAT CLIENT ====================
 if $INSTALL_CHAT; then
   echo "📦 Installing Chat Client..."
-  cd chat
+  pushd chat > /dev/null
   ./install.sh || {
     echo "❌ Chat client installation failed!"
-    cd -
+    popd > /dev/null
     exit 1 
   }
   echo "✅ Chat client ready"
-  cd -
+  popd > /dev/null
 fi
 
 echo ""
