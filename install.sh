@@ -63,29 +63,30 @@ fi
 
 # ==================== COMPONENT SELECTION ====================
 echo ""
+echo "Component Selection:"
 
-# Pre-declare all variables to prevent unbound variable errors under `set -u`
-install_chat=""
-install_hub=""
-install_node=""
-install_llama=""
-
+# Force reading from terminal (important for curl | bash)
 INSTALL_HUB=false
 INSTALL_NODE=false
 INSTALL_LLAMA=false
 INSTALL_CHAT=false
 
-read -p "Install Chat Client? (y/N): " install_chat
-read -p "Install Hub? (y/N): " install_hub
-read -p "Install Node? (y/N): " install_node
+read -p "Install Chat Client? (y/N): " -r install_chat </dev/tty
+read -p "Install Hub? (y/N): " -r install_hub </dev/tty
+read -p "Install Node? (y/N): " -r install_node </dev/tty
 
 [[ "${install_hub:-}"  =~ ^[Yy]$ ]] && INSTALL_HUB=true
 [[ "${install_node:-}" =~ ^[Yy]$ ]] && INSTALL_NODE=true
 [[ "${install_chat:-}" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
 
 if $INSTALL_NODE; then
-  read -p "Install llama-server (recommended)? (Y/n): " install_llama
+  read -p "Install llama-server (recommended)? (Y/n): " -r install_llama </dev/tty
   [[ -z "${install_llama:-}" || "${install_llama:-}" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
+fi
+
+if ! $INSTALL_HUB && ! $INSTALL_NODE && ! $INSTALL_CHAT; then
+  echo "❌ Nothing selected. Exiting."
+  exit 0
 fi
 
 # ==================== DOCKER (only if needed) ====================
