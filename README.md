@@ -40,7 +40,7 @@ For planned features, check the [Issues](https://github.com/tanzfisch/Rueckgrat/
 The easiest way to install Rueckgrat on Linux is using the one-line installer
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tanzfisch/Rueckgrat/master/install.sh
+curl -fsSL https://raw.githubusercontent.com/tanzfisch/Rueckgrat/master/install.sh | bash
 ```
 
 Or clone first and run:
