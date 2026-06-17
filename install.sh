@@ -143,15 +143,21 @@ if $INSTALL_HUB || $INSTALL_NODE; then
 
     if [[ $RUNNING_CONTAINERS -gt 0 ]]; then
         echo "⚠️  Found running Rueckgrat containers."
-        read -p "Stop and remove previous installation? (y/N): " -r clean_install </dev/tty
-        if [[ "$clean_install" =~ ^[Yy]$ ]]; then
-            echo "🛑 Cleaning up..."
+        read -p "Keep previous installation (reuse volumes & containers)? (Y/n): " -r keep_previous </dev/tty
+        
+        if [[ "${keep_previous:-}" =~ ^[Nn]$ ]]; then
+            echo "🛑 Stopping and removing previous Rueckgrat installation..."
+            
             docker ps -q --filter "name=rueckgrat" | xargs -r docker stop 2>/dev/null || true
             docker ps -a -q --filter "name=rueckgrat" | xargs -r docker rm -f 2>/dev/null || true
+            
+            echo "🗑️  Removing old volumes..."
             for vol in rueckgrat_caddy_data rueckgrat_caddy_config rueckgrat_node_images rueckgrat_hub_db rueckgrat_hub_images; do
                 docker volume rm "$vol" 2>/dev/null || true
             done
-            echo "✅ Cleanup complete."
+            echo "✅ Previous installation cleaned up."
+        else
+            echo "✅ Keeping previous installation (reusing volumes and containers)."
         fi
     fi
 fi
