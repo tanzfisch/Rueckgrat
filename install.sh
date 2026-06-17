@@ -62,6 +62,10 @@ else
 fi
 
 # Component selection
+install_chat=""
+install_hub=""
+install_node=""
+
 read -p "Install Chat Client? (y/N): " install_chat
 read -p "Install Hub? (y/N): " install_hub
 read -p "Install Node? (y/N): " install_node
