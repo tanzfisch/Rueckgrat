@@ -1,12 +1,22 @@
 #!/bin/bash
 # ===============================================
-# Rueckgrat Linux Installer
+# Rueckgrat Linux One-Line Installer
 # ===============================================
 
 set -euo pipefail
 
 echo "🚀 Rueckgrat Linux Installer"
 echo "============================="
+
+# If not running from inside the repo, clone it first
+if [[ ! -d "rueckgrat" && ! -d ".git" ]]; then
+  echo "📥 Repository not found. Cloning Rueckgrat..."
+  git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-temp
+  cd Rueckgrat-temp
+  echo "✅ Repository cloned successfully."
+else
+  echo "✅ Running from existing repository."
+fi
 
 # Ask main components
 read -p "Install Hub? (y/N): " install_hub
@@ -51,8 +61,16 @@ if $INSTALL_HUB; then
   fi  
 
   cd rueckgrat
-  docker compose up --build -d hub caddy || echo "❌  Docker compose failed (is Docker running?)"
-  cd ..
+
+    if [[ -f .env.example ]]; then
+      cp -n .env.example .env 2>/dev/null || true
+      echo "✅ Created new .env from template"
+    else
+      echo "❌ .env.example not found."
+    fi
+
+  docker compose up --build -d hub caddy || echo "❌ Docker compose failed (is Docker running?)"
+  cd -
 fi
 
 # ==================== NODE ====================
@@ -67,34 +85,36 @@ if $INSTALL_NODE; then
     HUB_ADDR=${HUB_ADDR:-localhost}
 
     cd rueckgrat
-    
     if [[ -f .env.example ]]; then
-      cp .env.example .env 2>/dev/null || true
+      if [[ ! -f .env ]]; then
+        cp .env.example .env
+        echo "✅ Created new .env from template"
+      fi
       sed -i "s|^#HUB_IP=.*|HUB_IP=${HUB_ADDR}|" .env 2>/dev/null || true
       echo "✅ Updated .env with HUB_IP=${HUB_ADDR}"
     else
       echo "❌ .env.example not found. Please configure HUB_IP manually."
     fi
-    cd ..
+    cd -
   fi
 
   cd rueckgrat
   docker compose up --build -d node || {
     echo "❌  Docker compose failed (is Docker running?)"
-    cd .. 
+    cd -
     exit 1         
   }
-  cd ..
+  cd -
   
   if $INSTALL_LLAMA; then
     echo "📦 Installing / Starting llama-server..."
     cd rueckgrat
     docker compose up --build -d llama-server || {
       echo "❌  Docker compose failed (is Docker running?)"
-      cd .. 
+      cd - 
       exit 1         
     }
-    cd ..
+    cd -
   fi
   
   echo "💡 Tip: For ComfyUI run 'cd ComfyUI && ./install.sh' separately if needed."
@@ -106,11 +126,11 @@ if $INSTALL_CHAT; then
   cd chat
   ./install.sh || {
     echo "❌ Chat client installation failed!"
-    cd .. 
+    cd -
     exit 1 
   }
   echo "✅ Chat client ready"
-  cd ..
+  cd -
 fi
 
 echo ""
