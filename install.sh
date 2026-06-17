@@ -61,24 +61,26 @@ else
     echo "✅ Cloned successfully."
 fi
 
-# Component selection
-install_chat=""
-install_hub=""
-install_node=""
-
+# ==================== COMPONENT SELECTION ====================
+echo ""
 read -p "Install Chat Client? (y/N): " install_chat
 read -p "Install Hub? (y/N): " install_hub
 read -p "Install Node? (y/N): " install_node
 
-INSTALL_HUB=false; INSTALL_NODE=false; INSTALL_LLAMA=false; INSTALL_CHAT=false
+# Explicitly declare variables to satisfy 'set -u'
+INSTALL_HUB=false
+INSTALL_NODE=false
+INSTALL_LLAMA=false
+INSTALL_CHAT=false
 
-[[ "$install_hub"  =~ ^[Yy]$ ]] && INSTALL_HUB=true
-[[ "$install_node" =~ ^[Yy]$ ]] && INSTALL_NODE=true
-[[ "$install_chat" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
+# Safe checks with default value
+[[ "${install_hub:-}"  =~ ^[Yy]$ ]] && INSTALL_HUB=true
+[[ "${install_node:-}" =~ ^[Yy]$ ]] && INSTALL_NODE=true
+[[ "${install_chat:-}" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
 
 if $INSTALL_NODE; then
-    read -p "Install llama-server? (Y/n): " install_llama
-    [[ -z "$install_llama" || "$install_llama" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
+  read -p "Install llama-server (recommended)? (Y/n): " install_llama
+  [[ -z "${install_llama:-}" || "${install_llama:-}" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
 fi
 
 if ! $INSTALL_HUB && ! $INSTALL_NODE && ! $INSTALL_CHAT; then
