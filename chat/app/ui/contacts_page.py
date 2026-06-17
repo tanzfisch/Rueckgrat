@@ -45,6 +45,8 @@ class ContactsPage(BasePage):
         self.navigator("profile_wizz")
 
     def _on_import_contact(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Import Profile", "../characters", "Profile Files (*.json)")
+
         path, _ = QFileDialog.getOpenFileName(self, "Import Profile")
         if path:
             with open(path, 'r') as file:
