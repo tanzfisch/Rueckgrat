@@ -5,6 +5,9 @@ from .common_types import ImageRequest
 from typing import Dict, Any, Union
 from json_repair import repair_json
 
+from .logger import Logger
+logger = Logger(__name__).get_logger()
+
 class Utils:
 
     @classmethod
@@ -27,16 +30,19 @@ class Utils:
     def json_loads(cls, text: str):
         match = re.search(r'(\{.*\}|\[.*\])', text, re.DOTALL)
         if not match:
+            logger.error("failed to find json match in text")
             return None
-        json_str = match.group(1)
         
+        json_str = match.group(1)        
         try:
             return json.loads(json_str)
         except:
             try:
+                logger.warning("trying to repair json")
                 repaired = repair_json(json_str)
                 return json.loads(repaired)
             except:
+                logger.warning(f"failed to load json from {text}")
                 return None    
             
     @classmethod

@@ -27,7 +27,7 @@ class PromptCompiler:
 
     def _build_identity(self) -> str:
         style = self.profile.get('style', '')
-        style = f"Your are {self._clean_text(style)}" if style != "" else ""
+        style = f"\nYour are {self._clean_text(style)}" if style != "" else ""
 
         name = Utils.get_nested_value(self.contact, ["identity", "name"], "")
         gender = Utils.get_nested_value(self.contact, ["identity", "gender"], "")
@@ -35,6 +35,7 @@ class PromptCompiler:
         personality = self._clean_text(Utils.get_nested_value(self.contact, ["identity", "personality"], ""))
 
         background_hook = self._clean_text(Utils.get_nested_value(self.profile, ["background_hook"], ""))
+        relationship = self._clean_text(Utils.get_nested_value(self.profile, ["relationship"], ""))
         body_language = self._clean_text(Utils.get_nested_value(self.profile, ["body_language"], ""))
 
         return f"""
@@ -42,9 +43,8 @@ You are {name} ({gender}).
 Your role is {role}.
 Your traits are {personality}
 Your background story is {background_hook}
-Your body language is {body_language}
-{style}
-You are talking to {self.user_name}.
+Your body language is {body_language} {style}
+You are talking to {self.user_name}. {relationship}
 """.strip()
 
     def _build_behavior(self) -> str:

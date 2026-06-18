@@ -108,6 +108,7 @@ Body Type: {body_type}
 EXAMPLE PROFILE:
 {{
     "background_hook": "former collegiate athlete with a winning mindset",
+    "relationship": "you became friends after he was your personal trainer for 2 years",
     "body_language": "dynamic energy, assertive posture, enthusiastic gestures, maintains eye contact, shows constant encouragement",
     "style": "functional and fashionable workout gear",
     "objectives": {{
@@ -150,8 +151,8 @@ EXAMPLE PROFILE:
 INSTRUCTIONS:
 - Invent a new profile based on the user input
 - Fill in information as applicable
-- background_hook -> invent an interessting and elaborate background story (max 500 words)
-- always use clothes in profile_picture_context/upper_body
+- background_hook -> invent an interessting and elaborate background story (max 100 words)
+- relationship -> make up a past between this character and the user (max 200 words)
 - {sfw}
 
 OUTPUT:
@@ -182,6 +183,7 @@ OUTPUT:
 
             "profile": {
                 "background_hook": Utils.get_nested_value(reply, ["background_hook"], ""),
+                "relationship": Utils.get_nested_value(reply, ["relationship"], ""),
                 "body_language": Utils.get_nested_value(reply, ["body_language"], ""),
                 "style": Utils.get_nested_value(reply, ["style"], ""),
                 "sfw": personality_input["sfw"],

@@ -321,7 +321,7 @@ class WebsearchTool(Tool):
         return """
 WEBSEARCH:
 
-Use the websearch tool for any precise, factual, current, latest, real-time, location-specific, or dynamic information (e.g. weather, prices, currencies, crypto, stocks, events, stats, news). If so, include:
+Use the websearch tool for any precise, factual, current, latest, real-time, location-specific, or dynamic information (e.g. weather, prices, currencies, crypto, stocks, events, stats, news), or when needing inspiration or direction change to bring fresh ideas in to the conversation. If so, include:
 {
   "tool": "websearch",
   "query": "exact search query"
