@@ -86,7 +86,7 @@ install_dependencies() {
 install_dependencies
 
 # ==================== REPOSITORY SETUP ====================
-echo "🔍 Checking repository..."
+echo "🔍 Checking repository 2..."
 
 IN_WORKSPACE_INSTALL=true
 
