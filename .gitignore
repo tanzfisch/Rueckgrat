@@ -207,6 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 rueckgrat/ComfyUI/ComfyUI
-chat/models/
-chat/cache/
+rueckgrat/chat/models/
+rueckgrat/chat/cache/
 models
+
+rueckgrat/webchat/caddy-root.crt

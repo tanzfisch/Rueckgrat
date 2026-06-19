@@ -33,6 +33,8 @@ class Backend:
             logger.warning('No server certificate found. Connection will be insecure')
         elif cls.server_cert and isinstance(cls.server_cert, str):
             cls.server_cert = Path(cls.server_cert)
+            if not cls.server_cert.exists():
+                logger.error(f"can't find server cert at {cls.server_cert}")
 
         logger.info(f"using backend at {cls.url}")
         logger.info(f"websocket at {cls.uri}")

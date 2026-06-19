@@ -9,6 +9,27 @@ set -euo pipefail
 echo "🚀 Rueckgrat Linux Installer"
 echo "============================="
 
+# Parse arguments
+CHAT_ONLY=false
+YES=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --chat_only)
+            CHAT_ONLY=true
+            shift
+            ;;
+        -y|--yes)
+            YES=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
 # ==================== DISTRO DETECTION ====================
 detect_distro() {
     if [[ -f /etc/os-release ]]; then
@@ -26,6 +47,7 @@ detect_distro
 
 # Package manager helpers
 install_pkg() {
+    echo "📦 installing $@ ..."
     case "$DISTRO" in
         *debian*|*ubuntu*)
             sudo apt update -y && sudo apt install -y "$@"
@@ -40,51 +62,89 @@ install_pkg() {
             sudo zypper install -y "$@"
             ;;
         *)
-            echo "❌ Unsupported distro. Please install dependencies manually."
+            echo "❌ Unsupported distro. Please install $@ manually."
             exit 1
             ;;
     esac
 }
 
+# ==================== BASIC DEPENDENCIES ==================
+install_dependencies() {
+    if ! command -v git &> /dev/null; then
+        install_pkg git
+    else    
+        echo "✅ git already installed."
+    fi
+
+    if ! command -v python3 &> /dev/null; then
+        install_pkg python3
+    else    
+        echo "✅ python3 already installed."
+    fi
+}
+
+install_dependencies
+
 # ==================== REPOSITORY SETUP ====================
-echo "📥 Checking repository..."
+echo "🔍 Checking repository..."
+
+IN_WORKSPACE_INSTALL=true
 
 if [[ -d ".git" ]]; then
-    echo "✅ Already inside the Rueckgrat repository."
-elif [[ -d "Rueckgrat-temp" ]]; then
-    echo "✅ Found 'Rueckgrat-temp' directory."
-    cd Rueckgrat-temp
+    echo "✅ Already inside the Rueckgrat repository. Using branch '$(git branch --show-current)'."
+elif [[ -d "Rueckgrat-install" ]]; then
+    cd Rueckgrat-install
+    echo "✅ Found repo in 'Rueckgrat-install' directory. Using branch: '$(git branch --show-current)'."
+    IN_WORKSPACE_INSTALL=false
 else
     echo "📥 Cloning fresh copy..."
     
     # Clone as current user (important!)
-    sudo -u "$USER" git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-temp
+    sudo -u $(whoami) git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-install
     
-    cd Rueckgrat-temp
+    cd Rueckgrat-install
     echo "✅ Repository cloned successfully."
+    IN_WORKSPACE_INSTALL=false
 fi
 
 # ==================== COMPONENT SELECTION ====================
 echo ""
 echo "Component Selection:"
 
-# Force reading from terminal (important for curl | bash)
-INSTALL_HUB=false
-INSTALL_NODE=false
-INSTALL_LLAMA=false
-INSTALL_CHAT=false
+if $CHAT_ONLY; then
+    INSTALL_CHAT=true
+    INSTALL_HUB=false
+    INSTALL_NODE=false
+    INSTALL_LLAMA=false
+else
+    INSTALL_HUB=false
+    INSTALL_NODE=false
+    INSTALL_CHAT=false
+    INSTALL_LLAMA=false
 
-read -p "Install Chat Client? (y/N): " -r install_chat </dev/tty
-read -p "Install Hub? (y/N): " -r install_hub </dev/tty
-read -p "Install Node? (y/N): " -r install_node </dev/tty
+    if $YES; then
+        INSTALL_CHAT=true
+        INSTALL_HUB=true
+        INSTALL_NODE=true
+        INSTALL_LLAMA=true
+    else
+        read -p "Install Chat Client? (Y/n): " -r install_chat < /dev/stdin
+        install_chat=${install_chat:-Y}
+        read -p "Install Hub? (Y/n): " -r install_hub < /dev/stdin
+        install_hub=${install_hub:-Y}
+        read -p "Install Node? (Y/n): " -r install_node < /dev/stdin
+        install_node=${install_node:-Y}
 
-[[ "${install_hub:-}"  =~ ^[Yy]$ ]] && INSTALL_HUB=true
-[[ "${install_node:-}" =~ ^[Yy]$ ]] && INSTALL_NODE=true
-[[ "${install_chat:-}" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
+        [[ "${install_hub:-}"  =~ ^[Yy]$ ]] && INSTALL_HUB=true
+        [[ "${install_node:-}" =~ ^[Yy]$ ]] && INSTALL_NODE=true
+        [[ "${install_chat:-}" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
 
-if $INSTALL_NODE; then
-  read -p "Install llama-server (recommended)? (Y/n): " -r install_llama </dev/tty
-  [[ -z "${install_llama:-}" || "${install_llama:-}" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
+        if $INSTALL_NODE; then
+          read -p "Install llama-server (recommended)? (Y/n): " -r install_llama < /dev/stdin
+          install_llama=${install_llama:-Y}
+          [[ -z "${install_llama:-}" || "${install_llama:-}" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
+        fi
+    fi
 fi
 
 if ! $INSTALL_HUB && ! $INSTALL_NODE && ! $INSTALL_CHAT; then
@@ -93,9 +153,7 @@ if ! $INSTALL_HUB && ! $INSTALL_NODE && ! $INSTALL_CHAT; then
 fi
 
 # ==================== DOCKER (only if needed) ====================
-if $INSTALL_HUB || $INSTALL_NODE; then
-    echo "📦 Checking Docker..."
-
+install_docker() {
     if ! command -v docker &> /dev/null; then
         echo "🐳 Installing Docker via official script..."
         curl -fsSL https://get.docker.com -o get-docker.sh
@@ -107,6 +165,10 @@ if $INSTALL_HUB || $INSTALL_NODE; then
     else
         echo "✅ Docker already installed."
     fi
+}
+
+if ! $CHAT_ONLY; then
+    install_docker
 fi
 
 # ==================== CADDY ====================
@@ -127,13 +189,8 @@ install_caddy() {
         return
     fi
 
-    # Fallback to package manager
-    case "$DISTRO" in
-        *debian*|*ubuntu*) install_pkg caddy ;;
-        *fedora*|*rhel*)   sudo dnf install -y caddy ;;
-        *arch*)            sudo pacman -S --noconfirm caddy ;;
-        *suse*)            sudo zypper install -y caddy ;;
-    esac
+    # fallback to package manager
+    install_pkg caddy
 }
 
 # ==================== VOLUME CLEANUP ====================
@@ -143,7 +200,12 @@ if $INSTALL_HUB || $INSTALL_NODE; then
 
     if [[ $RUNNING_CONTAINERS -gt 0 ]]; then
         echo "⚠️  Found running Rueckgrat containers."
-        read -p "Keep previous installation (reuse volumes & containers)? (Y/n): " -r keep_previous </dev/tty
+        if $YES; then
+            keep_previous="N"
+        else
+            read -p "Keep previous installation (reuse volumes & containers)? (y/N): " -r keep_previous < /dev/stdin
+            keep_previous=${keep_previous:-N}
+        fi
         
         if [[ "${keep_previous:-}" =~ ^[Nn]$ ]]; then
             echo "🛑 Stopping and removing previous Rueckgrat installation..."
@@ -164,7 +226,6 @@ fi
 
 # ==================== HUB ====================
 if $INSTALL_HUB; then
-    echo "📦 Installing / Starting Hub + Caddy..."
     install_caddy
 
     pushd rueckgrat > /dev/null
@@ -172,27 +233,33 @@ if $INSTALL_HUB; then
         cp -n .env.example .env 2>/dev/null || true
         echo "✅ .env created from template."
     fi
+
+    echo "🐋 compose up hub & daddy..."
     docker compose up --build -d hub caddy || echo "❌ Docker compose failed."
     popd > /dev/null
 fi
 
 # ==================== NODE ====================
 if $INSTALL_NODE; then
-    echo "📦 Installing / Starting Node..."
-
     if ! $INSTALL_HUB; then
-        read -p "Hub IP/hostname (default: localhost): " -r HUB_ADDR </dev/tty
-        HUB_ADDR=${HUB_ADDR:-localhost}
+        if $YES; then
+            HUB_ADDR="localhost"
+        else
+            read -p "Hub IP/hostname (default: localhost): " -r HUB_ADDR < /dev/stdin
+            HUB_ADDR=${HUB_ADDR:-localhost}
+        fi
 
         pushd rueckgrat > /dev/null
         if [[ -f .env.example && ! -f .env ]]; then
             cp .env.example .env
         fi
+        echo "⚙️ update .env"
         sed -i "s|^#HUB_IP=.*|HUB_IP=${HUB_ADDR}|" .env 2>/dev/null || true
         popd > /dev/null
     fi
 
     pushd rueckgrat > /dev/null
+    echo "🐋 compose up node..."
     docker compose up --build -d node || { echo "❌ Node failed."; popd; exit 1; }
     popd > /dev/null
 
@@ -206,19 +273,33 @@ fi
 # ==================== CHAT CLIENT ====================
 if $INSTALL_CHAT; then
     echo "📦 Installing Chat Client..."
-    pushd chat > /dev/null
+    pushd rueckgrat/chat > /dev/null
     ./install.sh || { echo "❌ Chat install failed!"; popd; exit 1; }
     popd > /dev/null
 fi
 
 echo ""
 echo "🎉 Installation finished!"
+
+BASE_DIR=$([ "$IN_WORKSPACE_INSTALL" = true ] && echo "" || echo "Rueckgrat-install/")
+
 if $INSTALL_HUB || $INSTALL_NODE; then
-    echo "→ Services:  docker compose ps"
-    echo "→ Logs:      docker compose logs -f"
+    echo ""
+    echo "→ Services:  cd ${BASE_DIR}rueckgrat && docker compose ps"
+    echo "→ Logs:      cd ${BASE_DIR}rueckgrat && docker compose logs -f"
 fi
+
 if $INSTALL_CHAT; then
-    echo "→ Chat:      cd chat && ./run.sh"
+    echo ""
+    echo "In oder to use the chat. Get the certificate from your caddy installation"
+    echo "For example like this:"
+    echo "curl -k https://localhost/health"
+    echo "docker cp rueckgrat-caddy-1:/data/caddy/pki/authorities/local/root.crt ~/.ssh/caddy-root.crt"
+    echo ""
+    echo "At first start, chat should ask you for the network settings. If not check ~/.config/Rueckgrat/rueckgrat.conf"
+    echo "The hub (via caddy) is configured to listen to rueckgrat.hub and localhost" # TODO
+    echo ""
+    echo "→ Chat:      cd ${BASE_DIR}ruckgrat/chat && ./run.sh"
 fi
 
 echo ""

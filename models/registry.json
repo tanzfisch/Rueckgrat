@@ -194,7 +194,16 @@
     "startup_parameters": ""
   },
 
-
+  "Huihui-Qwen3.6-27B-abliterated-ggml-model-Q4_K": {
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested",
+    "sources": [
+      "https://huggingface.co/huihui-ai/Huihui-Qwen3.6-27B-abliterated-MTP-GGUF/resolve/main/Huihui-Qwen3.6-27B-abliterated-ggml-model-Q4_K.gguf"
+    ],
+    "install_path": "llm/Huihui-Qwen3.6-27B-abliterated-ggml-model-Q4_K",
+    "startup_parameters": ""
+  },
   "Huihui-Qwen3.6-27B-abliterated-ggml-model-Q5_K": {
     "type": "llm",
     "compatibility": ["llama.cpp"],

@@ -1,4 +1,5 @@
 import logging
+import threading
 
 # ANSI color codes
 RESET = "\033[0m"
@@ -88,12 +89,14 @@ class Logger:
     def __init__(self, name=None, level=logging.DEBUG):
         self.logger = logging.getLogger(name)
         self.logger.setLevel(level)
+        self._lock = threading.Lock()
 
         if not self.logger.handlers:
             ch = logging.StreamHandler()
             ch.setLevel(level)
             formatter = ColorFormatter(fmt=f"%(levelname)s %(message)s\n          {DIM}PID:%(process)s %(pathname)s{RESET}")
             ch.setFormatter(formatter)
+            ch.emit = lambda record: (self._lock.acquire(), ch.__class__.emit(ch, record), self._lock.release()) or None
             self.logger.addHandler(ch)
 
     def get_logger(self):

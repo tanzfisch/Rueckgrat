@@ -4,7 +4,7 @@
     }
 }
 
-rueckgrat.hub, localhost {
+rueckgrat.hub localhost {
     reverse_proxy /ws* http://hub:14223 {
         header_up Host {host}
         header_up X-Real-IP {remote_host}

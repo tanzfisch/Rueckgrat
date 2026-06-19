@@ -414,7 +414,6 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                 break
 
             if job.has_response():
-                logger.debug(f"sending result {Utils.pretty_print(job.result())}")
                 MessageQueue().send_data(job.result())
 
     receiver_task = asyncio.create_task(receiver())
