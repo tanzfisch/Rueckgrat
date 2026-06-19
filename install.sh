@@ -91,18 +91,18 @@ echo "🔍 Checking repository..."
 IN_WORKSPACE_INSTALL=true
 
 if [[ -d ".git" ]]; then
-    echo "✅ Already inside the Rueckgrat repository."
-elif [[ -d "Rueckgrat-temp" ]]; then
-    echo "✅ Found repo in 'Rueckgrat-temp' directory."
-    cd Rueckgrat-temp
+    echo "✅ Already inside the Rueckgrat repository. Using branch '$(git branch --show-current)'."
+elif [[ -d "Rueckgrat-install" ]]; then
+    cd Rueckgrat-install
+    echo "✅ Found repo in 'Rueckgrat-install' directory. Using branch: '$(git branch --show-current)'."
     IN_WORKSPACE_INSTALL=false
 else
     echo "📥 Cloning fresh copy..."
     
     # Clone as current user (important!)
-    sudo -u $(whoami) git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-temp
+    sudo -u $(whoami) git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-install
     
-    cd Rueckgrat-temp
+    cd Rueckgrat-install
     echo "✅ Repository cloned successfully."
     IN_WORKSPACE_INSTALL=false
 fi
@@ -276,7 +276,7 @@ fi
 echo ""
 echo "🎉 Installation finished!"
 
-BASE_DIR=$([ "$IN_WORKSPACE_INSTALL" = true ] && echo "" || echo "Rueckgrat-temp/")
+BASE_DIR=$([ "$IN_WORKSPACE_INSTALL" = true ] && echo "" || echo "Rueckgrat-install/")
 
 if $INSTALL_HUB || $INSTALL_NODE; then
     echo ""
