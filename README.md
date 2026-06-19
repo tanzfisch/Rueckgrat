@@ -70,4 +70,4 @@ cd Rueckgrat\chat
 
 # Special Thanks To
 
-<center>✨🎉 **[spychodelics](https://github.com/spychodelics)** 🎊🚀</center>
+✨🎉 **spychodelics** 🎊🚀
