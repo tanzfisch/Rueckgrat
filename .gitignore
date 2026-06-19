@@ -210,3 +210,5 @@ rueckgrat/ComfyUI/ComfyUI
 chat/models/
 chat/cache/
 models
+
+rueckgrat/webchat/caddy-root.crt

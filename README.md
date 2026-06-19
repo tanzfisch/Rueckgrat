@@ -67,3 +67,7 @@ cd Rueckgrat\chat
 .\install.ps1
 .\run.ps1
 ```
+
+# Special Thanks To
+
+<center>✨🎉 **[spychodelics](https://github.com/spychodelics)** 🎊🚀</center>
