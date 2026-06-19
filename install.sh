@@ -86,7 +86,7 @@ install_dependencies() {
 install_dependencies
 
 # ==================== REPOSITORY SETUP ====================
-echo "🔍 Checking repository 2..."
+echo "🔍 Checking repository..."
 
 IN_WORKSPACE_INSTALL=true
 
@@ -128,16 +128,20 @@ else
         INSTALL_NODE=true
         INSTALL_LLAMA=true
     else
-        read -p "Install Chat Client? (y/N): " -r install_chat </dev/tty
-        read -p "Install Hub? (y/N): " -r install_hub </dev/tty
-        read -p "Install Node? (y/N): " -r install_node </dev/tty
+        read -p "Install Chat Client? (Y/n): " -r install_chat < /dev/stdin
+        install_chat=${install_chat:-Y}
+        read -p "Install Hub? (Y/n): " -r install_hub < /dev/stdin
+        install_hub=${install_hub:-Y}
+        read -p "Install Node? (Y/n): " -r install_node < /dev/stdin
+        install_node=${install_node:-Y}
 
         [[ "${install_hub:-}"  =~ ^[Yy]$ ]] && INSTALL_HUB=true
         [[ "${install_node:-}" =~ ^[Yy]$ ]] && INSTALL_NODE=true
         [[ "${install_chat:-}" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
 
         if $INSTALL_NODE; then
-          read -p "Install llama-server (recommended)? (Y/n): " -r install_llama </dev/tty
+          read -p "Install llama-server (recommended)? (Y/n): " -r install_llama < /dev/stdin
+          install_llama=${install_llama:-Y}
           [[ -z "${install_llama:-}" || "${install_llama:-}" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
         fi
     fi
@@ -197,9 +201,10 @@ if $INSTALL_HUB || $INSTALL_NODE; then
     if [[ $RUNNING_CONTAINERS -gt 0 ]]; then
         echo "⚠️  Found running Rueckgrat containers."
         if $YES; then
-            keep_previous="n"
+            keep_previous="N"
         else
-            read -p "Keep previous installation (reuse volumes & containers)? (Y/n): " -r keep_previous </dev/tty
+            read -p "Keep previous installation (reuse volumes & containers)? (y/N): " -r keep_previous < /dev/stdin
+            keep_previous=${keep_previous:-N}
         fi
         
         if [[ "${keep_previous:-}" =~ ^[Nn]$ ]]; then
@@ -240,7 +245,7 @@ if $INSTALL_NODE; then
         if $YES; then
             HUB_ADDR="localhost"
         else
-            read -p "Hub IP/hostname (default: localhost): " -r HUB_ADDR </dev/tty
+            read -p "Hub IP/hostname (default: localhost): " -r HUB_ADDR < /dev/stdin
             HUB_ADDR=${HUB_ADDR:-localhost}
         fi
 
