@@ -328,3 +328,26 @@ QSlider::handle:horizontal {
 
     border-radius: 16px;
 }
+
+QFileDialog {
+    color: #E0E0E0;
+    background-color: #121212;
+}
+
+QFileDialog QListView,
+QFileDialog QTreeView {
+    color: #E0E0E0;
+    background-color: #121212;
+    alternate-background-color: #1E1E1E;
+}
+
+QFileDialog QListView::item,
+QFileDialog QTreeView::item {
+    color: #E0E0E0;
+}
+
+QHeaderView::section {
+    background-color: #1E1E1E;
+    color: #E0E0E0;
+    border: none;
+}
