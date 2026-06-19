@@ -29,4 +29,4 @@ RUN chmod 600 /root/.ssh/caddy-root.crt
 
 EXPOSE 3001
 
-ENTRYPOINT [./run.sh]
+ENTRYPOINT ["./run.sh"]
