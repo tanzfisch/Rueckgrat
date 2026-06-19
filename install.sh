@@ -273,7 +273,7 @@ fi
 # ==================== CHAT CLIENT ====================
 if $INSTALL_CHAT; then
     echo "📦 Installing Chat Client..."
-    pushd chat > /dev/null
+    pushd rueckgrat/chat > /dev/null
     ./install.sh || { echo "❌ Chat install failed!"; popd; exit 1; }
     popd > /dev/null
 fi
@@ -299,7 +299,7 @@ if $INSTALL_CHAT; then
     echo "At first start, chat should ask you for the network settings. If not check ~/.config/Rueckgrat/rueckgrat.conf"
     echo "The hub (via caddy) is configured to listen to rueckgrat.hub and localhost" # TODO
     echo ""
-    echo "→ Chat:      cd ${BASE_DIR}chat && ./run.sh"
+    echo "→ Chat:      cd ${BASE_DIR}ruckgrat/chat && ./run.sh"
 fi
 
 echo ""
