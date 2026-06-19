@@ -100,7 +100,7 @@ else
     echo "📥 Cloning fresh copy..."
     
     # Clone as current user (important!)
-    sudo -u "$USER" git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-temp
+    sudo -u $(whoami) git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-temp
     
     cd Rueckgrat-temp
     echo "✅ Repository cloned successfully."
