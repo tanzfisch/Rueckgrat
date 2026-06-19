@@ -24,7 +24,7 @@ services:
       - hub_db:/hub/db
       - hub_images:/hub/images
       - ./config:/hub/config
-      - ../common:/hub/app/common
+      - ./common:/hub/app/common
     networks:
       - rueckgrat-net-local
     restart: unless-stopped
@@ -41,7 +41,7 @@ services:
       - node_images:/node/images
       - ./config:/node/config
       - ../models:/node/models
-      - ../common:/node/app/common
+      - ./common:/node/app/common
     networks:
       - rueckgrat-net-local
     stdin_open: true
