@@ -161,13 +161,11 @@ INSTRUCTIONS:
 
 OUTPUT:
 Return ONLY valid JSON in the same format.
-"""
-
-            logger.debug(f"update context query:\n{query}")
+"""            
             payload.append({"role": "user", "content": query})
         except Exception as e:
             logger.error(f"failed to build query {repr(e)}")            
-        
+                
         response_content = self.infrastructure.chat(payload, 0.4, random.randint(0, 100000), True)
         if not response_content:
             logger.warning(f"failed to update context")
