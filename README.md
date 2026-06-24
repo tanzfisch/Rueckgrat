@@ -35,7 +35,7 @@ I recommend a miniumm of 24b llm (ie cognitivecomputations_Dolphin-Mistral-24B-V
 
 For planned features, check the [Issues](https://github.com/tanzfisch/Rueckgrat/issues).
 
-## Getting Started (Recommended)
+## 🚀 Getting Started
 
 The easiest way to install Rueckgrat on Linux is using the one-line installer
 
@@ -54,10 +54,9 @@ cd Rueckgrat
 The installer will:
 
 * Ask which components you want (Chat Client / Hub / Node)
-* Automatically install Docker (if needed)
-* Install Caddy
+* Automatically install Docker and Caddy (if needed)
 * Removes previous installations (on user request)
-* Start the selected services
+* Start the selected services/containers
 
 For a Windows Chat Client
 
