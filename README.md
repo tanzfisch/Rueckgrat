@@ -70,4 +70,6 @@ cd Rueckgrat\chat
 
 # Special Tanks to
 
-🎊🎉 **spychodelics** ✨🚀
+✨ **Gebrielle** 🎉
+🎊 **spychodelics** 🚀
+👶 **Naomi** 🍼
