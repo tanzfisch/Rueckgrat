@@ -5,8 +5,8 @@ from PySide6.QtWidgets import (
 from app.ui import BasePage
 from app.ui.settings_page import NetworkSettingsPage
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class InitialSettingsPage(BasePage):
     def __init__(self, navigator):

@@ -1,4 +1,4 @@
-from .logger import Logger
+from .logger import get_logger
 from .download_queue import DownloadQueue, DownloadJob
 from .common_types import (
     ChatRequest, ChatResponse, ImageRequest, ImageResponse, ChatRequestLlama, GetMessagesRequest
@@ -6,7 +6,7 @@ from .common_types import (
 from .utils import Utils
 
 __all__ = [
-    "Logger", 
+    "get_logger", 
     "DownloadQueue", 
     "DownloadJob", 
     "ChatRequest", 

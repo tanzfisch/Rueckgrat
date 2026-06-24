@@ -1,8 +1,8 @@
 from .job_queue import Job
 from typing import Dict, Any
 
-from app.common import Logger, ImageRequest
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ImageRequest
+logger = get_logger()
 
 class ImageJob(Job):
     def __init__(self, request: ImageRequest, infrastructure):

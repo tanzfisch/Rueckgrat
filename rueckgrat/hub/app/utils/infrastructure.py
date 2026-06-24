@@ -11,8 +11,8 @@ from typing import Optional
 from dataclasses import dataclass
 from ..jobs.image_job import ImageRequest
 
-from app.common import Logger, ChatRequestLlama, DownloadQueue, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ChatRequestLlama, DownloadQueue, Utils
+logger = get_logger()
 
 INFRASTRUCTURE_CONFIG_PATH = Path("/hub/config/infrastructure.json")
 

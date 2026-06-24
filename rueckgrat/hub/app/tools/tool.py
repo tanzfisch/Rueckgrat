@@ -2,8 +2,8 @@ from app.jobs.job_queue import Job
 from typing import Dict,  Any
 from abc import abstractmethod
 
-from app.common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class Tool(Job):
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):

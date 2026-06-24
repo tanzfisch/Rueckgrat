@@ -5,8 +5,8 @@ import re
 import random
 from ..utils.prompt_compiler import PromptCompiler
 
-from app.common import Logger, ChatRequest, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ChatRequest, Utils
+logger = get_logger()
 
 class UpdateContextJob(Job):
     def __init__(self, request: ChatRequest, db, infrastructure):

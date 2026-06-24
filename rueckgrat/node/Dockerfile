@@ -8,7 +8,7 @@ RUN mkdir -p /node/images && chown -R nodeuser:nodeuser /node/images
 
 # Install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt --upgrade
 
 # Copy app
 COPY app app

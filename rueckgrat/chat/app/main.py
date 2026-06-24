@@ -11,10 +11,11 @@ from app.ui import LoginPage, ChatPage, ContactsPage, ConversationsPage, Profile
 from app.speech import Speech
 from app.utils.backend import Backend
 from app.utils.config import RueckgratConfig
+from app.utils import Paths
 import platform
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, Utils
+logger = get_logger()
 
 class MainWindow(QMainWindow):
     def __init__(self, hasConfig: bool):
@@ -88,11 +89,11 @@ async def async_main(app, window):
 
 def get_image(image_filename) -> str:
     try:
-        image_path = Path("cache/images") / image_filename
+        image_path = Paths.get_image_path() / image_filename
         logger.debug(f"check {image_path}")
         if not image_path.exists():
             logger.debug(f"download {image_path}")
-            Backend.download_file(f"images/{image_filename}", "cache/images")
+            Backend.download_file(f"images/{image_filename}", Paths.get_image_path())
     except Exception as e:
         logger.error(f"failed to handle incomming image: {repr(e)}")
 
@@ -102,7 +103,7 @@ def on_incomming_message(msg: dict):
         get_image(image["filename"])
 
 def main():
-    logger.debug(f"platform: {platform.system()}")
+    logger.debug(f"platform: {platform.system()}{' (inside docker)' if Utils.is_docker() else ''}")
     
     config = RueckgratConfig()
     Backend.init(config)

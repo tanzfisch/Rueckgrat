@@ -6,8 +6,8 @@ from app.ui import BasePage
 from app.ui.widgets import MessageBox, OneLineBubble, ContactHeader
 from app.utils import Backend, Contact
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class ConversationsPage(BasePage):
     def __init__(self, navigator):

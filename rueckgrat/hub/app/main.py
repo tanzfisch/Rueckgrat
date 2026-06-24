@@ -22,8 +22,8 @@ from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
-from app.common import Logger, ChatRequest, GetMessagesRequest, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ChatRequest, GetMessagesRequest, Utils
+logger = get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

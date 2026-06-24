@@ -2,8 +2,8 @@ import requests
 import re
 import json
 
-from app.common import Logger, ChatRequestLlama, ChatResponse
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ChatRequestLlama, ChatResponse
+logger = get_logger()
 
 class LLamaCppInterface:
     def __init__(self, host: str, port: int):

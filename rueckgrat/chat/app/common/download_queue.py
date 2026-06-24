@@ -11,8 +11,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Tuple
 
-from .logger import Logger
-logger = Logger(__name__).get_logger()
+from .logger import get_logger
+logger = get_logger()
 
 @dataclass
 class DownloadJob:

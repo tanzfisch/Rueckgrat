@@ -6,8 +6,8 @@ import json
 import re
 import sys
 
-from app.common import Logger, ChatRequest
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ChatRequest
+logger = get_logger()
 
 class ChatJob(Job):
     def __init__(self, request: ChatRequest, db, infrastructure, tool_registry, tool_outputs = None):

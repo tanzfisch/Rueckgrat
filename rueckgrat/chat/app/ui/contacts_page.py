@@ -8,11 +8,11 @@ from PySide6.QtCore import Qt, QSize
 
 from app.ui import BasePage
 from app.ui.widgets import OneLineBubble, MessageBox, ContactCard, ContactHeader
-from app.utils import Backend, Contact
-from pathlib import Path
+from app.utils import Backend, Contact, Paths
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+
+from app.common import get_logger
+logger = get_logger()
 
 class ContactsPage(BasePage):
     def __init__(self, navigator):
@@ -23,7 +23,6 @@ class ContactsPage(BasePage):
         self.contact_header = ContactHeader(navigator, False, False)
         self.main_layout.addWidget(self.contact_header)
 
-        # contacts section
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
 
@@ -45,9 +44,7 @@ class ContactsPage(BasePage):
         self.navigator("profile_wizz")
 
     def _on_import_contact(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Import Profile", "../characters", "Profile Files (*.json)")
-
-        path, _ = QFileDialog.getOpenFileName(self, "Import Profile")
+        path, _ = QFileDialog.getOpenFileName(self, "Import Profile", "../../characters", "Profile Files (*.json)")
         if path:
             with open(path, 'r') as file:
                 try:
@@ -87,9 +84,9 @@ class ContactsPage(BasePage):
             contact = Contact(contact_dict)
             profile_image_name = contact.get_latest_profile_image_name()
             if profile_image_name:
-                profile_image_path = Path("cache/images") / profile_image_name
+                profile_image_path = Paths.get_image_path() / profile_image_name
                 if not profile_image_path.exists():
-                    Backend.download_file(f"images/{profile_image_name}", "cache/images", 0)
+                    Backend.download_file(f"images/{profile_image_name}", Paths.get_image_path(), 0)
 
             contact_card_container = QWidget()
             contact_card_layout = QHBoxLayout(contact_card_container)            

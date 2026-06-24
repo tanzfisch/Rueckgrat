@@ -3,8 +3,8 @@ import threading
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from app.common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class CleanupWorker:
     def __init__(

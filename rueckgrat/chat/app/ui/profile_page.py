@@ -11,8 +11,8 @@ from app.ui import BasePage
 from app.ui.widgets import ContactHeader
 from app.utils import Backend
 
-from common import Logger, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, Utils
+logger = get_logger()
 
 class TextEdit(QTextEdit):
     def __init__(self):

@@ -3,8 +3,8 @@ from .chat_job import ChatJob
 from app.utils.message_queue import MessageQueue
 from typing import Dict, Any
 
-from app.common import Logger, ChatRequest, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ChatRequest, Utils
+logger = get_logger()
 
 class MetaJob(Job):
     def __init__(self, user_id: int, request: ChatRequest, db, infrastructure, tool_registry):

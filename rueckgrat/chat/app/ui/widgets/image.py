@@ -5,8 +5,8 @@ from pathlib import Path
 
 from .image_overlay import ImageOverlay
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class Image(QWidget):
     def __init__(self, image_path: Path, size: QSize = None, parent=None):
