@@ -2,8 +2,8 @@ import re
 from typing import Dict, Any, List
 from app.tools.tool_registry import ToolRegistry
 
-from app.common import Logger, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, Utils
+logger = get_logger()
 
 class PromptCompiler:
     def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_name: str = None, tool_registry: ToolRegistry = None):

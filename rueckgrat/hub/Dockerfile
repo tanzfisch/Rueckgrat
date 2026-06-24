@@ -4,14 +4,11 @@ WORKDIR /hub
 
 RUN useradd -m hubuser
 
-RUN mkdir -p /hub/db && chown -R hubuser:hubuser /hub/db
-RUN mkdir -p /hub/images && chown -R hubuser:hubuser /hub/images
+RUN mkdir -p /hub/images /hub/db && chown -R hubuser:hubuser /hub
 
-# Install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt --upgrade
 
-# Copy app
 COPY app app
 
 USER hubuser

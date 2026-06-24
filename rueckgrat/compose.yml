@@ -15,6 +15,7 @@ services:
     restart: unless-stopped
 
   hub:
+    container_name: hub
     build:
       context: ./hub
       dockerfile: Dockerfile
@@ -24,7 +25,7 @@ services:
       - hub_db:/hub/db
       - hub_images:/hub/images
       - ./config:/hub/config
-      - ./common:/hub/app/common
+      - ./chat/app/common:/hub/app/common
     networks:
       - rueckgrat-net-local
     restart: unless-stopped
@@ -32,6 +33,7 @@ services:
     tty: true
       
   node:
+    container_name: node
     build:
       context: ./node
       dockerfile: Dockerfile
@@ -41,7 +43,7 @@ services:
       - node_images:/node/images
       - ./config:/node/config
       - ../models:/node/models
-      - ./common:/node/app/common
+      - ./chat/app/common:/node/app/common
     networks:
       - rueckgrat-net-local
     stdin_open: true
@@ -50,9 +52,34 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"    
 
+  chat:
+    build:
+      context: ./chat
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      - ../logs:/app
+      - chat_cache:/chat/cache
+      - chat_models:/chat/models
+    stdin_open: true
+    tty: true      
+    restart: unless-stopped
+    extra_hosts:
+      - "rueckgrat.hub:192.168.2.39"
+    environment:
+      - TITLE=Rueckgrat
+      - PIXELFLUX_WAYLAND=true
+      #- HARDEN_DESKTOP=true
+      #- DISABLE_OPEN_TOOLS=true
+      #- DISABLE_SUDO=true
+      #- DISABLE_TERMINALS=true
+      #- NO_DECOR=true
+      #- RESTART_APP=true
+    
   llama-server:
-    image: ghcr.io/ggml-org/llama.cpp:server-${LLAMA_CPP_SERVER}
     container_name: llama-server
+    image: ghcr.io/ggml-org/llama.cpp:server-${LLAMA_CPP_SERVER}
     privileged: true
     volumes:
       - ../models:/models
@@ -71,3 +98,5 @@ volumes:
   node_images:
   hub_db:
   hub_images:
+  chat_cache:
+  chat_models:

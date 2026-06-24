@@ -1,8 +1,8 @@
 import sqlite3
 import json
 
-from app.common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class ChatDB:
     def __init__(self, db_path):

@@ -3,10 +3,11 @@ import re
 import hashlib
 from .common_types import ImageRequest
 from typing import Dict, Any, Union
+from pathlib import Path
 from json_repair import repair_json
 
-from .logger import Logger
-logger = Logger(__name__).get_logger()
+from .logger import get_logger
+logger = get_logger()
 
 class Utils:
 
@@ -53,3 +54,11 @@ class Utils:
             except json.JSONDecodeError:
                 return data
         return json.dumps(data, indent=4).replace('\\n', '\n')
+    
+    @classmethod
+    def is_docker(cls):
+        return (
+            Path('/.dockerenv').exists() or
+            any(k in open('/proc/1/cgroup').read() for k in ('docker', 'kubepod'))
+            if Path('/proc/1/cgroup').exists() else False
+        )

@@ -1,11 +1,10 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QFrame, QSizePolicy, QHBoxLayout)
 from PySide6.QtCore import Qt, Signal, QSize
 from .image import Image
-from app.utils import Contact
-from pathlib import Path
+from app.utils import Contact, Paths
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class ContactCard(QFrame):
     clicked = Signal(int)
@@ -20,7 +19,7 @@ class ContactCard(QFrame):
 
         profile_image_name = self.contact.get_latest_profile_image_name()
         if profile_image_name:
-            profile_image_path = Path("cache/images") / profile_image_name
+            profile_image_path = Paths.get_image_path() / profile_image_name
         else:
             profile_image_path = ""
                

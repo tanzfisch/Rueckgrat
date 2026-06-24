@@ -6,8 +6,8 @@ from typing import Dict, Any
 from .assistant_image_job import AssistantImageJob
 from ..utils.contact_image_prompt_compiler import ImageType
 
-from app.common import Logger, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, Utils
+logger = get_logger()
 
 class ContactGeneratorJob(Job):
     def __init__(self, user_input: Dict[str, Any], user_id: int, db, infrastructure):

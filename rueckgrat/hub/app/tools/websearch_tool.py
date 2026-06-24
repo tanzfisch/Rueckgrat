@@ -8,8 +8,8 @@ import datetime
 import tldextract
 from bs4 import BeautifulSoup
 
-from app.common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class WebsearchTool(Tool):
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):

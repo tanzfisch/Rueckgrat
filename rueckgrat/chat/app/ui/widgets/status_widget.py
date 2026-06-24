@@ -3,8 +3,8 @@ from PySide6.QtGui import QMovie, QPixmap, QDesktopServices, QIcon
 from PySide6.QtCore import QUrl, QSize, Qt
 import requests
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class StatusWidget(QWidget):
     def __init__(self, parent=None):

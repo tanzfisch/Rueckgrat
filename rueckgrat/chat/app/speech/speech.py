@@ -3,11 +3,11 @@ import signal
 import subprocess
 import sys
 from threading import Lock
-from app.utils import Backend
+from app.utils import Backend, Paths
 from pathlib import Path
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 
 class Speech:
@@ -32,9 +32,10 @@ class Speech:
             cls.kill_current_speech()
             speech_task_path = f"{os.getcwd()}/app/speech/speech_task.py"
 
-            model_path = Path(f"models/{model}")
-            model_file_path = Path(f"models/{model}/{model}.onnx")
-            model_json_file_path = Path(f"models/{model}/{model}.onnx.json")
+            voices_base_path = Paths.get_voices_path()
+            model_path = Path(f"{voices_base_path}/{model}")
+            model_file_path = Path(f"{model_path}/{model}.onnx")
+            model_json_file_path = Path(f"{model_path}/{model}.onnx.json")
             if not model_file_path.exists() or not model_json_file_path.exists():
                 Backend.get_model(model, model_path)
 

@@ -1,8 +1,7 @@
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QPushButton)
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtCore import Qt, QSize, Signal
-from app.utils import Contact
-from pathlib import Path
+from app.utils import Contact, Paths
 
 class ContactHeader(QWidget):
     go_back = Signal()
@@ -52,7 +51,7 @@ class ContactHeader(QWidget):
 
         self.contact_name.setText(self.contact.get_name())
         profile_image_name = self.contact.get_latest_profile_image_name()
-        profile_image_path = Path("cache/images") / profile_image_name
+        profile_image_path = Paths.get_image_path() / profile_image_name
         self.profile_label.setPixmap(QPixmap(str(profile_image_path)))
 
     def mousePressEvent(self, event):

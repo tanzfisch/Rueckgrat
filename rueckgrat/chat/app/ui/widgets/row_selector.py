@@ -4,8 +4,8 @@ from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QVBoxLayout
 from PySide6.QtCore import Signal, QSize
 from PySide6.QtGui import QIcon
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class RowSelector(QWidget):
     selection_changed = Signal(str)

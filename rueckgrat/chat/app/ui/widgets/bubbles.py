@@ -6,8 +6,8 @@ import bleach
 import re
 from .image import Image
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 
 class TextBlock(QTextBrowser):

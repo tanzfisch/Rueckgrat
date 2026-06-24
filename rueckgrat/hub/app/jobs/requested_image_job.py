@@ -3,8 +3,8 @@ from .image_job import ImageJob, ImageRequest
 from ..utils.generic_image_prompt_compiler import GenericImagePromptCompiler
 from typing import Dict, Any
 
-from app.common import Logger, ChatRequest, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ChatRequest, Utils
+logger = get_logger()
 
 class RequestedImageJob(Job):
     def __init__(self, prompt: str, contact_id: int, db, infrastructure):

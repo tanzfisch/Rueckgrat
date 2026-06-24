@@ -1,8 +1,8 @@
 from collections import deque
 import threading
 
-from app.common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class MessageQueue:
     _instance = None

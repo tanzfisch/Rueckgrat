@@ -5,6 +5,9 @@ Changelog
 -----
 
 - #73 improving installer
+- #75 docker for chat
+  known issues: autostart fails, no audio output
+- #72 fixed bug where file open dialog oppened twice
 
 0.6.1
 -----

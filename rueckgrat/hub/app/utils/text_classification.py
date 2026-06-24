@@ -4,8 +4,8 @@ from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn.multiclass import OneVsRestClassifier
 import re
 
-from app.common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 data = [
     # --- CONVERSATION ---             

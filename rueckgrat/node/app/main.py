@@ -8,8 +8,8 @@ import uuid
 from pydantic import BaseModel
 from app.utils import ModelRegistry, LLamaCppInterface, ComfyUIInterface, CleanupWorker
 
-from app.common import Logger, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse
+logger = get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

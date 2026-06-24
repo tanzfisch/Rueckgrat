@@ -6,8 +6,8 @@ from .take_photo_tool import TakePhotoTool
 from .websearch_tool import WebsearchTool
 from app.utils.message_queue import MessageQueue
 
-from app.common import Logger, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, Utils
+logger = get_logger()
 
 class ToolRegistry:
     def __init__(self, db, infrastructure, job_queue):

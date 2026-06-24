@@ -6,11 +6,10 @@ from PySide6.QtCore import Qt, QTimer, QSize, QPoint
 from app.ui import BasePage
 from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker, PlainTextEdit, StatusWidget
 from app.speech import Speech
-from app.utils import Backend, Contact
-from pathlib import Path
+from app.utils import Backend, Contact, Paths
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class HistoryContainer(QWidget):
     def resizeEvent(self, event):
@@ -266,9 +265,9 @@ class ChatPage(BasePage):
         return content
 
     def _get_image(self, image_filename) -> str:
-        image_path = Path("cache/images") / image_filename
+        image_path = Paths.get_image_path() / image_filename
         if not image_path.exists():
-            Backend.download_file(f"images/{image_filename}", "cache/images")
+            Backend.download_file(f"images/{image_filename}", Paths.get_image_path())
 
         return image_path
 
@@ -286,11 +285,11 @@ class ChatPage(BasePage):
 
                     if "take_photo" in msg:
                         image = msg["take_photo"]
-                        image_path = Path("cache/images") / image["filename"]
+                        image_path = Paths.get_image_path() / image["filename"]
                         self.append_history(role, content, image_path)
                     elif "generate_image" in msg:
                         image = msg["generate_image"]
-                        image_path = Path("cache/images") / image["filename"]
+                        image_path = Paths.get_image_path() / image["filename"]
                         self.append_history(role, content, image_path)
                     else:
                         self.append_history(role, content)

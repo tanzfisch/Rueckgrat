@@ -9,9 +9,13 @@ set -euo pipefail
 echo "🚀 Rueckgrat Linux Installer"
 echo "============================="
 
+CURRENT_DIR=$(pwd)
+
 # Parse arguments
 CHAT_ONLY=false
 YES=false
+VERBOSE=false
+DOCKER_PROGRESS_MODE="quiet"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -21,6 +25,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         -y|--yes)
             YES=true
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE=true
+            DOCKER_PROGRESS_MODE="auto"
             shift
             ;;
         *)
@@ -152,6 +161,17 @@ if ! $INSTALL_HUB && ! $INSTALL_NODE && ! $INSTALL_CHAT; then
   exit 0
 fi
 
+INSTALL_CHAT_DOCKER=false
+if $INSTALL_CHAT; then
+    if $YES; then
+        INSTALL_CHAT_DOCKER=true
+    else
+        read -p "Install Chat via Docker (instead of native)? (Y/n): " -r chat_docker < /dev/stdin
+        chat_docker=${chat_docker:-Y}
+        [[ -z "${chat_docker}" || "${chat_docker}" =~ ^[Yy]$ ]] && INSTALL_CHAT_DOCKER=true
+    fi
+fi
+
 # ==================== DOCKER (only if needed) ====================
 install_docker() {
     if ! command -v docker &> /dev/null; then
@@ -201,10 +221,10 @@ if $INSTALL_HUB || $INSTALL_NODE; then
     if [[ $RUNNING_CONTAINERS -gt 0 ]]; then
         echo "⚠️  Found running Rueckgrat containers."
         if $YES; then
-            keep_previous="N"
+            keep_previous="Y"
         else
-            read -p "Keep previous installation (reuse volumes & containers)? (y/N): " -r keep_previous < /dev/stdin
-            keep_previous=${keep_previous:-N}
+            read -p "Keep previous installation (reuse volumes & containers)? (Y/n): " -r keep_previous < /dev/stdin
+            keep_previous=${keep_previous:-Y}
         fi
         
         if [[ "${keep_previous:-}" =~ ^[Nn]$ ]]; then
@@ -224,6 +244,35 @@ if $INSTALL_HUB || $INSTALL_NODE; then
     fi
 fi
 
+safe_rm_rf() {
+    local dir="$1"
+    if [[ -z "$dir" || ! -e "$dir" ]]; then
+        return 0
+    fi
+    
+    if [[ -w "$dir" ]] || [[ -w "$(dirname "$dir")" ]]; then
+        # Can delete without sudo
+        echo "🗑️  Removing $dir"
+        rm -rf "$dir"
+    else
+        # Needs elevated privileges
+        echo "🗑️  Removing $dir (requires sudo)"
+        sudo rm -rf "$dir"
+    fi
+}
+
+# ==================== setup directories ====================
+BUILD_DIR="$CURRENT_DIR/build"
+CERT_DIR="$BUILD_DIR/certs"
+LOGS_DIR="$CURRENT_DIR/logs"
+
+safe_rm_rf "$BUILD_DIR"
+safe_rm_rf "$LOGS_DIR"
+
+mkdir -p $BUILD_DIR && chmod 777 $BUILD_DIR
+mkdir -p $CERT_DIR && chmod 777 $CERT_DIR
+mkdir -p $LOGS_DIR && chmod 777 $LOGS_DIR
+
 # ==================== HUB ====================
 if $INSTALL_HUB; then
     install_caddy
@@ -234,9 +283,17 @@ if $INSTALL_HUB; then
         echo "✅ .env created from template."
     fi
 
-    echo "🐋 compose up hub & daddy..."
-    docker compose up --build -d hub caddy || echo "❌ Docker compose failed."
+    echo "🐋 hub & caddy..."
+    docker compose --progress=$DOCKER_PROGRESS_MODE build hub caddy || { echo "❌ Docker compose build of hub & daddy failed."; popd; exit 1; }
+    docker compose up -d hub caddy || { echo "❌ Docker compose up of hub & daddy failed."; popd; exit 1; }
     popd > /dev/null
+
+    # ==================== RETRIEVE CADDY CERTIFICATE ====================
+    echo "🔑 Retrieving Caddy root certificate..."
+    sleep 3
+    curl -k https://localhost/health 2> /dev/null || echo "⚠️  Could not connect to caddy."    
+    docker cp rueckgrat-caddy-1:/data/caddy/pki/authorities/local/root.crt $CERT_DIR/rueckgrat-caddy.crt 2>/dev/null || echo "⚠️  Could not copy certificate (container may not be ready yet)."
+    echo "✅ Certificate stored in $CERT_DIR/rueckgrat-caddy.crt"
 fi
 
 # ==================== NODE ====================
@@ -259,23 +316,45 @@ if $INSTALL_NODE; then
     fi
 
     pushd rueckgrat > /dev/null
-    echo "🐋 compose up node..."
-    docker compose up --build -d node || { echo "❌ Node failed."; popd; exit 1; }
+    echo "🐋 node..."
+    docker compose --progress=$DOCKER_PROGRESS_MODE build node || { echo "❌ Docker compose build of node failed."; popd; exit 1; }
+    docker compose up -d node || { echo "❌ Docker compose up of node failed."; popd; exit 1; }
     popd > /dev/null
 
     if $INSTALL_LLAMA; then
         pushd rueckgrat > /dev/null
-        docker compose up --build -d llama-server || { echo "❌ llama-server failed."; popd; exit 1; }
+        echo "🐋 llama-server..."
+        docker compose --progress=$DOCKER_PROGRESS_MODE build llama-server || { echo "❌ Docker compose build of llama-server failed."; popd; exit 1; }
+        docker compose up -d llama-server || { echo "❌ Docker compose up of llama-server failed."; popd; exit 1; }
         popd > /dev/null
     fi
 fi
 
 # ==================== CHAT CLIENT ====================
-if $INSTALL_CHAT; then
-    echo "📦 Installing Chat Client..."
-    pushd rueckgrat/chat > /dev/null
-    ./install.sh || { echo "❌ Chat install failed!"; popd; exit 1; }
-    popd > /dev/null
+if $INSTALL_CHAT; then    
+    CADDY_CERT=$CERT_DIR/rueckgrat-caddy.crt
+
+    if $INSTALL_CHAT_DOCKER; then
+        pushd rueckgrat > /dev/null
+
+        mkdir -p chat/build
+        if [[ -f $CADDY_CERT ]]; then
+            cp $CADDY_CERT chat/build/
+        else
+            echo "❌ Certificate not found at $CADDY_CERT"
+            exit 1
+        fi
+
+        echo "🐋 chat..."
+        docker compose --progress=$DOCKER_PROGRESS_MODE build chat || { echo "❌ Docker compose build of chat failed."; popd; exit 1; }
+        docker compose up -d chat || { echo "❌ Docker compose up of chat failed."; popd; exit 1; }
+        popd > /dev/null
+    else
+        echo "📦 install chat..."
+        pushd rueckgrat/chat > /dev/null
+        ./install.sh "$CADDY_CERT" || { echo "❌ Chat native install failed!"; popd; exit 1; }
+        popd > /dev/null
+    fi
 fi
 
 echo ""
@@ -283,13 +362,13 @@ echo "🎉 Installation finished!"
 
 BASE_DIR=$([ "$IN_WORKSPACE_INSTALL" = true ] && echo "" || echo "Rueckgrat-install/")
 
-if $INSTALL_HUB || $INSTALL_NODE; then
+if $INSTALL_HUB || $INSTALL_NODE || $INSTALL_CHAT_DOCKER; then
     echo ""
     echo "→ Services:  cd ${BASE_DIR}rueckgrat && docker compose ps"
     echo "→ Logs:      cd ${BASE_DIR}rueckgrat && docker compose logs -f"
 fi
 
-if $INSTALL_CHAT; then
+if $INSTALL_CHAT && ! $INSTALL_CHAT_DOCKER; then
     echo ""
     echo "In oder to use the chat. Get the certificate from your caddy installation"
     echo "For example like this:"
@@ -299,7 +378,7 @@ if $INSTALL_CHAT; then
     echo "At first start, chat should ask you for the network settings. If not check ~/.config/Rueckgrat/rueckgrat.conf"
     echo "The hub (via caddy) is configured to listen to rueckgrat.hub and localhost" # TODO
     echo ""
-    echo "→ Chat:      cd ${BASE_DIR}ruckgrat/chat && ./run.sh"
+    echo "→ Chat:      cd ${BASE_DIR}rueckgrat/chat && ./run.sh"
 fi
 
 echo ""

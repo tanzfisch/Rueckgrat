@@ -4,8 +4,8 @@ from .image_job import ImageJob, ImageRequest
 from ..utils.contact_image_prompt_compiler import ContactImagePromptCompiler, ImageType
 from typing import Dict, Any
 
-from app.common import Logger, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, Utils
+logger = get_logger()
 
 class AssistantImageJob(Job):
     def __init__(self, user_id: int, contact_id: int, db, infrastructure, width: int = 720, height: int = 1280, conversation_id: int = None, show_assistant: bool = True, show_user: bool = False, image_type: ImageType = ImageType.FullBody, store_image_as: str = "gallery"):

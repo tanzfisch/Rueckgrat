@@ -9,8 +9,8 @@ from app.utils import RueckgratConfig
 from app.ui.widgets import RowSelector, ContactHeader
 from PySide6.QtCore import Signal
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class NetworkSettingsPage(QWidget):
     ok_clicked = Signal()
@@ -37,16 +37,6 @@ class NetworkSettingsPage(QWidget):
         self.port_input = QLineEdit(self.config.port)
         self.form_layout.addRow("Port", self.port_input)
 
-        cert_container = QWidget()
-        cert_layout = QHBoxLayout(cert_container)
-        self.cert_input = QLineEdit(self.config.server_cert)
-        cert_layout.addWidget(self.cert_input)
-        browse_btn = QPushButton("Browse")        
-        browse_btn.clicked.connect(self._browse_cert)
-        cert_layout.addWidget(browse_btn)
-        
-        self.form_layout.addRow("Certificate", cert_container)
-
         layout.addStretch()
 
         btn_container = QWidget()
@@ -64,13 +54,11 @@ class NetworkSettingsPage(QWidget):
     def _ok(self):
         self.config.host = self.host_input.text()
         self.config.port = self.port_input.text()
-        self.config.server_cert = self.cert_input.text()
         self.ok_clicked.emit()
 
     def _cancel(self):
         self.host_input.setText(self.config.host)
         self.port_input.setText(self.config.port)
-        self.cert_input.setText(self.config.server_cert)
         self.cancel_clicked.emit()
 
     def _browse_cert(self):

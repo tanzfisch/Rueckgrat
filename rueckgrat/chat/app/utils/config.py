@@ -2,22 +2,25 @@ import configparser
 import os
 from pathlib import Path
 
-from common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, Utils
+logger = get_logger()
 
 
 class RueckgratConfig:
     DEFAULTS = {
         "hub": {
             "rueckgrat_hub_host": "localhost",
-            "rueckgrat_hub_port": "443",
-            "server_cert": "~/.ssh/caddy-root.crt",
+            "rueckgrat_hub_port": "443"
         }
     }
 
-    def __init__(self, path="~/.config/Rueckgrat/rueckgrat.conf"):
+    def __init__(self, ):
+        if Utils.is_docker():
+            self.config_path=Path("/config/rueckgrat.conf").expanduser()
+        else:
+            self.config_path=Path("~/.config/Rueckgrat/rueckgrat.conf").expanduser()
+
         self.found_config = False
-        self.config_path = Path(path).expanduser()
         self.config = configparser.ConfigParser()
         logger.info(f"Reading config from {self.config_path}")
 
@@ -79,12 +82,3 @@ class RueckgratConfig:
     @port.setter
     def port(self, value):
         self._set("hub", "rueckgrat_hub_port", value)
-
-    @property
-    def server_cert(self):
-        value = self._get("hub", "server_cert", "no")
-        return os.path.expanduser(value)
-
-    @server_cert.setter
-    def server_cert(self, value):
-        self._set("hub", "server_cert", value)
