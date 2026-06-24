@@ -4,7 +4,7 @@
 
 The purpose is evolving. Currently the main focus is a **private, local-first AI companion** with strong multimodal capabilities.
 
-**Status**: Early stage — many features still missing, some instability expected, mostly manual installation needed.
+**Status**: Early stage — many features still missing, some instability expected, mostly manual installation needed since the installer does not cover all use cases yet.
 See the [changelog](https://github.com/tanzfisch/Rueckgrat/blob/master/changelog.md) for details.
 
 ## Features
