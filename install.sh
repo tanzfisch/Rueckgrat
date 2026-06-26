@@ -474,15 +474,6 @@ if $INSTALL_HUB || $INSTALL_NODE || $INSTALL_CHAT_DOCKER; then
 fi
 
 if $INSTALL_CHAT && ! $INSTALL_CHAT_DOCKER; then
-    echo ""
-    echo "In oder to use the chat. Get the certificate from your caddy installation"
-    echo "For example like this:"
-    echo "curl -k https://localhost/health"
-    echo "docker cp rueckgrat-caddy-1:/data/caddy/pki/authorities/local/root.crt ~/.ssh/caddy-root.crt"
-    echo ""
-    echo "At first start, chat should ask you for the network settings. If not check ~/.config/Rueckgrat/rueckgrat.conf"
-    echo "The hub (via caddy) is configured to listen to rueckgrat.hub and localhost" # TODO
-    echo ""
     echo "→ Chat:      cd ${BASE_DIR}rueckgrat/chat && ./run.sh"
 fi
 
