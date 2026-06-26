@@ -5,7 +5,7 @@ fetch_llm_models() {
     local -n MODEL_NAMES_REF="${3}"
     local -n DEFAULT_IDX_REF="${4}"
 
-    local VERBOSE="${5}"
+    local VERBOSE="${5:-false}"
     local FILTER="${6:-llm}"
 
     echo "🔍 fetching models from registry..."
@@ -14,6 +14,9 @@ fetch_llm_models() {
 
     MODELS=$(echo "$RESPONSE" | jq -c '.models[]' 2>/dev/null)
     i=1
+    MODEL_NAMES_REF=()
+    DEFAULT_IDX_REF=-1
+
     while IFS= read -r m; do
         name=$(echo "$m" | jq -r '.name')
         inst=$(echo "$m" | jq -r '.installed')

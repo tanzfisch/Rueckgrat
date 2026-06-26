@@ -177,6 +177,8 @@ if ! $YES; then
     echo "Component Selection"
 fi
 
+INSTALL_CHAT_DOCKER=false
+
 if $CHAT_ONLY; then
     INSTALL_CHAT=true
     INSTALL_HUB=false
@@ -191,7 +193,7 @@ else
         [[ "$(read_tty "Install Chat Client? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
 
         if $INSTALL_CHAT; then
-            [[ "$(read_tty "Install Chat via Docker (instead of native)? (y/N): " "N")" =~ ^[Yy]$ ]] && INSTALL_CHAT_DOCKER=true || INSTALL_CHAT_DOCKER=false
+            [[ "$(read_tty "Install Chat via Docker (instead of native)? (y/N): " "N")" =~ ^[Yy]$ ]] && INSTALL_CHAT_DOCKER=true
         fi
 
         [[ "$(read_tty "Install Hub? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_HUB=true
@@ -209,53 +211,58 @@ if ! $INSTALL_HUB && ! $INSTALL_NODE && ! $INSTALL_CHAT; then
 fi
 
 # ================== VALIDATION ====================
-print_section
-echo "selected for installation:"
-echo ""
-if $INSTALL_CHAT; then
-    if $INSTALL_CHAT_DOCKER; then
-        echo "* Chat (as docker)"
-    else
-        echo "* Chat (native)"
+if ! $YES; then
+    print_section
+    echo "selected for installation:"
+    echo ""
+    if $INSTALL_CHAT; then
+        if $INSTALL_CHAT_DOCKER; then
+            echo "* Chat (as docker)"
+        else
+            echo "* Chat (native)"
+        fi
+    fi
+    if $INSTALL_HUB; then
+        echo "* Hub"
+    fi
+    if $INSTALL_NODE; then
+        if $INSTALL_LLAMA; then
+            echo "* Node & llama-server"
+        else
+            echo "* Node"
+        fi
+    fi
+
+    INSTALL_NOW=false
+    echo ""
+    [[ "$(read_tty "Is this selection correct? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_NOW=true
+    echo ""
+    if ! $INSTALL_NOW; then
+        echo "❌ Aborted by user"
+        exit 0
     fi
 fi
-if $INSTALL_HUB; then
-    echo "* Hub"
-fi
-if $INSTALL_NODE; then
-    if $INSTALL_LLAMA; then
-        echo "* Node & llama-server"
-    else
-        echo "* Node"
+
+# ==================== NETWORK ====================
+if ! $YES; then
+    print_section
+    echo "network configuration"
+    echo ""
+
+    if [[ -z "${HUB_ADDR:-}" ]]; then
+        HUB_ADDR=$(read_tty "Hub IP: ")
     fi
-fi
 
-INSTALL_NOW=false
-echo ""
-[[ "$(read_tty "Is this selection correct? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_NOW=true
-echo ""
-if ! $INSTALL_NOW; then
-    echo "❌ Aborted by user"
-    exit 0
-fi
+    if [[ ! $HUB_ADDR =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "❌ Invalid IP address"
+        exit 1
+    fi
 
-print_section
-echo "network configuration"
-echo ""
-
-if [[ -z "${HUB_ADDR:-}" ]]; then
-    HUB_ADDR=$(read_tty "Hub IP: ")
-fi
-
-if [[ ! $HUB_ADDR =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "❌ Invalid IP address"
-    exit 1
-fi
-
-if ! grep -q "\b$HUB_HOSTNAME\b" /etc/hosts; then
-    if [[ "$(read_tty "Add \"$HUB_ADDR $HUB_HOSTNAME\" to /etc/hosts? (Y/n) " "Y")" =~ ^[Yy]$ ]]; then
-        echo "$HUB_ADDR $HUB_HOSTNAME" | sudo tee -a /etc/hosts >/dev/null
-        echo "✅ Added to /etc/hosts"
+    if ! grep -q "\b$HUB_HOSTNAME\b" /etc/hosts; then
+        if [[ "$(read_tty "Add \"$HUB_ADDR $HUB_HOSTNAME\" to /etc/hosts? (Y/n) " "Y")" =~ ^[Yy]$ ]]; then
+            echo "$HUB_ADDR $HUB_HOSTNAME" | sudo tee -a /etc/hosts >/dev/null
+            echo "✅ Added to /etc/hosts"
+        fi
     fi
 fi
 
@@ -271,7 +278,7 @@ install_docker() {
     echo "✅ Docker installed. Log out/in for group changes."
 }
 
-if ! $CHAT_ONLY || ${INSTALL_CHAT_DOCKER:-false}; then
+if ! $CHAT_ONLY || $INSTALL_CHAT_DOCKER; then
     install_docker
 fi
 
@@ -342,6 +349,7 @@ if $INSTALL_NODE; then
     popd > /dev/null
 fi
 
+# ==================== LLAMA-SERVER ====================
 if $INSTALL_LLAMA; then
     print_section
     echo "⬇️ installing llama-server..."
@@ -358,20 +366,19 @@ if $INSTALL_LLAMA; then
     if $YES; then
         idx=$DEFAULT_IDX
     else
-        read -p "📋 Select model [$DEFAULT_LLM]: " idx
-        idx=${idx:-$DEFAULT_IDX}
+        idx=$(read_tty "📋 Select model [$DEFAULT_LLM]: " "$DEFAULT_IDX")
     fi
+
     LLM_MODEL="${MODEL_NAMES[$((idx-1))]}"
 
-    install_llm "$LLM_MODEL" || { exit 1; }
+    install_llm "$LLM_MODEL" || { echo "❌ install_llm failed."; exit 1; }
 
     pushd rueckgrat > /dev/null
     GGUF_FILE_PATH="/models/llm/$LLM_MODEL/$LLM_MODEL.gguf"
     sed -i "s|^LLAMA_CPP_MODEL=.*|LLAMA_CPP_MODEL=$GGUF_FILE_PATH|" .env
-
     echo "🐋 llama-server..."
-    docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} llama-server || { echo "❌ Docker compose build of llama-server failed."; popd; exit 1; }
-    docker compose up -d llama-server || { echo "❌ Docker compose up of llama-server failed."; popd; exit 1; }
+    docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} llama-server
+    docker compose up -d llama-server
     popd > /dev/null
 fi
 
@@ -408,7 +415,6 @@ print_header "🎉 Installation finished!"
 BASE_DIR=$([ "$IN_WORKSPACE_INSTALL" = true ] && echo "" || echo "Rueckgrat-install/")
 
 if $INSTALL_HUB || $INSTALL_NODE || $INSTALL_CHAT_DOCKER; then
-    echo ""
     echo "→ Services:  cd ${BASE_DIR}rueckgrat && docker compose ps"
     echo "→ Logs:      cd ${BASE_DIR}rueckgrat && docker compose logs -f"
 fi
