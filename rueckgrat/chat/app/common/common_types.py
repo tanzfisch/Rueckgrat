@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import List, Optional
 
 class ChatRequest(BaseModel):
     contact_id: int
@@ -37,3 +38,22 @@ class ImageResponse(BaseModel):
 
 class GetMessagesRequest(BaseModel):
     max_messages: int = 100
+
+class ModelInfo(BaseModel):
+    name: str
+    type: str
+    installed: bool
+    size_gb: Optional[float] = None
+    description: Optional[str] = None
+
+class GetModelsResponse(BaseModel):
+    models: List[ModelInfo]
+
+class InstallModelRequest(BaseModel):
+    name: str
+    source: Optional[str] = None
+    force: bool = False
+
+class InstallModelResponse(BaseModel):
+    name: str
+    size_gb: Optional[float] = None
