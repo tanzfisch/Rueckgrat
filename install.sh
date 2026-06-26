@@ -8,7 +8,7 @@ set -euo pipefail
 
 print_header() {
     local text="$1"
-    local width=$(tput cols)
+    local width=$(tput cols 2>/dev/null || echo 80)
     printf '\033[36m%*s\033[0m\n' "$width" '' | tr ' ' '_'
     echo ""
     printf '\033[1m%*s\033[0m\n' $(( (width + ${#text}) / 2 )) "$text"
@@ -17,7 +17,7 @@ print_header() {
 }
 
 print_section() {
-    local width=$(tput cols)
+    local width=$(tput cols 2>/dev/null || echo 80)
     printf '\033[36m%*s\033[0m\n' "$width" '' | tr ' ' '_'
     echo ""
 }
@@ -36,46 +36,39 @@ CLEAN_BUILD=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --chat_only)
-            CHAT_ONLY=true
-            shift
-            ;;
-        -y|--yes)
-            YES=true
-            shift
-            ;;
-        -v|--verbose)
-            VERBOSE=true
-            DOCKER_PROGRESS_MODE="auto"
-            shift
-            ;;
-        -c|--clean)
-            NO_CACHE=--no-cache
-            CLEAN_BUILD=true
-            shift
-            ;;
-        --hub-ip)
-            HUB_ADDR="$2"
-            shift 2
-            ;;
-        *)
-            echo "Unknown option: $1"
-            exit 1
-            ;;
+        --chat_only) CHAT_ONLY=true; shift ;;
+        -y|--yes) YES=true; shift ;;
+        -v|--verbose) VERBOSE=true; DOCKER_PROGRESS_MODE="auto"; shift ;;
+        -c|--clean) CLEAN_BUILD=true; shift ;;
+        --hub-ip) HUB_ADDR="$2"; shift 2 ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
+
+# Interactive read helper
+read_tty() {
+    local prompt="$1"
+    local default="${2:-}"
+    local var
+    if $YES; then
+        var="${default:-Y}"
+    else
+        read -p "$prompt" -r var </dev/tty
+        var="${var:-$default}"
+    fi
+    echo "$var"
+}
 
 # ==================== DISTRO DETECTION ====================
 detect_distro() {
     if [[ -f /etc/os-release ]]; then
         . /etc/os-release
         DISTRO=${ID_LIKE:-$ID}
-        VERSION=${VERSION_ID:-}
+        echo "Detected: $PRETTY_NAME ($DISTRO ${VERSION_ID:-})"
     else
+        echo "Detected: unknown"
         DISTRO="unknown"
     fi
-
-    echo "Detected: $PRETTY_NAME ($DISTRO $VERSION)"
 }
 
 detect_distro
@@ -95,25 +88,16 @@ if [[ $ALL_CONTAINERS -gt 0 ]]; then
     echo ""
     echo "📡 Networks"
     echo "$(docker network ls --filter "name=rueckgrat" --format "{{.Name}}" | sort | tr '\n' ' ')"
+    echo ""
 
-    if $YES; then
-        keep_previous="Y"
-    else
-        read -p "Keep previous installation (reuse volumes & containers)? (Y/n): " -r keep_previous < /dev/stdin
-        keep_previous=${keep_previous:-Y}
-    fi
-    
-    if [[ "${keep_previous:-}" =~ ^[Nn]$ ]]; then
+    if [[ "$(read_tty "Keep previous installation (reuse volumes & containers)? (Y/n): " "Y")" =~ ^[Nn]$ ]]; then
         echo "🗑️ Removing previous Rueckgrat installation..."
         docker ps -q --filter "name=rueckgrat" | xargs -r docker stop 2>/dev/null || true
         docker ps -a -q --filter "name=rueckgrat" | xargs -r docker rm -f 2>/dev/null || true
-        
         for vol in rueckgrat_caddy_data rueckgrat_caddy_config rueckgrat_node_images rueckgrat_hub_db rueckgrat_hub_images; do
             docker volume rm "$vol" 2>/dev/null || true
         done
-        
         docker network rm rueckgrat-net-local 2>/dev/null || true
-        
         echo "✅ Previous installation cleaned up."
     fi
 fi
@@ -121,42 +105,26 @@ fi
 # ==================== PACKAGE MANAGER HELPER ==============
 install_pkg() {
     case "$DISTRO" in
-        *debian*|*ubuntu*)
-            sudo apt update -y && sudo apt install -y "$@"
-            ;;
-        *fedora*|*rhel*|*centos*|*rocky*|*alma*)
-            sudo dnf install -y "$@"
-            ;;
-        *arch*)
-            sudo pacman -Syu --noconfirm "$@"
-            ;;
-        *suse*|*opensuse*)
-            sudo zypper install -y "$@"
-            ;;
-        *)
-            echo "❌ Unsupported distro. Please install $@ manually."
-            exit 1
-            ;;
+        *debian*|*ubuntu*) sudo apt update -y && sudo apt install -y "$@" ;;
+        *fedora*|*rhel*|*centos*|*rocky*|*alma*) sudo dnf install -y "$@" ;;
+        *arch*) sudo pacman -Syu --noconfirm "$@" ;;
+        *suse*|*opensuse*) sudo zypper install -y "$@" ;;
+        *) echo "❌ Unsupported distro. Install $@ manually."; exit 1 ;;
     esac
 }
 
 # ==================== DEPENDENCIES ========================
-deps=(git python3)
+deps=(git python3 curl)
 missing_deps=()
 for pkg in "${deps[@]}"; do
-    if ! command -v "$pkg" &> /dev/null; then
-        missing_deps+=("$pkg")
-    fi
+    command -v "$pkg" &> /dev/null || missing_deps+=("$pkg")
 done
 
 if [ ${#missing_deps[@]} -gt 0 ]; then
     print_section
-    echo "📦 installing missing dependencies..."
-    echo "${missing_deps[*]}"
-    echo ""
-
+    echo "📦 Installing missing dependencies: ${missing_deps[*]}"
     install_pkg "${missing_deps[@]}"
-    echo "✅ finished installing dependencies"
+    echo "✅ Dependencies installed."
 fi
 
 # ==================== REPOSITORY SETUP ====================
@@ -164,23 +132,20 @@ print_section
 IN_WORKSPACE_INSTALL=true
 
 if [[ -d ".git" ]]; then
-    echo "✅ Using branch '$(git branch --show-current)'."
+    echo "✅ Using existing repo on branch '$(git branch --show-current)'."
     git pull
 elif [[ -d "Rueckgrat-install" ]]; then
     cd Rueckgrat-install
-    echo "✅ Using branch: '$(git branch --show-current)'."
+    echo "✅ Using existing repo on branch '$(git branch --show-current)'."
     git pull
     IN_WORKSPACE_INSTALL=false
 else
     echo "📥 Cloning fresh copy..."
-    sudo -u $(whoami) git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-install
-    
+    git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-install
     cd Rueckgrat-install
-    echo "✅ Using branch: '$(git branch --show-current)'."
     IN_WORKSPACE_INSTALL=false
 fi
 
-# current dir depends on workspace
 CURRENT_DIR=$(pwd)
 BUILD_DIR="$CURRENT_DIR/build"
 CERT_DIR="$BUILD_DIR/certs"
@@ -188,38 +153,29 @@ CADDY_CERT=$CERT_DIR/rueckgrat-caddy.crt
 LOGS_DIR="$CURRENT_DIR/logs"
 
 safe_rm_rf() {
-    local dir="$1"
-    if [[ -z "$dir" || ! -e "$dir" ]]; then
-        return 0
-    fi
-    
-    echo "🗑️ $dir"
-    if [[ -w "$dir" ]] || [[ -w "$(dirname "$dir")" ]]; then
-        rm -rf "$dir"
+    [[ -z "$1" || ! -e "$1" ]] && return
+    echo "🗑️ $1"
+    if [[ -w "$1" ]] || [[ -w "$(dirname "$1")" ]]; then
+        rm -rf "$1"
     else
-        sudo rm -rf "$dir"
+        sudo rm -rf "$1"
     fi
 }
 
 if $CLEAN_BUILD; then
     print_section
-    echo "🧹 clean up build..."
+    echo "🧹 Cleaning build..."
     safe_rm_rf "$BUILD_DIR"
     safe_rm_rf "$LOGS_DIR"
 fi
 
-mkdir -p $BUILD_DIR && chmod 777 $BUILD_DIR
-mkdir -p $CERT_DIR && chmod 777 $CERT_DIR
-mkdir -p $LOGS_DIR && chmod 777 $LOGS_DIR
+mkdir -p "$BUILD_DIR" "$CERT_DIR" "$LOGS_DIR" && chmod 777 "$BUILD_DIR" "$CERT_DIR" "$LOGS_DIR"
 
 # ==================== COMPONENT SELECTION ====================
 if ! $YES; then
     print_section
     echo "Component Selection"
-    echo ""
 fi
-
-INSTALL_CHAT_DOCKER=false
 
 if $CHAT_ONLY; then
     INSTALL_CHAT=true
@@ -227,55 +183,68 @@ if $CHAT_ONLY; then
     INSTALL_NODE=false
     INSTALL_LLAMA=false
 else
-    INSTALL_HUB=false
-    INSTALL_NODE=false
-    INSTALL_CHAT=false
-    INSTALL_LLAMA=false
+    INSTALL_CHAT=false; INSTALL_HUB=false; INSTALL_NODE=false; INSTALL_LLAMA=false
 
     if $YES; then
-        INSTALL_CHAT=true
-        INSTALL_HUB=true
-        INSTALL_NODE=true
-        INSTALL_LLAMA=true
+        INSTALL_CHAT=true; INSTALL_HUB=true; INSTALL_NODE=true; INSTALL_LLAMA=true
     else
-        read -p "Install Chat Client? (Y/n): " -r install_chat < /dev/stdin
-        install_chat=${install_chat:-Y}
-        [[ "${install_chat:-}" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
-        
+        [[ "$(read_tty "Install Chat Client? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
+
         if $INSTALL_CHAT; then
-            if $YES; then
-                INSTALL_CHAT_DOCKER=false
-            else
-                read -p "Install Chat via Docker (instead of native)? (y/N): " -r chat_docker < /dev/stdin
-                chat_docker=${chat_docker:-N}
-                [[ -n "${chat_docker}" && "${chat_docker}" =~ ^[Yy]$ ]] && INSTALL_CHAT_DOCKER=true || INSTALL_CHAT_DOCKER=false
-            fi
+            [[ "$(read_tty "Install Chat via Docker (instead of native)? (y/N): " "N")" =~ ^[Yy]$ ]] && INSTALL_CHAT_DOCKER=true || INSTALL_CHAT_DOCKER=false
         fi
 
-        read -p "Install Hub? (Y/n): " -r install_hub < /dev/stdin
-        install_hub=${install_hub:-Y}
-        [[ "${install_hub:-}"  =~ ^[Yy]$ ]] && INSTALL_HUB=true
-
-        read -p "Install Node? (Y/n): " -r install_node < /dev/stdin
-        install_node=${install_node:-Y}
-        [[ "${install_node:-}" =~ ^[Yy]$ ]] && INSTALL_NODE=true
+        [[ "$(read_tty "Install Hub? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_HUB=true
+        [[ "$(read_tty "Install Node? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_NODE=true
 
         if $INSTALL_NODE; then
-          read -p "Install llama-server on Node? (Y/n): " -r install_llama < /dev/stdin
-          install_llama=${install_llama:-Y}
-          [[ -z "${install_llama:-}" || "${install_llama:-}" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
+            [[ "$(read_tty "Install llama-server on Node? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
         fi
     fi
 fi
 
 if ! $INSTALL_HUB && ! $INSTALL_NODE && ! $INSTALL_CHAT; then
-  echo "❌ Nothing selected. Exiting."
-  exit 0
+    echo "❌ Nothing selected. Exiting."
+    exit 0
 fi
 
-if [[ -z "$HUB_ADDR" ]]; then
-    print_section
-    read -p "Hub IP: " -r HUB_ADDR < /dev/stdin
+# ================== VALIDATION ====================
+print_section
+echo "selected for installation:"
+echo ""
+if $INSTALL_CHAT; then
+    if $INSTALL_CHAT_DOCKER; then
+        echo "* Chat (as docker)"
+    else
+        echo "* Chat (native)"
+    fi
+fi
+if $INSTALL_HUB; then
+    echo "* Hub"
+fi
+if $INSTALL_NODE; then
+    if $INSTALL_LLAMA; then
+        echo "* Node & llama-server"
+    else
+        echo "* Node"
+    fi
+fi
+
+INSTALL_NOW=false
+echo ""
+[[ "$(read_tty "Is this selection correct? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_NOW=true
+echo ""
+if ! $INSTALL_NOW; then
+    echo "❌ Aborted by user"
+    exit 0
+fi
+
+print_section
+echo "network configuration"
+echo ""
+
+if [[ -z "${HUB_ADDR:-}" ]]; then
+    HUB_ADDR=$(read_tty "Hub IP: ")
 fi
 
 if [[ ! $HUB_ADDR =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -284,61 +253,37 @@ if [[ ! $HUB_ADDR =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 if ! grep -q "\b$HUB_HOSTNAME\b" /etc/hosts; then
-    if $YES; then
-        confirm="Y"
-    else
-        print_section
-        read -p "Add $HUB_ADDR $HUB_HOSTNAME to /etc/hosts? (Y/n) " -r confirm
-    fi
-
-    if [[ -z $confirm || $confirm =~ ^[Yy]$ ]]; then
+    if [[ "$(read_tty "Add \"$HUB_ADDR $HUB_HOSTNAME\" to /etc/hosts? (Y/n) " "Y")" =~ ^[Yy]$ ]]; then
         echo "$HUB_ADDR $HUB_HOSTNAME" | sudo tee -a /etc/hosts >/dev/null
-        if ! $YES; then
-            echo "✅ Added to /etc/hosts"
-        fi
+        echo "✅ Added to /etc/hosts"
     fi
 fi
 
-# ==================== DOCKER (only if needed) ====================
+# ==================== DOCKER ====================
 install_docker() {
-    if command -v docker &> /dev/null; then
-        return
-    fi
-
+    command -v docker &> /dev/null && return
     print_section
-    echo "🐳 Installing Docker via official script..."
+    echo "🐳 Installing Docker..."
     curl -fsSL https://get.docker.com -o get-docker.sh
     sudo sh get-docker.sh
     rm -f get-docker.sh
-
     sudo usermod -aG docker "$USER"
     echo "✅ Docker installed. Log out/in for group changes."
 }
 
-if ! $CHAT_ONLY || $INSTALL_CHAT_DOCKER; then
+if ! $CHAT_ONLY || ${INSTALL_CHAT_DOCKER:-false}; then
     install_docker
 fi
 
 # ==================== CADDY ====================
 install_caddy() {
-    if command -v caddy &> /dev/null; then
-        return
-    fi
-
+    command -v caddy &> /dev/null && return
     print_section
-    echo "📦 Installing Caddy (static binary preferred)..."
-
-    # Try static binary first (most universal)
-    if command -v curl &> /dev/null; then
-        curl -fsSL https://caddyserver.com/api/download?os=linux&arch=amd64 -o /tmp/caddy
-        sudo install -m 755 /tmp/caddy /usr/local/bin/caddy
-        rm -f /tmp/caddy
-        echo "✅ Caddy installed via static binary."
-        return
-    fi
-
-    # fallback to package manager
-    install_pkg caddy
+    echo "📦 Installing Caddy..."
+    curl -fsSL https://caddyserver.com/api/download?os=linux&arch=amd64 -o /tmp/caddy
+    sudo install -m 755 /tmp/caddy /usr/local/bin/caddy
+    rm -f /tmp/caddy
+    echo "✅ Caddy installed."
 }
 
 if $INSTALL_HUB; then
@@ -364,21 +309,16 @@ if $INSTALL_HUB; then
     sleep 5
 fi
 
-# ==================== RETRIEVE CADDY CERTIFICATE ====================
+# ==================== CERT ====================
 print_section
-echo "🔑 Retrieving Caddy root certificate..."
-RESPONSE=$(curl -k -s https://rueckgrat.hub/health 2> /dev/null)
-if [ ! "$RESPONSE" = '{"status":"ok"}' ]; then
-    echo "❌ Could not connect to caddy."
+echo "🔑 Retrieving Caddy certificate..."
+if ! curl -k -s https://rueckgrat.hub/health | grep -q '"status":"ok"'; then
+    echo "❌ Could not connect to hub."
     exit 1
 fi
-
-if docker cp rueckgrat-caddy-1:/data/caddy/pki/authorities/local/root.crt $CADDY_CERT 2>/dev/null; then
+mkdir -p "$CERT_DIR"
+docker cp rueckgrat-caddy-1:/data/caddy/pki/authorities/local/root.crt "$CADDY_CERT" 2>/dev/null || { echo "❌ Certificate copy failed."; exit 1; }
     echo "✅ Certificate stored in $CADDY_CERT"
-else
-    echo "❌ Could not copy caddy certificate."
-    exit 1
-fi
 
 # ==================== NODE ====================
 if $INSTALL_NODE; then

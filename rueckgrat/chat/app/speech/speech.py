@@ -39,6 +39,9 @@ class Speech:
             if not model_file_path.exists() or not model_json_file_path.exists():
                 Backend.get_model(model, model_path)
 
+            if not model_file_path.exists():
+                logger.error(f"failed to retrive voice file for {model}")
+
             proc = subprocess.Popen(
                 [sys.executable, speech_task_path, "--text", text, "--model", model_file_path],
                 stdout=subprocess.DEVNULL,
