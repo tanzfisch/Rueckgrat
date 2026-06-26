@@ -3,8 +3,8 @@ from .tool import Tool
 from app.jobs.requested_image_job import RequestedImageJob
 from app.utils.message_queue import MessageQueue
 
-from app.common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class ImageGenTool(Tool):
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):

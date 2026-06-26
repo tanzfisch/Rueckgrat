@@ -7,8 +7,8 @@ import io
 from pathlib import Path
 import threading
 
-from app.common import Logger, ImageRequest, ImageResponse
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ImageRequest, ImageResponse
+logger = get_logger()
 
 base_text_to_image = """
 {

@@ -8,8 +8,8 @@ import datetime
 import tldextract
 from bs4 import BeautifulSoup
 
-from app.common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 class WebsearchTool(Tool):
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
@@ -321,7 +321,7 @@ class WebsearchTool(Tool):
         return """
 WEBSEARCH:
 
-Use the websearch tool for any precise, factual, current, latest, real-time, location-specific, or dynamic information (e.g. weather, prices, currencies, crypto, stocks, events, stats, news). If so, include:
+Use the websearch tool for any precise, factual, current, latest, real-time, location-specific, or dynamic information (e.g. weather, prices, currencies, crypto, stocks, events, stats, news), or when needing inspiration or direction change to bring fresh ideas in to the conversation. If so, include:
 {
   "tool": "websearch",
   "query": "exact search query"

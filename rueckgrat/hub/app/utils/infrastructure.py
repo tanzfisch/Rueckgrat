@@ -11,8 +11,8 @@ from typing import Optional
 from dataclasses import dataclass
 from ..jobs.image_job import ImageRequest
 
-from app.common import Logger, ChatRequestLlama, DownloadQueue
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ChatRequestLlama, DownloadQueue, Utils
+logger = get_logger()
 
 INFRASTRUCTURE_CONFIG_PATH = Path("/hub/config/infrastructure.json")
 
@@ -194,6 +194,8 @@ class Infrastructure:
                 max_new_tokens=max_new_tokens,
                 context_size=context_size
             )
+
+            logger.debug(f"sending query to llm:\n{Utils.pretty_print(payload.model_dump())}")
 
             response = requests.post(
                 url,

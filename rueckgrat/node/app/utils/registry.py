@@ -5,8 +5,8 @@ from urllib.parse import urlparse
 from pathlib import Path
 from tqdm import tqdm
 
-from app.common import Logger
-logger = Logger(__name__).get_logger()
+from app.common import get_logger
+logger = get_logger()
 
 INFRASTRUCTURE_CONFIG_PATH = Path("/node/config/infrastructure.json")
 

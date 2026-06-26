@@ -207,6 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 rueckgrat/ComfyUI/ComfyUI
-chat/models/
-chat/cache/
+cache
 models
+logs
+chat-temp

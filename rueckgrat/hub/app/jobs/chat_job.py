@@ -6,8 +6,8 @@ import json
 import re
 import sys
 
-from app.common import Logger, ChatRequest
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ChatRequest
+logger = get_logger()
 
 class ChatJob(Job):
     def __init__(self, request: ChatRequest, db, infrastructure, tool_registry, tool_outputs = None):
@@ -54,9 +54,6 @@ class ChatJob(Job):
             compiler = PromptCompiler(contact, conversation, request.name, self.tool_registry if not self.tool_outputs else None)
             system_prompt, context_prompt = compiler.build_prompt()
 
-            logger.debug(f"system_prompt:\n{system_prompt}")
-            logger.debug(f"context_prompt:\n{context_prompt}")
-
             payload = [{"role": "developer", "content": system_prompt}]
             payload.append({"role": "developer", "content": context_prompt})
             
@@ -70,7 +67,6 @@ class ChatJob(Job):
 
             size_in_bytes = sys.getsizeof(messages)
             estimated_tokens = size_in_bytes / 4 * 1.25
-            logger.debug(f"request from {request.name} estimated token size: {estimated_tokens / 1000}k")
 
             response_content = self.infrastructure.chat(payload, request.temperature, request.conversation_id)
             if response_content:

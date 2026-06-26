@@ -6,10 +6,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import uuid
 from pydantic import BaseModel
+from typing import List, Optional
 from app.utils import ModelRegistry, LLamaCppInterface, ComfyUIInterface, CleanupWorker
 
-from app.common import Logger, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse
-logger = Logger(__name__).get_logger()
+from app.common import (
+    get_logger, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse, 
+    ModelInfo, GetModelsResponse, InstallModelResponse, InstallModelRequest
+)
+logger = get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -93,3 +97,71 @@ def get_model_url(model_name: str):
         model_urls=sources
     )
 
+@app.get("/models", response_model=GetModelsResponse)
+def get_models(type_filter: Optional[str] = None, verbose: bool = False):
+    registry = ModelRegistry("/node/models")
+    data = registry.get_registry()
+    
+    models_list: List[ModelInfo] = []
+    
+    for key, model_cfg in data.items():
+        if type_filter and type_filter != model_cfg.get("type"):
+            continue
+            
+        installed = registry.check_model_files(model_cfg)
+        
+        size_gb = None
+        if verbose and installed:
+            size_gb = registry.get_model_size(model_cfg)
+        
+        models_list.append(ModelInfo(
+            name=key,
+            type=model_cfg.get("type", "unknown"),
+            installed=installed,
+            size_gb=size_gb,
+            description=model_cfg.get("description")  # assuming this field exists
+        ))
+    
+    return GetModelsResponse(
+        models=models_list
+    )
+
+@app.post("/models/install", response_model=InstallModelResponse)
+def install_model(request: InstallModelRequest):
+    registry = ModelRegistry("/node/models")
+    
+    model_cfg = registry.get_model_cfg(request.name)
+    if not model_cfg:
+        logger.error(f"model {request.name} not found in registry")
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Model '{request.name}' not registered"
+        )
+    
+    try:
+        installed_cfg = registry.install_model(
+            request.name,
+            request.source,
+            request.force
+        )
+        
+        if not installed_cfg:
+            logger.error(f"Failed to install model {request.name}")
+            raise HTTPException(
+                status_code=500, 
+                detail="Failed to install model"
+            )
+        
+        size_gb = registry.get_model_size(installed_cfg) if installed_cfg else None
+        
+        return InstallModelResponse(
+            name=request.name,
+            size_gb=size_gb
+        )
+        
+    except Exception as e:
+        logger.error(f"Model installation failed for {request.name}: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Installation failed: {str(e)}"
+        )

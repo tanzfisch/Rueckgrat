@@ -4,8 +4,8 @@ import json
 import re
 import random
 
-from app.common import Logger, ChatRequest, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ChatRequest, Utils
+logger = get_logger()
 
 class FindAnswerJob(Job):
     def __init__(self, question: str, information: str, infrastructure):

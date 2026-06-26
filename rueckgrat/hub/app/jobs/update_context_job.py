@@ -5,8 +5,8 @@ import re
 import random
 from ..utils.prompt_compiler import PromptCompiler
 
-from app.common import Logger, ChatRequest, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, ChatRequest, Utils
+logger = get_logger()
 
 class UpdateContextJob(Job):
     def __init__(self, request: ChatRequest, db, infrastructure):
@@ -161,13 +161,11 @@ INSTRUCTIONS:
 
 OUTPUT:
 Return ONLY valid JSON in the same format.
-"""
-
-            logger.debug(f"update context query:\n{query}")
+"""            
             payload.append({"role": "user", "content": query})
         except Exception as e:
             logger.error(f"failed to build query {repr(e)}")            
-        
+                
         response_content = self.infrastructure.chat(payload, 0.4, random.randint(0, 100000), True)
         if not response_content:
             logger.warning(f"failed to update context")

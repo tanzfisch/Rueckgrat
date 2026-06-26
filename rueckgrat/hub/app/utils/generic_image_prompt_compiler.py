@@ -1,7 +1,7 @@
 import json
 import random
-from app.common import Logger, Utils
-logger = Logger(__name__).get_logger()
+from app.common import get_logger, Utils
+logger = get_logger()
 
 class GenericImagePromptCompiler:
     def __init__(self, prompt: str, infrastructure, temperature):
