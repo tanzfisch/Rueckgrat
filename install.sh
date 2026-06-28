@@ -280,7 +280,7 @@ install_docker() {
     echo "✅ Docker installed. Log out/in for group changes."
 }
 
-if ! $CHAT_ONLY || $INSTALL_CHAT_DOCKER; then
+if $INSTALL_CHAT_DOCKER || $INSTALL_HUB || $INSTALL_NODE || $INSTALL_LLAMA; then
     install_docker
 fi
 
@@ -314,20 +314,19 @@ if $INSTALL_HUB; then
     docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} hub caddy || { echo "❌ Docker compose build of hub & daddy failed."; popd; exit 1; }
     docker compose up -d hub caddy || { echo "❌ Docker compose up of hub & daddy failed."; popd; exit 1; }
     popd > /dev/null
-
     sleep 5
-fi
 
-# ==================== CERT ====================
-print_section
-echo "🔑 Retrieving Caddy certificate..."
-if ! curl -k -s https://rueckgrat.hub/health | grep -q '"status":"ok"'; then
-    echo "❌ Could not connect to hub."
-    exit 1
-fi
-mkdir -p "$CERT_DIR"
-docker cp rueckgrat-caddy-1:/data/caddy/pki/authorities/local/root.crt "$CADDY_CERT" 2>/dev/null || { echo "❌ Certificate copy failed."; exit 1; }
+    # ==================== CERT ====================
+    print_section
+    echo "🔑 Retrieving Caddy certificate..."
+    if ! curl -k -s https://rueckgrat.hub/health | grep -q '"status":"ok"'; then
+        echo "❌ Could not connect to hub."
+        exit 1
+    fi
+    mkdir -p "$CERT_DIR"
+    docker cp rueckgrat-caddy-1:/data/caddy/pki/authorities/local/root.crt "$CADDY_CERT" 2>/dev/null || { echo "❌ Certificate copy failed."; exit 1; }
     echo "✅ Certificate stored in $CADDY_CERT"
+fi
 
 # ==================== NODE ====================
 if $INSTALL_NODE; then
