@@ -4,7 +4,7 @@
 
 The purpose is evolving. Currently the main focus is a **private, local-first AI companion** with strong multimodal capabilities.
 
-**Status**: Early stage — many features still missing, some instability expected.  
+**Status**: Early stage — many features still missing, some instability expected, mostly manual installation needed since the installer does not cover all use cases yet.
 See the [changelog](https://github.com/tanzfisch/Rueckgrat/blob/master/changelog.md) for details.
 
 ## Features
@@ -35,7 +35,7 @@ I recommend a miniumm of 24b llm (ie cognitivecomputations_Dolphin-Mistral-24B-V
 
 For planned features, check the [Issues](https://github.com/tanzfisch/Rueckgrat/issues).
 
-## Getting Started (Recommended)
+## 🚀 Getting Started
 
 The easiest way to install Rueckgrat on Linux is using the one-line installer
 
@@ -54,10 +54,9 @@ cd Rueckgrat
 The installer will:
 
 * Ask which components you want (Chat Client / Hub / Node)
-* Automatically install Docker (if needed)
-* Install Caddy
+* Automatically install Docker and Caddy (if needed)
 * Removes previous installations (on user request)
-* Start the selected services
+* Start the selected services/containers
 
 For a Windows Chat Client
 
@@ -68,6 +67,10 @@ cd Rueckgrat\chat
 .\run.ps1
 ```
 
-# Special Thanks To
+# Special Tanks to
 
-✨🎉 **spychodelics** 🎊🚀
+✨ **Gebrielle** 🎉
+
+🎊 **spychodelics** 🚀
+
+👶 **Naomi** 🍼
