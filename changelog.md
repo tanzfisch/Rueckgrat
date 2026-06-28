@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.7.1
+-----
+
+- fixed some issues with the installer
+
 0.7.0
 -----
 
