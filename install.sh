@@ -74,31 +74,33 @@ detect_distro() {
 detect_distro
 
 # ==================== VOLUME CLEANUP ====================
-ALL_CONTAINERS=$(docker ps -a -q --filter "name=rueckgrat" 2>/dev/null | wc -l)
+if command -v docker &> /dev/null; then
+    ALL_CONTAINERS=$(docker ps -a -q --filter "name=rueckgrat" 2>/dev/null | wc -l)
 
-if [[ $ALL_CONTAINERS -gt 0 ]]; then
-    print_section
-    echo "Found existing Rueckgrat installation."
-    echo ""
-    echo "🐳 Container"
-    echo "$(docker ps -a --filter "name=rueckgrat" --format "{{.Names}}" | sort | tr '\n' ' ')"
-    echo ""
-    echo "💾 Volumes"
-    echo "$(docker volume ls --filter "name=rueckgrat" --format "{{.Name}}" | sort | tr '\n' ' ')"
-    echo ""
-    echo "📡 Networks"
-    echo "$(docker network ls --filter "name=rueckgrat" --format "{{.Name}}" | sort | tr '\n' ' ')"
-    echo ""
+    if [[ $ALL_CONTAINERS -gt 0 ]]; then
+        print_section
+        echo "Found existing Rueckgrat installation."
+        echo ""
+        echo "🐳 Container"
+        echo "$(docker ps -a --filter "name=rueckgrat" --format "{{.Names}}" | sort | tr '\n' ' ')"
+        echo ""
+        echo "💾 Volumes"
+        echo "$(docker volume ls --filter "name=rueckgrat" --format "{{.Name}}" | sort | tr '\n' ' ')"
+        echo ""
+        echo "📡 Networks"
+        echo "$(docker network ls --filter "name=rueckgrat" --format "{{.Name}}" | sort | tr '\n' ' ')"
+        echo ""
 
-    if [[ "$(read_tty "Keep previous installation (reuse volumes & containers)? (Y/n): " "Y")" =~ ^[Nn]$ ]]; then
-        echo "🗑️ Removing previous Rueckgrat installation..."
-        docker ps -q --filter "name=rueckgrat" | xargs -r docker stop 2>/dev/null || true
-        docker ps -a -q --filter "name=rueckgrat" | xargs -r docker rm -f 2>/dev/null || true
-        for vol in rueckgrat_caddy_data rueckgrat_caddy_config rueckgrat_node_images rueckgrat_hub_db rueckgrat_hub_images; do
-            docker volume rm "$vol" 2>/dev/null || true
-        done
-        docker network rm rueckgrat-net-local 2>/dev/null || true
-        echo "✅ Previous installation cleaned up."
+        if [[ "$(read_tty "Keep previous installation (reuse volumes & containers)? (Y/n): " "Y")" =~ ^[Nn]$ ]]; then
+            echo "🗑️ Removing previous Rueckgrat installation..."
+            docker ps -q --filter "name=rueckgrat" | xargs -r docker stop 2>/dev/null || true
+            docker ps -a -q --filter "name=rueckgrat" | xargs -r docker rm -f 2>/dev/null || true
+            for vol in rueckgrat_caddy_data rueckgrat_caddy_config rueckgrat_node_images rueckgrat_hub_db rueckgrat_hub_images; do
+                docker volume rm "$vol" 2>/dev/null || true
+            done
+            docker network rm rueckgrat-net-local 2>/dev/null || true
+            echo "✅ Previous installation cleaned up."
+        fi
     fi
 fi
 
