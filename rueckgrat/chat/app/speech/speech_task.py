@@ -9,7 +9,9 @@ import argparse
 import tempfile
 import platform
 
-from app.common import get_logger
+# todo ugly hack
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from common import get_logger
 logger = get_logger()
 
 

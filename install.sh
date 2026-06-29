@@ -6,6 +6,14 @@
 
 set -euo pipefail
 
+trap 'echo "❌ Error on line $LINENO"' ERR
+
+PARAMETERS=$@
+
+# print_header - Print centered bold header with top/bottom lines
+# Usage: print_header "Title text"
+# Args:
+#   $1 - Header text
 print_header() {
     local text="$1"
     local width=$(tput cols 2>/dev/null || echo 80)
@@ -16,95 +24,128 @@ print_header() {
     echo ""
 }
 
+# print_section - Print section separator line
+# Usage: print_section
+# No arguments
 print_section() {
     local width=$(tput cols 2>/dev/null || echo 80)
     printf '\033[36m%*s\033[0m\n' "$width" '' | tr ' ' '_'
     echo ""
 }
 
-print_header "🚀 Rückgrat Installer"
-
-# ==================== GLOBALS ==============================
-HUB_HOSTNAME="rueckgrat.hub"
-
-# ==================== HANDLE PARAMETERS ====================
-CHAT_ONLY=false
-YES=false
-VERBOSE=false
-DOCKER_PROGRESS_MODE="quiet"
-CLEAN_BUILD=false
-
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --chat_only) CHAT_ONLY=true; shift ;;
-        -y|--yes) YES=true; shift ;;
-        -v|--verbose) VERBOSE=true; DOCKER_PROGRESS_MODE="auto"; shift ;;
-        -c|--clean) CLEAN_BUILD=true; shift ;;
-        --hub-ip) HUB_ADDR="$2"; shift 2 ;;
-        *) echo "Unknown option: $1"; exit 1 ;;
-    esac
-done
-
-# Interactive read helper
+# read_tty - Read user input from tty, with default and YES-mode support
+# Usage: read_tty <prompt> [default]
+# Args:
+#   $1 - Prompt text
+#   $2 - Default value (optional)
+#   $3 - yes mode. if true skip question and answer with default
+# Returns: User input or default
 read_tty() {
     local prompt="$1"
     local default="${2:-}"
-    local var
-    if $YES; then
-        var="${default:-Y}"
-    else
-        read -p "$prompt" -r var </dev/tty
-        var="${var:-$default}"
+    local yes_mode="${3:-false}"
+    if [[ "$yes_mode" == true && -n "$default" ]]; then
+        echo "$default"
+        return
     fi
-    echo "$var"
+    local var
+    read -p "$prompt" -r var </dev/tty
+    echo "${var:-$default}"
 }
 
-# ==================== DISTRO DETECTION ====================
-detect_distro() {
+print_info() {
     if [[ -f /etc/os-release ]]; then
         . /etc/os-release
         DISTRO=${ID_LIKE:-$ID}
-        echo "Detected: $PRETTY_NAME ($DISTRO ${VERSION_ID:-})"
+        
     else
-        echo "Detected: unknown"
-        DISTRO="unknown"
+        echo "❌ failed to detect distro"
+        exit 1
+    fi
+
+    HOSTNAME=$(hostname)
+    HOST_ADDR=$(hostname -I | awk '{print $1}')
+
+    echo "Host   $HOSTNAME"
+    echo "IP     $HOST_ADDR"
+    echo "OS     $PRETTY_NAME"
+    echo "CPU    $(lscpu | grep 'Model name' | awk -F: '{print $2}' | xargs)"
+    echo "GPU    $(lspci | grep -E 'VGA|3D|Display' | sed 's/.*: //' | xargs || echo 'None detected')"
+    echo ""
+    echo "Launched with: $PARAMETERS"
+    echo "Current dir: $(pwd)"
+}
+
+# volume_cleanup - Check for and optionally remove existing Rueckgrat Docker resources
+# Usage: volume_cleanup
+# No arguments
+volume_cleanup() {
+    if command -v docker &> /dev/null; then
+        ALL_CONTAINERS=$(docker ps -a -q --filter "name=rueckgrat" 2>/dev/null | wc -l) || {
+            echo "❌ Failed to query Docker (permission or daemon issue)" >&2
+            exit 1
+        }
+        if [[ $ALL_CONTAINERS -gt 0 ]]; then
+            echo "3"
+            CLEANUP=false
+            if ! $YES; then
+                print_section
+                echo "Found existing Rueckgrat installation."
+                echo ""
+                echo "🐳 Container"
+                echo "$(docker ps -a --filter "name=rueckgrat" --format "{{.Names}}" | sort | tr '\n' ' ')"
+                echo ""
+                echo "💾 Volumes"
+                echo "$(docker volume ls --filter "name=rueckgrat" --format "{{.Name}}" | sort | tr '\n' ' ')"
+                echo ""
+                echo "📡 Networks"
+                echo "$(docker network ls --filter "name=rueckgrat" --format "{{.Name}}" | sort | tr '\n' ' ')"
+                echo ""
+
+                if [[ "$(read_tty "Keep previous installation (reuse volumes & containers)? (Y/n): " "Y" $YES)" =~ ^[Nn]$ ]]; then
+                    CLEANUP=true
+                fi
+            fi
+
+            if $CLEAN_BUILD || $CLEANUP; then
+                print_section
+                echo "🗑️ Removing previous Rueckgrat installation..."
+                docker ps -q --filter "name=rueckgrat" | xargs -r docker stop 2>/dev/null || true
+                docker ps -a -q --filter "name=rueckgrat" | xargs -r docker rm -f 2>/dev/null || true
+                for vol in rueckgrat_caddy_data rueckgrat_caddy_config rueckgrat_node_images rueckgrat_hub_db rueckgrat_hub_images; do
+                    docker volume rm "$vol" 2>/dev/null || true
+                done
+                echo "✅ Previous installation cleaned up."
+            fi
+        fi
+    else
+        install_docker
     fi
 }
 
-detect_distro
+# package_available - Check if a package is available in distro-specific repos
+# Usage: package_available <package>
+# Args:
+#   $1 - Package name to check
+# Returns:
+#   0 if available, 1 otherwise
+package_available() {
+    local package="$1"
 
-# ==================== VOLUME CLEANUP ====================
-if command -v docker &> /dev/null; then
-    ALL_CONTAINERS=$(docker ps -a -q --filter "name=rueckgrat" 2>/dev/null | wc -l)
+    case "$DISTRO" in
+        *debian*|*ubuntu*) apt-cache show "$package" >/dev/null 2>&1 ;;
+        *fedora*|*rhel*|*centos*|*rocky*|*alma*) dnf list --available "$package" >/dev/null 2>&1 ;;
+        *arch*) pacman -Si "$package" >/dev/null 2>&1 ;;
+        *suse*|*opensuse*) zypper search --match-exact "$package" >/dev/null 2>&1 ;;
+        *) echo "❌ Unsupported distro $DISTRO"; exit 1 ;;
+    esac
+    return $?
+}
 
-    if [[ $ALL_CONTAINERS -gt 0 ]]; then
-        print_section
-        echo "Found existing Rueckgrat installation."
-        echo ""
-        echo "🐳 Container"
-        echo "$(docker ps -a --filter "name=rueckgrat" --format "{{.Names}}" | sort | tr '\n' ' ')"
-        echo ""
-        echo "💾 Volumes"
-        echo "$(docker volume ls --filter "name=rueckgrat" --format "{{.Name}}" | sort | tr '\n' ' ')"
-        echo ""
-        echo "📡 Networks"
-        echo "$(docker network ls --filter "name=rueckgrat" --format "{{.Name}}" | sort | tr '\n' ' ')"
-        echo ""
-
-        if [[ "$(read_tty "Keep previous installation (reuse volumes & containers)? (Y/n): " "Y")" =~ ^[Nn]$ ]]; then
-            echo "🗑️ Removing previous Rueckgrat installation..."
-            docker ps -q --filter "name=rueckgrat" | xargs -r docker stop 2>/dev/null || true
-            docker ps -a -q --filter "name=rueckgrat" | xargs -r docker rm -f 2>/dev/null || true
-            for vol in rueckgrat_caddy_data rueckgrat_caddy_config rueckgrat_node_images rueckgrat_hub_db rueckgrat_hub_images; do
-                docker volume rm "$vol" 2>/dev/null || true
-            done
-            docker network rm rueckgrat-net-local 2>/dev/null || true
-            echo "✅ Previous installation cleaned up."
-        fi
-    fi
-fi
-
-# ==================== PACKAGE MANAGER HELPER ==============
+# install_pkg - Install packages using distro-specific package manager
+# Usage: install_pkg pkg1 [pkg2 ...]
+# Args:
+#   $@ - Package names to install
 install_pkg() {
     case "$DISTRO" in
         *debian*|*ubuntu*) sudo apt update -y && sudo apt install -y "$@" ;;
@@ -115,45 +156,82 @@ install_pkg() {
     esac
 }
 
-# ==================== DEPENDENCIES ========================
-deps=(git python3 curl)
-missing_deps=()
-for pkg in "${deps[@]}"; do
-    command -v "$pkg" &> /dev/null || missing_deps+=("$pkg")
-done
+# Lookup table: package -> test command
+declare -A pkg_check=(
+    ["python3.13-venv"]="python3.13 -m venv --help &> /dev/null"
+)
 
-if [ ${#missing_deps[@]} -gt 0 ]; then
+# install_dependencies - Check and install missing packages
+# Usage: install_dependencies pkg1 [pkg2 ...]
+# Args:
+#   $@ - List of package names to check/install
+install_dependencies() {
+    local deps=("$@")
+    local missing_deps=()
+    for pkg in "${deps[@]}"; do
+        check="${pkg_check[$pkg]:-command -v $pkg &> /dev/null}"
+        if ! eval "$check"; then
+            missing_deps+=("$pkg")
+        fi
+    done
+
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        print_section
+        echo "📦 detected missing dependencies: ${missing_deps[*]}"
+
+        if [[ "$(read_tty "Install dependencies? (Y/n): " "Y" $YES)" =~ ^[Yy]$ ]]; then
+            install_pkg "${missing_deps[@]}"
+            echo "✅ Dependencies installed."
+        fi
+    fi
+}
+
+# install_docker - Install Docker
+# Usage: install_docker
+# No arguments
+install_docker() {
+    command -v docker &> /dev/null && return
+
     print_section
-    echo "📦 Installing missing dependencies: ${missing_deps[*]}"
-    install_pkg "${missing_deps[@]}"
-    echo "✅ Dependencies installed."
-fi
+    echo "📦 detected missing docker"
 
-# ==================== REPOSITORY SETUP ====================
-print_section
-IN_WORKSPACE_INSTALL=true
+    if [[ "$(read_tty "Install docker? (Y/n): " "Y" $YES)" =~ ^[Yy]$ ]]; then
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sudo sh get-docker.sh
+        rm -f get-docker.sh
+        sudo usermod -aG docker "$USER"
+        echo "✅ Docker installed."
+    else
+        echo "⚠️ Aborted by user"
+        exit 0
+    fi
+}
 
-if [[ -d ".git" ]]; then
-    echo "✅ Using existing repo on branch '$(git branch --show-current)'."
-    git pull
-elif [[ -d "Rueckgrat-install" ]]; then
-    cd Rueckgrat-install
-    echo "✅ Using existing repo on branch '$(git branch --show-current)'."
-    git pull
-    IN_WORKSPACE_INSTALL=false
-else
-    echo "📥 Cloning fresh copy..."
-    git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-install
-    cd Rueckgrat-install
-    IN_WORKSPACE_INSTALL=false
-fi
+# install_caddy - Install Caddy if not present
+# Usage: install_caddy
+# No arguments
+install_caddy() {
+    command -v caddy &> /dev/null && return
 
-CURRENT_DIR=$(pwd)
-BUILD_DIR="$CURRENT_DIR/build"
-CERT_DIR="$BUILD_DIR/certs"
-CADDY_CERT=$CERT_DIR/rueckgrat-caddy.crt
-LOGS_DIR="$CURRENT_DIR/logs"
+    print_section
+    echo "📦 detected missing caddy"
 
+    if [[ "$(read_tty "Install caddy? (Y/n): " "Y" $YES)" =~ ^[Yy]$ ]]; then
+        curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" -o /tmp/caddy
+        sudo install -m 755 /tmp/caddy /usr/local/bin/caddy
+        rm -f /tmp/caddy
+
+        echo "✅ Caddy installed."
+     else
+        echo "⚠️ Aborted by user"
+        exit 0
+    fi   
+}
+
+# safe_rm_rf - Safely remove file/dir, using sudo only if needed
+# Usage: safe_rm_rf <path>
+# Args:
+#   $1 - Path to remove
 safe_rm_rf() {
     [[ -z "$1" || ! -e "$1" ]] && return
     echo "🗑️ $1"
@@ -164,266 +242,684 @@ safe_rm_rf() {
     fi
 }
 
-if $CLEAN_BUILD; then
+# setup_repository - Setup or update Rueckgrat git repository
+# Usage: setup_repository
+# No arguments (sets IN_WORKSPACE_INSTALL)
+setup_repository() {
+    install_dependencies git
+
     print_section
-    echo "🧹 Cleaning build..."
-    safe_rm_rf "$BUILD_DIR"
-    safe_rm_rf "$LOGS_DIR"
-fi
+    IN_WORKSPACE_INSTALL=true
 
-mkdir -p "$BUILD_DIR" "$CERT_DIR" "$LOGS_DIR" && chmod 777 "$BUILD_DIR" "$CERT_DIR" "$LOGS_DIR"
-
-# ==================== COMPONENT SELECTION ====================
-if ! $YES; then
-    print_section
-    echo "Component Selection"
-fi
-
-INSTALL_CHAT_DOCKER=false
-
-if $CHAT_ONLY; then
-    INSTALL_CHAT=true
-    INSTALL_HUB=false
-    INSTALL_NODE=false
-    INSTALL_LLAMA=false
-else
-    INSTALL_CHAT=false; INSTALL_HUB=false; INSTALL_NODE=false; INSTALL_LLAMA=false
-
-    if $YES; then
-        INSTALL_CHAT=true; INSTALL_HUB=true; INSTALL_NODE=true; INSTALL_LLAMA=true
+    if [[ -d ".git" ]]; then
+        echo "✅ Using existing repo on branch '$(git branch --show-current)'."
+        git pull &> /dev/null || true
+    elif [[ -d "Rueckgrat-install" ]]; then
+        cd Rueckgrat-install
+        echo "✅ Using existing repo on branch '$(git branch --show-current)'."
+        git pull &> /dev/null || true
+        IN_WORKSPACE_INSTALL=false
     else
-        [[ "$(read_tty "Install Chat Client? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
+        echo "📥 Cloning fresh copy..."
+        git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-install
+        cd Rueckgrat-install
+        IN_WORKSPACE_INSTALL=false
+    fi
 
-        if $INSTALL_CHAT; then
-            [[ "$(read_tty "Install Chat via Docker (instead of native)? (y/N): " "N")" =~ ^[Yy]$ ]] && INSTALL_CHAT_DOCKER=true
+    WORKING_DIR=$(pwd)
+
+    cp -f "$WORKING_DIR/rueckgrat/.env.example" "$WORKING_DIR/rueckgrat/.env"
+}
+
+# select_components - Prompt user for which components to install
+# Usage: select_components
+# Sets: INSTALL_CHAT, INSTALL_CHAT_DOCKER, INSTALL_HUB, INSTALL_NODE, INSTALL_LLAMA
+select_components() {
+    INSTALL_CHAT=false;
+    INSTALL_CHAT_DOCKER=false
+    INSTALL_HUB=false; 
+    INSTALL_NODE=false; 
+    INSTALL_LLAMA=false
+    INSTALL_LLAMA_MODEL=""
+    INSTALL_COMFYUI=false
+
+    [[ "$(read_tty "Install native chat client? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
+
+    [[ "$(read_tty "Install docker chat client? (y/N): " "N")" =~ ^[Yy]$ ]] && INSTALL_CHAT_DOCKER=true
+    if [[ "$INSTALL_CHAT_DOCKER" == true ]]; then
+        CHAT_DOCKER_PORT=$(read_tty "Chat Docker port? [$CHAT_DOCKER_PORT_DEFAULT]: " "$CHAT_DOCKER_PORT_DEFAULT" $YES)
+    fi
+
+    [[ "$(read_tty "Install Hub? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_HUB=true
+    if [[ "$INSTALL_HUB" == true ]]; then
+        HUB_PORT=$(read_tty "Hub port? [$HUB_PORT_DEFAULT]: " "$HUB_PORT_DEFAULT" $YES)
+    fi
+
+    [[ "$(read_tty "Install Node? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_NODE=true
+    if $INSTALL_NODE; then
+        NODE_PORT=$(read_tty "Node port? [$NODE_PORT_DEFAULT]: " "$NODE_PORT_DEFAULT" $YES)
+
+        [[ "$(read_tty "Install llama-server on Node? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
+        if $INSTALL_LLAMA; then
+            LLAMA_SERVER_PORT=$(read_tty "llama-server port? [$LLAMA_SERVER_PORT_DEFAULT]: " "$LLAMA_SERVER_PORT_DEFAULT" $YES)
+
+            DEFAULT_LLM="cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L"
+            REGISTRY_JSON="$WORKING_DIR/rueckgrat/node/data/registry.json"
+            TYPE="llm"
+
+            mapfile -t models < <(jq -r --arg t "$TYPE" 'to_entries[] | select(.value.type == $t) | .key' "$REGISTRY_JSON")
+
+            DEFAULT_IDX=0
+            for i in "${!models[@]}"; do
+            if [[ "${models[i]}" == "$DEFAULT_LLM" ]]; then
+                DEFAULT_IDX=$((i+1))
+                break
+            fi
+            done
+
+            echo ""
+            for i in "${!models[@]}"; do
+                if [ "$i" -eq "$((DEFAULT_IDX - 1))" ]; then
+                    echo "$((i+1))) ⭐ ${models[i]}"
+                else
+                    echo "$((i+1))) ${models[i]}"
+                fi
+            done
+
+            idx=$(read_tty "📋 Select model by index [$DEFAULT_IDX]: " "$DEFAULT_IDX")
+            echo "selected: ${models[idx-1]}"
+            INSTALL_LLAMA_MODEL="${models[idx-1]}"
+        fi   
+
+        [[ "$(read_tty "Install ComfyUI on Node? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_COMFYUI=true
+        if $INSTALL_COMFYUI; then
+            COMFYUI_PORT=$(read_tty "ComfyUI port? [$COMFYUI_PORT_DEFAULT]: " "$COMFYUI_PORT_DEFAULT" $YES)
         fi
+    fi
+}
 
-        [[ "$(read_tty "Install Hub? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_HUB=true
-        [[ "$(read_tty "Install Node? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_NODE=true
+service_json() {
+  local type="$1" name="$2" port="$3"
+  shift 3
+  local extra=""
+  while [ $# -gt 0 ]; do
+    extra="${extra},\"$1\":\"$2\""
+    shift 2
+  done
+  echo "{\"type\":\"$type\",\"name\":\"$name\",\"port\":$port$extra}"
+}
+
+# validate_ip - validates ip
+# Usage: validate_ip 1.1.1.1
+validate_ip() {
+    local ip="$1"
+    if [[ ! $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        echo "❌ invalid IP"
+        exit 1
+    fi
+}
+
+# select_hosts_and_components - Interactively collect target hosts + per-host components
+# Supports json config file loading/saving 
+# Usage: select_hosts_and_components
+select_hosts_and_components() {
+    print_section
+
+    if [[ -n "${CONFIG_FILE:-}" ]]; then
+        if jq . "$CONFIG_FILE" >/dev/null 2>&1; then
+            echo "📂 found valid config at $CONFIG_FILE"
+
+            mkdir -p "$WORKING_DIR/rueckgrat/config"
+            cp -f $CONFIG_FILE "$WORKING_DIR/rueckgrat/config/infrastructure.json"
+            CONFIG_FILE="$WORKING_DIR/rueckgrat/config/infrastructure.json"
+
+            echo "💾 Saved config to $CONFIG_FILE"
+            echo ""
+            echo "💡 you can use this file for a quicker future install ie:"
+            echo "   ./install -c infrastructure.json -y"
+        else
+            echo "❌ Failed to load config from $CONFIG_FILE"
+        fi
+        return
+    fi 
+
+    echo "Select hosts and their configuration"
+    
+    HUB_ADDR=""
+
+    hosts=()
+    while true; do
+        echo ""
+        host_addr=$(read_tty "Target host (IP/hostname, empty=done): " "")
+        [[ -z "$host_addr" ]] && break
+
+        validate_ip $host_addr
+
+        echo "Components for $host_addr:"
+        select_components
+
+        node_json=""       
+        hub_json=""
+        chat_json=""
 
         if $INSTALL_NODE; then
-            [[ "$(read_tty "Install llama-server on Node? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
+            services=()
+
+            if $INSTALL_LLAMA; then
+                services+=("$(service_json "text_to_text" "llama-server" $LLAMA_SERVER_PORT "model" "$INSTALL_LLAMA_MODEL")")
+            fi
+
+            if $INSTALL_COMFYUI; then
+                services+=("$(service_json "text_to_image" "ComfyUI" $COMFYUI_PORT)")
+            fi
+            
+            printf -v services_json '[%s]' "$(IFS=,; echo "${services[*]}")"
+
+            node_json="\"node\":{\"port\":$NODE_PORT,\"services\":$services_json}"
         fi
-    fi
-fi
 
-if ! $INSTALL_HUB && ! $INSTALL_NODE && ! $INSTALL_CHAT; then
-    echo "❌ Nothing selected. Exiting."
-    exit 0
-fi
+        if $INSTALL_HUB; then
+            hub_json="\"hub\":{\"port\":$HUB_PORT}"
+            if [ -n "$HUB_ADDR" ]; then
+                echo "❌ only one hub allowed"
+            fi
+            HUB_ADDR=$host_addr
+        fi
 
-# ================== VALIDATION ====================
-if ! $YES; then
-    print_section
-    echo "selected for installation:"
-    echo ""
-    if $INSTALL_CHAT; then
+        if $INSTALL_CHAT; then            
+            chat_json="\"chat\":{}"
+        fi
+
         if $INSTALL_CHAT_DOCKER; then
-            echo "* Chat (as docker)"
-        else
-            echo "* Chat (native)"
+            chat_json="\"chat_docker\":{\"port\":$CHAT_DOCKER_PORT}"
         fi
-    fi
-    if $INSTALL_HUB; then
-        echo "* Hub"
-    fi
-    if $INSTALL_NODE; then
-        if $INSTALL_LLAMA; then
-            echo "* Node & llama-server"
-        else
-            echo "* Node"
-        fi
+
+        host_parts=("\"addr\":\"$host_addr\"")
+        [ -n "$node_json" ] && host_parts+=("$node_json")
+        [ -n "$hub_json" ] && host_parts+=("$hub_json")
+        [ -n "$chat_json" ] && host_parts+=("$chat_json")
+        host_json="{$(IFS=,; echo "${host_parts[*]}")}"
+        hosts+=("$host_json")
+    done
+
+    CONFIG_FILE=$WORKING_DIR/rueckgrat/config/infrastructure.json
+    printf -v hosts_json '[%s]' "$(IFS=,; echo "${hosts[*]}")"
+    hosts_json="{\"hub\": { \"addr\": \"$HUB_ADDR\" },\"hosts\":$hosts_json }"
+    echo "$hosts_json" | jq . > "$CONFIG_FILE"
+    echo "💾 Saved config to $CONFIG_FILE"
+}
+
+# get_hosts_and_components: Parses CONFIG_FILE (JSON) and returns component info per host.
+# Output format (one line per host): addr|node (svc1,svc2,...);hub;chat;chat_docker
+# Empty components are omitted. Services in () joined by comma.
+# Usage: CONFIG_FILE=/path/to/config.json get_hosts_and_components
+get_hosts_and_components() {
+    if [[ -z "${CONFIG_FILE:-}" ]] || ! jq . "$CONFIG_FILE" >/dev/null 2>&1; then
+        echo "❌ Invalid config" >&2
+        return 1
     fi
 
-    INSTALL_NOW=false
+    jq -r '
+    .hosts[] | 
+    .addr as $addr |
+    (.node.services | map(.name) | join(",")) as $svcs |
+    (if $svcs != "" then "node (\($svcs))" else "" end) as $n |
+    (if .hub then "hub" else "" end) as $h |
+    (if .chat_docker then "chat_docker" else "" end) as $cd |
+    (if .chat then "chat" else "" end) as $c |
+    "\($addr)|\($n);\($h);\($c);\($cd)" | gsub(";(?=;|$)" ; "")
+    ' "$CONFIG_FILE"
+}
+
+# confirm_install_configuration - Print full multi-host installation plan and ask for final confirmation
+# Usage: confirm_install_configuration
+# Exits if no components selected or user aborts
+confirm_install_configuration() {
+    print_section
+    echo "Installation plan:"
     echo ""
-    [[ "$(read_tty "Is this selection correct? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_NOW=true
+
+    if [[ -z "$(get_hosts_and_components)" ]]; then
+        echo "❌ Noting selected to install"
+        exit 1
+    fi
+
+    echo "host/IP                        | components"
+    get_hosts_and_components | while IFS='|' read -r addr comps; do
+        comps=${comps//;/, }
+        printf "%-30s | %s\n" "$addr" "${comps:-none}"
+    done
+
     echo ""
-    if ! $INSTALL_NOW; then
-        echo "❌ Aborted by user"
+    if ! [[ "$(read_tty "Execute this plan? (Y/n): " "Y" $YES)" =~ ^[Yy]$ ]]; then
+        echo "⚠️ Aborted by user"
         exit 0
     fi
-fi
-
-# ==================== NETWORK ====================
-if ! $YES; then
-    print_section
-    echo "network configuration"
-    echo ""
-
-    if [[ -z "${HUB_ADDR:-}" ]]; then
-        HUB_ADDR=$(read_tty "Hub IP: ")
-    fi
-
-    if [[ ! $HUB_ADDR =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "❌ Invalid IP address"
-        exit 1
-    fi
-
-    if ! grep -q "\b$HUB_HOSTNAME\b" /etc/hosts; then
-        if [[ "$(read_tty "Add \"$HUB_ADDR $HUB_HOSTNAME\" to /etc/hosts? (Y/n) " "Y")" =~ ^[Yy]$ ]]; then
-            echo "$HUB_ADDR $HUB_HOSTNAME" | sudo tee -a /etc/hosts >/dev/null
-            echo "✅ Added to /etc/hosts"
-        fi
-    fi
-fi
-
-# ==================== DOCKER ====================
-install_docker() {
-    command -v docker &> /dev/null && return
-    print_section
-    echo "🐳 Installing Docker..."
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sudo sh get-docker.sh
-    rm -f get-docker.sh
-    sudo usermod -aG docker "$USER"
-    echo "✅ Docker installed. Log out/in for group changes."
 }
 
-if $INSTALL_CHAT_DOCKER || $INSTALL_HUB || $INSTALL_NODE || $INSTALL_LLAMA; then
-    install_docker
-fi
-
-# ==================== CADDY ====================
-install_caddy() {
-    command -v caddy &> /dev/null && return
+# deploy_hub - Build and start Hub + Caddy containers
+# Usage: deploy_hub
+# No arguments
+deploy_hub() {
     print_section
-    echo "📦 Installing Caddy..."
-    curl -fsSL https://caddyserver.com/api/download?os=linux&arch=amd64 -o /tmp/caddy
-    sudo install -m 755 /tmp/caddy /usr/local/bin/caddy
-    rm -f /tmp/caddy
-    echo "✅ Caddy installed."
-}
-
-if $INSTALL_HUB; then
-    install_caddy
-fi
-
-# ==================== HUB ====================
-if $INSTALL_HUB; then
-    print_section
-    echo "⬇️ installing hub & caddy..."
-
-    pushd rueckgrat > /dev/null
-    if [[ -f .env.example ]]; then
-        cp -n .env.example .env 2>/dev/null || true
-        echo "✅ .env created from template."
-    fi
-
     echo "🐋 hub & caddy..."
-    docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} hub caddy || { echo "❌ Docker compose build of hub & daddy failed."; popd; exit 1; }
-    docker compose up -d hub caddy || { echo "❌ Docker compose up of hub & daddy failed."; popd; exit 1; }
+    pushd rueckgrat > /dev/null
+    docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} hub caddy || { echo "❌ Docker compose build of hub & cdaddy failed."; popd; exit 1; }
+    docker compose up -d hub caddy || { echo "❌ Docker compose up of hub & cdaddy failed."; popd; exit 1; }
     popd > /dev/null
-    sleep 5
+}
 
-    # ==================== CERT ====================
+# gen_caddy_cert - generate caddy certificate
+# Usage: gen_caddy_cert
+# No arguments
+gen_caddy_cert() {
     print_section
-    echo "🔑 Retrieving Caddy certificate..."
-    if ! curl -k -s https://rueckgrat.hub/health | grep -q '"status":"ok"'; then
-        echo "❌ Could not connect to hub."
-        exit 1
-    fi
-    mkdir -p "$CERT_DIR"
-    docker cp rueckgrat-caddy-1:/data/caddy/pki/authorities/local/root.crt "$CADDY_CERT" 2>/dev/null || { echo "❌ Certificate copy failed."; exit 1; }
-    echo "✅ Certificate stored in $CADDY_CERT"
-fi
+    echo "🔑 handling caddy certificate..."
+    echo ""
+    CADDY_DIR="$WORKING_DIR/rueckgrat/caddy"
+    mkdir -p "$CADDY_DIR"
 
-# ==================== NODE ====================
-if $INSTALL_NODE; then
-    print_section
-    echo "⬇️ installing node..."
+    CADDY_KEY="$CADDY_DIR/rueckgrat-caddy.key"
+    CADDY_CERT="$CADDY_DIR/rueckgrat-caddy.cert"
 
-    if ! $INSTALL_HUB; then
-        pushd rueckgrat > /dev/null
-        if [[ -f .env.example && ! -f .env ]]; then
-            cp .env.example .env
+    if [ -n "$KEY_FILE" ] && [ -n "$CERT_FILE" ]; then
+        cp $KEY_FILE $CADDY_KEY
+        cp $CERT_FILE $CADDY_CERT
+        echo "using provided key/cert pair"
+    else
+        if [ ! -f "$CADDY_KEY" ] || [ ! -f "$CADDY_CERT" ]; then
+            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout "$CADDY_KEY" -out "$CADDY_CERT" -subj "/CN=rueckgrat.hub" \
+            -addext "subjectAltName = DNS:rueckgrat.hub,DNS:localhost,IP:192.168.2.39"
+            echo "generated new key/cert pair"
+        else
+            echo "use existing key/cert pair"
         fi
-        echo "⚙️ update .env"
-        sed -i "s|^#HUB_HOST=.*|HUB_HOST=${HUB_HOSTNAME}|" .env 2>/dev/null || true
-        popd > /dev/null
     fi
+    echo "key: $CADDY_KEY"
+    echo "crt: $CADDY_CERT"
+}
+
+# deploy_node - Build and start Node container
+# Usage: deploy_node
+# No arguments
+deploy_node() {
+    print_section
+    echo "🐋 node..."
 
     pushd rueckgrat > /dev/null
-    echo "🐋 node..."
     docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} node || { echo "❌ Docker compose build of node failed."; popd; exit 1; }
     docker compose up -d node || { echo "❌ Docker compose up of node failed."; popd; exit 1; }
     popd > /dev/null
-fi
+}
 
-# ==================== LLAMA-SERVER ====================
-if $INSTALL_LLAMA; then
+# deploy_llama - Download/select LLM model and start llama-server
+# Usage: deploy_llama "model name"
+# Args:
+#   $1 - model name
+deploy_llama() {
+    local LLM_MODEL="$1"
+
     print_section
-    echo "⬇️ installing llama-server..."
-
-    source scripts/registry_functions.sh
-
-    DEFAULT_LLM="cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L"
-    DEFAULT_HOST="localhost:7346"
-    declare -a MODEL_NAMES
-    declare -i DEFAULT_IDX=-1
-    VERBOSE=$([[ $YES == false ]] && echo true || echo false)
-    fetch_llm_models $DEFAULT_LLM $DEFAULT_HOST MODEL_NAMES DEFAULT_IDX $VERBOSE || { exit 1; }
-
-    if $YES; then
-        idx=$DEFAULT_IDX
-    else
-        idx=$(read_tty "📋 Select model [$DEFAULT_LLM]: " "$DEFAULT_IDX")
-    fi
-
-    LLM_MODEL="${MODEL_NAMES[$((idx-1))]}"
-
-    install_llm "$LLM_MODEL" || { echo "❌ install_llm failed."; exit 1; }
-
+    echo "🐋 llama-server..."
+    echo "running $LLM_MODEL"
+    
     pushd rueckgrat > /dev/null
     GGUF_FILE_PATH="/models/llm/$LLM_MODEL/$LLM_MODEL.gguf"
-    sed -i "s|^LLAMA_CPP_MODEL=.*|LLAMA_CPP_MODEL=$GGUF_FILE_PATH|" .env
-    echo "🐋 llama-server..."
+    sed -i "s|^LLAMA_SERVER_MODEL=.*|LLAMA_SERVER_MODEL=$GGUF_FILE_PATH|" .env
     docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} llama-server
     docker compose up -d llama-server
     popd > /dev/null
-fi
+}
 
-# ==================== CHAT CLIENT ====================
-if $INSTALL_CHAT; then   
+# install_chat - Install Chat (Docker)
+# Usage: deploy_chat_docker
+# No arguments
+deploy_chat_docker() {
     print_section
-    echo "⬇️ installing chat..."
+    echo "🐋 chat..."
 
-    if $INSTALL_CHAT_DOCKER; then
-        pushd rueckgrat > /dev/null
+    pushd rueckgrat > /dev/null
+    if [[ -f $CADDY_CERT ]]; then
+        cp "$CADDY_CERT" "$CHAT_DIR/app"
+    else
+        echo "❌ Certificate not found at $CADDY_CERT"
+        exit 1
+    fi
 
-        mkdir -p chat/build
-        if [[ -f $CADDY_CERT ]]; then
-            cp $CADDY_CERT chat/build/
-        else
-            echo "❌ Certificate not found at $CADDY_CERT"
-            exit 1
+    # TODO workarround until we decide how to pass the hub ip down to remote configs
+    if [ -z "$HUB_ADDR" ]; then
+        HUB_ADDR=$(read_tty "Missing ip of hub (IP/hostname, empty=done): " "")
+    fi
+
+    validate_ip $HUB_ADDR
+    sed -i "s/HUB_ADDR=.*/HUB_ADDR=$HUB_ADDR/" .env
+
+    docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} chat || { echo "❌ Docker compose build of chat failed."; popd; exit 1; }
+    docker compose up -d chat || { echo "❌ Docker compose up of chat failed."; popd; exit 1; }
+    popd > /dev/null
+}
+
+# deploy_chat_native - Install Chat (Native)
+# Usage: deploy_chat_native
+# No arguments
+deploy_chat_native() {
+    install_dependencies python3 python3.13-venv
+
+    print_section
+    echo "📦 chat..."
+
+    pushd rueckgrat/chat > /dev/null
+    ./install.sh "$CADDY_CERT" || { echo "❌ Chat native install failed!"; popd; exit 1; }
+    popd > /dev/null
+}
+
+# deploy_comfyui - instally ComfyUI service
+# Usage: deploy_comfyui
+# No arguments
+deploy_comfyui() {
+    install_dependencies git python3 build-essential pkg-config
+
+    if package_available python3.13-dev; then
+        install_dependencies python3.13-dev
+    else
+        install_dependencies python3.11-dev
+    fi
+
+    print_section
+    echo "📦 ComfyUI..."
+
+    pushd rueckgrat/ComfyUI > /dev/null
+    ./install.sh || { echo "❌ ComfyUI install failed!"; popd; exit 1; }
+    popd > /dev/null
+}
+
+# usage - Display help message and exit
+# Prints command-line options and usage for the installer script.
+# Usage: usage
+# No arguments
+usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo "Options:"
+    echo "  --config FILE        Load hosts & components from config file"
+    echo "  --key FILE           Path to private key file"
+    echo "  --cert FILE          Path to certificate file"
+    echo "  --fresh|-f           Perform clean build/install (remove previous)"
+    echo "  --verbose|-v         Enable verbose output"
+    echo "  --yes|-y             non interactive where possible"
+    echo "  --help|-h            Show this help"
+    exit 0
+}
+
+# prep_app_data_dir - creates models directory
+# Usage: prep_app_data_dir
+# No arguments
+prep_app_data_dir() {
+    echo "prep /var/lib/Rueckgrat ..."
+    sudo mkdir -p $APP_DATA_DIR
+    sudo mkdir -p $MODELS_DIR
+    sudo chown -R root:root $APP_DATA_DIR
+    sudo chmod -R 777 $APP_DATA_DIR
+}
+
+check_docker_group() {
+    if ! groups | grep -q docker && [ "$(id -u)" -ne 0 ]; then
+        echo "❌ User not in docker group. Run: sudo usermod -aG docker $USER && newgrp docker" >&2
+        exit 1
+    fi
+}
+
+# deploy_components - Local component installer
+# Usage: deploy_components "hub,node,llama,chat:docker"
+# Args:
+#   $1 - host configuration string
+deploy_components() {
+    local host_config="$1"
+
+    INSTALL_CHAT=false
+    INSTALL_CHAT_DOCKER=false
+    INSTALL_HUB=false
+    INSTALL_NODE=false
+    INSTALL_LLAMA=false
+    INSTALL_COMFYUI=false
+    INSTALL_LLAMA_MODEL=""
+    
+    # pretend to be in build dir
+    CURRENT_DIR=$(pwd)
+    WORKING_DIR=$CURRENT_DIR
+    CHAT_DIR="$WORKING_DIR/rueckgrat/chat"
+    CADDY_DIR="$WORKING_DIR/rueckgrat/caddy"
+    CADDY_KEY="$CADDY_DIR/rueckgrat-caddy.key"
+    CADDY_CERT="$CADDY_DIR/rueckgrat-caddy.cert"
+
+    if [ ! -f "$WORKING_DIR/rueckgrat/.env" ]; then
+        cp "$WORKING_DIR/rueckgrat/.env.example" "$WORKING_DIR/rueckgrat/.env"
+    fi
+
+    check_docker_group
+
+    volume_cleanup
+
+    gen_caddy_cert
+
+    print_section
+    echo "deploy components..."
+    echo "reading config"
+
+    if echo "$host_config" | jq -e '.hub' > /dev/null; then
+        INSTALL_HUB=true
+        HUB_PORT=$(echo "$host_config" | jq -r '.hub.port')
+    fi    
+
+    if echo "$host_config" | jq -e '.node' > /dev/null; then
+        INSTALL_NODE=true
+        NODE_PORT=$(echo "$host_config" | jq -r '.node.port')
+        # todo use NODE_PORT
+
+        services=$(echo "$host_config" | jq -c '.node.services // []')
+
+        for s in $(echo "$services" | jq -c '.[]'); do
+            type=$(echo "$s" | jq -r '.type')
+            name=$(echo "$s" | jq -r '.name')
+            port=$(echo "$s" | jq -r '.port')
+            # todo use service port
+
+            if [[ "$type" == "text_to_text" ]]; then
+                INSTALL_LLAMA=true
+                INSTALL_LLAMA_MODEL=$(echo "$s" | jq -r '.model')
+            elif [[ "$type" == "text_to_image" ]]; then             
+                INSTALL_COMFYUI=true
+            fi
+        done
+    fi
+
+    if echo "$host_config" | jq -e '.chat' > /dev/null; then
+        INSTALL_CHAT=true
+    fi
+
+    if echo "$host_config" | jq -e '.chat_docker' > /dev/null; then
+        INSTALL_CHAT_DOCKER=true
+        CHAT_DOCKER_PORT=$(echo "$host_config" | jq -r '.chat_docker.port')
+        # todo use chat port
+    fi
+
+    prep_app_data_dir
+
+    echo "deploy..."
+
+    if $INSTALL_HUB || $INSTALL_NODE; then
+        install_dependencies curl
+        install_docker    
+    fi
+
+    if $INSTALL_HUB; then
+        install_caddy
+        deploy_hub
+    fi
+
+    if $INSTALL_NODE; then
+        deploy_node
+
+        if $INSTALL_LLAMA; then
+            deploy_llama $INSTALL_LLAMA_MODEL
         fi
 
-        echo "🐋 chat..."
-        docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} chat || { echo "❌ Docker compose build of chat failed."; popd; exit 1; }
-        docker compose up -d chat || { echo "❌ Docker compose up of chat failed."; popd; exit 1; }
-        popd > /dev/null
-    else
-        echo "📦 install chat..."
-        pushd rueckgrat/chat > /dev/null
-        ./install.sh "$CADDY_CERT" || { echo "❌ Chat native install failed!"; popd; exit 1; }
-        popd > /dev/null
+        if $INSTALL_COMFYUI; then
+            deploy_comfyui 
+        fi        
     fi
-fi
 
-print_header "🎉 Installation finished!"
+    if $INSTALL_CHAT; then
+        deploy_chat_native
+    fi
+    
+    if $INSTALL_CHAT_DOCKER; then
+        deploy_chat_docker
+    fi
+}
 
-BASE_DIR=$([ "$IN_WORKSPACE_INSTALL" = true ] && echo "" || echo "Rueckgrat-install/")
+remove_line_breaks() {
+    echo -n "${1//$'\n'$'\r'/}"
+}
 
-if $INSTALL_HUB || $INSTALL_NODE || $INSTALL_CHAT_DOCKER; then
-    echo "→ Services:  cd ${BASE_DIR}rueckgrat && docker compose ps"
-    echo "→ Logs:      cd ${BASE_DIR}rueckgrat && docker compose logs -f"
-fi
+# deploy_components_remote - Copy workspace + run installer with --host-config on target host
+# Usage: deploy_components_remote <host> <comps>
+# Args:
+#   $1 - host config string
+deploy_components_remote() {
+    local host_config="$1"
+    host_addr=$(echo "$host_config" | jq -r '.addr')
+    clean_config=$(remove_line_breaks "$host_config")
 
-if $INSTALL_CHAT && ! $INSTALL_CHAT_DOCKER; then
-    echo "→ Chat:      cd ${BASE_DIR}rueckgrat/chat && ./run.sh"
-fi
+    install_dependencies rsync
 
-echo ""
-echo "All done! Enjoy Rueckgrat ✨"
-print_section
+    print_section
+    echo "🌐 Deploying to $host_addr"
+
+    local remote_dir="Rueckgrat-install"
+    local SSH_CONTROL="/tmp/deploy-$(whoami)-$(echo "$host_addr" | tr '@:' '__')"
+    local SSH_OPTS=( -o ControlMaster=auto -o ControlPersist=5m -o ControlPath="$SSH_CONTROL" )
+
+    trap 'ssh -O exit "${SSH_OPTS[@]}" "$host_addr" >/dev/null 2>&1 || true' EXIT
+
+    ssh "${SSH_OPTS[@]}" -Nf "$host_addr" || { echo "❌ SSH master failed"; return 1; }
+
+    if $CLEAN_BUILD; then
+        echo "Clean destination..."
+        ssh "${SSH_OPTS[@]}" "$host_addr" "rm -rf $remote_dir/*"
+    fi
+
+    echo "Copying files..."
+    rsync -az -e "ssh ${SSH_OPTS[*]}" --exclude='.git' --exclude='logs' ./ "$host_addr:$remote_dir/" || {
+        echo "❌ rsync failed for $host_addr"
+        return 1
+    }
+
+    echo "Running installer..."
+    local fresh_flag=$($CLEAN_BUILD && echo " --fresh" || echo "")
+    ssh "${SSH_OPTS[@]}" -t -o StrictHostKeyChecking=no -o ConnectTimeout=15 "$host_addr" "
+        set -euo pipefail
+        cd $remote_dir
+        chmod +x install.sh
+        ./install.sh --host-config '$clean_config' $fresh_flag
+    " || echo "❌ Installation failed on $host_addr"
+}
+
+# deploy_on_hosts - Iterate host components and execute installs per host
+# Usage: deploy_on_hosts
+# No arguments
+deploy_on_hosts() {
+    HUB_ADDR=$(jq -c '.hub.addr' "$CONFIG_FILE")
+    host_configs=$(jq -c '.hosts[]' "$CONFIG_FILE")
+    for host_config in $host_configs; do
+    deploy_components_remote "$host_config"
+    done
+}
+
+main() {   
+    HUB_ADDR=""
+    APP_DATA_DIR=/var/lib/Rueckgrat
+    MODELS_DIR="$APP_DATA_DIR/models"
+    CONFIG_FILE=""
+    VERBOSE=false
+    DOCKER_PROGRESS_MODE="quiet"
+    CLEAN_BUILD=false
+    REMOTE_CONFIG=""
+    KEY_FILE=""
+    CERT_FILE=""
+    YES=false
+
+    HUB_PORT_DEFAULT=14223
+    NODE_PORT_DEFAULT=7346
+    CHAT_DOCKER_PORT_DEFAULT=3001
+    LLAMA_SERVER_PORT_DEFAULT=8080
+    COMFYUI_PORT_DEFAULT=8188
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --config|-c)
+                if [[ -z "${2:-}" ]]; then
+                    echo "❌ --config requires a filename"
+                    exit 1
+                fi
+                CONFIG_FILE="$2"
+                YES=true
+                shift 2
+                ;;
+            --host-config|-hc)
+                if [[ -z "${2:-}" ]]; then
+                    echo "❌ --host-config requires config string for one host"
+                    exit 1
+                fi
+                REMOTE_CONFIG="$2"
+                YES=true
+                shift 2
+                ;;
+            --key)
+                if [[ -z "${2:-}" ]]; then
+                    echo "❌ --key requires a filename"
+                    exit 1
+                fi
+                KEY_FILE="$2"
+                shift 2
+                ;;
+            --cert)
+                if [[ -z "${2:-}" ]]; then
+                    echo "❌ --cert requires a filename"
+                    exit 1
+                fi
+                CERT_FILE="$2"
+                shift 2
+                ;;             
+            -v|--verbose) VERBOSE=true; DOCKER_PROGRESS_MODE="auto"; shift ;;
+            -f|--fresh) CLEAN_BUILD=true; shift ;;
+            -y|--yes) YES=true; shift ;;
+            -h|--help) usage ;;        
+            *) echo "Unknown option: $1"; exit 1 ;;
+        esac
+    done
+    
+    if [[ -n "$REMOTE_CONFIG" ]]; then
+        print_header "🌐 Rückgrat Installer ($(hostname) - $(hostname -I | awk '{print $1}'))"
+        print_info
+
+        deploy_components "$REMOTE_CONFIG"
+    else
+        print_header "🚀 Rückgrat Installer"
+        print_info
+
+        setup_repository
+
+        gen_caddy_cert
+
+        select_hosts_and_components
+        confirm_install_configuration
+
+        deploy_on_hosts
+
+        echo "All done! Enjoy Rueckgrat ✨"
+        print_section
+    fi
+}
+
+main "$@"

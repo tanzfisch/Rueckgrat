@@ -3,26 +3,6 @@ set -euo pipefail
 
 trap 'echo "Error on line $LINENO"' ERR
 
-package_available() {
-    local package="$1"
-
-    # Check if the package is available in apt
-    if apt-cache show "$package" >/dev/null 2>&1; then
-        return 0  # package exists
-    else
-        return 1  # package does not exist
-    fi
-}
-
-sudo apt update
-sudo apt install git python3 build-essential pkg-config
-
-if package_available python3.13-dev; then
-  sudo apt install python3.13-dev
-else
-  sudo apt install python3.11-dev
-fi
-
 # Resolve script directory
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -121,7 +101,7 @@ clone_or_pull https://github.com/ltdrdata/ComfyUI-Manager.git ComfyUI-Manager
 #clone_or_pull https://github.com/Gourieff/ComfyUI-ReActor.git ComfyUI-ReActor
 #"$PIP" install -r ComfyUI-ReActor/requirements.txt
 
-BASE_PATH="$CURRENT_DIR/../../models/ComfyUI"
+BASE_PATH="/var/lib/Rueckgrat/models/ComfyUI"
 EXTRA_MODEL_PATHS="$CURRENT_DIR/ComfyUI/extra_model_paths.yaml"
 bash -c "cat > $EXTRA_MODEL_PATHS" <<EOF
 comfyui:

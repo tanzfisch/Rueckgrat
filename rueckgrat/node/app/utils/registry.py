@@ -12,11 +12,11 @@ INFRASTRUCTURE_CONFIG_PATH = Path("/node/config/infrastructure.json")
 
 class ModelRegistry:
 
-    def __init__(self, base_dir):
-        self.base_dir = Path(base_dir)
+    def __init__(self):
+        self.base_dir = Path("/node/models")
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
-        self.registry_file = self.base_dir / "registry.json"
+        self.registry_file = Path("/node/data/registry.json")
         self._load_registry()
         self._load_infrastructure()        
 
@@ -101,7 +101,7 @@ class ModelRegistry:
             with open(self.registry_file, "r") as f:
                 self.registry = json.load(f)
         else:
-            print(f"Error: registry not found at {self.registry_file}")
+            logger.error(f"registry not found at {self.registry_file}")
             self.registry = {}
             self._save_registry()
 

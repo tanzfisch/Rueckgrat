@@ -23,12 +23,10 @@ async def lifespan(app: FastAPI):
     logger.info(f"running DEV_MODE={app.state.dev_mode}")
 
     host = "host.docker.internal"
-    llamacpp_port = "8080" # TODO make configurable
-    app.state.llamacpp = LLamaCppInterface(host, llamacpp_port)
+    app.state.llamacpp = LLamaCppInterface(host, "8080")
 
-    comfyui_port = "8188" # TODO make configurable
     client_id = str(uuid.uuid4())
-    app.state.comfyui = ComfyUIInterface(host, comfyui_port, client_id)
+    app.state.comfyui = ComfyUIInterface(host, "8188", client_id)
 
     # keep image cache clean
     app.state.cleanup_worker = CleanupWorker(folder="/node/images")
@@ -91,7 +89,7 @@ class GetModelURLResponse(BaseModel):
 
 @app.get("/models/{model_name}/url")
 def get_model_url(model_name: str):
-    registry = ModelRegistry("/node/models")
+    registry = ModelRegistry()
     sources = registry.get_urls(model_name)
     return GetModelURLResponse(
         model_urls=sources
@@ -99,7 +97,7 @@ def get_model_url(model_name: str):
 
 @app.get("/models", response_model=GetModelsResponse)
 def get_models(type_filter: Optional[str] = None, verbose: bool = False):
-    registry = ModelRegistry("/node/models")
+    registry = ModelRegistry()
     data = registry.get_registry()
     
     models_list: List[ModelInfo] = []
@@ -128,7 +126,7 @@ def get_models(type_filter: Optional[str] = None, verbose: bool = False):
 
 @app.post("/models/install", response_model=InstallModelResponse)
 def install_model(request: InstallModelRequest):
-    registry = ModelRegistry("/node/models")
+    registry = ModelRegistry()
     
     model_cfg = registry.get_model_cfg(request.name)
     if not model_cfg:

@@ -30,65 +30,21 @@ class Backend:
         cls.url = f"https://{cls.config.host}:{cls.config.port}"
         cls.uri = f"wss://{cls.config.host}:{cls.config.port}/ws"
 
-        cert = cls._get_and_save_cert(cls.url)
+        paths = [
+            Path("/chat/app/rueckgrat-caddy.cert"), 
+            Path(os.path.expanduser('~/.ssh/rueckgrat-caddy.cert'))
+        ]
+
+        cert = next((p for p in paths if p.exists()), None)
         if not cert:
             cls.server_cert = False
             logger.error(f"failed to get certificate from hub")
         else:
-            cls.server_cert = Path(cert)
+            cls.server_cert = cert
 
         logger.info(f"using backend at {cls.url}")
         logger.info(f"websocket at {cls.uri}")
         logger.info(f"server_cert {cls.server_cert}")
-
-    @classmethod
-    def _get_and_save_cert(cls, url):
-        logger.debug(f"Getting cert for {url}")
-
-        try:
-            warnings.simplefilter('ignore', InsecureRequestWarning)
-            requests.get(url, verify=False)
-        except Exception as e:
-            logger.error(f"failed to connect with {url}: {repr(e)}")
-            return None
-
-        if Utils.is_docker():
-            cert_path = "/chat/rueckgrat-caddy.crt"
-        else:
-            cert_path = os.path.expanduser('~/.ssh/rueckgrat-caddy.crt')
-            os.makedirs(os.path.dirname(cert_path), exist_ok=True)
-        
-        host = url.split('://')[1].split('/')[0].split(':')[0]
-        logger.debug(f"Host: {host}, cert_path: {cert_path}")
-
-        if os.path.exists(cert_path):
-            return cert_path
-        
-        try:
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-            
-            with socket.create_connection((host, 443), timeout=5) as sock:
-                with context.wrap_socket(sock, server_hostname=host) as ssock:
-                    cert_chain = ssock.get_verified_chain() or [ssock.getpeercert(binary_form=True)]
-            logger.debug(f"Got cert chain of length {len(cert_chain)}")
-            
-            with open(cert_path, 'w') as f:
-                for der in cert_chain:
-                    pem = ssl.DER_cert_to_PEM_cert(der)
-                    f.write(pem + '\n')
-            logger.debug(f"Saved full cert chain to {cert_path}")
-            return cert_path
-        except Exception as e:
-            logger.warning(f"failed to get full chain: {repr(e)}")
-            logger.debug("Using fallback")
-            # Fallback
-            cert = ssl.get_server_certificate((host, 443))
-            with open(cert_path, 'w') as f:
-                f.write(cert)
-            logger.debug(f"Saved fallback cert to {cert_path}")
-            return cert_path
 
     @classmethod
     def get_user_name(cls):

@@ -14,7 +14,7 @@ class Paths:
 
     @staticmethod
     def get_models_base_path():
-        return Path("/chat/models") if Utils.is_docker() else Path("../../models")    
+        return Path("/var/lib/Rueckgrat/models")
     
     @staticmethod
     def get_voices_path():

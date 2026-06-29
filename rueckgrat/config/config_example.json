@@ -1,0 +1,42 @@
+{
+  "hub": {
+    "addr": "192.168.2.39"
+  },
+  "hosts": [
+    {
+      "addr": "192.168.2.39",
+      "node": {
+        "port": 7346,
+        "services": [
+          {
+            "type": "text_to_text",
+            "name": "llama-server",
+            "port": 8080,
+            "model": "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L"
+          }
+        ]
+      },
+      "hub": {
+        "port": 14223
+      },
+      "chat_docker": {
+        "port": 3001
+      },
+      "chat": {
+      }
+    },
+    {
+      "addr": "192.168.2.158",
+      "node": {
+        "port": 7346,
+        "services": [
+          {
+            "type": "text_to_image",
+            "name": "ComfyUI",
+            "port": 8188
+          }
+        ]
+      }
+    }
+  ]
+}
