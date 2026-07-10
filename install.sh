@@ -45,12 +45,12 @@ read_tty() {
     local default="${2:-}"
     local yes_mode="${3:-false}"
     if [[ "$yes_mode" == true && -n "$default" ]]; then
-        echo "$default"
+        REPLY="$default"
         return
     fi
     local var
     read -p "$prompt" -r var </dev/tty
-    echo "${var:-$default}"
+    REPLY="${var:-$default}"
 }
 
 print_info() {
@@ -102,7 +102,8 @@ volume_cleanup() {
                 echo "$(docker network ls --filter "name=rueckgrat" --format "{{.Name}}" | sort | tr '\n' ' ')"
                 echo ""
 
-                if [[ "$(read_tty "Keep previous installation (reuse volumes & containers)? (Y/n): " "Y" $YES)" =~ ^[Nn]$ ]]; then
+                read_tty "Keep previous installation (reuse volumes & containers)? (Y/n): " "Y" $YES
+                if [[ "$REPLY" =~ ^[Nn]$ ]]; then
                     CLEANUP=true
                 fi
             fi
@@ -179,7 +180,8 @@ install_dependencies() {
         print_section
         echo "📦 detected missing dependencies: ${missing_deps[*]}"
 
-        if [[ "$(read_tty "Install dependencies? (Y/n): " "Y" $YES)" =~ ^[Yy]$ ]]; then
+        read_tty "Install dependencies? (Y/n): " "Y" $YES
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
             install_pkg "${missing_deps[@]}"
             echo "✅ Dependencies installed."
         fi
@@ -195,7 +197,8 @@ install_docker() {
     print_section
     echo "📦 detected missing docker"
 
-    if [[ "$(read_tty "Install docker? (Y/n): " "Y" $YES)" =~ ^[Yy]$ ]]; then
+    read_tty "Install docker? (Y/n): " "Y" $YES
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
         curl -fsSL https://get.docker.com -o get-docker.sh
         sudo sh get-docker.sh
         rm -f get-docker.sh
@@ -216,7 +219,8 @@ install_caddy() {
     print_section
     echo "📦 detected missing caddy"
 
-    if [[ "$(read_tty "Install caddy? (Y/n): " "Y" $YES)" =~ ^[Yy]$ ]]; then
+    read_tty "Install caddy? (Y/n): " "Y" $YES
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
         curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" -o /tmp/caddy
         sudo install -m 755 /tmp/caddy /usr/local/bin/caddy
         rm -f /tmp/caddy
@@ -275,65 +279,76 @@ setup_repository() {
 # Usage: select_components
 # Sets: INSTALL_CHAT, INSTALL_CHAT_DOCKER, INSTALL_HUB, INSTALL_NODE, INSTALL_LLAMA
 select_components() {
-    INSTALL_CHAT=false;
-    INSTALL_CHAT_DOCKER=false
-    INSTALL_HUB=false; 
-    INSTALL_NODE=false; 
-    INSTALL_LLAMA=false
-    INSTALL_LLAMA_MODEL=""
+    INSTALL_CHAT=false; INSTALL_CHAT_DOCKER=false
+    INSTALL_HUB=false; INSTALL_NODE=false
+    INSTALL_LLAMA=false; INSTALL_LLAMA_MODEL=""
     INSTALL_COMFYUI=false
 
-    [[ "$(read_tty "Install native chat client? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
+    echo "Select components:"
+    echo ""
 
-    [[ "$(read_tty "Install docker chat client? (y/N): " "N")" =~ ^[Yy]$ ]] && INSTALL_CHAT_DOCKER=true
+    read_tty "Install native chat client? (Y/n): " "Y"
+    [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
+    echo -e "\e[1A\e[K [$( [[ $INSTALL_CHAT == true ]] && echo '✅' || echo '⚫' )] Native Chat Client"
+
+    read_tty "Install docker chat client? (y/N): " "N"
+    [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_CHAT_DOCKER=true
+    echo -e "\e[1A\e[K [$( [[ $INSTALL_CHAT_DOCKER == true ]] && echo '✅' || echo '⚫' )] Docker Chat Client"
     if [[ "$INSTALL_CHAT_DOCKER" == true ]]; then
-        CHAT_DOCKER_PORT=$(read_tty "Chat Docker port? [$CHAT_DOCKER_PORT_DEFAULT]: " "$CHAT_DOCKER_PORT_DEFAULT" $YES)
+        read_tty "Chat Docker port? [$CHAT_DOCKER_PORT_DEFAULT]: " "$CHAT_DOCKER_PORT_DEFAULT" $YES
+        CHAT_DOCKER_PORT=$REPLY
+        echo -e "\e[1A\e[K     Port: $CHAT_DOCKER_PORT"
     fi
 
-    [[ "$(read_tty "Install Hub? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_HUB=true
+    read_tty "Install Hub? (Y/n): " "Y"
+    [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_HUB=true
+    echo -e "\e[1A\e[K [$( [[ $INSTALL_HUB == true ]] && echo '✅' || echo '⚫' )] Hub"
     if [[ "$INSTALL_HUB" == true ]]; then
-        HUB_PORT=$(read_tty "Hub port? [$HUB_PORT_DEFAULT]: " "$HUB_PORT_DEFAULT" $YES)
+        read_tty "Hub port? [$HUB_PORT_DEFAULT]: " "$HUB_PORT_DEFAULT" $YES
+        HUB_PORT=$REPLY
+        echo -e "\e[1A\e[K     Port: $HUB_PORT"
     fi
 
-    [[ "$(read_tty "Install Node? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_NODE=true
+    read_tty "Install Node? (Y/n): " "Y"
+    [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_NODE=true
+    echo -e "\e[1A\e[K [$( [[ $INSTALL_NODE == true ]] && echo '✅' || echo '⚫' )] Node"
     if $INSTALL_NODE; then
-        NODE_PORT=$(read_tty "Node port? [$NODE_PORT_DEFAULT]: " "$NODE_PORT_DEFAULT" $YES)
+        read_tty "Node port? [$NODE_PORT_DEFAULT]: " "$NODE_PORT_DEFAULT" $YES
+        NODE_PORT=$REPLY
+        echo -e "\e[1A\e[K     Port: $NODE_PORT"
 
-        [[ "$(read_tty "Install llama-server on Node? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
+        read_tty "Install llama-server on Node? (Y/n): " "Y"
+        [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
+        echo -e "\e[1A\e[K     [$( [[ $INSTALL_LLAMA == true ]] && echo '✅' || echo '⚫' )] llama-server"
         if $INSTALL_LLAMA; then
-            LLAMA_SERVER_PORT=$(read_tty "llama-server port? [$LLAMA_SERVER_PORT_DEFAULT]: " "$LLAMA_SERVER_PORT_DEFAULT" $YES)
-
+            read_tty "llama-server port? [$LLAMA_SERVER_PORT_DEFAULT]: " "$LLAMA_SERVER_PORT_DEFAULT" $YES
+            LLAMA_SERVER_PORT=$REPLY
+            echo -e "\e[1A\e[K         Port: $LLAMA_SERVER_PORT"
+            # your model selection code here (multi-line, no overwrite)
             DEFAULT_LLM="cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L"
             REGISTRY_JSON="$WORKING_DIR/rueckgrat/node/data/registry.json"
             TYPE="llm"
-
             mapfile -t models < <(jq -r --arg t "$TYPE" 'to_entries[] | select(.value.type == $t) | .key' "$REGISTRY_JSON")
-
             DEFAULT_IDX=0
             for i in "${!models[@]}"; do
-            if [[ "${models[i]}" == "$DEFAULT_LLM" ]]; then
-                DEFAULT_IDX=$((i+1))
-                break
-            fi
+                if [[ "${models[i]}" == "$DEFAULT_LLM" ]]; then DEFAULT_IDX=$((i+1)); break; fi
             done
-
-            echo ""
             for i in "${!models[@]}"; do
-                if [ "$i" -eq "$((DEFAULT_IDX - 1))" ]; then
-                    echo "$((i+1))) ⭐ ${models[i]}"
-                else
-                    echo "$((i+1))) ${models[i]}"
-                fi
+                if [ "$i" -eq "$((DEFAULT_IDX - 1))" ]; then echo "         $((i+1))) ⭐ ${models[i]}"; else echo "         $((i+1))) ${models[i]}"; fi
             done
-
-            idx=$(read_tty "📋 Select model by index [$DEFAULT_IDX]: " "$DEFAULT_IDX")
-            echo "selected: ${models[idx-1]}"
+            read_tty "         📋 Select model by index [$DEFAULT_IDX]: " "$DEFAULT_IDX"
+            idx=$REPLY
             INSTALL_LLAMA_MODEL="${models[idx-1]}"
-        fi   
+            echo -e "         Selected model: $INSTALL_LLAMA_MODEL"
+        fi
 
-        [[ "$(read_tty "Install ComfyUI on Node? (Y/n): " "Y")" =~ ^[Yy]$ ]] && INSTALL_COMFYUI=true
+        read_tty "Install ComfyUI on Node? (Y/n): " "Y"
+        [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_COMFYUI=true
+        echo -e "\e[1A\e[K     [$( [[ $INSTALL_COMFYUI == true ]] && echo '✅' || echo '⚫' )] ComfyUI"
         if $INSTALL_COMFYUI; then
-            COMFYUI_PORT=$(read_tty "ComfyUI port? [$COMFYUI_PORT_DEFAULT]: " "$COMFYUI_PORT_DEFAULT" $YES)
+            read_tty "ComfyUI port? [$COMFYUI_PORT_DEFAULT]: " "$COMFYUI_PORT_DEFAULT" $YES
+            COMFYUI_PORT=$REPLY
+            echo -e "\e[1A\e[K         Port: $COMFYUI_PORT"
         fi
     fi
 }
@@ -390,12 +405,12 @@ select_hosts_and_components() {
     hosts=()
     while true; do
         echo ""
-        host_addr=$(read_tty "Target host (IP/hostname, empty=done): " "")
+        read_tty "Target host (IP/hostname, empty=done): " ""
+        host_addr=$REPLY
         [[ -z "$host_addr" ]] && break
 
         validate_ip $host_addr
 
-        echo "Components for $host_addr:"
         select_components
 
         node_json=""       
@@ -491,7 +506,8 @@ confirm_install_configuration() {
     done
 
     echo ""
-    if ! [[ "$(read_tty "Execute this plan? (Y/n): " "Y" $YES)" =~ ^[Yy]$ ]]; then
+    read_tty "Execute this plan? (Y/n): " "Y" $YES
+    if ! [[ $REPLY =~ ^[Yy]$ ]]; then
         echo "⚠️ Aborted by user"
         exit 0
     fi
@@ -589,7 +605,8 @@ deploy_chat_docker() {
 
     # TODO workarround until we decide how to pass the hub ip down to remote configs
     if [ -z "$HUB_ADDR" ]; then
-        HUB_ADDR=$(read_tty "Missing ip of hub (IP/hostname, empty=done): " "")
+        read_tty "Missing ip of hub (IP/hostname, empty=done): " ""
+        HUB_ADDR=$REPLY
     fi
 
     validate_ip $HUB_ADDR
