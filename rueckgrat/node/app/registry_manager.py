@@ -25,7 +25,7 @@ def main():
 
     args = parser.parse_args()
 
-    registry = ModelRegistry("/node/models")
+    registry = ModelRegistry()
 
     if args.command == "install":
         model_cfg = registry.get_model_cfg(args.name)

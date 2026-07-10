@@ -10,8 +10,6 @@ services:
     volumes:
       - caddy_data:/data
       - caddy_config:/config
-    networks:
-      - rueckgrat-net-local
     restart: unless-stopped
 
   hub:
@@ -26,8 +24,6 @@ services:
       - hub_images:/hub/images
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
-    networks:
-      - rueckgrat-net-local
     restart: unless-stopped
     stdin_open: true
     tty: true
@@ -42,13 +38,11 @@ services:
     volumes:
       - node_images:/node/images
       - ./config:/node/config
-      - ../models:/node/models
+      - /var/lib/Rueckgrat/models:/node/models
       - ./chat/app/common:/node/app/common
-    networks:
-      - rueckgrat-net-local
     stdin_open: true
     tty: true
-    restart: unless-stopped    
+    restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"    
 
@@ -61,12 +55,10 @@ services:
     volumes:
       - ../logs:/app
       - chat_cache:/chat/cache
-      - chat_models:/chat/models
+      - /var/lib/Rueckgrat/models:/node/models
     stdin_open: true
     tty: true      
     restart: unless-stopped
-    extra_hosts:
-      - "rueckgrat.hub:192.168.2.39"
     environment:
       - TITLE=Rueckgrat
       - PIXELFLUX_WAYLAND=true
@@ -76,21 +68,20 @@ services:
       #- DISABLE_TERMINALS=true
       #- NO_DECOR=true
       #- RESTART_APP=true
-    
+    extra_hosts:
+      - "${HUB_HOST}:${HUB_ADDR}"
+
+
   llama-server:
     container_name: llama-server
-    image: ghcr.io/ggml-org/llama.cpp:server-${LLAMA_CPP_SERVER}
+    image: ghcr.io/ggml-org/llama.cpp:server-${LLAMA_SERVER_SERVER}
     privileged: true
     volumes:
-      - ../models:/models
+      - /var/lib/Rueckgrat/models:/models
     ports:
-      - "${LLAMA_CPP_PORT}:${LLAMA_CPP_PORT}"
+      - "${LLAMA_SERVER_PORT}:${LLAMA_SERVER_PORT}"
     restart: unless-stopped
-    command: -m ${LLAMA_CPP_MODEL} --host 0.0.0.0 --ctx-size ${LLAMA_CPP_MAX_CONTEXT} --n-gpu-layers ${LLAMA_CPP_GPU_LAYERS}
-
-networks:
-  rueckgrat-net-local:
-    external: true
+    command: -m ${LLAMA_SERVER_MODEL} --host 0.0.0.0 --ctx-size ${LLAMA_SERVER_MAX_CONTEXT} --n-gpu-layers ${LLAMA_SERVER_GPU_LAYERS}
 
 volumes:
   caddy_data:
@@ -99,4 +90,3 @@ volumes:
   hub_db:
   hub_images:
   chat_cache:
-  chat_models:

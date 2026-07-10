@@ -1,6 +1,12 @@
 Changelog
 =========
 
+0.8.0
+-----
+
+- #32 largely rewritten the installer. now allows multi host installation
+- #31 fixed audio
+
 0.7.1
 -----
 

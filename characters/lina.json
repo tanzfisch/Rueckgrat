@@ -57,7 +57,7 @@
             "preffered_context_size": "8000"
         },
         "image_parameters": {
-            "seed": 1337,
+            "seed": 15337,
             "steps": 40,
             "cfg": 5.0,
             "model": "default"

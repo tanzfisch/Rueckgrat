@@ -53,54 +53,61 @@ class Infrastructure:
         with open(INFRASTRUCTURE_CONFIG_PATH, "r") as f:
             data = json.load(f)
 
-        self.nodes = data["nodes"]
+        self.hosts = data["hosts"]
 
-        self.node_with_text_to_text = None
-        self.node_with_text_to_image = None
-        self.node_with_model_storage = None # TODO
+        self.node_with_text_to_text = {}
+        self.node_with_text_to_image = {}
+        self.node_with_model_storage = {} # TODO
 
-        for node in self.nodes:
-            if "services" in node:
-                services = node["services"]
-                for service in services:
-                    if service["type"] == "text_to_text":
-                        self.node_with_text_to_text = node
+        for host in self.hosts:
+            if "node" in host:
+                node = host["node"]
+                if "services" in node:
+                    services = node["services"]
+                    for service in services:
+                        if service["type"] == "text_to_text":
+                            self.node_with_text_to_text["addr"] = host["addr"]
+                            self.node_with_text_to_text["port"] = node["port"]
 
-                    if service["type"] == "text_to_image":
-                        self.node_with_text_to_image = node
+                        if service["type"] == "text_to_image":
+                            self.node_with_text_to_image["addr"] = host["addr"]
+                            self.node_with_text_to_image["port"] = node["port"]
 
         if not self.node_with_text_to_text:
             logger.error("couldn't find text_to_text generator in config")
         else:
-            logger.debug(f"found text_to_text generator at {self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}")
+            logger.debug(f"found text_to_text generator at {self.node_with_text_to_text['addr']}:{self.node_with_text_to_text['port']}")
 
         if not self.node_with_text_to_image:
             logger.warning("couldn't find text_to_image generator in config")
         else:
-            logger.debug(f"found text_to_image generator at {self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}")
+            logger.debug(f"found text_to_image generator at {self.node_with_text_to_image['addr']}:{self.node_with_text_to_image['port']}")
 
         self.download_queue = DownloadQueue()
 
     def get_status(self) -> StatusResult:
         result = StatusResult()
 
-        for node in self.nodes:
-            url = f"http://{node['host']}:{node['port']}/health"
+        for host in self.hosts:
 
-            try:
-                response = requests.get(url, timeout=1)
+            if "node" in host:
+                node = host["node"]
+                url = f"http://{host['addr']}:{node['port']}/health"
 
-                ok = response.status_code == 200 \
-                and response.json() == {"status": "ok"} \
-                and response.headers.get("content-type", "").startswith("application/json")
+                try:
+                    response = requests.get(url, timeout=1)
 
-                if ok:
-                    result.nodes.append(ServerResult(url, ok))
-                else:
-                    result.nodes.append(ServerResult(url, ok, error=response["status"]))
-                                
-            except Exception as e:
-                result.nodes.append(ServerResult(url, False, error=repr(e)))
+                    ok = response.status_code == 200 \
+                    and response.json() == {"status": "ok"} \
+                    and response.headers.get("content-type", "").startswith("application/json")
+
+                    if ok:
+                        result.nodes.append(ServerResult(url, ok))
+                    else:
+                        result.nodes.append(ServerResult(url, ok, error=response["status"]))
+                                    
+                except Exception as e:
+                    result.nodes.append(ServerResult(url, False, error=repr(e)))
 
         return result
     
@@ -142,7 +149,7 @@ class Infrastructure:
             logger.error("no text to image generator available")
             return None
         
-        url_image_request = f"http://{self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}/image"
+        url_image_request = f"http://{self.node_with_text_to_image['addr']}:{self.node_with_text_to_image['port']}/image"
 
         try:
             response = requests.post(
@@ -169,7 +176,7 @@ class Infrastructure:
 
     def download(self, source_path: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
         # todo pick correct host
-        url = f"http://{self.node_with_text_to_image['host']}:{self.node_with_text_to_image['port']}/downloads{source_path}"
+        url = f"http://{self.node_with_text_to_image['addr']}:{self.node_with_text_to_image['port']}/downloads{source_path}"
         if asynchronous:
             self.download_queue.add(
                 url=url, 
@@ -185,7 +192,7 @@ class Infrastructure:
 
     def chat(self, messages: list, temperature: float, seed: int, max_new_tokens: int = 512, context_size: int=8192) -> str:
         try:
-            url = f"http://{self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}/chat"
+            url = f"http://{self.node_with_text_to_text['addr']}:{self.node_with_text_to_text['port']}/chat"
             
             payload= ChatRequestLlama(
                 messages=messages,
@@ -214,7 +221,8 @@ class Infrastructure:
 
     def get_model_url(self, model_name) -> Response:
         # todo pick correct host
-        url = f"http://{self.node_with_text_to_text['host']}:{self.node_with_text_to_text['port']}/models/{model_name}/url"
+        url = f"http://{self.node_with_text_to_text['addr']}:{self.node_with_text_to_text['port']}/models/{model_name}/url"
+        logger.debug(f"get_model_url for {model_name} from {url}")
         
         try:
             response = requests.get(

@@ -21,7 +21,6 @@ WORKDIR /chat
 RUN mkdir -p /chat/cache /chat/models && chown -R abc:abc /chat
 
 COPY app app
-COPY --chown=abc:abc --chmod=644 build/rueckgrat-caddy.crt .
 
 EXPOSE 3001
 

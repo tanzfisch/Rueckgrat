@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # ==================== CERTIFICATE HANDLING ====================
-CERT_DEST="$HOME/.ssh/rueckgrat-caddy.crt"
+CERT_DEST="$HOME/.ssh/rueckgrat-caddy.cert"
 
 if [[ -n "${1:-}" ]]; then
     CERT_SRC="$1"
@@ -24,6 +24,6 @@ fi
 source .venv/bin/activate
 pip install -r requirements.txt --upgrade
 
-python -m spacy download en_core_web_sm
+python -m spacy download en_core_web_sm # todo forgot what this is for
 
 
