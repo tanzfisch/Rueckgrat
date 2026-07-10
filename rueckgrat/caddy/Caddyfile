@@ -12,6 +12,6 @@ rueckgrat.hub localhost {
         header_up X-Forwarded-Proto {scheme}
     }
 
-    tls internal
+    tls /etc/caddy/certs/rueckgrat-caddy.cert /etc/caddy/certs/rueckgrat-caddy.key
     reverse_proxy http://hub:14223
 }

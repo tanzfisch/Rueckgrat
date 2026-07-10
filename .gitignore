@@ -211,3 +211,7 @@ cache
 models
 logs
 chat-temp
+rueckgrat/config
+rueckgrat/caddy/*.cert
+rueckgrat/caddy/*.key
+rueckgrat/chat/app/*.cert

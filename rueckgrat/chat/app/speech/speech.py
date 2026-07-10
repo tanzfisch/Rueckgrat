@@ -2,6 +2,7 @@ import os
 import signal
 import subprocess
 import sys
+import shlex
 from threading import Lock
 from app.utils import Backend, Paths
 from pathlib import Path
@@ -41,9 +42,12 @@ class Speech:
 
             if not model_file_path.exists():
                 logger.error(f"failed to retrive voice file for {model}")
+                return        
 
+            command = [sys.executable, str(speech_task_path), "--text", text, "--model", str(model_file_path)]
+            logger.debug(shlex.join(command))
             proc = subprocess.Popen(
-                [sys.executable, speech_task_path, "--text", text, "--model", model_file_path],
+                command,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )

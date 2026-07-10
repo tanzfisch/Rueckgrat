@@ -10,8 +10,8 @@ RUN mkdir -p /node/images && chown -R nodeuser:nodeuser /node/images
 COPY requirements.txt .
 RUN pip install -r requirements.txt --upgrade
 
-# Copy app
 COPY app app
+COPY data data
 
 RUN mkdir -p /node/app/config && chown -R nodeuser:nodeuser /node/app/config
 
