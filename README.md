@@ -42,13 +42,15 @@ For planned features, check the [Issues](https://github.com/tanzfisch/Rueckgrat/
 
 ### Linux
 
-The easiest way to install Rueckgrat on Linux is using the one-line installer
+The easiest way to install Rueckgrat on Linux is using the installer script
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tanzfisch/Rueckgrat/master/install.sh | bash
+wget https://raw.githubusercontent.com/tanzfisch/Rueckgrat/master/install.sh
+chmod +x install.sh
+./install.sh
 ```
 
-Or clone first and run:
+Or clone the repo first and run:
 
 ```bash
 git clone https://github.com/tanzfisch/Rueckgrat.git
@@ -58,13 +60,11 @@ cd Rueckgrat
 
 The installer supports multi-host deployment, component selection (Chat native/Docker, Hub, Node, llama-server), clean builds, and all major distros via Docker/Caddy.
 
-Alternatively it can be started using a config file like so.
+Alternatively it can be started using a config file like so. This file can be created ussing the installer it self. Just follow the instructions until the point where it recaps your install instructions. The config file then can be found at rueckgrat/config/infrastructure.json
 
 ```bash
 ./install -c infrastructure.json -y
 ```
-
-No need to write a config manually when running ./install.sh it will create one and store it at rueckgrat/config/infrastructure.json
 
 ### Windows
 
