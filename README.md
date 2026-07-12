@@ -42,7 +42,9 @@ For planned features, check the [Issues](https://github.com/tanzfisch/Rueckgrat/
 
 ### Linux
 
-The easiest way to install Rueckgrat on Linux is using the one-line installer
+The easiest way to install Rueckgrat on Linux is using the installer script.
+
+*Note:* The installer requires you to have sudo access on all machines you want to install with using the same username. 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tanzfisch/Rueckgrat/master/install.sh | bash
@@ -61,7 +63,7 @@ The installer supports multi-host deployment, component selection (Chat native/D
 Alternatively it can be started using a config file like so.
 
 ```bash
-./install -c infrastructure.json -y
+./install -c rueckgrat/config/config_example.json -y
 ```
 
 No need to write a config manually when running ./install.sh it will create one and store it at rueckgrat/config/infrastructure.json
@@ -82,7 +84,7 @@ cd Rueckgrat\chat
 For local development it is ideal to shortcut the installer and go straight for instlling one host directly. This allows for an in code installation so when looking at error logs the path points to the code and not an installed copy.
 
 ```bash
-./install.sh --host-config '{ "addr": "192.168.2.39", "node": { "port": 7346, "services": [ { "type":"text_to_text", "name": "llama-server", "port": 8080, "model": "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L" } ] }, "hub": { "port": 14223 }, "chat": {}, "chat_docker": { "pert": "3001" } }'
+./install.sh --host-config '{ "addr": "192.168.2.39", "node": { "port": 7346, "services": [ { "type":"text_to_text", "name": "llama-server", "port": 8080, "model": "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L" } ] }, "hub": { "port": 14223 }, "chat": {}, "chat_docker": { "port": "3001" } }'
 ```
 
 # Troubleshoot & FAQ
