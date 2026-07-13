@@ -9,7 +9,7 @@ from PySide6.QtGui import QFont
 
 from app.ui import BasePage
 from app.ui.widgets import ContactHeader
-from app.utils import Backend
+from app.utils import Hub
 
 from app.common import get_logger, Utils
 logger = get_logger()
@@ -130,7 +130,7 @@ class ProfilePage(BasePage):
         if self.contact_id == -1:
             return     
 
-        contact = Backend.get_contact(self.contact_id)
+        contact = Hub.get_contact(self.contact_id)
         self.fill_form(contact)
 
     def _on_load(self):
@@ -152,10 +152,10 @@ class ProfilePage(BasePage):
 
     def _on_save(self):
         if self.contact_id == -1:
-            self.contact_id = Backend.create_contact()
+            self.contact_id = Hub.create_contact()
 
         data = self.get_data()
-        Backend.update_contact(self.contact_id, data)
+        Hub.update_contact(self.contact_id, data)
         self.navigator("contacts")
 
     def on_enter(self, **kwargs):

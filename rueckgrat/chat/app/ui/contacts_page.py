@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, QSize
 
 from app.ui import BasePage
 from app.ui.widgets import OneLineBubble, MessageBox, ContactCard, ContactHeader
-from app.utils import Backend, Contact, Paths
+from app.utils import Hub, Contact, Paths
 
 
 from app.common import get_logger
@@ -49,8 +49,8 @@ class ContactsPage(BasePage):
             with open(path, 'r') as file:
                 try:
                     data = json.load(file)
-                    contact_id = Backend.create_contact()
-                    Backend.update_contact(contact_id, data)
+                    contact_id = Hub.create_contact()
+                    Hub.update_contact(contact_id, data)
                     self.navigator("contacts")
                 except Exception as e:
                     logger.error(f"failed to load profile: {repr(e)}")
@@ -63,7 +63,7 @@ class ContactsPage(BasePage):
             if widget:
                 widget.deleteLater()
 
-        contacts = Backend.get_contacts()
+        contacts = Hub.get_contacts()
 
         buttons_layout = QHBoxLayout()
         buttons_layout.setContentsMargins(0, 0, 0, 0)
@@ -86,7 +86,7 @@ class ContactsPage(BasePage):
             if profile_image_name:
                 profile_image_path = Paths.get_image_path() / profile_image_name
                 if not profile_image_path.exists():
-                    Backend.download_file(f"images/{profile_image_name}", Paths.get_image_path(), 0)
+                    Hub.download_file(f"images/{profile_image_name}", Paths.get_image_path(), 0)
 
             contact_card_container = QWidget()
             contact_card_layout = QHBoxLayout(contact_card_container)            
@@ -132,7 +132,7 @@ class ContactsPage(BasePage):
 
     def delete_contact(self, contact_id):
         if MessageBox.open("Are you sure you want to delete this contact?"):
-            Backend.delete_contact(contact_id)
+            Hub.delete_contact(contact_id)
 
         self.load_contacts()        
 

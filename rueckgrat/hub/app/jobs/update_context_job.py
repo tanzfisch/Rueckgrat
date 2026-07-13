@@ -42,13 +42,17 @@ class UpdateContextJob(Job):
                 for m in messages
             ])
 
-            payload = []
+            messages = []
             contact = self.db.get_contact_by_id(self.request.contact_id)
             conversation = self.db.get_conversation(self.request.conversation_id)
-            compiler = PromptCompiler(contact, conversation, self.request.name)
+            compiler = PromptCompiler(
+                contact=contact, 
+                conversation=conversation, 
+                user_name=self.request.name
+            )
             system_prompt, context_prompt = compiler.build_prompt()
 
-            payload.append({"role": "developer", "content": system_prompt})
+            messages.append({"role": "developer", "content": system_prompt})
 
             if context == "":
                 # fallback context
@@ -162,11 +166,15 @@ INSTRUCTIONS:
 OUTPUT:
 Return ONLY valid JSON in the same format.
 """            
-            payload.append({"role": "user", "content": query})
+            messages.append({"role": "user", "content": query})
         except Exception as e:
             logger.error(f"failed to build query {repr(e)}")            
                 
-        response_content = self.infrastructure.chat(payload, 0.4, random.randint(0, 100000), True)
+        response_content = self.infrastructure.chat(
+            messages=messages,
+            temperature=0.4, 
+            seed=random.randint(0, 100000)
+        )
         if not response_content:
             logger.warning(f"failed to update context")
             return context

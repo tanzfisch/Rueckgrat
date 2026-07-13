@@ -25,7 +25,7 @@ class FindAnswerJob(Job):
        
     def _find_answer(self):
         try:
-            payload = []
+            messages = []
             query = f"""
 Find the answer to a search query in a given text. 
 
@@ -47,11 +47,15 @@ Rate the quality of the source from 1 to 10 in terms of how well it answeres the
             
             logger.debug(f"find answer query:\n{query}")
 
-            payload.append({"role": "user", "content": query})
+            messages.append({"role": "user", "content": query})
         except Exception as e:
             logger.error(f"failed to build query {repr(e)}")            
         
-        response_content = self.infrastructure.chat(payload, 0.1, random.randint(0, 100000), True)
+        response_content = self.infrastructure.chat(
+            messages=messages, 
+            temperature=0.1, 
+            seed=random.randint(0, 100000)
+        )
         if not response_content:
             logger.error(f"failed query")
             return None

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt
 
-from app.utils import Backend
+from app.utils import Hub
 from app.ui import BasePage
 from app.ui.widgets import ContactHeader, LabeledSlider, RowSelector, PlainTextEdit
 
@@ -427,12 +427,12 @@ class ProfileWizard(BasePage):
                         "personality": personality
                     }
                 }
-                Backend.generate(prompt)
+                Hub.generate(prompt)
             else:
                 data = {
                     "profile": json.dumps(profile)
                 }
-                Backend.update_user_data(data)
+                Hub.update_user_data(data)
                 self.navigator("contacts")
 
     def prev_page(self):
@@ -464,8 +464,8 @@ class ProfileWizard(BasePage):
         self.clear_pages()
 
         if self.user_profile_mode:
-            data = Backend.get_user_data()
-            name = Backend.get_user_name()
+            data = Hub.get_user_data()
+            name = Hub.get_user_name()
             if data and "profile" in data:
                 profile = data["profile"]
             else:
@@ -485,11 +485,11 @@ class ProfileWizard(BasePage):
             #self.add_page(self.progress_page)
 
         if not self.user_profile_mode:
-            Backend.register_incomming_message(self.on_incomming_message)
+            Hub.register_incomming_message(self.on_incomming_message)
 
     def on_leave(self):
         if not self.user_profile_mode:
-            Backend.unregister_incomming_message(self.on_incomming_message)
+            Hub.unregister_incomming_message(self.on_incomming_message)
 
     def on_incomming_message(self, msg: dict):
         try:

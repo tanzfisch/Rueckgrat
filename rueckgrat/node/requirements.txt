@@ -7,3 +7,4 @@ requests
 websocket-client
 Pillow
 json-repair
+websockets

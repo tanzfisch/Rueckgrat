@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
     stdin_open: true
     tty: true
-      
+
   node:
     container_name: rueckgrat_node
     build:

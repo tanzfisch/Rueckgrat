@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 
 from app.ui import BasePage
 from app.ui.widgets import OneLineBubble
-from app.utils import Backend
+from app.utils import Hub
 
 from app.common import get_logger
 logger = get_logger()
@@ -118,7 +118,7 @@ class AddUserPage(QWidget):
 class LoginPage(BasePage):
     def __init__(self, navigator):
         super().__init__(navigator)
-        self.users = Backend.get_users()
+        self.users = Hub.get_users()
         self.selected_user = None
         self.user_name = None
 
@@ -156,21 +156,21 @@ class LoginPage(BasePage):
     def create_user(self):
         name = self.add_page.name_edit.text()
         pwd = self.add_page.pass_edit.text()
-        Backend.create_user(name, pwd)
-        if Backend.login_user(name, pwd):
+        Hub.create_user(name, pwd)
+        if Hub.login_user(name, pwd):
             self.on_successful_login()
         else:
             logger.error("login failed")
 
     def check_login(self):
         pwd = self.pass_page.password_edit.text()
-        if Backend.login_user(self.user_name, pwd):
+        if Hub.login_user(self.user_name, pwd):
             self.on_successful_login()
         else:
             logger.error("login failed")
 
     def on_successful_login(self):
-        if not Backend.get_user_data():
+        if not Hub.get_user_data():
             name = self.add_page.name_edit.text()
             self.navigator("profile_wizz", user_profile_mode=True)
         else:

@@ -4,7 +4,7 @@ import subprocess
 import sys
 import shlex
 from threading import Lock
-from app.utils import Backend, Paths
+from app.utils import Hub, Paths
 from pathlib import Path
 
 from app.common import get_logger
@@ -38,7 +38,7 @@ class Speech:
             model_file_path = Path(f"{model_path}/{model}.onnx")
             model_json_file_path = Path(f"{model_path}/{model}.onnx.json")
             if not model_file_path.exists() or not model_json_file_path.exists():
-                Backend.get_model(model, model_path)
+                Hub.get_model(model, model_path)
 
             if not model_file_path.exists():
                 logger.error(f"failed to retrive voice file for {model}")

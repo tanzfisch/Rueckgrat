@@ -2,23 +2,17 @@ import os
 import requests
 from urllib.parse import urlparse
 import asyncio
-import socket
-import ssl
 import json
 from pathlib import Path
-from app.utils.websocket import WebSocketClient
-from typing import Callable, List
-import warnings
-from urllib3.exceptions import InsecureRequestWarning
+from typing import Callable
 
-from app.common import get_logger, DownloadQueue, ChatRequest, GetMessagesRequest, Utils
+from app.common import get_logger, DownloadQueue, ChatRequest, GetMessagesRequest, WebSocketClient
 logger = get_logger()
 
-class Backend:
+class Hub:
     user_id = -1
     user_name = ""
     access_token = ""
-    on_incoming_message: List[Callable[[dict], None]] = []
     download_queue = DownloadQueue()
     ws_task = None
     websocket_client = None
@@ -42,9 +36,11 @@ class Backend:
         else:
             cls.server_cert = cert
 
-        logger.info(f"using backend at {cls.url}")
-        logger.info(f"websocket at {cls.uri}")
-        logger.info(f"server_cert {cls.server_cert}")
+        logger.info(f"hub: {cls.url}")
+        logger.info(f"hub ws: {cls.uri}")
+        logger.info(f"hub cert: {cls.server_cert}")
+
+        cls.websocket_client = WebSocketClient(cls.uri, cls.server_cert)
 
     @classmethod
     def get_user_name(cls):
@@ -80,7 +76,7 @@ class Backend:
             )
 
     @classmethod
-    async def _on_login_success(cls, token: str):
+    def _on_login_success(cls, token: str):
         cls.ws_task = asyncio.create_task(cls._start_websocket(token))
 
     @classmethod
@@ -94,11 +90,15 @@ class Backend:
 
     @classmethod
     async def _start_websocket(cls, token: str):
-        if cls.websocket_client and cls.websocket_client.is_connected():
-            return
-        cls.websocket_client = WebSocketClient(cls.uri, cls.server_cert)
-        cls.websocket_client.set_on_message(cls._on_incomming_websocket)
         await cls.websocket_client.connect(token)
+
+    @classmethod
+    def unregister_incomming_message(cls, callback: Callable[[dict], None]):
+        cls.websocket_client.unregister_incomming_message(callback)
+
+    @classmethod
+    def register_incomming_message(cls, callback: Callable[[dict], None]):
+        cls.websocket_client.register_incomming_message(callback)
 
     @classmethod
     def chat(cls, contact_id: int, conversation_id: int, role: str, content: str, temperature: float):
@@ -111,34 +111,12 @@ class Backend:
             temperature=temperature
         )
         payload = {"chat": chat_request.model_dump()}
-        asyncio.get_event_loop().create_task(cls._send_async_payload(json.dumps(payload)))
+        cls.websocket_client.send_message(json.dumps(payload))
 
     @classmethod
     def generate(cls, prompt: dict):
         payload = {"generate": prompt}
-        asyncio.get_event_loop().create_task(cls._send_async_payload(json.dumps(payload)))
-
-    @classmethod
-    async def _send_async_payload(cls, payload):
-        if cls.websocket_client:
-            await cls.websocket_client.send_message(payload)
-
-    @classmethod
-    def _on_incomming_websocket(cls, msg: dict):
-        try:
-            for func in cls.on_incoming_message:
-                func(msg)
-        except Exception as e:
-            logger.error(f"failed to handle incomming message: {repr(e)}")
-
-    @classmethod
-    def unregister_incomming_message(cls, callback: Callable[[dict], None]):
-        if callback in cls.on_incoming_message:
-            cls.on_incoming_message.remove(callback)
-
-    @classmethod
-    def register_incomming_message(cls, callback: Callable[[dict], None]):
-        cls.on_incoming_message.append(callback)
+        cls.websocket_client.send_message(json.dumps(payload))
 
     @classmethod
     def check_health(cls):
@@ -571,7 +549,7 @@ class Backend:
             if response.status_code == 200:
                 data = response.json()
                 cls.access_token = data.get("access_token", "")
-                asyncio.create_task(cls._on_login_success(cls.access_token))
+                cls._on_login_success(cls.access_token)
                 cls.user_id = data.get("user_id", -1)
                 cls.user_name = user_name
                 return True

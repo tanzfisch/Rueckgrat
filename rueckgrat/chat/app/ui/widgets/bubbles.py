@@ -32,26 +32,48 @@ class TextBlock(QTextBrowser):
 class ChatBubble(QWidget):
     def __init__(self, role: str, content: str, image_filepath: str = None):
         super().__init__()
+        self.role = role
         self.image_filepath = image_filepath
         self.image = None
+        self.content = ""
 
         self.setObjectName("chatBubble")
         self.setProperty("role", role)
-        
-        content_items = self._parse_content(content)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setAlignment(Qt.AlignTop)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setAlignment(Qt.AlignTop)
+
+        self.append_content(content)
+
+    def _clear(self):
+        while self.layout.count():
+            item = self.layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def clear_content(self):
+        self.content = ""
+
+    def append_content(self, content: str):
+        self.content += content
+        self._clear()
+
+        parsable_content = self.content
+        if parsable_content.count("```") % 2 == 1:
+            parsable_content += "\n```"
+
+        content_items = self._parse_content(parsable_content)
 
         if self.image_filepath:
-            self._add_image(layout, self.image_filepath)
+            self._add_image(self.layout, self.image_filepath)
 
         for item in content_items:
             if item["type"] == "text":
-                self._add_text(layout, item["value"], role)
+                self._add_text(self.layout, item["value"], self.role)
             elif item["type"] == "code":
-                self._add_code(layout, item["value"])
+                self._add_code(self.layout, item["value"])
 
     def setFixedWidth(self, width):
         if self.image:

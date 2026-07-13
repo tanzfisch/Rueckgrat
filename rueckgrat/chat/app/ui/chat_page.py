@@ -6,9 +6,9 @@ from PySide6.QtCore import Qt, QTimer, QSize, QPoint
 from app.ui import BasePage
 from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker, PlainTextEdit, StatusWidget
 from app.speech import Speech
-from app.utils import Backend, Contact, Paths
+from app.utils import Hub, Contact, Paths
 
-from app.common import get_logger
+from app.common import get_logger, Utils
 logger = get_logger()
 
 class HistoryContainer(QWidget):
@@ -89,6 +89,11 @@ class ChatPage(BasePage):
 
         chat_layout.addWidget(input_container)
 
+        self.delta_buffer = ""
+        self.flush_timer = QTimer(self)
+        self.flush_timer.setSingleShot(True)
+        self.flush_timer.timeout.connect(self._flush_delta)
+
     def openEmojiPicker(self):
         button_pos = self.emoji_button.mapToGlobal(QPoint(0, 0))
         result = EmojiPicker.open(button_pos)
@@ -111,16 +116,25 @@ class ChatPage(BasePage):
             elif child_layout is not None:
                 self.clear_layout(child_layout)
 
+
     def clear_history(self):
         self.clear_layout(self.history_layout)
 
-        wrapper = QWidget()
-        wrapper_layout = QHBoxLayout(wrapper)
-        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        status_widget_wrapper = QWidget()
+        status_widget_wrapper_layout = QHBoxLayout(status_widget_wrapper)
+        status_widget_wrapper_layout.setContentsMargins(0, 0, 0, 0)
         self.status_widget = StatusWidget()
         self.status_widget.clear_status()
-        wrapper_layout.addWidget(self.status_widget, alignment=Qt.AlignmentFlag.AlignLeft)
-        self.history_layout.addWidget(wrapper)
+        status_widget_wrapper_layout.addWidget(self.status_widget, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.history_layout.addWidget(status_widget_wrapper)
+
+        stream_bubble_wrapper = QWidget()
+        stream_bubble_wrapper_layout = QHBoxLayout(stream_bubble_wrapper)
+        stream_bubble_wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        self.stream_bubble = ChatBubble("assistant", "", None)
+        self.stream_bubble.hide()
+        stream_bubble_wrapper_layout.addWidget(self.stream_bubble, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.history_layout.addWidget(stream_bubble_wrapper)
 
         self.history_layout.addStretch()
 
@@ -128,15 +142,15 @@ class ChatPage(BasePage):
         self.contact_id = kwargs.get("contact_id")
         self.conversation_id = kwargs.get("conversation_id")
 
-        self.contact = Contact(Backend.get_contact(self.contact_id))
+        self.contact = Contact(Hub.get_contact(self.contact_id))
         self.contact_header.set_contact(self.contact)
 
         self.clear_history()
 
-        messages = Backend.get_messages(self.conversation_id)
+        messages = Hub.get_messages(self.conversation_id)
         for message in messages:
             message_id = message["id"]
-            attachements = Backend.get_attachments(message_id)
+            attachements = Hub.get_attachments(message_id)
             if attachements:
                 image_path = self._get_image(attachements[0]["file_name"])
                 self.append_history(message["role"], message["content"], image_path)
@@ -154,10 +168,10 @@ class ChatPage(BasePage):
 
         self.temperature = float(self.contact.get_llm_temperature())
 
-        Backend.register_incomming_message(self.on_incomming_message)
+        Hub.register_incomming_message(self.on_incomming_message)
 
     def on_leave(self):
-        Backend.unregister_incomming_message(self.on_incomming_message)
+        Hub.unregister_incomming_message(self.on_incomming_message)
 
     def resizeEvent(self, event):
         self.adjust_input_box_height()
@@ -223,7 +237,7 @@ class ChatPage(BasePage):
             self.replay_content = content
             wrapper_layout.addWidget(bubble, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        self.history_layout.insertWidget(self.history_layout.count() - 2, wrapper)
+        self.history_layout.insertWidget(self.history_layout.count() - 3, wrapper)
         
         QTimer.singleShot(10, self.history_container.refreshSize)
         QTimer.singleShot(50, self.scroll_to_bottom)
@@ -243,7 +257,7 @@ class ChatPage(BasePage):
         parts = re.split(f"({code_block_pattern})", text, flags=re.DOTALL)
 
         def clean_text(t: str) -> str:
-            return re.sub(r"\n{2,}", "\n", t)
+            return re.sub(r"\n{3,}", "\n\n", t)
 
         return "".join(
             part if re.match(code_block_pattern, part, flags=re.DOTALL)
@@ -253,7 +267,6 @@ class ChatPage(BasePage):
 
     def _cleanup_content(self, content):        
         content = self._remove_excess_linebreaks(content)
-
         return content    
     
     def _cleanup_for_speech(self, content):
@@ -267,19 +280,40 @@ class ChatPage(BasePage):
     def _get_image(self, image_filename) -> str:
         image_path = Paths.get_image_path() / image_filename
         if not image_path.exists():
-            Backend.download_file(f"images/{image_filename}", Paths.get_image_path())
+            Hub.download_file(f"images/{image_filename}", Paths.get_image_path())
 
         return image_path
 
+    def _flush_delta(self):
+        if not self.delta_buffer:
+            return
+        self.stream_bubble.show()
+        self.stream_bubble.append_content(self.delta_buffer)
+        self.delta_buffer = ""
+        QTimer.singleShot(10, self.history_container.refreshSize)
+        QTimer.singleShot(50, self.scroll_to_bottom)
+
     def on_incomming_message(self, msg: dict):
         try:
-            if "status" in msg:      
+            #logger.debug(Utils.pretty_print(msg))
+
+            if "status" in msg:
                 self.status_widget.on_status_message(msg["status"])
+
+            if "delta" in msg:                
+                if msg["conversation_id"] == self.conversation_id:
+                    self.delta_buffer += msg["delta"]
+                    if not self.flush_timer.isActive():
+                        self.flush_timer.start(100)
 
             if "chat" in msg:
                 chat = msg["chat"]
 
                 if chat["conversation_id"] == self.conversation_id:
+                    self.stream_bubble.hide()
+                    if self.flush_timer.isActive():
+                        self.flush_timer.stop()
+
                     content = self._cleanup_content(chat["content"])
                     role = chat["role"]
 
@@ -303,6 +337,8 @@ class ChatPage(BasePage):
 
     def send_message(self):
         self.status_widget.clear_status()
+        self.stream_bubble.clear_content()
+        self.delta_buffer = ""
         
         message = self.input_box.toPlainText().strip()
         if not message:
@@ -310,4 +346,4 @@ class ChatPage(BasePage):
         self.input_box.clear()
 
         self.append_history("user", message)
-        Backend.chat(self.contact_id, self.conversation_id, "user", message, self.temperature)
+        Hub.chat(self.contact_id, self.conversation_id, "user", message, self.temperature)

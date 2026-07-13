@@ -160,11 +160,16 @@ OUTPUT:
 - keep each entry close to the lenght in the example
 """
             logger.debug(f"contact generator query:\n{query}")
-            payload = [{"role": "developer", "content": query}]
+            messages = [{"role": "developer", "content": query}]
         except Exception as e:
             logger.error(f"failed to generate payload {repr(e)}")
 
-        response_content = self.infrastructure.chat(payload, 0.2, random.randint(0, 100000))
+        response_content = self.infrastructure.chat(
+            messages=messages, 
+            temperature=0.2, 
+            seed=random.randint(0, 100000)
+        )
+        
         reply = Utils.json_loads(response_content)
             
         if not reply:

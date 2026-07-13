@@ -2,13 +2,12 @@ from typing import Dict,  Any
 import re
 from .tool import Tool
 from app.jobs.find_answer_job import FindAnswerJob
-from app.utils.message_queue import MessageQueue
 import requests
 import datetime
 import tldextract
 from bs4 import BeautifulSoup
 
-from app.common import get_logger
+from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 class WebsearchTool(Tool):
@@ -317,7 +316,7 @@ class WebsearchTool(Tool):
             logger.error(f"failed to do a websearch {repr(e)}")
 
     @classmethod
-    def prompt(cls) -> str: 
+    def prompt(cls) -> str:
         return """
 WEBSEARCH:
 

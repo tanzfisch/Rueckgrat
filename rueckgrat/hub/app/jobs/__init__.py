@@ -4,6 +4,7 @@ from .meta_job import MetaJob
 from .job_queue import Job, JobQueue
 from .contact_generator_job import ContactGeneratorJob
 from .assistant_image_job import AssistantImageJob
+from .thinking_job import ThinkingJob
 
 __all__ = [
     "Job", 
@@ -12,5 +13,6 @@ __all__ = [
     "ImageJob", 
     "MetaJob", 
     "ContactGeneratorJob",
-    "AssistantImageJob"
+    "AssistantImageJob",
+    "ThinkingJob"
 ]
