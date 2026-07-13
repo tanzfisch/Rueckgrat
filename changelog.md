@@ -1,6 +1,12 @@
 Changelog
 =========
 
+0.9.0
+-----
+
+- #40 improving installer
+  - cleaned up issue with Removing previous Rueckgrat installation during installation
+
 0.8.0
 -----
 
