@@ -628,7 +628,7 @@ deploy_chat_docker() {
 # Usage: deploy_chat_native
 # No arguments
 deploy_chat_native() {
-    install_dependencies python3 python3.13-venv
+    install_dependencies python3 python3.13-venv alsa-utils
 
     print_section
     echo "📦 chat..."

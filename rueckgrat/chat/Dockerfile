@@ -1,7 +1,7 @@
 FROM ghcr.io/linuxserver/baseimage-selkies:ubunturesolute
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends iputils-ping git nmap vim && \
+    apt-get install -y --no-install-recommends iputils-ping git nmap vim alsa-utils && \
     rm -rf \
     /config/.cache \
     /config/.launchpadlib \
