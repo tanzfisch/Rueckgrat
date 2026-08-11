@@ -8,6 +8,7 @@ import re
 import argparse
 import tempfile
 import platform
+import shlex
 
 # todo ugly hack
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -29,9 +30,9 @@ def run_speech(text, model):
     )
 
     try:
-        logger.debug(f"generate speech: {output_file}")
-        subprocess.run(["piper", "--model", model, "--output_file", output_file, text],
-                       check=True, capture_output=True)
+        command_piper = [".venv/bin/piper", "--model", model, "--output_file", output_file, text]
+        logger.debug(f"run: {shlex.join(command_piper)}")
+        subprocess.run(command_piper, check=True, capture_output=True)
 
         if not os.path.exists(output_file):
             logger.error("failed to generate speech file")
@@ -42,7 +43,9 @@ def run_speech(text, model):
             import winsound
             winsound.PlaySound(output_file, winsound.SND_FILENAME)
         else:
-            subprocess.run(["aplay", output_file], check=False)
+            command_aplay = ["aplay", output_file]
+            logger.debug(f"run: {shlex.join(command_aplay)}")
+            subprocess.run(command_aplay, check=False)
     except Exception as e:
         logger.error(f"Speech error: {e}", file=sys.stderr)
     finally:

@@ -1,4 +1,3 @@
 #!/bin/bash
 
-source .venv/bin/activate
-python -m app.main --logfile ../../logs/chat.log
+.venv/bin/python -m app.main --logfile ../../logs/chat.log

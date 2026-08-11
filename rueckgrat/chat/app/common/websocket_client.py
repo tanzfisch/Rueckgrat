@@ -5,7 +5,8 @@ from typing import Callable, Optional, List
 from websockets.connection import State
 import ssl
 
-from app.common import get_logger, Utils
+from .utils import Utils
+from .logger import get_logger
 logger = get_logger()
 
 class WebSocketClient:
