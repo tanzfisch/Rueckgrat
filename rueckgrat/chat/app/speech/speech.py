@@ -45,7 +45,7 @@ class Speech:
                 return        
 
             command = [sys.executable, str(speech_task_path), "--text", text, "--model", str(model_file_path)]
-            logger.debug(shlex.join(command))
+            logger.debug(f"run: {shlex.join(command)}")
             proc = subprocess.Popen(
                 command,
                 stdout=subprocess.DEVNULL,

@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.9.1
+-----
+
+- #42 fixed speech playback in standalone chat
+
 0.9.0
 -----
 

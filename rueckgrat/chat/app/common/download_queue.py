@@ -9,7 +9,6 @@ from pathlib import Path
 import requests
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Tuple
 
 from .logger import get_logger
 logger = get_logger()
