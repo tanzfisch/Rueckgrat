@@ -1,5 +1,6 @@
 services:
   caddy:
+    container_name: rueckgrat_caddy
     build:
       context: ./caddy
       dockerfile: Dockerfile
@@ -13,7 +14,7 @@ services:
     restart: unless-stopped
 
   hub:
-    container_name: hub
+    container_name: rueckgrat_hub
     build:
       context: ./hub
       dockerfile: Dockerfile
@@ -27,9 +28,9 @@ services:
     restart: unless-stopped
     stdin_open: true
     tty: true
-      
+
   node:
-    container_name: node
+    container_name: rueckgrat_node
     build:
       context: ./node
       dockerfile: Dockerfile
@@ -47,6 +48,7 @@ services:
       - "host.docker.internal:host-gateway"    
 
   chat:
+    container_name: rueckgrat_chat
     build:
       context: ./chat
       dockerfile: Dockerfile
@@ -73,7 +75,7 @@ services:
 
 
   llama-server:
-    container_name: llama-server
+    container_name: rueckgrat_llama_server
     image: ghcr.io/ggml-org/llama.cpp:server-${LLAMA_SERVER_SERVER}
     privileged: true
     volumes:

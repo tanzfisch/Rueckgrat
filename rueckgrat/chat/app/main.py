@@ -9,7 +9,7 @@ from PySide6.QtCore import QTimer
 import atexit
 from app.ui import LoginPage, ChatPage, ContactsPage, ConversationsPage, ProfilePage, ProfileWizard, SettingsPage, InitialSettingsPage
 from app.speech import Speech
-from app.utils.backend import Backend
+from app.utils.hub import Hub
 from app.utils.config import RueckgratConfig
 from app.utils import Paths
 import platform
@@ -59,7 +59,7 @@ class MainWindow(QMainWindow):
             return InitialSettingsPage(self.navigate)    
 
     def heartbeat(self):
-        if not Backend.check_health():
+        if not Hub.check_health():
             logger.error("system unhealthy")
 
     def navigate(self, page_name: str, **kwargs):
@@ -85,32 +85,52 @@ async def async_main(app, window):
     app.aboutToQuit.connect(stop_event.set)
     await stop_event.wait()
 
-    Backend.stop_websocket()
+    await Hub.stop_websocket()
 
-def get_image(image_filename) -> str:
+def get_image(image_filename: str) -> str:
+    if not image_filename:
+        logger.error(f"invalid parameter: {image_filename}")
+        return
+    
     try:
+        logger.debug(f"image_filename {image_filename}")
         image_path = Paths.get_image_path() / image_filename
+        logger.debug(f"image_path {image_path}")
         logger.debug(f"check {image_path}")
         if not image_path.exists():
             logger.debug(f"download {image_path}")
-            Backend.download_file(f"images/{image_filename}", Paths.get_image_path())
+            Hub.download_file(f"images/{image_filename}", Paths.get_image_path())
     except Exception as e:
         logger.error(f"failed to handle incomming image: {repr(e)}")
 
 def on_incomming_message(msg: dict):
-    if "image" in msg:
-        image = msg["image"]
-        get_image(image["filename"])
+    try:
+        if "image" in msg:
+            image = msg["image"]
+            filename = image["filename"]
+            if filename:
+                get_image(image["filename"])
+
+        if "error" in msg:
+            error = msg["error"]
+            logger.error(f"[{error["src"]}] {error["msg"]}")
+
+        if "warning" in msg:
+            warning = msg["warning"]
+            logger.warning(f"[{warning["src"]}] {warning["msg"]}")
+
+    except Exception as e:
+        logger.error(f"failed to handle incomming message {e}")
 
 def main():
     logger.debug(f"platform: {platform.system()}{' (inside docker)' if Utils.is_docker() else ''}")
     
     config = RueckgratConfig()
-    Backend.init(config)
+    Hub.init(config)
 
     truststore.inject_into_ssl()
     atexit.register(Speech.kill_current_speech)
-    atexit.register(Backend.shutdown)
+    atexit.register(Hub.shutdown)
 
     app = qasync.QApplication(sys.argv)
 
@@ -121,11 +141,11 @@ def main():
     window = MainWindow(config.has_config())
     window.show()
 
-    Backend.register_incomming_message(on_incomming_message)
+    Hub.register_incomming_message(on_incomming_message)
 
     qasync.run(async_main(app, window))
 
-    Backend.unregister_incomming_message(on_incomming_message)
+    Hub.unregister_incomming_message(on_incomming_message)
 
 if __name__ == "__main__":
     main()

@@ -1,6 +1,9 @@
+import json
 import os
+import asyncio
+
 from tqdm import tqdm
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,7 +14,7 @@ from app.utils import ModelRegistry, LLamaCppInterface, ComfyUIInterface, Cleanu
 
 from app.common import (
     get_logger, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse, 
-    ModelInfo, GetModelsResponse, InstallModelResponse, InstallModelRequest
+    ModelInfo, GetModelsResponse, InstallModelResponse, InstallModelRequest, MessageQueue
 )
 logger = get_logger()
 
@@ -163,3 +166,77 @@ def install_model(request: InstallModelRequest):
             status_code=500, 
             detail=f"Installation failed: {str(e)}"
         )
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+
+    closed = asyncio.Event()
+
+    async def safe_close(code: int = 1000):
+        if not closed.is_set():
+            closed.set()
+            try:
+                await websocket.close(code=code)
+            except RuntimeError:
+                # already closed at ASGI level
+                pass
+
+    # recieve from client
+    async def receiver():
+        try:
+            while not closed.is_set():
+                text = await websocket.receive_text()
+                data = json.loads(text)
+
+                if "chat" in data:
+                    chat_request = ChatRequestLlama(**data["chat"])
+                    app.state.llamacpp.chat(chat_request, lambda message: MessageQueue().send_data(message))
+                
+                else:                    
+                    logger.error(f"unknown request")
+                    MessageQueue().send_data({"error": "unknown request", "data": data})
+
+        except WebSocketDisconnect:
+            print("Client disconnected (receiver)")
+            await safe_close()
+
+        except Exception as e:
+            logger.error(f"receiver failure {repr(e)}")
+            await safe_close(code=1011)
+
+    # send to client
+    async def sender():
+        try:
+            while not closed.is_set():
+                message = MessageQueue().pop_message()
+                if message:
+                    try:
+                        await websocket.send_text(json.dumps(message))
+                    except RuntimeError:
+                        break
+                else:
+                    await asyncio.sleep(0.01)
+
+        except WebSocketDisconnect:
+            print("Client disconnected (sender)")
+            await safe_close()
+
+        except Exception as e:
+            logger.error(f"sender failure {repr(e)}")
+            await safe_close(code=1011)
+
+    receiver_task = asyncio.create_task(receiver())
+    sender_task = asyncio.create_task(sender())
+
+    done, pending = await asyncio.wait(
+        [receiver_task, sender_task],
+        return_when=asyncio.FIRST_EXCEPTION
+    )
+
+    await safe_close()
+
+    for task in pending:
+        task.cancel()
+
+    await asyncio.gather(*pending, return_exceptions=True)

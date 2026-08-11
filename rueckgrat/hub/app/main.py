@@ -1,3 +1,5 @@
+
+import uvicorn
 import json
 import random
 import asyncio
@@ -14,7 +16,7 @@ from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from app.utils import ChatDB, Infrastructure, ImageType, MessageQueue
+from app.utils import ChatDB, Infrastructure, ImageType
 from app.tools import ToolRegistry
 from app.jobs import JobQueue, MetaJob, AssistantImageJob, ContactGeneratorJob
 from argon2 import PasswordHasher
@@ -22,7 +24,7 @@ from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
-from app.common import get_logger, ChatRequest, GetMessagesRequest, Utils
+from app.common import get_logger, ChatRequest, GetMessagesRequest, MessageQueue
 logger = get_logger()
 
 @asynccontextmanager
@@ -30,6 +32,8 @@ async def lifespan(app: FastAPI):
     random.seed(time.time())
         
     app.state.infrastructure = Infrastructure()
+    await app.state.infrastructure.connect_nodes()
+
     db_path = "/hub/db/chat.db"
     app.state.db = ChatDB(db_path)
     app.state.job_queue = JobQueue()
@@ -321,7 +325,6 @@ async def download_file(file_path: str):
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
-########### websocket handling 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_current_user_ws)):
     await websocket.accept()
@@ -359,8 +362,19 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
 
                 if "chat" in data:
                     chat_request = ChatRequest(**data["chat"])
-                    job = MetaJob(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry)
-                    app.state.job_queue.add(job)
+
+                    if chat_request.content == "ping":
+                        MessageQueue().send_data({ 
+                            "chat": {
+                                "conversation_id": chat_request.conversation_id,
+                                "role": "assistant",
+                                "content": "pong",
+                                "tool_calls": [] 
+                            }
+                        })
+                    else:
+                        job = MetaJob(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry)
+                        app.state.job_queue.add(job)
                 elif "generate" in data:
                     generate = data["generate"]
                     if "generate_profile" in generate:
@@ -374,7 +388,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                 else:                    
                     logger.error(f"unknown request {data}")
                     await websocket.send_text(
-                        json.dumps({"status": "unknown request"})
+                        json.dumps({"error": "unknown request"})
                     )
 
         except WebSocketDisconnect:

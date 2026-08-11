@@ -362,7 +362,20 @@
     ],
     "install_path": "llm/supergemma4-26b-uncensored-fast-v2-Q4_K_M",
     "startup_parameters": ""
+  },
+
+  "Ternary-Bonsai-27B-Q2_0": {
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested",
+    "sources": [
+      "https://huggingface.co/prism-ml/Ternary-Bonsai-27B-gguf/resolve/main/Ternary-Bonsai-27B-Q2_0.gguf",
+      "https://huggingface.co/prism-ml/Ternary-Bonsai-27B-gguf/resolve/main/Ternary-Bonsai-27B-mmproj-Q8_0.gguf"
+    ],
+    "install_path": "llm/Ternary-Bonsai-27B-Q2_0",
+    "startup_parameters": ""
   }
+
 }
 
 

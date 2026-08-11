@@ -21,6 +21,8 @@ class ChatRequestLlama(BaseModel):
     seed: int
     max_new_tokens: int
     context_size: int
+    stream: bool = False
+    conversation_id: int = -1
 
 class ImageRequest(BaseModel):
     positive_prompt: str

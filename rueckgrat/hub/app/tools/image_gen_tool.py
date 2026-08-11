@@ -1,9 +1,8 @@
 from typing import Dict,  Any
 from .tool import Tool
 from app.jobs.requested_image_job import RequestedImageJob
-from app.utils.message_queue import MessageQueue
 
-from app.common import get_logger
+from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 class ImageGenTool(Tool):

@@ -611,6 +611,18 @@ class ChatDB:
 
         return False
 
+    def get_message_count_by_conversation(self, conversation_id: int):
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT COUNT(*) FROM messages WHERE conversation_id = ?
+                """, (conversation_id,))
+                return cursor.fetchone()[0]
+            except Exception as e:
+                logger.error(f"failed returning message count: {e}")
+                return 0
+
     def get_messages_by_conversation(self, conversation_id: int, max_messages: int):
         with self.get_connection() as conn:
             try:
@@ -674,6 +686,21 @@ class ChatDB:
             except Exception as e:
                 logger.error(f"updating message: {e}")
 
+        return False
+
+    def append_to_message(self, message_id: int, content: str) -> bool:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE messages 
+                    SET content = COALESCE(content, '') || ?
+                    WHERE id = ?
+                """, (content, message_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"appending to message: {e}")
         return False
 
     def add_attachment(self, message_id: int, file_name: str, file_url: str, file_type: str, file_size: int) -> int:

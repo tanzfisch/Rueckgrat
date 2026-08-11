@@ -29,3 +29,16 @@ echo "get caddy cert ..."
 curl -k https://localhost/health
 
 docker cp rueckgrat-caddy-1:/data/caddy/pki/authorities/local/root.crt ~/.ssh/caddy-root.crt
+
+
+
+
+
+##########################
+
+dev setup
+
+./install.sh -y --config rueckgrat/config/config_example.json --key ~/caddy_cert/rueckgrat-caddy.key --cert ~/caddy_cert/rueckgrat-caddy.cert
+
+./install.sh -y --host-config '{"addr":"192.168.2.39", "node":{"port":7346,"services":[{"type":"text_to_text", "name":"llama_server","port":8080,"model":"cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L"}]},"hub":{"port":14223},"chat":{}}' --key ~/caddy_cert/rueckgrat-caddy.key --cert ~/caddy_cert/rueckgrat-caddy.cert
+./install.sh -y --host-config '{"addr":"192.168.2.158","node":{"port":7346,"services":[{"type":"text_to_image","name":"ComfyUI","port":8188}]}}' --key ~/caddy_cert/rueckgrat-caddy.key --cert ~/caddy_cert/rueckgrat-caddy.cert

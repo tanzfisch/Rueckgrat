@@ -1,91 +1,61 @@
 from .job_queue import Job
-from .update_context_job import UpdateContextJob
 from ..utils.prompt_compiler import PromptCompiler
 from typing import Dict, Any
 import json
 import re
-import sys
 
 from app.common import get_logger, ChatRequest
 logger = get_logger()
 
 class ChatJob(Job):
-    def __init__(self, request: ChatRequest, db, infrastructure, tool_registry, tool_outputs = None):
+    def __init__(self, request: ChatRequest, db, infrastructure, callback=None, thinking_response = None):
         super().__init__()
         self.request = request
         self.db = db
         self.infrastructure = infrastructure
-        self.tool_registry = tool_registry
-        self.tool_outputs = tool_outputs
+        self.thinking_response = thinking_response
+        self.callback = callback
 
     def execute(self) -> None:
-        self.response = self._handle_chat_request(self.request)
+        try:            
+            contact = self.db.get_contact_by_id(self.request.contact_id)
+            conversation = self.db.get_conversation(self.request.conversation_id)
 
-    def result(self) -> Dict[str, Any]:
-        return self.response
-    
-    def _remove_code(self, text):
-        text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
-        text = re.sub(r"`.*?`", "", text)
-        return text.strip()
+            compiler = PromptCompiler(
+                contact=contact,
+                conversation=conversation,
+                user_name=self.request.name,
+                thinking=False,
+                tool_registry=None
+            )
 
-    def _update_conversation(self):
-        udate_context_job = UpdateContextJob(self.request, self.db, self.infrastructure)
-        self.add_sub_job(udate_context_job)
-        self.wait_for([udate_context_job])
-        new_context = udate_context_job.result()
-    
-        conversation = self.db.get_conversation(self.request.conversation_id)
-        conversation["title"] = new_context["topic"]
-        self.db.update_conversation(self.request.conversation_id, conversation["title"], json.dumps(new_context))
-
-    def _handle_chat_request(self, request: ChatRequest):        
-        try:
-            messages = self.db.get_messages_by_conversation(request.conversation_id, 10)
-
-            if not self.tool_outputs:
-                # check if this is the beginning of the conversation and create a new conversation context
-                if len(messages) < 2:
-                    self._update_conversation()
-
-            contact = self.db.get_contact_by_id(request.contact_id)
-            conversation = self.db.get_conversation(request.conversation_id)
-
-            compiler = PromptCompiler(contact, conversation, request.name, self.tool_registry if not self.tool_outputs else None)
             system_prompt, context_prompt = compiler.build_prompt()
 
-            payload = [{"role": "developer", "content": system_prompt}]
-            payload.append({"role": "developer", "content": context_prompt})
+            messages = [{"role": "developer", "content": system_prompt}]
+            if context_prompt:
+                messages.append({"role": "developer", "content": context_prompt})
             
-            for message in messages:
+            history = self.db.get_messages_by_conversation(self.request.conversation_id, 10)
+            for message in history:
                 content = message['content']
-                payload.append({"role": message["role"], "content": content})
+                messages.append({"role": message["role"], "content": content})
 
-            if self.tool_outputs:
+            if self.thinking_response:
                 logger.debug("adding tool outputs to chat query")
-                payload.append({"role": "developer", "content": self.tool_outputs})
-
-            size_in_bytes = sys.getsizeof(messages)
-            estimated_tokens = size_in_bytes / 4 * 1.25
-
-            response_content = self.infrastructure.chat(payload, request.temperature, request.conversation_id)
-            if response_content:
-                tool_calls, content = self.tool_registry.extract_tool_calls(response_content)
-                
-                self._update_conversation()
-                return {
-                    "conversation_id": request.conversation_id,
-                    "role": "assistant",
-                    "content": content,
-                    "tool_calls": tool_calls
-                }
-            else:
-                return {
-                    "conversation_id": request.conversation_id,
-                    "role": "error",
-                    "content": "failed to get chat response",
-                    "tool_calls": []
-                }
+                messages.append({"role": "developer", "content": self.thinking_response})
             
+            self.infrastructure.chat(
+                messages=messages,
+                temperature=self.request.temperature,
+                seed=self.request.conversation_id,
+                stream=True,
+                callback=self.callback
+            )
         except Exception as e:
             logger.error(f"failed to handle chat request {repr(e)}")
+
+    def result(self) -> Dict[str, Any]:
+        return None
+
+    def has_response(self) -> bool:
+        return False

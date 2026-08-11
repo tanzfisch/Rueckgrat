@@ -18,7 +18,7 @@ RUN mkdir -p /node/app/config && chown -R nodeuser:nodeuser /node/app/config
 USER nodeuser
 
 # Expose port
-EXPOSE 8000
+EXPOSE 7346
 
 ENTRYPOINT ["python", "-u", "-m", "uvicorn", "app.main:app"]
 CMD ["--host", "0.0.0.0", "--port", "7346"]
