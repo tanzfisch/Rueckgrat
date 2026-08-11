@@ -1,9 +1,8 @@
 from typing import Dict,  Any
 from .tool import Tool
 from app.jobs.assistant_image_job import AssistantImageJob
-from app.utils.message_queue import MessageQueue
 
-from app.common import get_logger
+from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 class TakePhotoTool(Tool):

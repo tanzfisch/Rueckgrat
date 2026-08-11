@@ -351,8 +351,6 @@ select_hosts_and_components() {
 
     echo "Select hosts and their configuration"
     
-    HUB_ADDR=""
-
     hosts=()
     while true; do
         echo ""
@@ -386,10 +384,6 @@ select_hosts_and_components() {
 
         if $INSTALL_HUB; then
             hub_json="\"hub\":{\"port\":$HUB_PORT}"
-            if [ -n "$HUB_ADDR" ]; then
-                echo "❌ Error: only one hub allowed"
-            fi
-            HUB_ADDR=$host_addr
         fi
 
         if $INSTALL_CHAT; then            
@@ -410,7 +404,7 @@ select_hosts_and_components() {
 
     CONFIG_FILE=$WORKING_DIR/rueckgrat/config/infrastructure.json
     printf -v hosts_json '[%s]' "$(IFS=,; echo "${hosts[*]}")"
-    hosts_json="{\"hub\": { \"addr\": \"$HUB_ADDR\" },\"hosts\":$hosts_json }"
+    hosts_json="{\"hosts\":$hosts_json }"
     echo "$hosts_json" | jq . > "$CONFIG_FILE"
     echo "💾 Saved config to $CONFIG_FILE"
 }
@@ -617,13 +611,12 @@ deploy_chat_docker() {
         exit 1
     fi
 
-    # TODO workarround until we decide how to pass the hub ip down to remote configs
-    if [ -z "$HUB_ADDR" ]; then
-        read_tty "Missing ip of hub (IP/hostname, empty=done): " ""
-        HUB_ADDR=$REPLY
+    read_tty "Choose hub to connect this chat to (IP/hostname, empty=done): " ""
+    HUB_ADDR=$REPLY
+    if [ -n "$HUB_ADDR" ]; then
+        validate_ip "$HUB_ADDR"
     fi
-
-    validate_ip $HUB_ADDR
+    
     sed -i "s/HUB_ADDR=.*/HUB_ADDR=$HUB_ADDR/" .env
 
     docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} chat || { echo "❌ Error: Docker compose build of chat failed."; popd; exit 1; }
@@ -817,11 +810,11 @@ deploy_components_remote() {
 
     trap 'ssh -O exit "${SSH_OPTS[@]}" "$host_addr" >/dev/null 2>&1 || true' EXIT
 
-    sshpass -p "$SUDO_PASSWORD" ssh "${SSH_OPTS[@]}" -o User="$SUDO_USER" -Nf "$host_addr" || { echo "❌ Error: SSH master failed"; return 1; }
+    sshpass -p "$SUDO_PASSWORD" ssh "${SSH_OPTS[@]}" -o User="$SUDO_USER" -Nf "$host_addr" || { echo "❌ Error: failed to connect with $host_addr"; return 1; }
 
     if $CLEAN_BUILD; then
         echo "Clean destination..."
-        ssh "${SSH_OPTS[@]}" "$host_addr" "rm -rf $remote_dir/*"
+        echo "$SUDO_PASSWORD" | ssh -tt "${SSH_OPTS[@]}" "$host_addr" "sudo rm -rf $remote_dir/*"
     fi
 
     echo "Copying files..."
@@ -844,10 +837,9 @@ deploy_components_remote() {
 # Usage: deploy_on_hosts
 # No arguments
 deploy_on_hosts() {
-    HUB_ADDR=$(jq -c '.hub.addr' "$CONFIG_FILE")
     host_configs=$(jq -c '.hosts[]' "$CONFIG_FILE")
     for host_config in $host_configs; do
-        deploy_components_remote "$host_config"
+        deploy_components_remote "$host_config"        
     done
 }
 
@@ -903,8 +895,7 @@ main() {
     readonly MODELS_DIR="$APP_DATA_DIR/models"
 
     get_info
-
-    HUB_ADDR=""
+    
     CONFIG_FILE=""
     VERBOSE=false
     DOCKER_PROGRESS_MODE="quiet"
@@ -925,7 +916,6 @@ main() {
                     exit 1
                 fi
                 CONFIG_FILE="$2"
-                YES=true
                 shift 2
                 ;;
             --host-config|-hc)
@@ -1005,7 +995,6 @@ main() {
     else
         print_header "🚀 Rückgrat Installer"
 
-        # TODO update order to ask for password as late as possible
         get_user_passwd
 
         setup_repository

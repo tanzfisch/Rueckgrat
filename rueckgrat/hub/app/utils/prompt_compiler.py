@@ -1,17 +1,19 @@
 import re
 from typing import Dict, Any, List
 from app.tools.tool_registry import ToolRegistry
+from datetime import datetime
 
 from app.common import get_logger, Utils
 logger = get_logger()
 
 class PromptCompiler:
-    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_name: str = None, tool_registry: ToolRegistry = None):
+    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_name: str = None, thinking: bool = False, tool_registry: ToolRegistry = None):
         self.contact = contact
         self.conversation = conversation
         self.user_name = user_name
         self.profile = contact.get("profile", {})
         self.tool_registry = tool_registry
+        self.thinking = thinking
 
         self.context = Utils.get_nested_value(conversation, ["context"], "")
 
@@ -91,6 +93,13 @@ OBJECTIVES:
 {chr(10).join(f"  - {s}" for s in secondary)}
 """.strip()
    
+    def _build_tools(self) -> str:
+        if self.tool_registry:
+            tools = self.tool_registry.get_tools_prompt()
+            return f"\n\nFollowing the available tools:\n\n{tools}"
+        else:
+            return ""
+
     def _build_context(self) -> str:
         location = Utils.get_nested_value(self.context, ["location"], "")
         topic = Utils.get_nested_value(self.context, ["topic"], "")
@@ -113,29 +122,39 @@ Topic: {topic}
 You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_body}
 """.strip()
 
-    def _build_tools(self) -> str:
-        if self.tool_registry:
-            return self.tool_registry.get_tools_prompt()
-        else:
-            return ""
-
     def _build_instructions(self) -> str:
         return """
 INSTRUCTIONS:
-* When a WEBSEARCH_RESULT section is provided, base your final answer solely on it. Do not invent or add any information. Answer concisely.
+* When a WEBSEARCH_RESULT section is provided, base your answer on it. Do not invent or add any information. Answer concisely.
 """
 
-    def build_prompt(self) -> str:
-        sections = [
-            self._build_identity(),
-            self._build_behavior(),
-            self._build_style(),
-            self._build_objectives(),
-            self._build_tools(),
-            self._build_instructions()
-        ]
+    def _build_thinking(self) -> str:
+        return """
+THINKING ONLY. Do NOT answer yet.
+Quickly break down query. Note key context/needs. Spot gaps, use tools if needed. Plan answer structure.
+Output tool call first if required, then short analysis + plan only. No final response.
+"""
+
+    def _build_date_time(self) -> str:
+        return f"Right now: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+    def build_prompt(self) -> tuple[str, str]:
+        sections = []
+
+        if self.thinking:
+            #sections.append(self._build_thinking())
+            sections.append(self._build_tools())
+            sections.append(self._build_date_time())
+            context_prompt = ""
+        else:
+            sections.append(self._build_identity())
+            sections.append(self._build_behavior())
+            sections.append(self._build_style())
+            sections.append(self._build_objectives())
+            sections.append(self._build_instructions())
+            sections.append(self._build_date_time())
+            context_prompt = self._build_context()
 
         system_prompt = "\n\n".join(sections)
-        context_prompt = self._build_context()
 
         return system_prompt, context_prompt

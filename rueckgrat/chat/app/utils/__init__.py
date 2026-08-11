@@ -1,6 +1,6 @@
-from .backend import Backend
+from .hub import Hub
 from .contact import Contact
 from .config import RueckgratConfig
 from .paths import Paths
 
-__all__ = ["Backend", "Contact", "RueckgratConfig", "Paths"]
+__all__ = ["Hub", "Contact", "RueckgratConfig", "Paths"]

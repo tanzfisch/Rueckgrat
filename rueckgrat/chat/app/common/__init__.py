@@ -5,6 +5,8 @@ from .common_types import (
     GetMessagesRequest, ModelInfo, GetModelsResponse, InstallModelRequest, InstallModelResponse
 )
 from .utils import Utils
+from .message_queue import MessageQueue
+from .websocket_client import WebSocketClient
 
 __all__ = [
     "get_logger", 
@@ -20,5 +22,7 @@ __all__ = [
     "ModelInfo", 
     "GetModelsResponse", 
     "InstallModelRequest", 
-    "InstallModelResponse"
+    "InstallModelResponse",
+    "MessageQueue",
+    "WebSocketClient"
 ]

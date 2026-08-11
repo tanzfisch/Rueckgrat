@@ -4,9 +4,8 @@ from .tool import Tool
 from .image_gen_tool import ImageGenTool
 from .take_photo_tool import TakePhotoTool
 from .websearch_tool import WebsearchTool
-from app.utils.message_queue import MessageQueue
 
-from app.common import get_logger, Utils
+from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
 
 class ToolRegistry:
@@ -73,5 +72,10 @@ class ToolRegistry:
                 except Exception as e:
                     logger.error(f"failed to extract tool calls {repr(e)}")
                     return None, None
+                
+            # remove json artifacts
+            cleaned_text = re.sub(r'```(?:json)?\s*\{[\s\S]*?\}\s*```', '', cleaned_text, flags=re.IGNORECASE).strip()
+            cleaned_text = re.sub(r"```.*?```", "", cleaned_text, flags=re.DOTALL)
+            cleaned_text = re.sub(r"`.*?`", "", cleaned_text)
             
             return tool_calls, cleaned_text

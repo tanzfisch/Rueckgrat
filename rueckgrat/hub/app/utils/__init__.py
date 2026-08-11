@@ -3,7 +3,6 @@ from .infrastructure import Infrastructure
 from .prompt_compiler import PromptCompiler
 from .contact_image_prompt_compiler import ContactImagePromptCompiler, ImageType
 from .generic_image_prompt_compiler import GenericImagePromptCompiler
-from .message_queue import MessageQueue
 
 __all__ = [
     "ChatDB", 
@@ -12,6 +11,5 @@ __all__ = [
     "ImageRequest", 
     "ContactImagePromptCompiler", 
     "ImageType", 
-    "GenericImagePromptCompiler",
-    "MessageQueue"
+    "GenericImagePromptCompiler"
 ]

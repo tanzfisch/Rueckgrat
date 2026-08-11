@@ -17,7 +17,7 @@ class LLamaCppInterface:
         response = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
         return think, response
 
-    def chat(self, request: ChatRequestLlama) -> ChatResponse:
+    def chat(self, request: ChatRequestLlama, callback=None) -> ChatResponse:
         payload = {
             "messages": request.messages,
             "temperature": request.temperature,
@@ -60,37 +60,71 @@ class LLamaCppInterface:
             "n_batch": 512,
 
             "num_experts_per_token": 2,
-            "stream": False
+            "stream": request.stream
         }
 
         headers = {
             "Content-Type": "application/json"
         }   
-
         try:
-            response = requests.post(
-                self.url,
-                json=payload,
-                headers=headers,
-                timeout=240
-            )
+            if request.stream:
+                logger.info("using stream")
+                if not callback:
+                    logger.error("need callback to run as stream")
+                    return ChatResponse(role="error", content="No callback")
 
-            response.raise_for_status()    
-
-            if response.status_code == 200:
-                content = response.json()["choices"][0]["message"]["content"]
-                think, response = self.extract_think_and_response(content)
-
-                return ChatResponse(
-                    role = "assistant",
-                    content = response,
-                    think = think
+                full_content = ""
+                with requests.post(self.url, json=payload, headers=headers, stream=True, timeout=240) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if line:
+                            line = line.decode('utf-8')
+                            if line.startswith("data: "):
+                                data = json.loads(line[6:])
+                                if data.get("choices"):
+                                    delta = data["choices"][0]["delta"].get("content", "")
+                                    if delta:
+                                        full_content += delta
+                                        response = {
+                                            "conversation_id": request.conversation_id,
+                                            "delta": delta
+                                        }
+                                        callback(json.dumps(response))
+                                    if data.get("choices", [{}])[0].get("finish_reason"):
+                                        break
+               
+                think, resp = self.extract_think_and_response(full_content)
+                response = {
+                    "conversation_id": request.conversation_id,               
+                    "response": resp,
+                    "thinking": think
+                }
+                callback(json.dumps(response))
+                return ChatResponse(role="assistant", content=resp, think=think)
+            
+            else:
+                response = requests.post(
+                    self.url,
+                    json=payload,
+                    headers=headers,
+                    timeout=240
                 )
 
-            return ChatResponse(role="error", content=f"llama.cpp error: {response.status_code} {response.reason}")
+                response.raise_for_status()
+
+                if response.status_code == 200:
+                    content = response.json()["choices"][0]["message"]["content"]
+                    think, response = self.extract_think_and_response(content)
+                    return ChatResponse(role = "assistant", content = response, think = think)
+
+                return ChatResponse(role="error", content=f"llama.cpp error: {response.status_code} {response.reason}")
+            
         except requests.exceptions.RequestException as e:
+            logger.error(f"Request failed: {str(e)}")
             return ChatResponse(role="error", content=f"Request failed: {str(e)}")
         except (KeyError, IndexError, json.JSONDecodeError) as e:
+            logger.error(f"Invalid response: {str(e)}")
             return ChatResponse(role="error", content=f"Invalid response: {str(e)}")
         except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
             return ChatResponse(role="error", content=f"Unexpected error: {str(e)}")
