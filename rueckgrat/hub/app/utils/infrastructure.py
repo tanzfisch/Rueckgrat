@@ -29,10 +29,9 @@ class StatusResult:
     nodes : list[ServerResult]
 
 class WebSocketClientNode(WebSocketClient):
-    def __init__(self, addr: str, port: int, type: str):
+    def __init__(self, addr: str, port: int):
         self.addr = addr
         self.port = port
-        self.type = type
         self.uri = f"ws://{self.addr}:{self.port}/ws"
         logger.debug(f"connecting to node at {self.uri}")
         super().__init__(self.uri)
@@ -49,7 +48,8 @@ class Infrastructure:
             data = json.load(f)
 
         self.hosts = data["hosts"]
-        self.nodes: dict[str, WebSocketClientNode] = {}
+        self.nodes: list[WebSocketClientNode] = []
+        self.node_by_type: dict[str, WebSocketClientNode] = {}
 
         self.download_queue = DownloadQueue()
 
@@ -57,21 +57,30 @@ class Infrastructure:
         for host in self.hosts:
             if "node" in host:
                 node = host["node"]
+                websocket_node = WebSocketClientNode(host["addr"], node["port"])
+                self.nodes.append(websocket_node)
+                await websocket_node.connect()
+                logger.debug(f"connecting with node {host['addr']}:{node['port']}")
+
                 if "services" in node:
                     services = node["services"]
                     for service in services:
-                        websocket_node = WebSocketClientNode(host["addr"], node["port"], service["type"])
-                        await websocket_node.connect()
-                        self.nodes[service["type"]] = websocket_node
-                        logger.debug(f"found {service['type']} service at {host['addr']}:{node['port']}")
+                        self.node_by_type[service["type"]] = websocket_node
+                        logger.debug(f"found service {service['type']} on node {host['addr']}:{node['port']}")
 
-        if not "text_to_text" in self.nodes:
+                if "modules" in node:
+                    modules = node["modules"]
+                    for module in modules:
+                        self.node_by_type[module["type"]] = websocket_node
+                        logger.debug(f"found module {module['type']} on node {host['addr']}:{node['port']}")  
+
+        if not "text_to_text" in self.node_by_type:
             logger.error("couldn't find text_to_text generator")
         else:
-            node = self.nodes["text_to_text"]
-            node.register_incomming_message(self._on_incomming_message)            
+            node = self.node_by_type["text_to_text"]
+            node.register_incomming_message(self._on_incomming_message)
 
-        if not "text_to_image" in self.nodes:
+        if not "text_to_image" in self.node_by_type:
             logger.warning("couldn't find text_to_image generator")        
 
     def get_status(self) -> StatusResult:
@@ -134,11 +143,11 @@ class Infrastructure:
         return self._download_file(url, target_filepath)
 
     def image(self, image_request: ImageRequest) -> str:
-        if not "text_to_image" in self.nodes:
+        if not "text_to_image" in self.node_by_type:
             logger.error("no text to image generator available")
             return None
         
-        node = self.nodes["text_to_image"]
+        node = self.node_by_type["text_to_image"]
         url_image_request = f"http://{node.addr}:{node.port}/image"
 
         try:
@@ -165,7 +174,7 @@ class Infrastructure:
         return str(filepath)
 
     def download(self, source_path: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
-        node = self.nodes["text_to_image"] # not sure about this. how do we know from which node to download?
+        node = self.node_by_type["text_to_image"] # not sure about this. how do we know from which node to download?
         url = f"http://{node.addr}:{node.port}/downloads{source_path}"
         if asynchronous:
             self.download_queue.add(
@@ -207,7 +216,7 @@ class Infrastructure:
 
             #logger.debug(f"sending query to llm:\n{Utils.pretty_print(chat_request.model_dump())}")
 
-            node = self.nodes["text_to_text"]
+            node = self.node_by_type["text_to_text"]
 
             if stream:
                 if not callback:
@@ -235,7 +244,7 @@ class Infrastructure:
         return None
 
     def get_model_url(self, model_name) -> Response:
-        node = self.nodes["text_to_text"] # we can use any node here
+        node = self.node_by_type["text_to_text"] # we can use any node here
         url = f"http://{node.addr}:{node.port}/models/{model_name}/url"
         logger.debug(f"get_model_url for {model_name} from {url}")
         

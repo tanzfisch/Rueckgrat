@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.10.0
+------
+
+- #36 replaced ComfyUI with directly using diffusers (see ImageGen)
+
 0.9.1
 -----
 

@@ -79,7 +79,7 @@ class ModelRegistry:
             else:
                 self._download_from_url(url, install_path, force_install)
 
-        return model_cfg if self.check_model_files(model_cfg) else None
+        return model_cfg if self.is_model_installed(model_cfg) else None
         
     def get_registry(self):
         return self.registry.copy()
@@ -109,6 +109,15 @@ class ModelRegistry:
         with open(self.registry_file, "w") as f:
             json.dump(self.registry, f, indent=2)
 
+    def get_safetensors(self, model_cfg) -> Path:
+        for url in model_cfg["sources"]:
+            filepath = self.base_dir / model_cfg["install_path"] / os.path.basename(url)
+            if filepath.suffix.lower() == ".safetensors":
+                return filepath
+
+        logger.error(f"model has no safetensors")
+        return Path()
+
     def get_model_size(self, model_cfg) -> int:
         result = 0
         for url in model_cfg["sources"]:
@@ -118,7 +127,7 @@ class ModelRegistry:
 
         return result
 
-    def check_model_files(self, model_cfg):
+    def is_model_installed(self, model_cfg):
         for url in model_cfg["sources"]:
             filepath = self.base_dir / model_cfg["install_path"] / os.path.basename(url)
             if not os.path.exists(filepath):

@@ -38,8 +38,8 @@ class AssistantImageJob(Job):
         positive_prompt, negative_prompt = compiler.build()
 
         models = {
-            "default": "DreamShaperXL_Turbo_V2-SFW.safetensors",
-            "nsfw-default": "lustifySDXLNSFW_ggwpV7.safetensors"
+            "default": "DreamShaperXL_Turbo_V2-SFW",
+            "nsfw-default": "lustifySDXLNSFW_ggwpV7"
         }    
         model = models[image_parameters.get("model", "default")]        
 
