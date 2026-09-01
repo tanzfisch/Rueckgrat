@@ -23,11 +23,10 @@
       "addr": "192.168.2.158",
       "node": {
         "port": 7346,
-        "services": [
+        "modules": [
           {
             "type": "text_to_image",
-            "name": "ComfyUI",
-            "port": 8188
+            "name": "image_gen"
           }
         ]
       }

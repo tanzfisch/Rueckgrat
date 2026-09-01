@@ -9,7 +9,8 @@ class LLamaCppInterface:
     def __init__(self, host: str, port: int):
         self.url = f"http://{host}:{port}/v1/chat/completions"
 
-        logger.debug(f"llama.cpp url: {self.url}")
+        logger.info(f"startup llama interface")
+        logger.info(f"llama.cpp url: {self.url}")
 
     def extract_think_and_response(self, content):
         match = re.search(r'<think>(.*?)</think>', content, re.DOTALL)
