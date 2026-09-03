@@ -51,7 +51,7 @@
     "sources": [
       "https://huggingface.co/boopyfloopy/lustifyXL_v7/resolve/main/lustifySDXLNSFW_ggwpV7.safetensors"
     ],
-    "install_path": "image_gen/safetensors",
+    "install_path": "image_gen/lustifySDXLNSFW_ggwpV7",
     "startup_parameters": ""
   },
   
@@ -62,7 +62,7 @@
     "sources": [
       "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_v2.safetensors"
     ],
-    "install_path": "image_gen/safetensors",
+    "install_path": "image_gen/DreamShaperXL_Turbo_v2",
     "startup_parameters": ""
   },
   "DreamShaperXL_Turbo_v2_1": {
@@ -72,7 +72,7 @@
     "sources": [
       "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_v2_1.safetensors"
     ],
-    "install_path": "image_gen/safetensors",
+    "install_path": "image_gen/DreamShaperXL_Turbo_v2_1",
     "startup_parameters": ""
   },
   "DreamShaperXL_Turbo_V2-SFW": {
@@ -82,7 +82,7 @@
     "sources": [
       "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_V2-SFW.safetensors"
     ],
-    "install_path": "image_gen/safetensors",
+    "install_path": "image_gen/DreamShaperXL_Turbo_V2-SFW",
     "startup_parameters": ""
   },
 
@@ -93,7 +93,7 @@
     "sources": [
       "https://huggingface.co/stabilityai/stable-diffusion-3.5-large/resolve/main/sd3.5_large.safetensors"
     ],
-    "install_path": "image_gen/safetensors",
+    "install_path": "image_gen/sd3.5_large",
     "startup_parameters": ""
   },
 
@@ -104,7 +104,7 @@
     "sources": [
       "https://huggingface.co/XLabs-AI/flux-dev-fp8/resolve/main/flux-dev-fp8.safetensors"
     ],
-    "install_path": "image_gen/safetensors",
+    "install_path": "image_gen/flux-dev-fp8",
     "startup_parameters": ""
   },
   "flux-dev": {
@@ -114,7 +114,7 @@
     "sources": [
       "https://huggingface.co/SicariusSicariiStuff/FLUX.1-dev/resolve/main/flux1-dev.safetensors"
     ],
-    "install_path": "image_gen/safetensors",
+    "install_path": "image_gen/flux-dev",
     "startup_parameters": ""
   },
 

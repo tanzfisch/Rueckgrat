@@ -19,15 +19,21 @@ ARG TORCH_BACKEND=cpu
 ENV USE_IMAGE_GEN=$INSTALL_IMAGE_GEN
 ENV TORCH_BACKEND=$TORCH_BACKEND
 
+ARG TORCH_CUDA_INDEX=cu128
+ARG TORCH_ROCM_INDEX=rocm6.3
+
 RUN --mount=type=cache,target=/root/.cache/pip \
     if [ "$INSTALL_IMAGE_GEN" = "true" ]; then \
       pip install -r requirements_image_gen.txt; \
       case "$TORCH_BACKEND" in \
-        rocm) pip install --force-reinstall --index-url https://download.pytorch.org/whl/rocm6.3 \
+        rocm) pip install --force-reinstall \
+                --index-url "https://download.pytorch.org/whl/${TORCH_ROCM_INDEX}" \
                 torch torchvision torchaudio ;; \
-        cuda) pip install --force-reinstall --index-url https://download.pytorch.org/whl/cu121 \
+        cuda) pip install --force-reinstall \
+                --index-url "https://download.pytorch.org/whl/${TORCH_CUDA_INDEX}" \
                 torch torchvision torchaudio ;; \
-        xpu)  pip install --force-reinstall --index-url https://download.pytorch.org/whl/xpu \
+        xpu)  pip install --force-reinstall \
+                --index-url https://download.pytorch.org/whl/xpu \
                 torch torchvision torchaudio ;; \
       esac; \
     fi

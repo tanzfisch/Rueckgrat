@@ -65,6 +65,11 @@ read_tty_s() {
     echo ""
 }
 
+# version_ge - true if $1 >= $2 (dotted versions)
+version_ge() {
+    [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]
+}
+
 detect_gpu_backend() {
     local vendor=""
     local pci
@@ -73,7 +78,9 @@ detect_gpu_backend() {
     GPU_INFO=$(lspci | grep -E 'VGA|3D|Display' | sed 's/.*: //' | xargs || echo 'None detected')
     NVIDIA_DRIVER=""
     NVIDIA_CUDA=""
+    NVIDIA_COMPUTE_CAP=""
     TORCH_CUDA_INDEX=""
+    TORCH_ROCM_INDEX=""
 
     if echo "$pci" | grep -qi '\[10de:' && { [ -e /dev/nvidia0 ] || command -v nvidia-smi >/dev/null; }; then
         vendor="nvidia"
@@ -101,6 +108,7 @@ detect_gpu_backend() {
     if [ "$vendor" = "nvidia" ] && command -v nvidia-smi >/dev/null; then
         NVIDIA_DRIVER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n1 | xargs)
         NVIDIA_CUDA=$(nvidia-smi | awk -F'CUDA Version: ' '/CUDA Version/ {print $2; exit}' | awk '{print $1}')
+        NVIDIA_COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n1 | xargs)
         case "$NVIDIA_CUDA" in
             12.8*|12.9*|13.*) TORCH_CUDA_INDEX=cu128 ;;
             12.6*|12.7*)      TORCH_CUDA_INDEX=cu126 ;;
@@ -111,7 +119,77 @@ detect_gpu_backend() {
         esac
     fi
 
+    if [ "$vendor" = "amd" ]; then
+        local gfx=""
+        if command -v rocminfo >/dev/null; then
+            gfx=$(rocminfo 2>/dev/null | awk '/Name: +gfx/{print $2; exit}')
+        fi
+        case "$gfx" in
+            gfx120*) TORCH_ROCM_INDEX=rocm6.4 ;;
+            gfx110*|gfx103*|gfx101*) TORCH_ROCM_INDEX=rocm6.3 ;;
+            *) TORCH_ROCM_INDEX=rocm6.3 ;;
+        esac
+    fi
+
     GPU_VENDOR="$vendor"
+
+    case "${GPU_VENDOR:-cpu}" in
+        nvidia) LLAMA_SERVER_BACKEND=cuda ;;
+        amd)    LLAMA_SERVER_BACKEND=rocm ;;
+        intel)  LLAMA_SERVER_BACKEND=intel ;;
+        *)      LLAMA_SERVER_BACKEND=cpu ;;
+    esac
+}
+
+# check_llama_server_backend - fail if host cannot run official server-${backend} image
+# Usage: check_llama_server_backend [backend]
+check_llama_server_backend() {
+    local backend="${1:-${LLAMA_SERVER_BACKEND:-cpu}}"
+    local image="ghcr.io/ggml-org/llama.cpp:server-${backend}"
+
+    case "$backend" in
+        cuda)
+            if ! command -v nvidia-smi >/dev/null; then
+                echo "❌ Error: $image needs nvidia-smi (NVIDIA driver)"
+                exit 1
+            fi
+            if [ ! -e /dev/nvidia0 ]; then
+                echo "❌ Error: $image needs /dev/nvidia0"
+                exit 1
+            fi
+            # official server-cuda is CUDA 12.8 → Linux driver >= 570
+            if ! version_ge "${NVIDIA_DRIVER:-0}" "570"; then
+                echo "❌ Error: $image needs NVIDIA driver >= 570 (host: ${NVIDIA_DRIVER:-unknown}, CUDA ${NVIDIA_CUDA:-unknown})"
+                echo "   GeForce cannot use CUDA forward-compat. Upgrade the driver."
+                exit 1
+            fi
+            if ! version_ge "${NVIDIA_CUDA:-0}" "12.8"; then
+                echo "❌ Error: $image needs driver CUDA >= 12.8 (host nvidia-smi: ${NVIDIA_CUDA:-unknown})"
+                exit 1
+            fi
+            if [ -n "${NVIDIA_COMPUTE_CAP:-}" ] && ! version_ge "$NVIDIA_COMPUTE_CAP" "7.5"; then
+                echo "❌ Error: $image is not reliable on compute cap $NVIDIA_COMPUTE_CAP (need >= 7.5, Turing+)"
+                exit 1
+            fi
+            ;;
+        rocm)
+            if [ ! -e /dev/kfd ]; then
+                echo "❌ Error: $image needs AMD KFD (/dev/kfd)"
+                exit 1
+            fi
+            ;;
+        intel|sycl) # TODO intel was not tested
+            if [ ! -e /dev/dri ]; then
+                echo "❌ Error: $image needs /dev/dri"
+                exit 1
+            fi
+            ;;
+        cpu) ;;
+        *)
+            echo "❌ Error: unknown LLAMA_SERVER_BACKEND='$backend' (cuda|rocm|intel|cpu)"
+            exit 1
+            ;;
+    esac
 }
 
 # get_info - collect some generall information
@@ -158,6 +236,10 @@ print_info_block() {
         echo "NVIDIA driver  ${NVIDIA_DRIVER:----}"
         echo "CUDA (driver)  ${NVIDIA_CUDA:----}"
         echo "Torch CUDA     ${TORCH_CUDA_INDEX:----}"
+    fi
+
+    if [ "${GPU_VENDOR:-}" = "amd" ]; then
+        echo "Torch ROCM     ${TORCH_ROCM_INDEX:----}"
     fi
 
     echo ""
@@ -309,9 +391,12 @@ install_docker() {
 install_nvidia_toolkit() {
     [ "${GPU_VENDOR:-}" = "nvidia" ] || return 0
 
-    if docker info 2>/dev/null | grep -qiE 'Runtimes:.*nvidia'; then
-        echo "✅ NVIDIA container toolkit already configured"
-        return 0
+    if command -v nvidia-ctk >/dev/null \
+        && command -v nvidia-container-cli >/dev/null \
+        && nvidia-container-cli info >/dev/null 2>&1 \
+        && docker run --rm --gpus all alpine ls /dev/nvidia0 >/dev/null 2>&1; then
+            echo "✅ NVIDIA container toolkit already configured"
+            return 0
     fi
 
     if ! command -v nvidia-smi >/dev/null 2>&1; then
@@ -701,7 +786,8 @@ deploy_node() {
     if [ "$INSTALL_IMAGE_GEN" = true ]; then
         BUILD_ARGS+=(--build-arg INSTALL_IMAGE_GEN=true)
         BUILD_ARGS+=(--build-arg "TORCH_BACKEND=${TORCH_BACKEND:-cpu}")
-        BUILD_ARGS+=(--build-arg "TORCH_CUDA_INDEX=${TORCH_CUDA_INDEX:-cu121}")
+        BUILD_ARGS+=(--build-arg "TORCH_CUDA_INDEX=${TORCH_CUDA_INDEX:-cu128}")
+        BUILD_ARGS+=(--build-arg "TORCH_ROCM_INDEX=${TORCH_ROCM_INDEX:-rocm6.3}")
     fi
 
     if [ "$INSTALL_LLAMA" = true ]; then
@@ -709,21 +795,52 @@ deploy_node() {
     fi
 
     case "${GPU_VENDOR:-cpu}" in
-        amd)    COMPOSE_FILES+=(-f compose.amd.yml) ;;
+        amd)
+            COMPOSE_FILES+=(-f compose.amd.yml)
+            HOST_AMD_VIDEO=$(getent group video | cut -d: -f3)
+            HOST_AMD_RENDER=$(getent group render | cut -d: -f3)
+            [ -n "$HOST_AMD_VIDEO" ] && [ -n "$HOST_AMD_RENDER" ] \
+              || { echo "❌ Error: host video/render GIDs not found"; exit 1; }
+            export HOST_AMD_VIDEO HOST_AMD_RENDER
+            ;;
         nvidia) COMPOSE_FILES+=(-f compose.nvidia.yml) ;;
-    esac    
+    esac
 
     echo "   vendor=${GPU_VENDOR:-cpu} backend=${TORCH_BACKEND:-cpu} cuda_index=${TORCH_CUDA_INDEX:-n/a}"
     echo "   compose=${COMPOSE_FILES[*]}"
-    echo "   build_args=${BUILD_ARGS[*]:-none}"    
+    echo "   build_args=${BUILD_ARGS[*]:-none}"
+    [ "${GPU_VENDOR:-}" = "amd" ] && echo "   amd_gids=video:$HOST_AMD_VIDEO render:$HOST_AMD_RENDER"
 
     pushd rueckgrat > /dev/null
+    if [ "${GPU_VENDOR:-}" = "amd" ]; then
+        set_env_value HOST_AMD_VIDEO "$HOST_AMD_VIDEO"
+        set_env_value HOST_AMD_RENDER "$HOST_AMD_RENDER"
+    fi
     docker compose --progress=$DOCKER_PROGRESS_MODE "${COMPOSE_FILES[@]}" \
         build ${NO_CACHE:-} "${BUILD_ARGS[@]}" node \
         || { echo "❌ Error: Docker compose build of node failed."; popd; exit 1; }
     docker compose "${COMPOSE_FILES[@]}" up -d node \
         || { echo "❌ Error: Docker compose up of node failed."; popd; exit 1; }
     popd > /dev/null
+}
+
+# set_env_value - Set or replace KEY=VALUE in a .env file
+# Usage: set_env_value <key> <value> [file]
+# Args:
+#   $1 - Key
+#   $2 - Value
+#   $3 - File (default: .env)
+set_env_value() {
+    local key="$1"
+    local value="$2"
+    local file="${3:-.env}"
+    mkdir -p "$(dirname "$file")"
+    touch "$file"
+    if grep -q "^${key}=" "$file"; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+    else
+        echo "${key}=${value}" >> "$file"
+    fi
 }
 
 # deploy_llama - Download/select LLM model and start llama-server
@@ -735,13 +852,38 @@ deploy_llama() {
 
     print_section
     echo "🐋 llama-server..."
-    echo "running $LLM_MODEL"
-    
+    echo "running $LLM_MODEL on $LLAMA_SERVER_BACKEND"
+
+    check_llama_server_backend "$LLAMA_SERVER_BACKEND"
+
+    COMPOSE_FILES=(-f compose.yml)
+    case "${GPU_VENDOR:-cpu}" in
+        amd)
+            COMPOSE_FILES+=(-f compose.amd.yml)
+            HOST_AMD_VIDEO=$(getent group video | cut -d: -f3)
+            HOST_AMD_RENDER=$(getent group render | cut -d: -f3)
+            [ -n "$HOST_AMD_VIDEO" ] && [ -n "$HOST_AMD_RENDER" ] \
+              || { echo "❌ Error: host video/render GIDs not found"; exit 1; }
+            export HOST_AMD_VIDEO HOST_AMD_RENDER
+            ;;
+        nvidia) COMPOSE_FILES+=(-f compose.nvidia.yml) ;;
+    esac
+
+    echo "   vendor=${GPU_VENDOR:-cpu} backend=$LLAMA_SERVER_BACKEND"
+    echo "   compose=${COMPOSE_FILES[*]}"
+    [ "${GPU_VENDOR:-}" = "amd" ] && echo "   amd_gids=video:$HOST_AMD_VIDEO render:$HOST_AMD_RENDER"
+
     pushd rueckgrat > /dev/null
     GGUF_FILE_PATH="/models/llm/$LLM_MODEL/$LLM_MODEL.gguf"
-    sed -i "s|^LLAMA_SERVER_MODEL=.*|LLAMA_SERVER_MODEL=$GGUF_FILE_PATH|" .env
-    docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} llama-server
-    docker compose up -d llama-server
+    set_env_value LLAMA_SERVER_MODEL "$GGUF_FILE_PATH"
+    set_env_value LLAMA_SERVER_BACKEND "$LLAMA_SERVER_BACKEND"
+    if [ "${GPU_VENDOR:-}" = "amd" ]; then
+        set_env_value HOST_AMD_VIDEO "$HOST_AMD_VIDEO"
+        set_env_value HOST_AMD_RENDER "$HOST_AMD_RENDER"
+    fi    
+
+    docker compose --progress=$DOCKER_PROGRESS_MODE "${COMPOSE_FILES[@]}" build ${NO_CACHE:-} llama-server || { echo "❌ Error: Docker compose build of llama-server failed."; popd; exit 1; }
+    docker compose "${COMPOSE_FILES[@]}" up -d llama-server || { echo "❌ Error: Docker compose up of llama-server failed."; popd; exit 1; }
     popd > /dev/null
 }
 
@@ -766,7 +908,7 @@ deploy_chat_docker() {
         validate_ip "$HUB_ADDR"
     fi
     
-    sed -i "s/HUB_ADDR=.*/HUB_ADDR=$HUB_ADDR/" .env
+    set_env_value HUB_ADDR "$HUB_ADDR"
 
     docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} chat || { echo "❌ Error: Docker compose build of chat failed."; popd; exit 1; }
     docker compose up -d chat || { echo "❌ Error: Docker compose up of chat failed."; popd; exit 1; }
@@ -805,13 +947,11 @@ check_docker_group() {
     fi
 }
 
-# deploy_components - Local component installer
-# Usage: deploy_components "hub,node,llama,chat:docker"
-# Args:
-#   $1 - host configuration string
-deploy_components() {
-    local host_config="$1"
-    [[ -z "$host_config" ]] && { echo "❌ Error: host_config is empty" >&2; exit 1; }
+# parse_host_config - set INSTALL_* flags from one host JSON object
+# Usage: parse_host_config '<host json>'
+parse_host_config() {
+    local host_config="$1"    
+    [[ -n "$host_config" ]] || { echo "❌ Error: host_config is empty" >&2; exit 1; }
 
     INSTALL_CHAT=false
     INSTALL_CHAT_DOCKER=false
@@ -820,7 +960,66 @@ deploy_components() {
     INSTALL_LLAMA=false
     INSTALL_IMAGE_GEN=false
     INSTALL_LLAMA_MODEL=""
+    HUB_PORT=""
+    NODE_PORT=""
+    CHAT_DOCKER_PORT=""
+    LLAMA_SERVER_PORT=""
+
+    if echo "$host_config" | jq -e '.hub' >/dev/null; then
+        INSTALL_HUB=true
+        HUB_PORT=$(echo "$host_config" | jq -r '.hub.port // empty')
+    fi
+
+    if echo "$host_config" | jq -e '.chat' >/dev/null; then
+        INSTALL_CHAT=true
+    fi
+
+    if echo "$host_config" | jq -e '.chat_docker' >/dev/null; then
+        INSTALL_CHAT_DOCKER=true
+        CHAT_DOCKER_PORT=$(echo "$host_config" | jq -r '.chat_docker.port // empty')
+    fi
+
+    if echo "$host_config" | jq -e '.node' >/dev/null; then
+        INSTALL_NODE=true
+        NODE_PORT=$(echo "$host_config" | jq -r '.node.port // empty')
+        # todo use NODE_PORT
+
+        local item type name
+        for item in $(echo "$host_config" | jq -c '.node.services // [] | .[]'); do
+            type=$(echo "$item" | jq -r '.type')
+            name=$(echo "$item" | jq -r '.name')
+            if [[ "$type" == "text_to_text" || "$name" == "llama_server" || "$name" == "llama-server" ]]; then
+                INSTALL_LLAMA=true
+                INSTALL_LLAMA_MODEL=$(echo "$item" | jq -r '.model // empty')
+                LLAMA_SERVER_PORT=$(echo "$item" | jq -r '.port // empty')
+            fi
+            if [[ "$type" == "text_to_image" || "$name" == "image_gen" ]]; then
+                INSTALL_IMAGE_GEN=true
+            fi
+        done
+        for item in $(echo "$host_config" | jq -c '.node.modules // [] | .[]'); do
+            type=$(echo "$item" | jq -r '.type')
+            name=$(echo "$item" | jq -r '.name')
+            if [[ "$type" == "text_to_image" || "$name" == "image_gen" ]]; then
+                INSTALL_IMAGE_GEN=true
+            fi
+        done
+    fi
+}
+
+# deploy_components - Local component installer
+# Usage: deploy_components "hub,node,llama,chat:docker"
+# Args:
+#   $1 - host configuration string
+deploy_components() {
+    local host_config="$1"
+
+    print_section
+    echo "deploy components..."
     
+    echo "reading config $host_config"
+    parse_host_config "$host_config"
+
     # pretend to be in build dir
     CURRENT_DIR=$(pwd)
     WORKING_DIR=$CURRENT_DIR
@@ -834,70 +1033,15 @@ deploy_components() {
     fi
 
     check_docker_group
-
     volume_cleanup
-
     gen_caddy_cert
-
-    print_section
-    echo "deploy components..."
-    echo "reading config"
-
-    if echo "$host_config" | jq -e '.hub' > /dev/null; then
-        INSTALL_HUB=true
-        HUB_PORT=$(echo "$host_config" | jq -r '.hub.port')
-    fi    
-
-    if echo "$host_config" | jq -e '.node' > /dev/null; then
-        INSTALL_NODE=true
-        NODE_PORT=$(echo "$host_config" | jq -r '.node.port')
-        # todo use NODE_PORT
-
-        services=$(echo "$host_config" | jq -c '.node.services // []')
-
-        for s in $(echo "$services" | jq -c '.[]'); do
-            type=$(echo "$s" | jq -r '.type')
-            name=$(echo "$s" | jq -r '.name')
-            port=$(echo "$s" | jq -r '.port')
-            # todo use service port
-
-            if [[ "$type" == "text_to_text" ]]; then
-                INSTALL_LLAMA=true
-                INSTALL_LLAMA_MODEL=$(echo "$s" | jq -r '.model')
-            fi
-        done
-
-        modules=$(echo "$host_config" | jq -c '.node.modules // []')
-
-        for m in $(echo "$modules" | jq -c '.[]'); do
-            type=$(echo "$m" | jq -r '.type')
-            name=$(echo "$m" | jq -r '.name')
-
-            if [[ "$type" == "text_to_image" && "$name" == "image_gen" ]]; then
-                INSTALL_IMAGE_GEN=true
-            fi
-        done
-    fi
-
-    if echo "$host_config" | jq -e '.chat' > /dev/null; then
-        INSTALL_CHAT=true
-    fi
-
-    if echo "$host_config" | jq -e '.chat_docker' > /dev/null; then
-        INSTALL_CHAT_DOCKER=true
-        CHAT_DOCKER_PORT=$(echo "$host_config" | jq -r '.chat_docker.port')
-        # todo use chat port
-    fi
-
     prep_app_data_dir
 
     echo "deploy..."
 
     if $INSTALL_HUB || $INSTALL_NODE; then
         install_dependencies curl
-        install_docker    
-
-        [ "$INSTALL_IMAGE_GEN" = true ] && [ "$GPU_VENDOR" = "nvidia" ] && install_nvidia_toolkit
+        install_docker            
     fi
 
     if $INSTALL_HUB; then
@@ -906,6 +1050,10 @@ deploy_components() {
     fi
 
     if $INSTALL_NODE; then
+        if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_LLAMA" == true ]]; then
+            install_nvidia_toolkit
+        fi
+
         deploy_node
 
         if $INSTALL_LLAMA; then
@@ -1209,4 +1357,6 @@ main() {
     fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
