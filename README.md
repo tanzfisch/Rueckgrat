@@ -1,10 +1,8 @@
 # <img src="logo.png" width="50" alt="Logo">ückgrat
 
-**AI chat frontend & backend** — focused on personal, private companion apps.
+AI chat frontend & backend. The purpose is evolving. Currently the main focus is a **private, local-first AI companion**.
 
-The purpose is evolving. Currently the main focus is a **private, local-first AI companion**.
-
-**Status**: Early stage. Do not use in production. 
+**Status**: Early stage. Do not use in production.
  * many features still missing
  * instability expected
  * Author has no clue about auth, cert and caddy. Could use some help here to get this right.
@@ -15,10 +13,11 @@ The purpose is evolving. Currently the main focus is a **private, local-first AI
 Everything is in its early stages. Don't expect too much and mostly the quality depends on the models you run underneath
 
 - all python based
-- full Linux support (Chat client only for Windows)
+- full Linux support (tested only on Debian)
+- only native chat client on Windows supported
 - In-chat image generation on demand
 - AI self-visualization and character-aware image generation
-- Chat with any locally installed LLM
+- Chat with locally installed LLM
 - Client-side text-to-speech using Piper (subject to change)
 - code highlighting
 - Tools 
@@ -42,9 +41,7 @@ For planned features, check the [Issues](https://github.com/tanzfisch/Rueckgrat/
 
 ### Linux
 
-The easiest way to install Rueckgrat on Linux is using the installer script.
-
-*Note:* The installer requires you to have sudo access on all machines you want to install with using the same username. 
+Install Rueckgrat on Linux using the following commands
 
 ```bash
 wget https://raw.githubusercontent.com/tanzfisch/Rueckgrat/master/install.sh
@@ -52,15 +49,26 @@ chmod +x install.sh
 ./install.sh
 ```
 
-Or clone the repo first and run:
+The installer supports multi-host deployment, component selection (Chat native/Docker, Hub, Node, llama-server), clean builds, and all major distros. It will install and run all selected options except the native chat client.
+
+*Note:* The installer requires you to have sudo access on all machines you want to install with using the same username. 
+
+To launch the native client manually:
+
+```bash
+cd rueckgrat/chat
+./run.sh
+```
+
+##### Alternative methods of installation:
+
+First clone and then run install
 
 ```bash
 git clone https://github.com/tanzfisch/Rueckgrat.git
 cd Rueckgrat
 ./install.sh
 ```
-
-The installer supports multi-host deployment, component selection (Chat native/Docker, Hub, Node, llama-server), clean builds, and all major distros via Docker/Caddy.
 
 Alternatively it can be started using a config file like so. This file can be created ussing the installer it self. Just follow the instructions until the point where it recaps your install instructions. The config file then can be found at rueckgrat/config/infrastructure.json
 
@@ -81,11 +89,16 @@ cd Rueckgrat\chat
 
 # Development
 
-For local development it is ideal to shortcut the installer and go straight for instlling one host directly. This allows for an in code installation so when looking at error logs the path points to the code and not an installed copy.
+For local development this is the recommended workflow.
 
-```bash
-./install.sh --host-config '{ "addr": "192.168.2.39", "node": { "port": 7346, "services": [ { "type":"text_to_text", "name": "llama-server", "port": 8080, "model": "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L" } ] }, "hub": { "port": 14223 }, "chat": {}, "chat_docker": { "port": "3001" } }'
-```
+* Install once as described above (note that this creates a config file `infrastructure.json`).
+* make changes to code
+* optionally run `./install.sh -s` to sync the local changes to all remote machines based on `infrastructure.json`
+* run `./dev.sh` on each machine to launch all docker containers based on the configuration in `infrastructure.json`
+
+# want to use other models
+
+Edit rueckgrat/node/data/registry.json in order to add more models to the system. Follow the existing entries as examples.
 
 # Troubleshoot & FAQ
 
@@ -106,4 +119,3 @@ No log file. Chat writes directly to stdout.
 🎊 **spychodelics** 🚀
 
 👶 **Naomi** 🍼
-3001

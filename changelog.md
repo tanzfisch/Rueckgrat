@@ -6,6 +6,7 @@ Changelog
 
 - #36 replaced ComfyUI with directly using diffusers (see ImageGen)
 - #49 fixed issues when running on different hardware. generally amd and nvidia are supported. Intel is not since I don't have intel GPUs
+- #50 replaced .env.example with code writing .env directly
 
 0.9.1
 -----

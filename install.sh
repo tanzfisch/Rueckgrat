@@ -502,7 +502,7 @@ setup_repository() {
 
     WORKING_DIR=$(pwd)
 
-    cp -f "$WORKING_DIR/rueckgrat/.env.example" "$WORKING_DIR/rueckgrat/.env"
+    write_default_env
 }
 
 service_json() {
@@ -737,6 +737,7 @@ deploy_hub() {
     print_section
     echo "🐋 hub & caddy..."
     pushd rueckgrat > /dev/null
+    docker compose stop hub caddy 2>/dev/null || true
     docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} hub caddy || { echo "❌ Error: Docker compose build of hub & cdaddy failed."; popd; exit 1; }
     docker compose up -d hub caddy || { echo "❌ Error: Docker compose up of hub & cdaddy failed."; popd; exit 1; }
     popd > /dev/null
@@ -816,6 +817,8 @@ deploy_node() {
         set_env_value HOST_AMD_VIDEO "$HOST_AMD_VIDEO"
         set_env_value HOST_AMD_RENDER "$HOST_AMD_RENDER"
     fi
+
+    docker compose "${COMPOSE_FILES[@]}" stop node 2>/dev/null || true
     docker compose --progress=$DOCKER_PROGRESS_MODE "${COMPOSE_FILES[@]}" \
         build ${NO_CACHE:-} "${BUILD_ARGS[@]}" node \
         || { echo "❌ Error: Docker compose build of node failed."; popd; exit 1; }
@@ -833,7 +836,7 @@ deploy_node() {
 set_env_value() {
     local key="$1"
     local value="$2"
-    local file="${3:-.env}"
+    local file="${3:-$WORKING_DIR/rueckgrat/.env}"
     mkdir -p "$(dirname "$file")"
     touch "$file"
     if grep -q "^${key}=" "$file"; then
@@ -874,7 +877,7 @@ deploy_llama() {
     [ "${GPU_VENDOR:-}" = "amd" ] && echo "   amd_gids=video:$HOST_AMD_VIDEO render:$HOST_AMD_RENDER"
 
     pushd rueckgrat > /dev/null
-    GGUF_FILE_PATH="/models/llm/$LLM_MODEL/$LLM_MODEL.gguf"
+    GGUF_FILE_PATH="$CONTAINER_MODELS_DIR/llm/$LLM_MODEL/$LLM_MODEL.gguf"
     set_env_value LLAMA_SERVER_MODEL "$GGUF_FILE_PATH"
     set_env_value LLAMA_SERVER_BACKEND "$LLAMA_SERVER_BACKEND"
     if [ "${GPU_VENDOR:-}" = "amd" ]; then
@@ -882,6 +885,7 @@ deploy_llama() {
         set_env_value HOST_AMD_RENDER "$HOST_AMD_RENDER"
     fi    
 
+    docker compose "${COMPOSE_FILES[@]}" stop llama-server 2>/dev/null || true
     docker compose --progress=$DOCKER_PROGRESS_MODE "${COMPOSE_FILES[@]}" build ${NO_CACHE:-} llama-server || { echo "❌ Error: Docker compose build of llama-server failed."; popd; exit 1; }
     docker compose "${COMPOSE_FILES[@]}" up -d llama-server || { echo "❌ Error: Docker compose up of llama-server failed."; popd; exit 1; }
     popd > /dev/null
@@ -935,7 +939,7 @@ deploy_chat_native() {
 prep_app_data_dir() {
     echo "prep /var/lib/Rueckgrat ..."
     echo "$SUDO_PASSWORD" | sudo -S mkdir -p $APP_DATA_DIR
-    echo "$SUDO_PASSWORD" | sudo -S mkdir -p $MODELS_DIR
+    echo "$SUDO_PASSWORD" | sudo -S mkdir -p $HOST_MODELS_DIR
     echo "$SUDO_PASSWORD" | sudo -S chown -R root:root $APP_DATA_DIR
     echo "$SUDO_PASSWORD" | sudo -S chmod -R 777 $APP_DATA_DIR
 }
@@ -1007,6 +1011,35 @@ parse_host_config() {
     fi
 }
 
+write_default_env() {
+    [ -f "$WORKING_DIR/rueckgrat/.env" ] && return
+
+    # hub hostname
+    set_env_value HUB_HOST "rueckgrat.hub"
+    set_env_value HUB_ADDR "127.0.0.1"
+
+    # models that work with Rückgrat (tested with 24GB vram)
+    # cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L (autor's preffered option)
+    # Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-ggml-model-Q3_K
+    # NousResearch_Hermes-4.3-36B-Q4_K_S
+    # Huihui-Qwen3.6-27B-abliterated-ggml-model-Q5_K (had issues with json generation, maybe ran out of mem, unclear)
+    # Huihui-Qwen3.6-27B-abliterated-ggml-model-Q4_K
+    # dolphin-2.9.1-yi-1.5-34b-Q4_K_M (very fast 24GB a bit too tight)
+    set_env_value LLAMA_SERVER_MODEL "$CONTAINER_MODELS_DIR/llm/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L.gguf"
+
+    # max context in tokens
+    set_env_value LLAMA_SERVER_MAX_CONTEXT 4096
+
+    # GPU layers
+    set_env_value LLAMA_SERVER_GPU_LAYERS -1 # -1 means all layers run on GPU
+
+    # llama-server port
+    set_env_value LLAMA_SERVER_PORT 8080
+
+    # llama-server backend ie. rocm, cuda, intel
+    set_env_value LLAMA_SERVER_BACKEND rocm
+}
+
 # deploy_components - Local component installer
 # Usage: deploy_components "hub,node,llama,chat:docker"
 # Args:
@@ -1028,9 +1061,7 @@ deploy_components() {
     CADDY_KEY="$CADDY_DIR/rueckgrat-caddy.key"
     CADDY_CERT="$CADDY_DIR/rueckgrat-caddy.cert"
 
-    if [ ! -f "$WORKING_DIR/rueckgrat/.env" ]; then
-        cp "$WORKING_DIR/rueckgrat/.env.example" "$WORKING_DIR/rueckgrat/.env"
-    fi
+    write_default_env
 
     check_docker_group
     volume_cleanup
@@ -1210,14 +1241,15 @@ sync_on_hosts() {
     done < <(jq -c '.hosts[]' "$CONFIG_FILE")
 }
 
-main() {   
-    readonly HUB_PORT_DEFAULT=14223
-    readonly NODE_PORT_DEFAULT=7346
-    readonly CHAT_DOCKER_PORT_DEFAULT=3001
-    readonly LLAMA_SERVER_PORT_DEFAULT=8080
-    readonly APP_DATA_DIR=/var/lib/Rueckgrat
-    readonly MODELS_DIR="$APP_DATA_DIR/models"
+readonly CONTAINER_MODELS_DIR="/models"
+readonly HUB_PORT_DEFAULT=14223
+readonly NODE_PORT_DEFAULT=7346
+readonly CHAT_DOCKER_PORT_DEFAULT=3001
+readonly LLAMA_SERVER_PORT_DEFAULT=8080
+readonly APP_DATA_DIR=/var/lib/Rueckgrat
+readonly HOST_MODELS_DIR="$APP_DATA_DIR/models"
 
+main() {   
     export DOCKER_BUILDKIT=1
     export COMPOSE_DOCKER_CLI_BUILD=1
 
