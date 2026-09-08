@@ -1,4 +1,5 @@
 import torch
+import gc
 import os
 from pathlib import Path
 from diffusers import FluxPipeline, FluxTransformer2DModel, StableDiffusionXLPipeline
@@ -48,27 +49,45 @@ class ImageGen:
             return torch.bfloat16
         return torch.float16  # NVIDIA
     
+    def _unload(self):
+        if self.pipe is None and self.compel is None:
+            return
+
+        logger.info(f"unloading model {self.model} ...")
+        
+        if self.pipe is not None:
+            try:
+                self.pipe.to("cpu")
+            except Exception:
+                pass
+            del self.pipe
+
+        if self.compel is not None:
+            del self.compel
+
+        self.pipe = None
+        self.compel = None
+        self.model = None
+
+        gc.collect()
+        if self.device == "cuda":
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+
     def _load(self, model: Path):
         if self.model == model and self.pipe is not None:
             return self.pipe
 
-        if self.pipe is not None:
-            del self.pipe
-            self.pipe = None
-            self.compel = None
-            self.model = None
-            if self.device == "cuda":
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
+        self._unload()
 
-
-        is_flux = "flux" in str(model)
+        is_flux = "flux" in str(model).lower()
         if is_flux:
             logger.error("flux is currently not supported")
 
         self.model = model
-        dtype = self._dtype()        
-        logger.debug(f"loading model {model} dtype={dtype} device={self.device} ...")
+        dtype = self._dtype()
+        logger.info(f"loading model {model} dtype={dtype} device={self.device} ...")
 
         cls = FluxPipeline if is_flux else StableDiffusionXLPipeline
         pipe = cls.from_single_file(str(model), torch_dtype=dtype)
