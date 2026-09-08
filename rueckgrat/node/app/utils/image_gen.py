@@ -1,7 +1,7 @@
 import torch
 import os
 from pathlib import Path
-from diffusers import FluxPipeline, StableDiffusionXLPipeline
+from diffusers import FluxPipeline, FluxTransformer2DModel, StableDiffusionXLPipeline
 from app.utils import ModelRegistry
 
 from app.common import get_logger, ImageRequest, ImageResponse
@@ -61,9 +61,13 @@ class ImageGen:
                 torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
 
+
         is_flux = "flux" in str(model)
+        if is_flux:
+            logger.error("flux is currently not supported")
+
         self.model = model
-        dtype = self._dtype()
+        dtype = self._dtype()        
         logger.debug(f"loading model {model} dtype={dtype} device={self.device} ...")
 
         cls = FluxPipeline if is_flux else StableDiffusionXLPipeline
@@ -127,7 +131,7 @@ class ImageGen:
                 neg_embeds, neg_pooled = self.compel(negative_prompt)
                 kwargs["negative_prompt_embeds"] = neg_embeds
                 kwargs["negative_pooled_prompt_embeds"] = neg_pooled
-            logger.debug(f"generate image (compel) {prompt[:80]}")
+            logger.debug(f"generate image (compel) {prompt}")
             return pipe(**kwargs).images[0]
 
         if not is_flux and negative_prompt:

@@ -81,7 +81,7 @@ services:
 
   llama-server:
     container_name: rueckgrat_llama_server
-    image: ghcr.io/ggml-org/llama.cpp:server-${LLAMA_SERVER_SERVER}
+    image: ghcr.io/ggml-org/llama.cpp:server-${LLAMA_SERVER_BACKEND}
     privileged: true
     volumes:
       - /var/lib/Rueckgrat/models:/models

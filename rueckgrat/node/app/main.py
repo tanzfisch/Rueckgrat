@@ -73,7 +73,7 @@ def image(request: ImageRequest):
 
     if not registry.is_model_installed(model_cfg):
         try:
-            _install_model(request.model, request.source, request.force)
+            _install_model(name=request.model)
         except Exception as e:
             logger.error(f"Model installation failed for {request.model}: {e}")
             return ImageResponse(output="")
