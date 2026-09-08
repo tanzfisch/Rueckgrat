@@ -46,7 +46,7 @@ def main():
             if args.type != "" and args.type != model_cfg["type"]:
                 continue
 
-            installed = registry.check_model_files(model_cfg)
+            installed = registry.is_model_installed(model_cfg)
 
             if args.verbose:
                 if installed:

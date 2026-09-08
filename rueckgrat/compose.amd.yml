@@ -1,0 +1,23 @@
+services:
+  node:
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - "${HOST_AMD_VIDEO}"
+      - "${HOST_AMD_RENDER}"
+    ipc: host
+    security_opt:
+      - seccomp:unconfined
+
+  llama-server:
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - "${HOST_AMD_VIDEO}"
+      - "${HOST_AMD_RENDER}"
+    ipc: host
+    security_opt:
+      - seccomp:unconfined
+    privileged: true

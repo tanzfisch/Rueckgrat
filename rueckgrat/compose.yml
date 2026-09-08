@@ -34,6 +34,11 @@ services:
     build:
       context: ./node
       dockerfile: Dockerfile
+      args:
+        INSTALL_IMAGE_GEN: ${INSTALL_IMAGE_GEN:-false}
+        INSTALL_LLAMA: ${INSTALL_LLAMA:-false}
+        TORCH_BACKEND: ${TORCH_BACKEND:-cpu}
+        TORCH_CUDA_INDEX: ${TORCH_CUDA_INDEX:-cu121}
     ports:
       - "7346:7346"
     volumes:
@@ -76,7 +81,7 @@ services:
 
   llama-server:
     container_name: rueckgrat_llama_server
-    image: ghcr.io/ggml-org/llama.cpp:server-${LLAMA_SERVER_SERVER}
+    image: ghcr.io/ggml-org/llama.cpp:server-${LLAMA_SERVER_BACKEND}
     privileged: true
     volumes:
       - /var/lib/Rueckgrat/models:/models

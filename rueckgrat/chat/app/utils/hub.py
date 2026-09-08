@@ -129,7 +129,7 @@ class Hub:
                 if status == "error":
                     logger.error(f"failed to check health: {data.get('message', '')}")
                     return False
-                logger.debug("system is healthy")
+                #logger.debug("system is healthy")
                 return True
             else:
                 logger.error(f"lost connection - {response.status_code}")

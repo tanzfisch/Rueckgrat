@@ -65,6 +65,133 @@ read_tty_s() {
     echo ""
 }
 
+# version_ge - true if $1 >= $2 (dotted versions)
+version_ge() {
+    [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]
+}
+
+detect_gpu_backend() {
+    local vendor=""
+    local pci
+    pci="$(lspci -nn 2>/dev/null || true)"
+
+    GPU_INFO=$(lspci | grep -E 'VGA|3D|Display' | sed 's/.*: //' | xargs || echo 'None detected')
+    NVIDIA_DRIVER=""
+    NVIDIA_CUDA=""
+    NVIDIA_COMPUTE_CAP=""
+    TORCH_CUDA_INDEX=""
+    TORCH_ROCM_INDEX=""
+
+    if echo "$pci" | grep -qi '\[10de:' && { [ -e /dev/nvidia0 ] || command -v nvidia-smi >/dev/null; }; then
+        vendor="nvidia"
+    elif echo "$pci" | grep -qi '\[1002:' && [ -e /dev/kfd ]; then
+        vendor="amd"
+    elif echo "$pci" | grep -qiE '\[8086:.*(VGA|3D|Display)' && [ -e /dev/dri ]; then
+        vendor="intel"
+    elif echo "$pci" | grep -qi '\[10de:'; then
+        vendor="nvidia"
+    elif echo "$pci" | grep -qi '\[1002:'; then
+        vendor="amd"
+    elif echo "$pci" | grep -qiE '\[8086:.*(VGA|3D|Display)'; then
+        vendor="intel"
+    else
+        vendor="cpu"
+    fi
+
+    case "$vendor" in
+        nvidia) TORCH_BACKEND=cuda ;;
+        amd)    TORCH_BACKEND=rocm ;;
+        intel)  TORCH_BACKEND=xpu ;;
+        *)      TORCH_BACKEND=cpu; vendor=cpu ;;
+    esac
+
+    if [ "$vendor" = "nvidia" ] && command -v nvidia-smi >/dev/null; then
+        NVIDIA_DRIVER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n1 | xargs)
+        NVIDIA_CUDA=$(nvidia-smi | awk -F'CUDA Version: ' '/CUDA Version/ {print $2; exit}' | awk '{print $1}')
+        NVIDIA_COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n1 | xargs)
+        case "$NVIDIA_CUDA" in
+            12.8*|12.9*|13.*) TORCH_CUDA_INDEX=cu128 ;;
+            12.6*|12.7*)      TORCH_CUDA_INDEX=cu126 ;;
+            12.4*|12.5*)      TORCH_CUDA_INDEX=cu124 ;;
+            12.[123]*)        TORCH_CUDA_INDEX=cu121 ;;
+            11.*)             TORCH_CUDA_INDEX=cu118 ;;
+            *)                TORCH_CUDA_INDEX=cu118 ;;
+        esac
+    fi
+
+    if [ "$vendor" = "amd" ]; then
+        local gfx=""
+        if command -v rocminfo >/dev/null; then
+            gfx=$(rocminfo 2>/dev/null | awk '/Name: +gfx/{print $2; exit}')
+        fi
+        case "$gfx" in
+            gfx120*) TORCH_ROCM_INDEX=rocm6.4 ;;
+            gfx110*|gfx103*|gfx101*) TORCH_ROCM_INDEX=rocm6.3 ;;
+            *) TORCH_ROCM_INDEX=rocm6.3 ;;
+        esac
+    fi
+
+    GPU_VENDOR="$vendor"
+
+    case "${GPU_VENDOR:-cpu}" in
+        nvidia) LLAMA_SERVER_BACKEND=cuda ;;
+        amd)    LLAMA_SERVER_BACKEND=rocm ;;
+        intel)  LLAMA_SERVER_BACKEND=intel ;;
+        *)      LLAMA_SERVER_BACKEND=cpu ;;
+    esac
+}
+
+# check_llama_server_backend - fail if host cannot run official server-${backend} image
+# Usage: check_llama_server_backend [backend]
+check_llama_server_backend() {
+    local backend="${1:-${LLAMA_SERVER_BACKEND:-cpu}}"
+    local image="ghcr.io/ggml-org/llama.cpp:server-${backend}"
+
+    case "$backend" in
+        cuda)
+            if ! command -v nvidia-smi >/dev/null; then
+                echo "❌ Error: $image needs nvidia-smi (NVIDIA driver)"
+                exit 1
+            fi
+            if [ ! -e /dev/nvidia0 ]; then
+                echo "❌ Error: $image needs /dev/nvidia0"
+                exit 1
+            fi
+            # official server-cuda is CUDA 12.8 → Linux driver >= 570
+            if ! version_ge "${NVIDIA_DRIVER:-0}" "570"; then
+                echo "❌ Error: $image needs NVIDIA driver >= 570 (host: ${NVIDIA_DRIVER:-unknown}, CUDA ${NVIDIA_CUDA:-unknown})"
+                echo "   GeForce cannot use CUDA forward-compat. Upgrade the driver."
+                exit 1
+            fi
+            if ! version_ge "${NVIDIA_CUDA:-0}" "12.8"; then
+                echo "❌ Error: $image needs driver CUDA >= 12.8 (host nvidia-smi: ${NVIDIA_CUDA:-unknown})"
+                exit 1
+            fi
+            if [ -n "${NVIDIA_COMPUTE_CAP:-}" ] && ! version_ge "$NVIDIA_COMPUTE_CAP" "7.5"; then
+                echo "❌ Error: $image is not reliable on compute cap $NVIDIA_COMPUTE_CAP (need >= 7.5, Turing+)"
+                exit 1
+            fi
+            ;;
+        rocm)
+            if [ ! -e /dev/kfd ]; then
+                echo "❌ Error: $image needs AMD KFD (/dev/kfd)"
+                exit 1
+            fi
+            ;;
+        intel|sycl) # TODO intel was not tested
+            if [ ! -e /dev/dri ]; then
+                echo "❌ Error: $image needs /dev/dri"
+                exit 1
+            fi
+            ;;
+        cpu) ;;
+        *)
+            echo "❌ Error: unknown LLAMA_SERVER_BACKEND='$backend' (cuda|rocm|intel|cpu)"
+            exit 1
+            ;;
+    esac
+}
+
 # get_info - collect some generall information
 # Usage: get_info
 # No arguments
@@ -73,7 +200,7 @@ get_info() {
     HOST_ADDR=$(hostname -I | awk '{print $1}')
 
     CPU_INFO=$(lscpu | grep 'Model name' | awk -F: '{print $2}' | xargs)
-    GPU_INFO=$(lspci | grep -E 'VGA|3D|Display' | sed 's/.*: //' | xargs || echo 'None detected')
+    
 
     if [[ -f /etc/os-release ]]; then
         . /etc/os-release
@@ -88,22 +215,36 @@ get_info() {
     if command -v git >/dev/null 2>&1; then    
         RUECKGRAT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null) || true
     fi
+
+    detect_gpu_backend
 }
 
 # print_info_block - printing info block
 # Usage: print_info_block
 # No arguments
 print_info_block() {
-    echo "Rückgrat ver   $RUECKGRAT_VERSION"    
+    echo "Rückgrat ver   ${RUECKGRAT_VERSION:----}"
     echo ""
     echo "Host           $HOSTNAME"
     echo "IP             $HOST_ADDR"
     echo "OS             $PRETTY_NAME"
     echo "CPU            $CPU_INFO"
     echo "GPU            $GPU_INFO"
+    echo "GPU Vendor     $GPU_VENDOR"
+    echo "Torch Backend  $TORCH_BACKEND"
+    if [ "${GPU_VENDOR:-}" = "nvidia" ]; then
+        echo "NVIDIA driver  ${NVIDIA_DRIVER:----}"
+        echo "CUDA (driver)  ${NVIDIA_CUDA:----}"
+        echo "Torch CUDA     ${TORCH_CUDA_INDEX:----}"
+    fi
+
+    if [ "${GPU_VENDOR:-}" = "amd" ]; then
+        echo "Torch ROCM     ${TORCH_ROCM_INDEX:----}"
+    fi
+
     echo ""
     echo "Current dir    $(pwd)"
-    echo "Launched with  $PARAMETERS"
+    echo "Launched with  $(echo "$PARAMETERS" | sed -E 's/-p [^ ]+/-p ******/g')"
 }
 
 # volume_cleanup - Check for and optionally remove existing Rueckgrat Docker resources
@@ -221,21 +362,84 @@ install_dependencies() {
 # Usage: install_docker
 # No arguments
 install_docker() {
-    command -v docker &> /dev/null && return
+    if ! command -v docker &> /dev/null; then
+        print_section
+        echo "📦 detected missing docker"
+
+        read_tty "Install docker? (Y/n): " "Y" $YES
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            curl -fsSL https://get.docker.com -o get-docker.sh
+            echo "$SUDO_PASSWORD" | sudo -S sh get-docker.sh
+            rm -f get-docker.sh
+            echo "$SUDO_PASSWORD" | sudo -S usermod -aG docker "$SUDO_USER && newgrp docker"
+            echo "✅ Docker installed."
+        else
+            echo "⚠️ Warning: Aborted by user"
+            exit 0
+        fi
+    fi
+
+    if ! docker buildx version >/dev/null 2>&1; then
+        echo "❌ Error: docker buildx not found"
+        exit 1
+    fi
+}
+
+# install_nvidia_toolkit - Host NVIDIA Container Toolkit for Docker
+# Usage: install_nvidia_toolkit
+# Expects GPU_VENDOR from detect_gpu_backend. No-op unless nvidia.
+install_nvidia_toolkit() {
+    [ "${GPU_VENDOR:-}" = "nvidia" ] || return 0
+
+    if command -v nvidia-ctk >/dev/null \
+        && command -v nvidia-container-cli >/dev/null \
+        && nvidia-container-cli info >/dev/null 2>&1 \
+        && docker run --rm --gpus all alpine ls /dev/nvidia0 >/dev/null 2>&1; then
+            echo "✅ NVIDIA container toolkit already configured"
+            return 0
+    fi
+
+    if ! command -v nvidia-smi >/dev/null 2>&1; then
+        echo "❌ Error: NVIDIA GPU detected but nvidia-smi missing (install the driver first)"
+        exit 1
+    fi
 
     print_section
-    echo "📦 detected missing docker"
+    echo "📦 NVIDIA GPU needs the container toolkit for Docker"
 
-    read_tty "Install docker? (Y/n): " "Y" $YES
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        curl -fsSL https://get.docker.com -o get-docker.sh
-        echo "$SUDO_PASSWORD" | sudo -S sh get-docker.sh
-        rm -f get-docker.sh
-        echo "$SUDO_PASSWORD" | sudo -S usermod -aG docker "$SUDO_USER && newgrp docker"
-        echo "✅ Docker installed."
-    else
+    read_tty "Install nvidia-container-toolkit? (Y/n): " "Y" $YES
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo "⚠️ Warning: Aborted by user"
         exit 0
+    fi
+
+    local keyring=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    local list=/etc/apt/sources.list.d/nvidia-container-toolkit.list
+    local tmp
+    tmp="$(mktemp -d)"
+
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey -o "$tmp/key.asc"
+    curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list -o "$tmp/list"
+
+    gpg --batch --yes --dearmor -o "$tmp/keyring.gpg" "$tmp/key.asc"
+    sed "s#deb https://#deb [signed-by=$keyring] https://#g" "$tmp/list" > "$tmp/list.signed"
+
+    echo "$SUDO_PASSWORD" | sudo -S mkdir -p /usr/share/keyrings
+    echo "$SUDO_PASSWORD" | sudo -S cp "$tmp/keyring.gpg" "$keyring"
+    echo "$SUDO_PASSWORD" | sudo -S cp "$tmp/list.signed" "$list"
+    echo "$SUDO_PASSWORD" | sudo -S chmod 644 "$keyring" "$list"
+    rm -rf "$tmp"
+
+    echo "$SUDO_PASSWORD" | sudo -S apt-get update
+    install_dependencies nvidia-container-toolkit
+    echo "$SUDO_PASSWORD" | sudo -S nvidia-ctk runtime configure --runtime=docker
+    echo "$SUDO_PASSWORD" | sudo -S systemctl restart docker
+
+    if docker info 2>/dev/null | grep -qiE 'Runtimes:.*nvidia'; then
+        echo "✅ NVIDIA container toolkit installed"
+    else
+        echo "❌ Error: toolkit installed but Docker has no nvidia runtime"
+        exit 1
     fi
 }
 
@@ -277,12 +481,11 @@ safe_rm_rf() {
 
 # setup_repository - Setup or update Rueckgrat git repository
 # Usage: setup_repository
-# No arguments (sets IN_WORKSPACE_INSTALL)
+# No arguments
 setup_repository() {
     install_dependencies git
 
     print_section
-    IN_WORKSPACE_INSTALL=true
 
     if [[ -d ".git" ]]; then
         echo "✅ Using existing repo on branch '$(git branch --show-current)'."
@@ -291,17 +494,15 @@ setup_repository() {
         cd Rueckgrat-install
         echo "✅ Using existing repo on branch '$(git branch --show-current)'."
         git pull &> /dev/null || true
-        IN_WORKSPACE_INSTALL=false
     else
         echo "📥 Cloning fresh copy..."
         git clone https://github.com/tanzfisch/Rueckgrat.git Rueckgrat-install
         cd Rueckgrat-install
-        IN_WORKSPACE_INSTALL=false
     fi
 
     WORKING_DIR=$(pwd)
 
-    cp -f "$WORKING_DIR/rueckgrat/.env.example" "$WORKING_DIR/rueckgrat/.env"
+    write_default_env
 }
 
 service_json() {
@@ -313,6 +514,17 @@ service_json() {
     shift 2
   done
   echo "{\"type\":\"$type\",\"name\":\"$name\",\"port\":$port$extra}"
+}
+
+module_json() {
+  local type="$1" name="$2"
+  shift 2
+  local extra=""
+  while [ $# -gt 0 ]; do
+    extra="${extra},\"$1\":\"$2\""
+    shift 2
+  done
+  echo "{\"type\":\"$type\",\"name\":\"$name\"$extra}"
 }
 
 # validate_ip - validates ip
@@ -368,13 +580,14 @@ select_hosts_and_components() {
 
         if $INSTALL_NODE; then
             services=()
+            modules=()
 
             if $INSTALL_LLAMA; then
                 services+=("$(service_json "text_to_text" "llama_server" $LLAMA_SERVER_PORT "model" "$INSTALL_LLAMA_MODEL")")
             fi
 
-            if $INSTALL_COMFYUI; then
-                services+=("$(service_json "text_to_image" "ComfyUI" $COMFYUI_PORT)")
+            if $INSTALL_IMAGE_GEN; then
+                services+=("$(module_json "text_to_image" "image_gen")")
             fi
             
             printf -v services_json '[%s]' "$(IFS=,; echo "${services[*]}")"
@@ -416,7 +629,7 @@ select_components() {
     INSTALL_CHAT=false; INSTALL_CHAT_DOCKER=false
     INSTALL_HUB=false; INSTALL_NODE=false
     INSTALL_LLAMA=false; INSTALL_LLAMA_MODEL=""
-    INSTALL_COMFYUI=false
+    INSTALL_IMAGE_GEN=false
 
     echo "Select components:"
     echo ""
@@ -476,14 +689,9 @@ select_components() {
             echo -e "         Selected model: $INSTALL_LLAMA_MODEL"
         fi
 
-        read_tty "Install ComfyUI on Node? (Y/n): " "Y"
-        [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_COMFYUI=true
-        echo -e "\e[1A\e[K     [$( [[ $INSTALL_COMFYUI == true ]] && echo '✅' || echo '⚫' )] ComfyUI"
-        if $INSTALL_COMFYUI; then
-            read_tty "ComfyUI port? [$COMFYUI_PORT_DEFAULT]: " "$COMFYUI_PORT_DEFAULT" $YES
-            COMFYUI_PORT=$REPLY
-            echo -e "\e[1A\e[K         Port: $COMFYUI_PORT"
-        fi
+        read_tty "Install image generation on Node? (Y/n): " "Y"
+        [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_IMAGE_GEN=true
+        echo -e "\e[1A\e[K     [$( [[ $INSTALL_IMAGE_GEN == true ]] && echo '✅' || echo '⚫' )] ImageGen"
     fi
 }
 
@@ -500,7 +708,8 @@ format_hosts() {
     "  "+(if $h.chat then "[✅]" else "[⚫]" end)+" Native Chat Client",
     "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub",
     "  "+(if $h.node then "[✅]" else "[⚫]" end)+" Node",
-    "  "+($h.node.services[]? | "    [✅] \(.name)")
+    "  "+($h.node.services[]? | "    [✅] \(.name)"),
+    "  "+($h.node.modules[]? | "    [✅] \(.name)")
   ' "$CONFIG_FILE"
 }
 
@@ -528,6 +737,7 @@ deploy_hub() {
     print_section
     echo "🐋 hub & caddy..."
     pushd rueckgrat > /dev/null
+    docker compose stop hub caddy 2>/dev/null || true
     docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} hub caddy || { echo "❌ Error: Docker compose build of hub & cdaddy failed."; popd; exit 1; }
     docker compose up -d hub caddy || { echo "❌ Error: Docker compose up of hub & cdaddy failed."; popd; exit 1; }
     popd > /dev/null
@@ -571,10 +781,69 @@ deploy_node() {
     print_section
     echo "🐋 node..."
 
+    BUILD_ARGS=()
+    COMPOSE_FILES=(-f compose.yml)
+
+    if [ "$INSTALL_IMAGE_GEN" = true ]; then
+        BUILD_ARGS+=(--build-arg INSTALL_IMAGE_GEN=true)
+        BUILD_ARGS+=(--build-arg "TORCH_BACKEND=${TORCH_BACKEND:-cpu}")
+        BUILD_ARGS+=(--build-arg "TORCH_CUDA_INDEX=${TORCH_CUDA_INDEX:-cu128}")
+        BUILD_ARGS+=(--build-arg "TORCH_ROCM_INDEX=${TORCH_ROCM_INDEX:-rocm6.3}")
+    fi
+
+    if [ "$INSTALL_LLAMA" = true ]; then
+        BUILD_ARGS+=(--build-arg INSTALL_LLAMA=true)
+    fi
+
+    case "${GPU_VENDOR:-cpu}" in
+        amd)
+            COMPOSE_FILES+=(-f compose.amd.yml)
+            HOST_AMD_VIDEO=$(getent group video | cut -d: -f3)
+            HOST_AMD_RENDER=$(getent group render | cut -d: -f3)
+            [ -n "$HOST_AMD_VIDEO" ] && [ -n "$HOST_AMD_RENDER" ] \
+              || { echo "❌ Error: host video/render GIDs not found"; exit 1; }
+            export HOST_AMD_VIDEO HOST_AMD_RENDER
+            ;;
+        nvidia) COMPOSE_FILES+=(-f compose.nvidia.yml) ;;
+    esac
+
+    echo "   vendor=${GPU_VENDOR:-cpu} backend=${TORCH_BACKEND:-cpu} cuda_index=${TORCH_CUDA_INDEX:-n/a}"
+    echo "   compose=${COMPOSE_FILES[*]}"
+    echo "   build_args=${BUILD_ARGS[*]:-none}"
+    [ "${GPU_VENDOR:-}" = "amd" ] && echo "   amd_gids=video:$HOST_AMD_VIDEO render:$HOST_AMD_RENDER"
+
     pushd rueckgrat > /dev/null
-    docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} node || { echo "❌ Error: Docker compose build of node failed."; popd; exit 1; }
-    docker compose up -d node || { echo "❌ Error: Docker compose up of node failed."; popd; exit 1; }
+    if [ "${GPU_VENDOR:-}" = "amd" ]; then
+        set_env_value HOST_AMD_VIDEO "$HOST_AMD_VIDEO"
+        set_env_value HOST_AMD_RENDER "$HOST_AMD_RENDER"
+    fi
+
+    docker compose "${COMPOSE_FILES[@]}" stop node 2>/dev/null || true
+    docker compose --progress=$DOCKER_PROGRESS_MODE "${COMPOSE_FILES[@]}" \
+        build ${NO_CACHE:-} "${BUILD_ARGS[@]}" node \
+        || { echo "❌ Error: Docker compose build of node failed."; popd; exit 1; }
+    docker compose "${COMPOSE_FILES[@]}" up -d node \
+        || { echo "❌ Error: Docker compose up of node failed."; popd; exit 1; }
     popd > /dev/null
+}
+
+# set_env_value - Set or replace KEY=VALUE in a .env file
+# Usage: set_env_value <key> <value> [file]
+# Args:
+#   $1 - Key
+#   $2 - Value
+#   $3 - File (default: .env)
+set_env_value() {
+    local key="$1"
+    local value="$2"
+    local file="${3:-$WORKING_DIR/rueckgrat/.env}"
+    mkdir -p "$(dirname "$file")"
+    touch "$file"
+    if grep -q "^${key}=" "$file"; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+    else
+        echo "${key}=${value}" >> "$file"
+    fi
 }
 
 # deploy_llama - Download/select LLM model and start llama-server
@@ -586,13 +855,39 @@ deploy_llama() {
 
     print_section
     echo "🐋 llama-server..."
-    echo "running $LLM_MODEL"
-    
+    echo "running $LLM_MODEL on $LLAMA_SERVER_BACKEND"
+
+    check_llama_server_backend "$LLAMA_SERVER_BACKEND"
+
+    COMPOSE_FILES=(-f compose.yml)
+    case "${GPU_VENDOR:-cpu}" in
+        amd)
+            COMPOSE_FILES+=(-f compose.amd.yml)
+            HOST_AMD_VIDEO=$(getent group video | cut -d: -f3)
+            HOST_AMD_RENDER=$(getent group render | cut -d: -f3)
+            [ -n "$HOST_AMD_VIDEO" ] && [ -n "$HOST_AMD_RENDER" ] \
+              || { echo "❌ Error: host video/render GIDs not found"; exit 1; }
+            export HOST_AMD_VIDEO HOST_AMD_RENDER
+            ;;
+        nvidia) COMPOSE_FILES+=(-f compose.nvidia.yml) ;;
+    esac
+
+    echo "   vendor=${GPU_VENDOR:-cpu} backend=$LLAMA_SERVER_BACKEND"
+    echo "   compose=${COMPOSE_FILES[*]}"
+    [ "${GPU_VENDOR:-}" = "amd" ] && echo "   amd_gids=video:$HOST_AMD_VIDEO render:$HOST_AMD_RENDER"
+
     pushd rueckgrat > /dev/null
-    GGUF_FILE_PATH="/models/llm/$LLM_MODEL/$LLM_MODEL.gguf"
-    sed -i "s|^LLAMA_SERVER_MODEL=.*|LLAMA_SERVER_MODEL=$GGUF_FILE_PATH|" .env
-    docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} llama-server
-    docker compose up -d llama-server
+    GGUF_FILE_PATH="$CONTAINER_MODELS_DIR/llm/$LLM_MODEL/$LLM_MODEL.gguf"
+    set_env_value LLAMA_SERVER_MODEL "$GGUF_FILE_PATH"
+    set_env_value LLAMA_SERVER_BACKEND "$LLAMA_SERVER_BACKEND"
+    if [ "${GPU_VENDOR:-}" = "amd" ]; then
+        set_env_value HOST_AMD_VIDEO "$HOST_AMD_VIDEO"
+        set_env_value HOST_AMD_RENDER "$HOST_AMD_RENDER"
+    fi    
+
+    docker compose "${COMPOSE_FILES[@]}" stop llama-server 2>/dev/null || true
+    docker compose --progress=$DOCKER_PROGRESS_MODE "${COMPOSE_FILES[@]}" build ${NO_CACHE:-} llama-server || { echo "❌ Error: Docker compose build of llama-server failed."; popd; exit 1; }
+    docker compose "${COMPOSE_FILES[@]}" up -d llama-server || { echo "❌ Error: Docker compose up of llama-server failed."; popd; exit 1; }
     popd > /dev/null
 }
 
@@ -617,7 +912,7 @@ deploy_chat_docker() {
         validate_ip "$HUB_ADDR"
     fi
     
-    sed -i "s/HUB_ADDR=.*/HUB_ADDR=$HUB_ADDR/" .env
+    set_env_value HUB_ADDR "$HUB_ADDR"
 
     docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} chat || { echo "❌ Error: Docker compose build of chat failed."; popd; exit 1; }
     docker compose up -d chat || { echo "❌ Error: Docker compose up of chat failed."; popd; exit 1; }
@@ -638,33 +933,13 @@ deploy_chat_native() {
     popd > /dev/null
 }
 
-# deploy_comfyui - instally ComfyUI service
-# Usage: deploy_comfyui
-# No arguments
-deploy_comfyui() {
-    install_dependencies git python3 build-essential pkg-config
-
-    if package_available python3.13-dev; then
-        install_dependencies python3.13-dev
-    else
-        install_dependencies python3.11-dev
-    fi
-
-    print_section
-    echo "📦 ComfyUI..."
-
-    pushd rueckgrat/ComfyUI > /dev/null
-    ./install.sh || { echo "❌ Error: ComfyUI install failed!"; popd; exit 1; }
-    popd > /dev/null
-}
-
 # prep_app_data_dir - creates models directory
 # Usage: prep_app_data_dir
 # No arguments
 prep_app_data_dir() {
     echo "prep /var/lib/Rueckgrat ..."
     echo "$SUDO_PASSWORD" | sudo -S mkdir -p $APP_DATA_DIR
-    echo "$SUDO_PASSWORD" | sudo -S mkdir -p $MODELS_DIR
+    echo "$SUDO_PASSWORD" | sudo -S mkdir -p $HOST_MODELS_DIR
     echo "$SUDO_PASSWORD" | sudo -S chown -R root:root $APP_DATA_DIR
     echo "$SUDO_PASSWORD" | sudo -S chmod -R 777 $APP_DATA_DIR
 }
@@ -676,22 +951,108 @@ check_docker_group() {
     fi
 }
 
-# deploy_components - Local component installer
-# Usage: deploy_components "hub,node,llama,chat:docker"
-# Args:
-#   $1 - host configuration string
-deploy_components() {
-    local host_config="$1"
-    [[ -z "$host_config" ]] && { echo "❌ Error: host_config is empty" >&2; exit 1; }
+# parse_host_config - set INSTALL_* flags from one host JSON object
+# Usage: parse_host_config '<host json>'
+parse_host_config() {
+    local host_config="$1"    
+    [[ -n "$host_config" ]] || { echo "❌ Error: host_config is empty" >&2; exit 1; }
 
     INSTALL_CHAT=false
     INSTALL_CHAT_DOCKER=false
     INSTALL_HUB=false
     INSTALL_NODE=false
     INSTALL_LLAMA=false
-    INSTALL_COMFYUI=false
+    INSTALL_IMAGE_GEN=false
     INSTALL_LLAMA_MODEL=""
+    HUB_PORT=""
+    NODE_PORT=""
+    CHAT_DOCKER_PORT=""
+    LLAMA_SERVER_PORT=""
+
+    if echo "$host_config" | jq -e '.hub' >/dev/null; then
+        INSTALL_HUB=true
+        HUB_PORT=$(echo "$host_config" | jq -r '.hub.port // empty')
+    fi
+
+    if echo "$host_config" | jq -e '.chat' >/dev/null; then
+        INSTALL_CHAT=true
+    fi
+
+    if echo "$host_config" | jq -e '.chat_docker' >/dev/null; then
+        INSTALL_CHAT_DOCKER=true
+        CHAT_DOCKER_PORT=$(echo "$host_config" | jq -r '.chat_docker.port // empty')
+    fi
+
+    if echo "$host_config" | jq -e '.node' >/dev/null; then
+        INSTALL_NODE=true
+        NODE_PORT=$(echo "$host_config" | jq -r '.node.port // empty')
+        # todo use NODE_PORT
+
+        local item type name
+        for item in $(echo "$host_config" | jq -c '.node.services // [] | .[]'); do
+            type=$(echo "$item" | jq -r '.type')
+            name=$(echo "$item" | jq -r '.name')
+            if [[ "$type" == "text_to_text" || "$name" == "llama_server" || "$name" == "llama-server" ]]; then
+                INSTALL_LLAMA=true
+                INSTALL_LLAMA_MODEL=$(echo "$item" | jq -r '.model // empty')
+                LLAMA_SERVER_PORT=$(echo "$item" | jq -r '.port // empty')
+            fi
+            if [[ "$type" == "text_to_image" || "$name" == "image_gen" ]]; then
+                INSTALL_IMAGE_GEN=true
+            fi
+        done
+        for item in $(echo "$host_config" | jq -c '.node.modules // [] | .[]'); do
+            type=$(echo "$item" | jq -r '.type')
+            name=$(echo "$item" | jq -r '.name')
+            if [[ "$type" == "text_to_image" || "$name" == "image_gen" ]]; then
+                INSTALL_IMAGE_GEN=true
+            fi
+        done
+    fi
+}
+
+write_default_env() {
+    [ -f "$WORKING_DIR/rueckgrat/.env" ] && return
+
+    # hub hostname
+    set_env_value HUB_HOST "rueckgrat.hub"
+    set_env_value HUB_ADDR "127.0.0.1"
+
+    # models that work with Rückgrat (tested with 24GB vram)
+    # cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L (autor's preffered option)
+    # Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-ggml-model-Q3_K
+    # NousResearch_Hermes-4.3-36B-Q4_K_S
+    # Huihui-Qwen3.6-27B-abliterated-ggml-model-Q5_K (had issues with json generation, maybe ran out of mem, unclear)
+    # Huihui-Qwen3.6-27B-abliterated-ggml-model-Q4_K
+    # dolphin-2.9.1-yi-1.5-34b-Q4_K_M (very fast 24GB a bit too tight)
+    set_env_value LLAMA_SERVER_MODEL "$CONTAINER_MODELS_DIR/llm/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L.gguf"
+
+    # max context in tokens
+    set_env_value LLAMA_SERVER_MAX_CONTEXT 4096
+
+    # GPU layers
+    set_env_value LLAMA_SERVER_GPU_LAYERS -1 # -1 means all layers run on GPU
+
+    # llama-server port
+    set_env_value LLAMA_SERVER_PORT 8080
+
+    # llama-server backend ie. rocm, cuda, intel
+    set_env_value LLAMA_SERVER_BACKEND rocm
+}
+
+# deploy_components - Local component installer
+# Usage: deploy_components "hub,node,llama,chat:docker"
+# Args:
+#   $1 - host configuration string
+deploy_components() {
+    local host_config="$1"
+
+    print_section
+    echo "deploy components..."
     
+    echo "reading config $host_config"
+    parse_host_config "$host_config"
+
     # pretend to be in build dir
     CURRENT_DIR=$(pwd)
     WORKING_DIR=$CURRENT_DIR
@@ -700,64 +1061,18 @@ deploy_components() {
     CADDY_KEY="$CADDY_DIR/rueckgrat-caddy.key"
     CADDY_CERT="$CADDY_DIR/rueckgrat-caddy.cert"
 
-    if [ ! -f "$WORKING_DIR/rueckgrat/.env" ]; then
-        cp "$WORKING_DIR/rueckgrat/.env.example" "$WORKING_DIR/rueckgrat/.env"
-    fi
+    write_default_env
 
     check_docker_group
-
     volume_cleanup
-
     gen_caddy_cert
-
-    print_section
-    echo "deploy components..."
-    echo "reading config"
-
-    if echo "$host_config" | jq -e '.hub' > /dev/null; then
-        INSTALL_HUB=true
-        HUB_PORT=$(echo "$host_config" | jq -r '.hub.port')
-    fi    
-
-    if echo "$host_config" | jq -e '.node' > /dev/null; then
-        INSTALL_NODE=true
-        NODE_PORT=$(echo "$host_config" | jq -r '.node.port')
-        # todo use NODE_PORT
-
-        services=$(echo "$host_config" | jq -c '.node.services // []')
-
-        for s in $(echo "$services" | jq -c '.[]'); do
-            type=$(echo "$s" | jq -r '.type')
-            name=$(echo "$s" | jq -r '.name')
-            port=$(echo "$s" | jq -r '.port')
-            # todo use service port
-
-            if [[ "$type" == "text_to_text" ]]; then
-                INSTALL_LLAMA=true
-                INSTALL_LLAMA_MODEL=$(echo "$s" | jq -r '.model')
-            elif [[ "$type" == "text_to_image" ]]; then             
-                INSTALL_COMFYUI=true
-            fi
-        done
-    fi
-
-    if echo "$host_config" | jq -e '.chat' > /dev/null; then
-        INSTALL_CHAT=true
-    fi
-
-    if echo "$host_config" | jq -e '.chat_docker' > /dev/null; then
-        INSTALL_CHAT_DOCKER=true
-        CHAT_DOCKER_PORT=$(echo "$host_config" | jq -r '.chat_docker.port')
-        # todo use chat port
-    fi
-
     prep_app_data_dir
 
     echo "deploy..."
 
     if $INSTALL_HUB || $INSTALL_NODE; then
         install_dependencies curl
-        install_docker    
+        install_docker            
     fi
 
     if $INSTALL_HUB; then
@@ -766,15 +1081,15 @@ deploy_components() {
     fi
 
     if $INSTALL_NODE; then
+        if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_LLAMA" == true ]]; then
+            install_nvidia_toolkit
+        fi
+
         deploy_node
 
         if $INSTALL_LLAMA; then
             deploy_llama $INSTALL_LLAMA_MODEL
         fi
-
-        if $INSTALL_COMFYUI; then
-            deploy_comfyui 
-        fi        
     fi
 
     if $INSTALL_CHAT; then
@@ -818,18 +1133,17 @@ deploy_components_remote() {
     fi
 
     echo "Copying files..."
-    rsync -az -e "ssh ${SSH_OPTS[*]}" --exclude='.git' --exclude='logs' ./ "$host_addr:$remote_dir/" || {
+    rsync -az --checksum -e "ssh ${SSH_OPTS[*]}" --exclude='.git' --exclude='logs' ./ "$host_addr:$remote_dir/" || {
         echo "❌ Error: rsync failed for $host_addr"
         return 1
     }
 
     echo "Running installer..."
-    local fresh_flag=$($CLEAN_BUILD && echo " --fresh" || echo "")
     ssh "${SSH_OPTS[@]}" -t -o StrictHostKeyChecking=no -o ConnectTimeout=15 "$host_addr" "
         set -euo pipefail
         cd $remote_dir
         chmod +x install.sh
-        ./install.sh --local-config '$clean_config' $fresh_flag -p $SUDO_PASSWORD -u $SUDO_USER
+        ./install.sh --local-config '$clean_config' ${CLEAN_BUILD:+-f} ${VERBOSE:+-v} ${YES:+-y} -p $SUDO_PASSWORD -u $SUDO_USER
     " || echo "❌ Error: Installation failed on $host_addr"
 }
 
@@ -859,15 +1173,21 @@ usage() {
     echo "  --verbose | -v                      Enable verbose output"
     echo "  --yes | -y                          Non interactive where possible"
     echo "  --host-config | -hc    STRING       partial config for just one host"    
+    echo "  --sync | -s                         Dev mode: rsync local tree to remote hosts only"
     echo "  --user | -u            USER         Sudo username"
     echo "  --password | -p        PASSWORD     Sudo password"
+    echo "  --info | -i                         Print system info"
     echo "  --help | -h                         Show this help"
     echo ""
     echo "Expert:"
     echo "  --local-config | -lc   STRING       works like host-config but it assumes that the script"
     echo "                                      was executed already on the correct machine"
-    echo ""
-    exit 0
+    echo ""    
+}
+
+info() {
+    print_header "System Info"
+    print_section
 }
 
 # get_user_passwd - makes sure we have user and password ready
@@ -885,14 +1205,53 @@ get_user_passwd() {
     fi    
 }
 
+# resolve_config_file checks if config file already exists
+resolve_config_file() {
+    CONFIG_FILE=$WORKING_DIR/rueckgrat/config/infrastructure.json
+    [[ -f "$CONFIG_FILE" ]] || { echo "❌ Error: config file not found: $CONFIG_FILE. Try run install regularily first before using sync."; exit 1; }
+}
+
+# rsync_to_host - Copy current workspace to a remote host (no install)
+rsync_to_host() {
+    local host_addr="$1"
+    local remote_dir="Rueckgrat-install"
+    local SSH_CONTROL="/tmp/deploy-$SUDO_USER-$(echo "$host_addr" | tr '@:' '__')"
+    local SSH_OPTS=( -o ControlMaster=auto -o ControlPersist=5m -o ControlPath="$SSH_CONTROL" )
+
+    trap 'ssh -O exit "${SSH_OPTS[@]}" "$host_addr" >/dev/null 2>&1 || true' EXIT
+
+    sshpass -p "$SUDO_PASSWORD" ssh "${SSH_OPTS[@]}" -o User="$SUDO_USER" -Nf "$host_addr" || { echo "❌ Error: failed to connect with $host_addr"; return 1; }
+
+    echo "Copying files to $host_addr..."
+    rsync -az --checksum -e "ssh ${SSH_OPTS[*]}" --exclude='.git' --exclude='logs' ./ "$host_addr:$remote_dir/" || {
+        echo "❌ Error: rsync failed for $host_addr"
+        return 1
+    }
+    echo "✅ Synced to $host_addr:$remote_dir/"
+}
+
+sync_on_hosts() {
+    install_dependencies rsync sshpass jq
+
+    while IFS= read -r host_config; do
+        host_addr=$(echo "$host_config" | jq -r '.addr')
+        print_section
+        echo "🔄 Syncing to $host_addr"
+        rsync_to_host "$host_addr"
+    done < <(jq -c '.hosts[]' "$CONFIG_FILE")
+}
+
+readonly CONTAINER_MODELS_DIR="/models"
+readonly HUB_PORT_DEFAULT=14223
+readonly NODE_PORT_DEFAULT=7346
+readonly CHAT_DOCKER_PORT_DEFAULT=3001
+readonly LLAMA_SERVER_PORT_DEFAULT=8080
+readonly APP_DATA_DIR=/var/lib/Rueckgrat
+readonly HOST_MODELS_DIR="$APP_DATA_DIR/models"
+
 main() {   
-    readonly HUB_PORT_DEFAULT=14223
-    readonly NODE_PORT_DEFAULT=7346
-    readonly CHAT_DOCKER_PORT_DEFAULT=3001
-    readonly LLAMA_SERVER_PORT_DEFAULT=8080
-    readonly COMFYUI_PORT_DEFAULT=8188
-    readonly APP_DATA_DIR=/var/lib/Rueckgrat
-    readonly MODELS_DIR="$APP_DATA_DIR/models"
+    export DOCKER_BUILDKIT=1
+    export COMPOSE_DOCKER_CLI_BUILD=1
 
     get_info
     
@@ -905,8 +1264,10 @@ main() {
     KEY_FILE=""
     CERT_FILE=""
     YES=false
-    SUDO_USER=""
+    SUDO_USER="$(whoami)"
     SUDO_PASSWORD=""
+    NO_CACHE=""
+    SYNC_ONLY=false
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -969,13 +1330,30 @@ main() {
                 shift 2
                 ;;
             -v|--verbose) VERBOSE=true; DOCKER_PROGRESS_MODE="auto"; shift ;;
-            -f|--fresh) CLEAN_BUILD=true; shift ;;
+            -f|--fresh) CLEAN_BUILD=true; NO_CACHE="--no-cache"; shift ;;
+            -s|--sync) SYNC_ONLY=true; shift ;;
             -y|--yes) YES=true; shift ;;
-            -h|--help) usage ;;
+            -h|--help) usage; exit 0 ;;
+            -i|--info) info; exit 0 ;;
             *) echo "Unknown option: $1"; exit 1 ;;
         esac
     done
+
+    if $SYNC_ONLY; then
+        print_header "🔄 Rückgrat Sync"
     
+        get_user_passwd
+
+        setup_repository
+
+        resolve_config_file
+        
+        sync_on_hosts
+        echo "Sync done."
+        print_section
+        return
+    fi        
+  
     if [[ -n "$LOCAL_CONFIG" ]]; then
         print_header "🌐 Rückgrat Installer ($HOSTNAME - $HOST_ADDR)"
         get_user_passwd
@@ -1011,4 +1389,6 @@ main() {
     fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

@@ -20,67 +20,84 @@ class ModelRegistry:
         self._load_registry()
         self._load_infrastructure()        
 
-    def find_valid_url(self, source_url: str, install_path: str, alternative_server: str=None):
-        filename = Path(source_url).name
-        url = None
+    def _find_valid_url(self, source_url: str, install_path: str, alternative_server: str=None):
+        try:
+            filename = Path(source_url).name
+            url = None
 
-        if alternative_server:
-            test_url = f"http://{alternative_server}/downloads/models/{install_path}/{filename}"
-            if self._url_exists(test_url):                
-                url = test_url
-
-        if not url:
-            for node in self.nodes:
-                test_url = f"http://{node['host']}:{node['port']}/downloads/models/{install_path}/{filename}"                
-                logger.debug(f"test url {test_url}")
-                if self._url_exists(test_url):
+            if alternative_server:
+                test_url = f"http://{alternative_server}/downloads/models/{install_path}/{filename}"
+                if self._url_exists(test_url):                
                     url = test_url
-                    logger.debug(f"{test_url} exists")
-                    break
-
-        if not url:
-            if self._url_exists(source_url):
-                url = source_url
-                
-        return url
-
-    def get_urls(self, model_name: str, alternative_server: str=None):
-        model_cfg = self.get_model_cfg(model_name)
-        if not model_cfg:
-            print(f"Error: model \"{model_name}\" not registered")
-            return None
-
-        sources=model_cfg["sources"]
-        install_path=model_cfg["install_path"]
-
-        result = []
-
-        for source_url in sources:
-            url = self.find_valid_url(source_url, install_path, alternative_server)
-            if url:
-                result.append(url)
-
-        return result
-
-    def install_model(self, model_name: str, alternative_server: str=None, force_install: bool=False):
-        model_cfg = self.get_model_cfg(model_name)
-        if not model_cfg:
-            print(f"Error: model \"{model_name}\" not registered")
-            return None
-
-        sources=model_cfg["sources"]
-        install_path=model_cfg["install_path"]
-
-        for source_url in sources:
-            url = self.find_valid_url(source_url, install_path, alternative_server)
 
             if not url:
-                print(f"Error: can't find download source for {model_name}")
-            else:
-                self._download_from_url(url, install_path, force_install)
+                for node in self.nodes:
+                    test_url = f"http://{node['host']}:{node['port']}/downloads/models/{install_path}/{filename}"                
+                    logger.debug(f"test url {test_url}")
+                    if self._url_exists(test_url):
+                        url = test_url
+                        logger.debug(f"{test_url} exists")
+                        break
 
-        return model_cfg if self.check_model_files(model_cfg) else None
+            if not url:
+                if self._url_exists(source_url):
+                    url = source_url
+
+            return url
         
+        except Exception as e:
+            logger.error(f"failed to look for valid url: {e}")
+
+        return None        
+
+    def get_urls(self, model_name: str, alternative_server: str=None):
+        try:
+            model_cfg = self.get_model_cfg(model_name)
+            if not model_cfg:
+                print(f"Error: model \"{model_name}\" not registered")
+                return None
+
+            sources=model_cfg["sources"]
+            install_path=model_cfg["install_path"]
+
+            result = []
+
+            for source_url in sources:
+                url = self._find_valid_url(source_url, install_path, alternative_server)
+                if url:
+                    result.append(url)
+
+            return result
+        except Exception as e:
+            logger.error(f"failed to get urls: {e}")
+
+        return None            
+
+    def install_model(self, model_name: str, alternative_server: str=None, force_install: bool=False):
+        try:
+            model_cfg = self.get_model_cfg(model_name)
+            if not model_cfg:
+                print(f"Error: model \"{model_name}\" not registered")
+                return None
+
+            sources=model_cfg["sources"]
+            install_path=model_cfg["install_path"]
+
+            for source_url in sources:
+                url = self._find_valid_url(source_url, install_path, alternative_server)
+
+                if not url:
+                    print(f"Error: can't find download source for {model_name}")
+                else:
+                    self._download_from_url(url, install_path, force_install)
+
+            return model_cfg if self.is_model_installed(model_cfg) else None
+        
+        except Exception as e:
+            logger.error(f"failed to install model: {e}")
+
+        return None
+
     def get_registry(self):
         return self.registry.copy()
 
@@ -109,6 +126,15 @@ class ModelRegistry:
         with open(self.registry_file, "w") as f:
             json.dump(self.registry, f, indent=2)
 
+    def get_safetensors(self, model_cfg) -> Path:
+        for url in model_cfg["sources"]:
+            filepath = self.base_dir / model_cfg["install_path"] / os.path.basename(url)
+            if filepath.suffix.lower() == ".safetensors":
+                return filepath
+
+        logger.error(f"model has no safetensors")
+        return Path()
+
     def get_model_size(self, model_cfg) -> int:
         result = 0
         for url in model_cfg["sources"]:
@@ -118,7 +144,7 @@ class ModelRegistry:
 
         return result
 
-    def check_model_files(self, model_cfg):
+    def is_model_installed(self, model_cfg):
         for url in model_cfg["sources"]:
             filepath = self.base_dir / model_cfg["install_path"] / os.path.basename(url)
             if not os.path.exists(filepath):

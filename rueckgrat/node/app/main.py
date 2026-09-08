@@ -7,10 +7,10 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
-import uuid
+import os
 from pydantic import BaseModel
 from typing import List, Optional
-from app.utils import ModelRegistry, LLamaCppInterface, ComfyUIInterface, CleanupWorker
+from app.utils import ModelRegistry, LLamaCppInterface, CleanupWorker
 
 from app.common import (
     get_logger, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse, 
@@ -25,11 +25,17 @@ async def lifespan(app: FastAPI):
         app.state.dev_mode = "prod"
     logger.info(f"running DEV_MODE={app.state.dev_mode}")
 
-    host = "host.docker.internal"
-    app.state.llamacpp = LLamaCppInterface(host, "8080")
+    if os.getenv("USE_LLAMA") == "true":
+        host = "host.docker.internal"
+        app.state.llamacpp = LLamaCppInterface(host, "8080")
+    else:
+        app.state.llamacpp = None
 
-    client_id = str(uuid.uuid4())
-    app.state.comfyui = ComfyUIInterface(host, "8188", client_id)
+    if os.getenv("USE_IMAGE_GEN") == "true":
+        from app.utils.image_gen import ImageGen
+        app.state.image_gen = ImageGen()  
+    else:
+        app.state.image_gen = None
 
     # keep image cache clean
     app.state.cleanup_worker = CleanupWorker(folder="/node/images")
@@ -55,7 +61,24 @@ def chat(request: ChatRequestLlama):
 
 @app.post("/image", response_model=ImageResponse)
 def image(request: ImageRequest):
-    response = app.state.comfyui.image(request)
+    if not app.state.image_gen:
+        logger.error(f"Node has not image_gen module loaded")
+        return ImageResponse(output="")
+    
+    registry = ModelRegistry()
+    model_cfg = registry.get_model_cfg(request.model)
+    if not model_cfg:
+        logger.error(f"model {request.model} not found in registry")
+        return ImageResponse(output="")
+
+    if not registry.is_model_installed(model_cfg):
+        try:
+            _install_model(name=request.model)
+        except Exception as e:
+            logger.error(f"Model installation failed for {request.model}: {e}")
+            return ImageResponse(output="")
+    
+    response = app.state.image_gen.image(request)
     if not response:
         logger.error("failed to generate image with comfyui")
     return response
@@ -109,7 +132,7 @@ def get_models(type_filter: Optional[str] = None, verbose: bool = False):
         if type_filter and type_filter != model_cfg.get("type"):
             continue
             
-        installed = registry.check_model_files(model_cfg)
+        installed = registry.is_model_installed(model_cfg)
         
         size_gb = None
         if verbose and installed:
@@ -127,39 +150,35 @@ def get_models(type_filter: Optional[str] = None, verbose: bool = False):
         models=models_list
     )
 
-@app.post("/models/install", response_model=InstallModelResponse)
-def install_model(request: InstallModelRequest):
+def _install_model(name: str, alternative_server: str=None, force_install: bool=False):
     registry = ModelRegistry()
     
-    model_cfg = registry.get_model_cfg(request.name)
+    model_cfg = registry.get_model_cfg(name)
     if not model_cfg:
-        logger.error(f"model {request.name} not found in registry")
+        logger.error(f"model {name} not found in registry")
         raise HTTPException(
             status_code=404, 
-            detail=f"Model '{request.name}' not registered"
+            detail=f"Model '{name}' not registered"
         )
     
+    installed_cfg = registry.install_model(name, alternative_server, force_install)
+    
+    if not installed_cfg:
+        logger.error(f"Failed to install model {name}")
+        raise HTTPException(
+            status_code=500, 
+            detail="Failed to install model '{name}'"
+        )
+
+@app.post("/models/install", response_model=InstallModelResponse)
+def install_model(request: InstallModelRequest):
     try:
-        installed_cfg = registry.install_model(
-            request.name,
-            request.source,
-            request.force
-        )
-        
-        if not installed_cfg:
-            logger.error(f"Failed to install model {request.name}")
-            raise HTTPException(
-                status_code=500, 
-                detail="Failed to install model"
-            )
-        
-        size_gb = registry.get_model_size(installed_cfg) if installed_cfg else None
-        
+        _install_model(request.name, request.source, request.force)
         return InstallModelResponse(
-            name=request.name,
-            size_gb=size_gb
+           name=request.name,
+           size_gb=0 # TODO
         )
-        
+         
     except Exception as e:
         logger.error(f"Model installation failed for {request.name}: {e}")
         raise HTTPException(
