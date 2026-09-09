@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.11.0
+------
+
+- #52 cleanup model registry
+
 0.10.0
 ------
 

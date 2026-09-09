@@ -1,9 +1,0 @@
-# To access the registry manager
-
-docker compose run --entrypoint /bin/bash --rm node
-
-# list models
-python -m app.registry_manager list -v
-
-# install models run
-python -m app.registry_manager install [modelname as shown by list]
