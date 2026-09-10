@@ -96,9 +96,24 @@ For local development this is the recommended workflow.
 * optionally run `./install.sh -s` to sync the local changes to all remote machines based on `infrastructure.json`
 * run `./dev.sh` on each machine to launch all docker containers based on the configuration in `infrastructure.json`
 
-# want to use other models
+# Models
 
-Edit rueckgrat/node/data/registry.json in order to add more models to the system. Follow the existing entries as examples.
+In oder to use other models then offered by Rückgrat edit the registry at rueckgrat/node/data/registry.json.
+Follow the existing entries as example.
+
+In order to manually install and manage models use the registry manager
+
+# Registry manager
+
+Currently the only way to run the registry manager is from a shell inside of a running container.
+
+`docker compose run --entrypoint /bin/bash --rm node`
+
+**list models**
+python -m app.registry_manager list -v
+
+**install models**
+python -m app.registry_manager install [modelname as shown by list]
 
 # Troubleshoot & FAQ
 
