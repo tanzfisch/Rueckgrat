@@ -5,6 +5,7 @@ Changelog
 ------
 
 - #52 cleanup model registry
+- #10 added speech to text using silero_vad and faster_whisper
 
 0.10.0
 ------

@@ -13,3 +13,6 @@ scikit-learn
 json-repair
 bs4
 tldextract
+faster-whisper
+torch
+numpy

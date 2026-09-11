@@ -1,4 +1,3 @@
-# speech_task.py
 import subprocess
 from pathlib import Path
 import sys
@@ -47,7 +46,7 @@ def run_speech(text, model):
             logger.debug(f"run: {shlex.join(command_aplay)}")
             subprocess.run(command_aplay, check=False)
     except Exception as e:
-        logger.error(f"Speech error: {e}", file=sys.stderr)
+        logger.error(f"failed to generate and playback speech: {e}", file=sys.stderr)
     finally:
         logger.debug(f"delete speech")
         Path(output_file).unlink(missing_ok=True)

@@ -1,12 +1,12 @@
 import re
 from PySide6.QtWidgets import ( QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QScrollArea, QMenu, QLabel )
 from PySide6.QtGui import QIcon
-from PySide6.QtCore import Qt, QTimer, QSize, QPoint
+from PySide6.QtCore import Qt, QTimer, QSize, QPoint, Signal
 
 from app.ui import BasePage
 from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker, PlainTextEdit, StatusWidget
-from app.speech import Speech
-from app.utils import Hub, Contact, Paths
+from app.audio import Text_To_Speech
+from app.utils import Hub, Contact, Paths, AudioStreamer
 
 from app.common import get_logger, Utils
 logger = get_logger()
@@ -22,6 +22,8 @@ class HistoryContainer(QWidget):
                 bubble.setFixedWidth(int(self.width() * 0.85))
 
 class ChatPage(BasePage):
+    audio_msg = Signal(dict)
+
     def __init__(self, navigator):
         super().__init__(navigator)
 
@@ -78,6 +80,9 @@ class ChatPage(BasePage):
         self.mic_toggle_btn.setIconSize(QSize(24, 24))
         self.mic_toggle_btn.toggled.connect(self.on_mic_toggle)
         input_layout.addWidget(self.mic_toggle_btn, alignment=Qt.AlignmentFlag.AlignBottom)
+
+        self.audio_streamer = None
+        self.audio_msg.connect(self._handle_audio_payload)
 
         send_btn = QPushButton()
         send_btn.setIcon(QIcon("app/icons/send_light.png"))
@@ -171,6 +176,7 @@ class ChatPage(BasePage):
         Hub.register_incomming_message(self.on_incomming_message)
 
     def on_leave(self):
+        self._stop_mic()
         Hub.unregister_incomming_message(self.on_incomming_message)
 
     def resizeEvent(self, event):
@@ -218,11 +224,42 @@ class ChatPage(BasePage):
 
     def on_mic_toggle(self, checked):
         if checked:
+            self._start_mic()
             self.mic_toggle_btn.setIcon(QIcon("app/icons/mic_on_light.png"))
-            # turn mic on
         else:
+            self._stop_mic()
             self.mic_toggle_btn.setIcon(QIcon("app/icons/mic_off_light.png"))
-            # turn mic off
+
+    def _start_mic(self):
+        self._stop_mic()
+        uri = Hub.uri.replace("/ws", "/ws/audio")
+        self.audio_streamer = AudioStreamer(
+            uri=uri,
+            token=Hub.access_token,
+            cert=Hub.server_cert,
+            on_message=self._on_audio_message,
+        )
+        self.audio_streamer.start()
+
+    def _on_audio_message(self, payload: dict):                
+        self.audio_msg.emit(payload)
+
+    def _handle_audio_payload(self, payload: dict):
+        logger.debug(Utils.pretty_print(payload))
+        kind = payload.get("type")
+        text = (payload.get("text") or "").strip()
+        if not text:
+            return
+        if kind == "partial":
+            self.input_box.setPlainText(text)
+        elif kind == "final":
+            self.input_box.setPlainText(text)
+            self.send_message()
+
+    def _stop_mic(self):
+        if self.audio_streamer:
+            self.audio_streamer.stop()
+            self.audio_streamer = None
 
     def append_history(self, role: str, content: str, image_filepath: str = None):
         bubble = ChatBubble(role, content, image_filepath)
@@ -247,7 +284,7 @@ class ChatPage(BasePage):
         scrollbar.setValue(scrollbar.maximum())
 
     def replay(self):
-        Speech.speak(
+        Text_To_Speech.speak(
             text=self._cleanup_for_speech(self.replay_content), 
             model=self.piper_model
         )
@@ -328,7 +365,7 @@ class ChatPage(BasePage):
                     else:
                         self.append_history(role, content)
                 
-                Speech.speak(
+                Text_To_Speech.speak(
                     text=self._cleanup_for_speech(content), 
                     model=self.piper_model
                 )

@@ -11,7 +11,7 @@ from app.common import get_logger
 logger = get_logger()
 
 
-class Speech:
+class Text_To_Speech:
     _current_proc = None
     _proc_lock = Lock()
 
@@ -31,7 +31,7 @@ class Speech:
 
         try:
             cls.kill_current_speech()
-            speech_task_path = f"{os.getcwd()}/app/speech/speech_task.py"
+            speech_task_path = f"{os.getcwd()}/app/speech/text_to_speech_task.py"
 
             voices_base_path = Paths.get_voices_path()
             model_path = Path(f"{voices_base_path}/{model}")

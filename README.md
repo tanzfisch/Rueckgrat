@@ -13,12 +13,12 @@ AI chat frontend & backend. The purpose is evolving. Currently the main focus is
 Everything is in its early stages. Don't expect too much and mostly the quality depends on the models you run underneath
 
 - all python based
-- full Linux support (tested only on Debian)
+- full Linux support
 - only native chat client on Windows supported
-- In-chat image generation on demand
-- AI self-visualization and character-aware image generation
+- in-chat image generation
 - Chat with locally installed LLM
 - Client-side text-to-speech using Piper (subject to change)
+- speech to text using silero_vad and faster_whisper
 - code highlighting
 - Tools 
     - websearch searches the web when requested or needed
