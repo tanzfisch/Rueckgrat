@@ -22,8 +22,7 @@ class ImageGen:
 
     def image(self, request: ImageRequest) -> ImageResponse:
         registry = ModelRegistry()
-        model_cfg = registry.get_model_cfg(request.model)
-        model_path = registry.get_safetensors(model_cfg)
+        model_path = registry.get_safetensors(request.model)
 
         image = self._generate(
             prompt = request.positive_prompt,

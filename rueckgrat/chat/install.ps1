@@ -5,5 +5,3 @@ if (-not (Test-Path .venv)) {
 .venv\Scripts\activate
 
 pip install -r requirements.txt --upgrade
-
-python -m spacy download en_core_web_sm

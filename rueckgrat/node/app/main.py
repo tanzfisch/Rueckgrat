@@ -66,12 +66,11 @@ def image(request: ImageRequest):
         return ImageResponse(output="")
     
     registry = ModelRegistry()
-    model_cfg = registry.get_model_cfg(request.model)
-    if not model_cfg:
+    if not registry.has_model(request.model):
         logger.error(f"model {request.model} not found in registry")
         return ImageResponse(output="")
 
-    if not registry.is_model_installed(model_cfg):
+    if not registry.is_installed(request.model):
         try:
             _install_model(name=request.model)
         except Exception as e:
@@ -124,26 +123,20 @@ def get_model_url(model_name: str):
 @app.get("/models", response_model=GetModelsResponse)
 def get_models(type_filter: Optional[str] = None, verbose: bool = False):
     registry = ModelRegistry()
-    data = registry.get_registry()
     
     models_list: List[ModelInfo] = []
     
-    for key, model_cfg in data.items():
-        if type_filter and type_filter != model_cfg.get("type"):
-            continue
-            
-        installed = registry.is_model_installed(model_cfg)
-        
-        size_gb = None
-        if verbose and installed:
-            size_gb = registry.get_model_size(model_cfg)
+    for model_name in registry.get_models(type_filter):
+        installed = registry.is_installed(model_name)
+        size_gb = registry.get_size(model_name)
+        description = registry.get_description(model_name)
         
         models_list.append(ModelInfo(
-            name=key,
-            type=model_cfg.get("type", "unknown"),
+            name=model_name,
+            type=type_filter,
             installed=installed,
             size_gb=size_gb,
-            description=model_cfg.get("description")  # assuming this field exists
+            description=description
         ))
     
     return GetModelsResponse(
@@ -153,8 +146,7 @@ def get_models(type_filter: Optional[str] = None, verbose: bool = False):
 def _install_model(name: str, alternative_server: str=None, force_install: bool=False):
     registry = ModelRegistry()
     
-    model_cfg = registry.get_model_cfg(name)
-    if not model_cfg:
+    if not registry.has_model(name):
         logger.error(f"model {name} not found in registry")
         raise HTTPException(
             status_code=404, 
