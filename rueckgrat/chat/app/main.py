@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout)
 from PySide6.QtCore import QTimer
 import atexit
 from app.ui import LoginPage, ChatPage, ContactsPage, ConversationsPage, ProfilePage, ProfileWizard, SettingsPage, InitialSettingsPage
-from app.speech import Speech
+from app.audio import Text_To_Speech
 from app.utils.hub import Hub
 from app.utils.config import RueckgratConfig
 from app.utils import Paths
@@ -129,7 +129,7 @@ def main():
     Hub.init(config)
 
     truststore.inject_into_ssl()
-    atexit.register(Speech.kill_current_speech)
+    atexit.register(Text_To_Speech.kill_current_speech)
     atexit.register(Hub.shutdown)
 
     app = qasync.QApplication(sys.argv)

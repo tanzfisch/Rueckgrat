@@ -14,8 +14,6 @@ COPY root/ /
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-RUN python -m spacy download en_core_web_sm
-
 WORKDIR /chat
 
 RUN mkdir -p /chat/cache /chat/models && chown -R abc:abc /chat

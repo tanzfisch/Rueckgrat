@@ -923,13 +923,32 @@ deploy_chat_docker() {
 # Usage: deploy_chat_native
 # No arguments
 deploy_chat_native() {
-    install_dependencies python3 python3.13-venv alsa-utils
+    install_dependencies python3 python3.13-venv alsa-utils libportaudio2 portaudio19-dev
 
     print_section
     echo "📦 chat..."
 
     pushd rueckgrat/chat > /dev/null
-    ./install.sh "$CADDY_CERT" || { echo "❌ Error: Chat native install failed!"; popd; exit 1; }
+
+    CERT_DEST="$HOME/.ssh/rueckgrat-caddy.cert"
+    if [[ -n "${CADDY_CERT:-}" ]]; then
+        echo "🔑 Installing certificate from: $CADDY_CERT"
+        mkdir -p "$HOME/.ssh"
+        cp -f "$CADDY_CERT" "$CERT_DEST"
+        chmod 644 "$CERT_DEST"
+        echo "✅ Certificate installed to $CERT_DEST"
+    elif [[ -f "$CERT_DEST" ]]; then
+        echo "⚠️ Warning: Using existing certificate: $CERT_DEST"
+    else
+        echo "❌ Error: No certificate path provided and $CERT_DEST not found."
+        popd > /dev/null
+        exit 1
+    fi
+
+    [ -d .venv ] || python3 -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt
+
     popd > /dev/null
 }
 

@@ -8,6 +8,9 @@ import os
 from tqdm import tqdm
 from pathlib import Path
 import time
+import numpy as np
+from faster_whisper import WhisperModel
+import torch
 
 from fastapi.responses import StreamingResponse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
@@ -29,20 +32,32 @@ logger = get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    random.seed(time.time())
-        
+    logger.info("loading infrastructure config")
     app.state.infrastructure = Infrastructure()
     await app.state.infrastructure.connect_nodes()
 
+    logger.info("loading db")
     db_path = "/hub/db/chat.db"
     app.state.db = ChatDB(db_path)
     app.state.job_queue = JobQueue()
 
+    logger.info("loading tool registry")
     app.state.tool_registry = ToolRegistry(
         infrastructure=app.state.infrastructure,
         db=app.state.db,
         job_queue=app.state.job_queue
     )
+
+    logger.info("loading whisper")
+    app.state.whisper_lock = asyncio.Lock()
+    app.state.whisper_model = WhisperModel("medium", device="cpu", compute_type="int8")
+    app.state.whisper_model_fast = WhisperModel("small", device="cpu", compute_type="int8")
+
+    logger.info("loading vad")
+    VAD_PATH = Path(__file__).resolve().parent / "silero_vad" / "silero_vad.jit"
+    app.state.vad = torch.jit.load(str(VAD_PATH), map_location="cpu")   
+    app.state.vad.eval()
+    torch.set_num_threads(1)
 
     logger.info("hub initialized")
 
@@ -445,3 +460,89 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
         task.cancel()
 
     await asyncio.gather(*pending, return_exceptions=True)        
+
+SPEECH = 0.5
+SILENCE_MS = 2000
+PARTIAL_MS = 1000
+
+def pcm16_to_float(b: bytes) -> np.ndarray:
+    return np.frombuffer(b, dtype=np.int16).astype(np.float32) / 32768.0
+
+@app.websocket("/ws/audio")
+async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_current_user_ws)):
+    await websocket.accept()
+    user_id = app.state.db.get_user_id(username)
+    utterance = []
+    voiced = False
+    silence = 0
+    spoken_ms = 0
+    busy = False
+    buf = bytearray()
+    meta = {"sample_rate": 16000, "channels": 1, "encoding": "pcm_s16le"}
+    frame = 512
+
+    async def transcribe(model, wav, kind: str):
+        nonlocal busy
+        if kind == "partial" and (busy or app.state.whisper_lock.locked()):
+            return
+        busy = True
+        try:
+            async with app.state.whisper_lock:
+                segments, _ = await asyncio.to_thread(
+                    model.transcribe, wav, vad_filter=False
+                )
+            text = "".join(s.text for s in segments).strip()
+            if text:
+                await websocket.send_json({"type": kind, "text": text})
+                logger.debug(text)
+        finally:
+            busy = False
+
+    try:
+        while True:
+            msg = await websocket.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+
+            if "text" in msg and msg["text"]:
+                data = json.loads(msg["text"])
+                if data.get("type") == "audio.start":
+                    meta.update({k: data[k] for k in ("sample_rate", "channels", "encoding") if k in data})
+                    await websocket.send_json({"type": "audio.ready"})
+                elif data.get("type") == "audio.stop":
+                    break
+                continue
+
+            chunk = msg.get("bytes")
+            if not chunk:
+                continue
+            buf.extend(chunk)
+            audio = pcm16_to_float(bytes(buf))
+
+            while len(audio) >= frame:
+                piece = audio[:frame]
+                audio = audio[frame:]
+                buf = bytearray(audio.astype(np.int16).tobytes())
+                prob = app.state.vad(torch.from_numpy(piece), 16000).item()
+                if prob >= SPEECH:
+                    voiced = True
+                    silence = 0
+                    utterance.append(piece)
+                    spoken_ms += frame / 16
+                    if spoken_ms >= PARTIAL_MS:
+                        spoken_ms = 0
+                        wav = np.concatenate(utterance)
+                        await transcribe(app.state.whisper_model_fast, wav, "partial")
+                elif voiced:
+                    silence += frame / 16
+                    utterance.append(piece)
+                    if silence >= SILENCE_MS:
+                        wav = np.concatenate(utterance)
+                        await transcribe(app.state.whisper_model, wav, "final")
+                        utterance = []
+                        voiced = False
+                        silence = 0
+                        spoken_ms = 0
+
+    except WebSocketDisconnect:
+        pass
