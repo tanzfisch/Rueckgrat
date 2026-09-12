@@ -32,7 +32,7 @@ logger = get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("loading infrastructure config")
+    logger.info("connecting infrastructure")
     app.state.infrastructure = Infrastructure()
     await app.state.infrastructure.connect_nodes()
 

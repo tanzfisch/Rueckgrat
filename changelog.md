@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.11.1
+------
+
+- #57 fixed wrong path when calling TTS and added missing piper model
+
 0.11.0
 ------
 
