@@ -41,13 +41,13 @@ async def lifespan(app: FastAPI):
     app.state.cleanup_worker = CleanupWorker(folder="/node/images")
     app.state.cleanup_worker.start()
 
-    logger.info("Infrastructure initialized")
+    logger.info("node initialized")
 
     yield
 
     app.state.cleanup_worker.stop()
     
-    logger.info("Infrastructure shut down")
+    logger.info("node shut down")
 
 app = FastAPI(lifespan=lifespan)   
 

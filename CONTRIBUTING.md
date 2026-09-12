@@ -6,3 +6,5 @@ By submitting a contribution to this project, you agree that:
 2. You license your contribution under the same license as the project.
 3. You grant the project maintainer the right to relicense your
    contribution under other licenses, including commercial licenses.
+
+The author develop primarily on a private copy of this repo. Feel free to open tickets here anyway or contact directly via martinloga@protonmail.com
