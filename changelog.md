@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.11.2
+------
+
+- #58 fixed health check timout issue
+
 0.11.1
 ------
 

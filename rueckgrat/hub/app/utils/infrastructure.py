@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional, Dict, Callable
 from dataclasses import dataclass
 from ..jobs.image_job import ImageRequest
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.common import get_logger, ChatRequestLlama, DownloadQueue, Utils, WebSocketClient
 logger = get_logger()
@@ -85,28 +86,28 @@ class Infrastructure:
 
     def get_status(self) -> StatusResult:
         result = StatusResult()
+        hosts = [h for h in self.hosts if "node" in h]
 
-        for host in self.hosts:
+        def check(host):
+            node = host["node"]
+            url = f"http://{host['addr']}:{node['port']}/health"
+            try:
+                r = requests.get(url, timeout=1)
+                ok = (
+                    r.status_code == 200
+                    and r.json() == {"status": "ok"}
+                    and r.headers.get("content-type", "").startswith("application/json")
+                )
+                err = None if ok else str(r.status_code)
+                return ServerResult(url, ok, error=err)
+            except Exception as e:
+                return ServerResult(url, False, error=repr(e))
 
-            if "node" in host:
-                node = host["node"]
-                url = f"http://{host['addr']}:{node['port']}/health"
-
-                try:
-                    response = requests.get(url, timeout=1)
-
-                    ok = response.status_code == 200 \
-                    and response.json() == {"status": "ok"} \
-                    and response.headers.get("content-type", "").startswith("application/json")
-
-                    if ok:
-                        result.nodes.append(ServerResult(url, ok))
-                    else:
-                        result.nodes.append(ServerResult(url, ok, error=response["status"]))
-                                    
-                except Exception as e:
-                    result.nodes.append(ServerResult(url, False, error=repr(e)))
-
+        if hosts:
+            with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
+                futs = [pool.submit(check, h) for h in hosts]
+                for f in as_completed(futs):
+                    result.nodes.append(f.result())
         return result
     
     # TODO need to begin working on a common module that can be shared across applications
