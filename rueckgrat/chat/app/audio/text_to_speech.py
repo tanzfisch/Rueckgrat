@@ -31,7 +31,7 @@ class Text_To_Speech:
 
         try:
             cls.kill_current_speech()
-            speech_task_path = f"{os.getcwd()}/app/speech/text_to_speech_task.py"
+            speech_task_path = f"{os.getcwd()}/app/audio/text_to_speech_task.py"
 
             voices_base_path = Paths.get_voices_path()
             model_path = Path(f"{voices_base_path}/{model}")

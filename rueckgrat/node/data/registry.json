@@ -63,6 +63,23 @@
     ],
     "install_path": "voices/en_US-hfc_male-medium"
   },
+  "en_US-hfc_female-medium": {
+    "description": "",
+    "type": "tts",
+    "compatibility": ["piper-tts"],
+    "comment": "acceptable quality at high speed",
+    "files": [
+      {
+        "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx.json",
+        "path": ""
+      }
+    ],
+    "install_path": "voices/en_US-hfc_female-medium"
+  },  
 
  "lustifySDXLNSFW_ggwpV7": {
     "description": "",

@@ -1,47 +1,63 @@
 # <img src="logo.png" width="50" alt="Logo">ückgrat
 
-AI chat frontend & backend. The purpose is evolving. Currently the main focus is a **private, local-first AI companion**.
+**AI tools running private and local.**
 
 **Status**: Early stage. Do not use in production.
  * many features still missing
  * instability expected
- * Author has no clue about auth, cert and caddy. Could use some help here to get this right.
+ * Author has no clue about security, auth, certs, or Caddy. Help welcome.
  * See the [changelog](https://github.com/tanzfisch/Rueckgrat/blob/master/changelog.md) for more details.
+
+AGPL-3.0. Commercial licensing: see `COMMERCIAL_LICENSE.md`.
 
 ## Features
 
-Everything is in its early stages. Don't expect too much and mostly the quality depends on the models you run underneath
+Rückgrat is a hub/node backend plus a user-facing companion chat client. Quality depends on the models you run.
 
-- all python based
-- full Linux support
-- only native chat client on Windows supported
+### Backend
+
+- Linux only
+    * Debian ✅
+    * Ubuntu (not tested)
+    * Fedora (not tested)
+    * Arch (not tested)
+    * openSUSE (not tested)
+- full conrol over which hardware is used
+- no third-party AI APIs used
+- multi-host: one **hub** (control + DB + STT) and one or more **nodes** (workers)
+- Caddy for HTTPS
+- **llama.cpp** server in Docker (`text_to_text`)
+- image generation via Diffusers / SDXL (`text_to_image`)
+- STT on the hub: Silero VAD + faster-whisper
+- GPU: NVIDIA and AMD. Intel GPUs are not supported/tested.
+- AI tools
+    - **websearch** — search the web when requested or needed
+    - **generate_image** — generate an image on request or on its own
+    - **take_photo** — generate a photo of self, user, or both from current context
+
+Use at least a 24B LLM (e.g. `cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L`). Smaller models fail JSON/tool calls often.
+
+### Chat Client
+
+- native Linux and Windows
+- optional Docker chat (known issues: no audio, autostart unreliable)
+- chat with a locally installed LLM
 - in-chat image generation
-- Chat with locally installed LLM
-- Client-side text-to-speech using Piper (subject to change)
-- speech to text using silero_vad and faster_whisper
+- client-side TTS via Piper
 - code highlighting
-- Tools 
-    - websearch searches the web when requested or needed
-    - image_gen general image generation by user request or by it self
-    - take_photo takes a "photo" of self, user or both based on current context
- 
-Currently supported os are:
-* Debian ✅
-* Ubuntu (not tested)
-* Fedora (not tested)
-* Arch (not tested)
-* openSUSE (not tested)
-* Windows ✅ (client only)
+- contacts, character templates, character-creation wizard, settings
 
-I recommend a miniumm of 24b llm (ie cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L which I worked with the most) otherwise it will not be able to handle json generation correctly and consitantly.
+## Planned
 
-For planned features, check the [Issues](https://github.com/tanzfisch/Rueckgrat/issues).
+- rewrite the client for mobile, then drop Docker chat
+- character consistency in images
+- Flux support
+- some more productivity oriented frontend
+- agents
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Linux
-
-Install Rueckgrat on Linux using the following commands
 
 ```bash
 wget https://raw.githubusercontent.com/tanzfisch/Rueckgrat/master/install.sh
@@ -49,20 +65,20 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The installer supports multi-host deployment, component selection (Chat native/Docker, Hub, Node, llama-server), clean builds, and all major distros. It will install and run all selected options except the native chat client.
+The installer supports multi-host deploy, component selection (chat native/Docker, hub, node, llama-server, ImageGen), clean/fresh builds (`-f`), and the distros listed above. Selected Docker services are started; the native chat client is not.
 
-*Note:* The installer requires you to have sudo access on all machines you want to install with using the same username. 
+Requires sudo on every target host, same username.
 
-To launch the native client manually:
+Native chat:
 
 ```bash
 cd rueckgrat/chat
 ./run.sh
 ```
 
-##### Alternative methods of installation:
+#### Alternatives
 
-First clone and then run install
+Clone, then install:
 
 ```bash
 git clone https://github.com/tanzfisch/Rueckgrat.git
@@ -70,64 +86,74 @@ cd Rueckgrat
 ./install.sh
 ```
 
-Alternatively it can be started using a config file like so. This file can be created ussing the installer it self. Just follow the instructions until the point where it recaps your install instructions. The config file then can be found at rueckgrat/config/infrastructure.json
+Config-driven install. Walk the installer until it recaps the plan; the written file is `rueckgrat/config/infrastructure.json`. Example:
 
 ```bash
-./install -c rueckgrat/config/config_example.json -y
+./install.sh -c rueckgrat/config/config_example.json -y
 ```
+
+Useful flags: `-y` non-interactive, `-c FILE` config, `-s` rsync-only sync, `-f` clean rebuild, `--key` / `--cert` Caddy files, `-h` help.
 
 ### Windows
 
-Currently only installing the client by script is supported for Windows.
+Native client only:
 
 ```powershell
 git clone https://github.com/tanzfisch/Rueckgrat.git
-cd Rueckgrat\chat
+cd Rueckgrat\rueckgrat\chat
 .\install.ps1
 .\run.ps1
 ```
 
-# Development
+## Development
 
-For local development this is the recommended workflow.
+1. install once (creates `rueckgrat/config/infrastructure.json`)
+2. change code
+3. optional: `./install.sh -s` to rsync this tree to remote hosts from that config
+4. run `./dev.sh` on each machine to restart that host's containers and follow logs
+5. run `./stop.sh` to stop all docker services
 
-* Install once as described above (note that this creates a config file `infrastructure.json`).
-* make changes to code
-* optionally run `./install.sh -s` to sync the local changes to all remote machines based on `infrastructure.json`
-* run `./dev.sh` on each machine to launch all docker containers based on the configuration in `infrastructure.json`
+## Models
 
-# Models
+Edit `rueckgrat/node/data/registry.json` to add models. Copy an existing entry for reference.
 
-In oder to use other models then offered by Rückgrat edit the registry at rueckgrat/node/data/registry.json.
-Follow the existing entries as example.
+Manage installs with the registry manager.
 
-In order to manually install and manage models use the registry manager
+## Registry manager
 
-# Registry manager
+Needs to run inside a node container:
 
-Currently the only way to run the registry manager is from a shell inside of a running container.
+```bash
+cd rueckgrat
+docker compose run --entrypoint /bin/bash --rm node
+```
 
-`docker compose run --entrypoint /bin/bash --rm node`
-
-**list models**
+```bash
 python -m app.registry_manager list -v
+python -m app.registry_manager list -v -t llm    # llm | image | tts | stt
+python -m app.registry_manager install MODELNAME
+python -m app.registry_manager nodes
+```
 
-**install models**
-python -m app.registry_manager install [modelname as shown by list]
+Models live under `/var/lib/Rueckgrat/models` on the host.
 
-# Troubleshoot & FAQ
+## Troubleshoot & FAQ
 
-### How can I see the logs?
-For hub, node, caddy and llama-server:
-`docker logs -f [container]`
+### Logs for hub, node, caddy, llama-server
 
-### Can't see the Chat logs when running inside Docker
-Look in `logs/chat.log` and `logs/autostart.log`.
+`docker logs -f CONTAINER`
 
-### Where are the logs for Chat running native?
-No log file. Chat writes directly to stdout.
+Container names: `rueckgrat_hub`, `rueckgrat_node`, `rueckgrat_caddy`, `rueckgrat_llama_server`, `rueckgrat_chat`.
 
-# Special Tanks to
+### Chat logs in Docker
+
+`logs/chat.log` and `logs/autostart.log`.
+
+### Native chat logs
+
+Stdout only (`./run.sh` also writes `logs/chat.log` if that path exists).
+
+## Special thanks to
 
 ✨ **Gebrielle** 🎉
 
