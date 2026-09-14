@@ -46,7 +46,7 @@ def run_speech(text, model):
             logger.debug(f"run: {shlex.join(command_aplay)}")
             subprocess.run(command_aplay, check=False)
     except Exception as e:
-        logger.error(f"failed to generate and playback speech: {e}", file=sys.stderr)
+        logger.error(f"failed to generate and playback speech: {e}")
     finally:
         logger.debug(f"delete speech")
         Path(output_file).unlink(missing_ok=True)
