@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 import threading
 import argparse
@@ -95,12 +96,28 @@ class ColorFormatter(logging.Formatter):
         
         return super().format(record)
 
+class LockedStreamHandler(logging.StreamHandler):
+    def __init__(self, lock, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._lock = lock
+
+    def emit(self, record):
+        with self._lock:
+            super().emit(record)
+
+class HealthFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not (record.args and len(record.args) >= 3 and record.args[2] == "/health")
+
 class Logger:
     def __init__(self, level=logging.DEBUG):
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--logfile', default=None)
-        args, unknown = parser.parse_known_args()
-        logfile = args.logfile
+        if sys.platform != "android":
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--logfile", default=None)
+            args, _ = parser.parse_known_args()
+            logfile = args.logfile
+        else:
+            logfile = None
 
         self._logger = logging.getLogger("Rückgrat")
         self._logger.setLevel(level)
@@ -110,20 +127,27 @@ class Logger:
             if logfile:
                 logfile_path = Path(os.path.expanduser(logfile))
                 os.makedirs(logfile_path.parent, exist_ok=True)
-                fh = logging.FileHandler(logfile_path, mode='w')
+                fh = logging.FileHandler(logfile_path, mode="w")
                 os.chmod(logfile_path, 0o666)
                 fh.setLevel(level)
-                logfile_formatter = ColorFormatter(use_colors=False, fmt=f"%(levelname)s %(message)s\n          %(pathname)s")
-                fh.setFormatter(logfile_formatter)
+                fh.setFormatter(ColorFormatter(
+                    use_colors=False,
+                    fmt="%(levelname)s %(message)s\n          %(pathname)s",
+                ))
                 self._logger.addHandler(fh)
                 self._logger.debug(f"logging to file {logfile_path}")
 
-            ch = logging.StreamHandler()
+            ch = LockedStreamHandler(self._lock, sys.stderr)
             ch.setLevel(level)
-            formatter = ColorFormatter(fmt=f"%(levelname)s %(message)s\n          %(pathname)s")
-            ch.setFormatter(formatter)
-            ch.emit = lambda record: (self._lock.acquire(), ch.__class__.emit(ch, record), self._lock.release()) or None
+            ch.setFormatter(ColorFormatter(
+                use_colors=True,
+                fmt="%(levelname)s %(message)s\n          %(pathname)s",
+            ))
             self._logger.addHandler(ch)
+
+        access = logging.getLogger("uvicorn.access")
+        if not any(isinstance(f, HealthFilter) for f in access.filters):
+            access.addFilter(HealthFilter())
 
     def get_logger(self):
         return self._logger

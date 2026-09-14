@@ -1,50 +1,48 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QFrame, QSizePolicy, QHBoxLayout)
-from PySide6.QtCore import Qt, Signal, QSize
-from .image import Image
+import flet as ft
 from app.utils import Contact, Paths
 
 from app.common import get_logger
 logger = get_logger()
 
-class ContactCard(QFrame):
-    clicked = Signal(int)
 
-    def __init__(self, contact: Contact):
-        super().__init__()
+class ContactCard(ft.Container):
+    def __init__(self, contact: Contact, on_clicked=None, **kwargs):
         self.contact = contact
-
-        self.setObjectName("contact_card")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)        
-        self.setCursor(Qt.PointingHandCursor)
+        self.on_clicked = on_clicked
 
         profile_image_name = self.contact.get_latest_profile_image_name()
-        if profile_image_name:
-            profile_image_path = Paths.get_image_path() / profile_image_name
-        else:
-            profile_image_path = ""
-               
-        layout = QHBoxLayout(self)
-        profile_image = Image(image_path=profile_image_path, size=QSize(200,200))
-        layout.addWidget(profile_image)
+        profile_image_path = (
+            str(Paths.get_image_path() / profile_image_name)
+            if profile_image_name
+            else ""
+        )
 
-        wrapper = QWidget()
-        wrapper.setObjectName("transparent")
-        label_layout = QVBoxLayout(wrapper)
-        layout.addWidget(wrapper)
+        profile_image = ft.Image(
+            src=profile_image_path or None,
+            width=150,
+            height=150,
+            fit=ft.BoxFit.COVER,
+        )
 
-        name_label = QLabel(self.contact.get_name())
-        label_layout.addWidget(name_label)
+        labels = ft.Column(
+            [
+                ft.Text(self.contact.get_name()),
+                ft.Text(self.contact.get_role()),
+                ft.Text(self.contact.get_persona()),
+            ],
+            spacing=4,
+            expand=True,
+            tight=True,
+        )
 
-        traits_label = QLabel(self.contact.get_role())
-        traits_label.setWordWrap(True)
-        label_layout.addWidget(traits_label)
+        super().__init__(
+            content=ft.Row([profile_image, labels], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START),
+            data={"id": "contact_card"},
+            ink=True,
+            on_click=self._on_click,
+            **kwargs,
+        )
 
-        purpose_label = QLabel(self.contact.get_persona())
-        purpose_label.setWordWrap(True)
-        label_layout.addWidget(purpose_label)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.clicked.emit(self.contact.get_id())
-        super().mousePressEvent(event)
-
+    def _on_click(self, e):
+        if self.on_clicked:
+            self.on_clicked(self.contact.get_id())

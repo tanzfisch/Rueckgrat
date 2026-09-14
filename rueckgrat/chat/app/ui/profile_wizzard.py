@@ -1,21 +1,20 @@
 import json
+import os
 import random
-
-from PySide6.QtWidgets import (
-    QVBoxLayout, QStackedLayout, QWidget, QPushButton, QLabel,
-    QHBoxLayout, QLineEdit, QTextEdit, QFormLayout, QComboBox
-)
-from PySide6.QtGui import QFont
-from PySide6.QtCore import Qt
+import flet as ft
+from app.ui.theme import STYLES
 
 from app.utils import Hub
 from app.ui import BasePage
-from app.ui.widgets import ContactHeader, LabeledSlider, RowSelector, PlainTextEdit
-
+from app.ui.widgets import ContactHeader, LabeledSlider, RowSelector
 from app.common import get_logger
+
 logger = get_logger()
 
-class ProfilePage(QWidget):
+LABEL_WIDTH = 80
+ASSETS_DIR = os.getenv("FLET_ASSETS_DIR") or "assets"
+
+class WizardProfilePage(ft.Column):
     male_names = [
         "Hans", "Marcus", "Oliver", "Lukas", "Leon", "Ben", "David", "Tim", "Niklas", "Max",
         "Felix", "Lennart", "Johannes", "Paul", "Simon", "Jonas", "Moritz", "Tom", "Leonard",
@@ -38,7 +37,7 @@ class ProfilePage(QWidget):
         "Thabo", "Sipho", "Lethabo", "Neo", "Mandla", "Sibusiso", "Andile", "Kagiso",
         "Tumelo", "Rashid", "Zuberi", "Jelani", "Omari", "Malik", "Hakim", "Abdul",
         "Faraji", "Jabari", "Amari", "Kamau", "Mosi", "Sekou", "Khamisi", "Baraka",
-        "Ekon", "Nuru", "Obinna", "Chuma", "Dumisani", "Siyabonga", "Vusi"
+        "Ekon", "Nuru", "Obinna", "Chuma", "Dumisani", "Siyabonga", "Vusi",
     ]
 
     female_names = [
@@ -64,46 +63,46 @@ class ProfilePage(QWidget):
         "Rethabile", "Tshepiso", "Ayanda", "Zanele", "Siphesihle",
         "Jelani", "Malika", "Hadiya", "Jamila", "Samira", "Nala", "Zahara",
         "Asha", "Bahati", "Eshe", "Kesi", "Malaika", "Nuru", "Sanaa", "Zola",
-        "Obioma", "Chinwe", "Adanna", "Ebele", "Uduak", "Yewande", "Funmi"        
+        "Obioma", "Chinwe", "Adanna", "Ebele", "Uduak", "Yewande", "Funmi",
     ]
 
     male_ages = {
-        "18": "app/icons/male_teen_light.png",
-        "22": "app/icons/male_20s_light.png",
-        "27": "app/icons/male_30s_light.png",
-        "45": "app/icons/male_40s_light.png",
-        "60": "app/icons/male_old_light.png"
+        "18": f"{ASSETS_DIR}/icons/male_teen_light.png",
+        "22": f"{ASSETS_DIR}/icons/male_20s_light.png",
+        "27": f"{ASSETS_DIR}/icons/male_30s_light.png",
+        "45": f"{ASSETS_DIR}/icons/male_40s_light.png",
+        "60": f"{ASSETS_DIR}/icons/male_old_light.png",
     }
 
     female_ages = {
-        "18": "app/icons/female_teen_light.png",
-        "22": "app/icons/female_20s_light.png",
-        "27": "app/icons/female_30s_light.png",
-        "45": "app/icons/female_40s_light.png",
-        "60": "app/icons/female_old_light.png"
+        "18": f"{ASSETS_DIR}/icons/female_teen_light.png",
+        "22": f"{ASSETS_DIR}/icons/female_20s_light.png",
+        "27": f"{ASSETS_DIR}/icons/female_30s_light.png",
+        "45": f"{ASSETS_DIR}/icons/female_40s_light.png",
+        "60": f"{ASSETS_DIR}/icons/female_old_light.png",
     }
 
     hair_color = {
-        "black": "app/icons/hair_black.png",
-        "dark brown": "app/icons/hair_dark_brown.png",
-        "brown": "app/icons/hair_brown.png",
-        "bright brown": "app/icons/hair_bright_brown.png",
-        "blonde": "app/icons/hair_blonde.png",
-        "red": "app/icons/hair_red.png",
-        "gray": "app/icons/hair_gray.png"
+        "black": f"{ASSETS_DIR}/icons/hair_black.png",
+        "dark brown": f"{ASSETS_DIR}/icons/hair_dark_brown.png",
+        "brown": f"{ASSETS_DIR}/icons/hair_brown.png",
+        "bright brown": f"{ASSETS_DIR}/icons/hair_bright_brown.png",
+        "blonde": f"{ASSETS_DIR}/icons/hair_blonde.png",
+        "red": f"{ASSETS_DIR}/icons/hair_red.png",
+        "gray": f"{ASSETS_DIR}/icons/hair_gray.png",
     }
 
     eye_color = {
-        "black": "app/icons/eye_black.png",
-        "dark brown": "app/icons/eye_dark_brown.png",
-        "bright brown": "app/icons/eye_bright_brown.png",
-        "green": "app/icons/eye_green.png",
-        "blue": "app/icons/eye_blue.png",
-        "gray": "app/icons/eye_gray.png",
-        "red": "app/icons/eye_red.png"
+        "black": f"{ASSETS_DIR}/icons/eye_black.png",
+        "dark brown": f"{ASSETS_DIR}/icons/eye_dark_brown.png",
+        "bright brown": f"{ASSETS_DIR}/icons/eye_bright_brown.png",
+        "green": f"{ASSETS_DIR}/icons/eye_green.png",
+        "blue": f"{ASSETS_DIR}/icons/eye_blue.png",
+        "gray": f"{ASSETS_DIR}/icons/eye_gray.png",
+        "red": f"{ASSETS_DIR}/icons/eye_red.png",
     }
 
-    ethnicity = {
+    ethnicity_options = {
         "East Asian": "",
         "South Asian": "",
         "Southeast Asian": "",
@@ -112,380 +111,321 @@ class ProfilePage(QWidget):
         "European": "",
         "Latino": "",
         "Native American": "",
-        "Oceanian": ""
+        "Oceanian": "",
     }
 
     body_type = {
-        "underweight": "app/icons/body_underweight_light.png",
-        "athletic": "app/icons/body_normal_light.png",
-        "curvy": "app/icons/body_overweight_light.png",
-        "overweight": "app/icons/body_obese_light.png",
-        "obese": "app/icons/body_morbidly_obese_light.png",
-    }    
+        "underweight": f"{ASSETS_DIR}/icons/body_underweight_light.png",
+        "athletic": f"{ASSETS_DIR}/icons/body_normal_light.png",
+        "curvy": f"{ASSETS_DIR}/icons/body_overweight_light.png",
+        "overweight": f"{ASSETS_DIR}/icons/body_obese_light.png",
+        "obese": f"{ASSETS_DIR}/icons/body_morbidly_obese_light.png",
+    }
 
-    def __init__(self, profile: dict = None, name: str = None, parent=None):
-        super().__init__(parent)
+    def __init__(self, profile: dict = None, name: str = None):
+        super().__init__(expand=True, spacing=14, scroll=ft.ScrollMode.AUTO)
         self.profile = profile
-        self.name = name
 
-        self._setup_ui()
-
-
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-
-        container = QWidget()
-        layout.addWidget(container)
-        self.form_layout = QFormLayout(container)
-        self.form_layout.setSpacing(5)
-        
-        self.name_input = QLineEdit()
-
-        if self.name:
-            self.name_input.setText(self.name)
-            self.name_input.setEnabled(False)
+        if name:
+            name_value, name_enabled = name, False
+        elif profile:
+            name_value, name_enabled = profile["name"], True
         else:
-            if self.profile:
-                self.name_input.setText(self.profile["name"])
-            else:
-                self.name_input.setText(random.choice(self.male_names))
+            name_value, name_enabled = random.choice(self.male_names), True
 
-        self.form_layout.addRow("Name", self.name_input)
+        self.name_input = ft.TextField(
+            value=name_value,
+            disabled=not name_enabled,
+            filled=True,
+            bgcolor="#2C2C2C",
+            border_radius=22,
+            border_color="transparent",
+            focused_border_color="#0D7377",
+            content_padding=ft.Padding.only(left=16, right=16, top=10, bottom=10),
+            height=44,
+        )
 
-        self.gender = RowSelector({"male": "app/icons/male_light.png", "female": "app/icons/female_light.png"})
-        self.gender.selection_changed.connect(self.on_gender_changed)
-        if not self.profile:
-            self.gender.select("male")
-        else:
-            self.gender.select(self.profile["gender"])
-        self.form_layout.addRow("Gender", self.gender)
+        self.gender = RowSelector({"male": f"{ASSETS_DIR}/icons/male_light.png", "female": f"{ASSETS_DIR}/icons/female_light.png"})
+        self.gender.on_selection_changed = self.on_gender_changed
+        self.gender.select(profile["gender"] if profile else "male")
 
         self.age = RowSelector(self.male_ages)
-        if not self.profile:
-            self.age.select("22")
-        else:
-            age = self.profile["age"]
-            ages = [int(k) for k in self.male_ages.keys()]
-            closest = min(ages, key=lambda x: abs(x - age))
+        if profile:
+            ages = [int(k) for k in self.male_ages]
+            closest = min(ages, key=lambda x: abs(x - profile["age"]))
             self.age.select(str(closest))
-        self.form_layout.addRow("Age", self.age)
+        else:
+            self.age.select("22")
 
         self.hair = RowSelector(self.hair_color, True, 7)
-        if not self.profile:
-            self.hair.select_random()
-        else:
-            self.hair.select(self.profile["hair_color"])
-        self.form_layout.addRow("Hair", self.hair)
+        self.hair.select(profile["hair_color"] if profile else None) if profile else self.hair.select_random()
 
         self.eye = RowSelector(self.eye_color, True, 7)
-        if not self.profile:
-            self.eye.select_random()
-        else:
-            self.eye.select(self.profile["eye_color"])
-        self.form_layout.addRow("Eyes", self.eye)
+        self.eye.select(profile["eye_color"] if profile else None) if profile else self.eye.select_random()
 
-        self.ethnicity = RowSelector(self.ethnicity, False, 3)
-        if not self.profile:
-            self.ethnicity.select_random()
-        else:
-            self.ethnicity.select(self.profile["ethnicity"])
-        self.form_layout.addRow("Ethnicity", self.ethnicity)
+        self.ethnicity = RowSelector(self.ethnicity_options, False, 3)
+        self.ethnicity.select(profile["ethnicity"] if profile else None) if profile else self.ethnicity.select_random()
 
-        self.body_type = RowSelector(self.body_type, True, 5)
-        if not self.profile:
-            self.body_type.select_random()
-        else:
-            self.body_type.select(self.profile["body_type"])
-        self.form_layout.addRow("Body Type", self.body_type)
+        self.body = RowSelector(self.body_type, True, 5)
+        self.body.select(profile["body_type"] if profile else None) if profile else self.body.select_random()
 
-        self.backstory = PlainTextEdit()
-        self.backstory.setObjectName("contactForm")
-        self.backstory.setFont(QFont("Consolas", 12))
-        self.backstory.setPlaceholderText("Type optional backstory here ...")
-        if self.profile:
-            self.backstory.setPlainText(self.profile["backstory"])
-        self.form_layout.addRow("Backstory", self.backstory)
+        self.backstory = ft.TextField(
+            hint_text="Type optional backstory here ...",
+            multiline=True,
+            min_lines=4,
+            max_lines=8,
+            value=profile["backstory"] if profile else "",
+            filled=True,
+            bgcolor="#2C2C2C",
+            border_radius=16,
+            border_color="transparent",
+            focused_border_color="#0D7377",
+            content_padding=16,
+        )
 
-        layout.addStretch()
+        self.controls = [
+            self._row("Name", self.name_input),
+            self._row("Gender", self.gender),
+            self._row("Age", self.age),
+            self._row("Hair", self.hair),
+            self._row("Eyes", self.eye),
+            self._row("Ethnicity", self.ethnicity, top=True),
+            self._row("Body Type", self.body),
+            self._row("Backstory", self.backstory, top=True),
+        ]
+
+    def _row(self, label, control, top=False):
+        return ft.Row(
+            [
+                ft.Container(
+                    content=ft.Text(label, color="#C8C8C8"),
+                    width=LABEL_WIDTH,
+                    padding=ft.Padding.only(top=12) if top else None,
+                    alignment=ft.Alignment.TOP_LEFT if top else ft.Alignment.CENTER_LEFT,
+                ),
+                ft.Container(content=control, expand=True),
+            ],
+            vertical_alignment=ft.CrossAxisAlignment.START if top else ft.CrossAxisAlignment.CENTER,
+            spacing=12,
+        )
 
     def on_gender_changed(self, gender: str):
         if gender == "male":
             if not self.profile:
-                self.name_input.setText(random.choice(self.male_names))
+                self.name_input.value = random.choice(self.male_names)
+                self.name_input.update()
             self.age.update_images(self.male_ages)
         else:
             if not self.profile:
-                self.name_input.setText(random.choice(self.female_names))
+                self.name_input.value = random.choice(self.female_names)
+                self.name_input.update()
             self.age.update_images(self.female_ages)
 
     def get_values(self):
-        result = {
-            "name" : self.name_input.text(),
-            "gender" : self.gender.get_selected(),
-            "age" : int(self.age.get_selected()),
-            "hair_color" : self.hair.get_selected(),
-            "eye_color" : self.eye.get_selected(),
-            "ethnicity" : self.ethnicity.get_selected(),
-            "body_type" : self.body_type.get_selected(),
-            "backstory" : self.backstory.toPlainText()
+        return {
+            "name": self.name_input.value or "",
+            "gender": self.gender.get_selected(),
+            "age": int(self.age.get_selected()),
+            "hair_color": self.hair.get_selected(),
+            "eye_color": self.eye.get_selected(),
+            "ethnicity": self.ethnicity.get_selected(),
+            "body_type": self.body.get_selected(),
+            "backstory": self.backstory.value or "",
         }
 
-        return result
 
-class PersonalityPage(QWidget):
+class PersonalityPage(ft.Column):
     roles = [
-        "Assistant", "Friend", "Partner","Coach", 
-        "Therapist", "Mentor", "Rival", "Companion", 
-        "Motivator", "Teacher", "Muse", "Critic", 
-        "Cheerleader", "Pet"
+        "Assistant", "Friend", "Partner", "Coach",
+        "Therapist", "Mentor", "Rival", "Companion",
+        "Motivator", "Teacher", "Muse", "Critic",
+        "Cheerleader", "Pet",
     ]
 
     perosnality_attributes = {
-        "Warmth": {
-            "tags": ["cold", "warm"],
-            "trait": ["cold", "distant", "reserved", "indifferent", "approachable", "friendly", "warm"]
-        },
-        "Formality": {
-            "tags": ["casual", "formal"],
-            "trait": ["informal", "casual", "semi-casual", "semi-formal", "very formal", "extremely formal", "excessively formal"],
-        }, 
-        "Energy": {
-            "tags": ["calm", "energetic"],
-            "trait": ["calm", "composed", "collected", "alert", "enthusiastic", "energetic", "passionate"]
-        }, 
-        "Humor": {
-            "tags": ["serious", "funny"],
-            "trait": ["serious", "thoughtful", "analytical", "humorous", "playful", "witty", "funny"]
-        },
-        "Directness": {
-            "tags": ["gentle", "blunt"],
-            "trait": ["gentle", "mild", "soft-spoken", "straightforward", "frank", "direct", "blunt"]
-        },
-        "Familiarity": {
-            "tags": ["stranger", "best friend"],
-            "trait": ["stranger", "acquaintance", "companion", "familiar", "friend", "close friend", "best friend"]
-        },
-        "Power": {
-            "tags": ["submissive", "dominant"],
-            "trait": ["submissive", "accommodating", "cooperative", "influential", "assertive", "confident", "dominant"]
-        },
-        "Initiative": {
-            "tags": ["reactive", "active"],
-            "trait": ["reactive", "responsive", "adaptable", "proactive", "initiative-taking", "pioneering", "active"]
-        },
-        "Honesty": {
-            "tags": ["agreeable", "liar"],
-            "trait": ["agreeable", "cooperative", "accommodating", "assertive", "confrontational", "challenging", "liar"]
-        },
-        "Intent": {
-            "tags": ["manipulative", "benevolent"],
-            "trait": ["manipulative", "exploitative", "self-serving", "prudent", "empathetic", "generous", "benevolent"]
-        }
+        "Warmth": {"tags": ["cold", "warm"], "trait": ["cold", "distant", "reserved", "indifferent", "approachable", "friendly", "warm"]},
+        "Formality": {"tags": ["casual", "formal"], "trait": ["informal", "casual", "semi-casual", "semi-formal", "very formal", "extremely formal", "excessively formal"]},
+        "Energy": {"tags": ["calm", "energetic"], "trait": ["calm", "composed", "collected", "alert", "enthusiastic", "energetic", "passionate"]},
+        "Humor": {"tags": ["serious", "funny"], "trait": ["serious", "thoughtful", "analytical", "humorous", "playful", "witty", "funny"]},
+        "Directness": {"tags": ["gentle", "blunt"], "trait": ["gentle", "mild", "soft-spoken", "straightforward", "frank", "direct", "blunt"]},
+        "Familiarity": {"tags": ["stranger", "best friend"], "trait": ["stranger", "acquaintance", "companion", "familiar", "friend", "close friend", "best friend"]},
+        "Power": {"tags": ["submissive", "dominant"], "trait": ["submissive", "accommodating", "cooperative", "influential", "assertive", "confident", "dominant"]},
+        "Initiative": {"tags": ["reactive", "active"], "trait": ["reactive", "responsive", "adaptable", "proactive", "initiative-taking", "pioneering", "active"]},
+        "Honesty": {"tags": ["agreeable", "liar"], "trait": ["agreeable", "cooperative", "accommodating", "assertive", "confrontational", "challenging", "liar"]},
+        "Intent": {"tags": ["manipulative", "benevolent"], "trait": ["manipulative", "exploitative", "self-serving", "prudent", "empathetic", "generous", "benevolent"]},
     }
-   
-    def __init__(self, parent=None):
-        super().__init__(parent)
 
+    def __init__(self):
+        super().__init__(expand=True, spacing=14, scroll=ft.ScrollMode.AUTO)
         self.perosnality_sliders = {}
 
-        self._setup_ui()
-
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-
-        container = QWidget()
-        layout.addWidget(container)
-        self.form_layout = QFormLayout(container)
-        self.form_layout.setSpacing(5)
-
-        self.role = QComboBox()
-        self.role.addItems(self.roles)
-        self.role.setEditable(True)
-        self.role.setMaxVisibleItems(5)
-        self.form_layout.addRow("Role", self.role)
+        self.role = ft.Dropdown(
+            options=[ft.DropdownOption(key=r, text=r) for r in self.roles],
+            value="Assistant",
+        )
+        rows = [self._row("Role", self.role)]
 
         for name, item in self.perosnality_attributes.items():
-            left = item["tags"][0]
-            right = item["tags"][1]
             slider = LabeledSlider(
-                left_text=left,
-                right_text=right,
+                left_text=item["tags"][0],
+                right_text=item["tags"][1],
                 range_min=0,
-                range_max=len(item["trait"])-1,
-                start_value=len(item["trait"])/2
+                range_max=len(item["trait"]) - 1,
+                start_value=len(item["trait"]) / 2 - 1,
             )
-
-            self.form_layout.addRow(name, slider)
             self.perosnality_sliders[name] = slider
+            rows.append(self._row(name, slider))
 
-        self.objective = QTextEdit()
-        self.objective.setObjectName("contactForm")
-        self.objective.setFont(QFont("Consolas", 12))
-        self.objective.setText("Be helpful")
-        self.form_layout.addRow("Objective", self.objective)
-
-        self.sfw = RowSelector({"SFW": "app/icons/sfw_light.png", "NSFW": "app/icons/nsfw_light.png"}, False)
+        self.objective = ft.TextField(
+            hint_text="Be helpful",
+            multiline=True,
+            min_lines=3,
+            max_lines=6,
+            value="Be helpful",
+            filled=True,
+            bgcolor="#2C2C2C",
+            border_radius=16,
+            border_color=ft.Colors.TRANSPARENT,
+            focused_border_color="#0D7377",
+            content_padding=ft.Padding.all(16),
+        )
+        self.sfw = RowSelector(
+            {"SFW": f"{ASSETS_DIR}/icons/sfw_light.png", "NSFW": f"{ASSETS_DIR}/icons/nsfw_light.png"},
+            False,
+        )
         self.sfw.select("SFW")
-        self.form_layout.addRow("NSFW", self.sfw)        
+        rows += [
+            self._row("Objective", self.objective, top=True),
+            self._row("NSFW", self.sfw),
+        ]
+        self.controls = rows
 
-        layout.addStretch()
+    def _row(self, label, control, top=False):
+        return ft.Row(
+            [
+                ft.Container(
+                    content=ft.Text(label, color="#C8C8C8"),
+                    width=LABEL_WIDTH,
+                    padding=ft.Padding.only(top=12) if top else None,
+                    alignment=ft.Alignment.TOP_LEFT if top else ft.Alignment.CENTER_LEFT,
+                ),
+                ft.Container(content=control, expand=True),
+            ],
+            vertical_alignment=ft.CrossAxisAlignment.START if top else ft.CrossAxisAlignment.CENTER,
+            spacing=12,
+        )
 
     def get_values(self):
         personality = ""
         for name, item in self.perosnality_attributes.items():
-            value = self.perosnality_sliders[name].get_value()
+            value = int(self.perosnality_sliders[name].get_value())
             trait = item["trait"][value]
-            if trait != "":
-                if personality != "":
-                    personality += ", "
-                personality += trait        
-        
-        result = {
-            "role": self.role.currentText(),
+            if trait:
+                personality = f"{personality}, {trait}" if personality else trait
+        return {
+            "role": self.role.value or "",
             "personality": personality,
-            "objective": self.objective.toPlainText(),
-            "sfw": self.sfw.get_selected()
-        }        
+            "objective": self.objective.value or "",
+            "sfw": self.sfw.get_selected(),
+        }
 
-        return result   
-    
-class ProgressPage(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
 
-        self._setup_ui()
+class ProgressPage(ft.Column):
+    def __init__(self):
+        super().__init__(expand=True, alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+        self.controls = [ft.Text("Please wait...")]
 
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        progress_label = QLabel("Please wait...")
-        progress_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(progress_label)
 
 class ProfileWizard(BasePage):
     selected_role = ""
 
     def __init__(self, navigator):
         super().__init__(navigator)
-        self.main_layout = QVBoxLayout(self)        
+        self.user_profile_mode = False
+        self.current_index = 0
+        self.pages = []
 
         self.contact_header = ContactHeader(navigator, False)
-        self.contact_header.go_back.connect(self.on_go_back)
-        self.main_layout.addWidget(self.contact_header)
-        
-        self.stack = QStackedLayout()        
-        self.main_layout.addLayout(self.stack)
+        self.contact_header.on_go_back = self.on_go_back
+        self.content_slot = ft.Container(expand=True)
+        self.back_btn = ft.Button("...", on_click=self.prev_page, expand=True, visible=False, **STYLES["button"])
+        self.next_btn = ft.Button("...", on_click=self.next_page, expand=True, **STYLES["button"])
 
-        self.current_index = 0
+        self.controls = [
+            ft.Container(
+                margin=20,
+                expand=True,
+                content=ft.Column(
+                    expand=True,
+                    controls=[
+                        self.contact_header,
+                        self.content_slot,
+                        ft.Row(controls=[self.back_btn, self.next_btn]),
+                    ],
+                ),
+            )
+]
 
-        self.pages = []
-        
-        # --- BUTTONS ---
-        button_container = QWidget()
-        button_layout = QHBoxLayout(button_container)
-
-        self.back_btn = QPushButton("...")
-        self.back_btn.clicked.connect(self.prev_page)
-        button_layout.addWidget(self.back_btn)
-
-        self.next_btn = QPushButton("...")
-        self.next_btn.clicked.connect(self.next_page)
-        button_layout.addWidget(self.next_btn)
-
-        self.main_layout.addWidget(button_container)
-
-        self.update_buttons()
-
-    def on_go_back(self):
+    def on_go_back(self, e=None):
         self.navigator("contacts")
 
     def add_page(self, widget):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.addWidget(widget)
-        self.pages.append(page)
-        self.stack.addWidget(page)
+        self.pages.append(widget)
 
     def clear_pages(self):
-        while self.pages:
-            page = self.pages.pop()
-            self.stack.removeWidget(page)
-            page.deleteLater()
+        self.pages.clear()
+        self.current_index = 0
 
-    def next_page(self):
+    def _show(self):
+        if not self.pages:
+            return
+        self.content_slot.content = self.pages[self.current_index]
+        self.content_slot.update()
+        self.update_buttons()
+
+    def next_page(self, e=None):
         if self.current_index < len(self.pages) - 1:
             self.current_index += 1
-            self.stack.setCurrentIndex(self.current_index)
-            self.update_buttons()        
+            self._show()
+            return
+
+        profile = self.profile_page.get_values()
+        if not self.user_profile_mode:
+            Hub.generate({"generate_profile": {"profile": profile, "personality": self.personality_page.get_values()}})
         else:
-            profile = self.profile_page.get_values()
+            Hub.update_user_data({"profile": json.dumps(profile)})
+            self.navigator("contacts")
 
-            if not self.user_profile_mode:
-                personality = self.personality_page.get_values()
-                prompt = {
-                    "generate_profile": {
-                        "profile": profile,
-                        "personality": personality
-                    }
-                }
-                Hub.generate(prompt)
-            else:
-                data = {
-                    "profile": json.dumps(profile)
-                }
-                Hub.update_user_data(data)
-                self.navigator("contacts")
-
-    def prev_page(self):
+    def prev_page(self, e=None):
         if self.current_index > 0:
             self.current_index -= 1
-            self.stack.setCurrentIndex(self.current_index)
-            self.update_buttons()
+            self._show()
 
     def update_buttons(self):
-        back_button = {
-            0: [False, ""],
-            1: [True, "Back"],
-            2: [False, ""]
-        }
-        self.back_btn.setVisible(back_button[self.current_index][0])
-        self.back_btn.setText(back_button[self.current_index][1])
-
-        next_button = {
-            0: [True, "Next"],
-            1: [True, "Finish"],
-            2: [False, ""]
-        }
-        self.next_btn.setVisible(next_button[self.current_index][0])
-        self.next_btn.setText(next_button[self.current_index][1])
+        back = {0: (False, ""), 1: (True, "Back"), 2: (False, "")}
+        next = {0: (True, "Next"), 1: (True, "Finish"), 2: (False, "")}
+        self.back_btn.visible, self.back_btn.content = back.get(self.current_index, (False, ""))
+        self.next_btn.visible, self.next_btn.content = next.get(self.current_index, (False, ""))
+        self.update()
 
     def on_enter(self, **kwargs):
         self.user_profile_mode = kwargs.get("user_profile_mode", False)
-
         self.clear_pages()
 
         if self.user_profile_mode:
             data = Hub.get_user_data()
             name = Hub.get_user_name()
-            if data and "profile" in data:
-                profile = data["profile"]
-            else:
-                profile = None
-                
-            self.profile_page = ProfilePage(profile=profile, name=name)
-
+            profile = data["profile"] if data and "profile" in data else None
+            self.profile_page = WizardProfilePage(profile=profile, name=name)
             self.add_page(self.profile_page)
         else:
-            self.profile_page = ProfilePage()
-            self.add_page(self.profile_page)
-
+            self.profile_page = WizardProfilePage()
             self.personality_page = PersonalityPage()
+            self.add_page(self.profile_page)
             self.add_page(self.personality_page)
-
-            #self.progress_page = ProgressPage()
-            #self.add_page(self.progress_page)
-
-        if not self.user_profile_mode:
             Hub.register_incomming_message(self.on_incomming_message)
+
+        self._show()
 
     def on_leave(self):
         if not self.user_profile_mode:
@@ -494,8 +434,6 @@ class ProfileWizard(BasePage):
     def on_incomming_message(self, msg: dict):
         try:
             if "contact_id" in msg:
-                contact_id = msg["contact_id"]
                 self.navigator("contacts")
         except Exception as e:
             logger.error(f"failed to handle incomming message: {repr(e)}")
-

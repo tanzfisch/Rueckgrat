@@ -1,161 +1,158 @@
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QStackedLayout,
-    QWidget, QScrollArea, QLineEdit, QFormLayout,
-    QPushButton, QLabel
-)
-from PySide6.QtCore import Qt
+import flet as ft
 
 from app.ui import BasePage
 from app.ui.widgets import OneLineBubble
 from app.utils import Hub
-
 from app.common import get_logger
+from app.ui.theme import STYLES
+
 logger = get_logger()
 
 
-class VCenterLabel(QWidget):
-    def __init__(self, text):
-        super().__init__()
-        self.setObjectName("login")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.addWidget(QLabel(text))
-
-
-class UserSelectionPage(QWidget):
+class UserSelectionPage(ft.Column):
     def __init__(self, users, user_chosen, goto_create):
-        super().__init__()
-        layout = QVBoxLayout(self)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        self.list_layout = QVBoxLayout(content)
-        self.list_layout.addStretch()
-
+        super().__init__(expand=True, spacing=8, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+        items = []
         for user in users:
             bubble = OneLineBubble(user["username"], user["id"])
-            bubble.clicked.connect(lambda u=user["username"], i=user["id"]: user_chosen(u, i))
-            self.list_layout.addWidget(bubble)
-        self.list_layout.addStretch()
-        scroll.setWidget(content)
-        layout.addWidget(scroll)
+            bubble.on_click = lambda e, u=user["username"], i=user["id"]: user_chosen(u, i)
+            items.append(bubble)
 
-        btn = QPushButton("Add User")
-        btn.clicked.connect(goto_create)
-        layout.addWidget(btn)
+        self.controls = [
+            ft.Container(
+                expand=True,
+                margin=20,
+                content=ft.Column(
+                    expand=True,
+                    scroll=ft.ScrollMode.AUTO,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=8,
+                    controls=items,
+                ),
+            ),
+            ft.Container(
+                padding=10,
+                margin=10,
+                content=ft.Button(
+                    "Add User",
+                    on_click=lambda e: goto_create(),
+                    **STYLES["button"],
+                ),
+            )
+        ]
 
 
-class PasswordPage(QWidget):
+class PasswordPage(ft.Container):
     def __init__(self, goto_select, check_login):
-        super().__init__()
-        layout = QVBoxLayout(self)
-        layout.setSpacing(8)
-        layout.addStretch()
-
         self.user_bubble = OneLineBubble()
-        self.user_bubble.setFixedHeight(40)
-        layout.addWidget(self.user_bubble)
+        self.password_edit = ft.TextField(
+            password=True,
+            can_reveal_password=True,
+            text_align=ft.TextAlign.CENTER,
+            on_submit=lambda e: check_login(),
+            **STYLES["field"],
+        )
+        super().__init__(
+            expand=True,
+            margin=20,
+            content=ft.Column(
+                expand=True,
+                spacing=8,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                controls=[
+                    ft.Container(expand=True),
+                    self.user_bubble,
+                    self.password_edit,
+                    ft.Container(expand=True),
+                    ft.Row(
+                        controls=[
+                            ft.Button("Change User", expand=True, on_click=lambda e: goto_select(), **STYLES["button"]),
+                            ft.Button("Login", expand=True, on_click=lambda e: check_login(), **STYLES["button"]),
+                        ]
+                    ),
+                ],
+            ),
+        )
 
-        self.password_edit = QLineEdit()
-        self.password_edit.setObjectName("login")
-        self.password_edit.setEchoMode(QLineEdit.Password)
-        self.password_edit.setAlignment(Qt.AlignCenter)
-        self.password_edit.returnPressed.connect(check_login)
-        layout.addWidget(self.password_edit)
 
-        btns = QWidget()
-        btn_layout = QHBoxLayout(btns)
-        btn_layout.setContentsMargins(0, 0, 0, 0)
+class AddUserPage(ft.Column):
+    def __init__(self, create_user, goto_select, horizontal_alignment=ft.CrossAxisAlignment.STRETCH):
+        super().__init__(expand=True, spacing=8)
+        self.name_edit = ft.TextField(label="Name", expand=True, **STYLES["field"])
+        self.pass_edit = ft.TextField(label="Password", password=True, can_reveal_password=True, expand=True, **STYLES["field"])
 
-        change_btn = QPushButton("Change User")
-        change_btn.clicked.connect(goto_select)
-        btn_layout.addWidget(change_btn)
-
-        login_btn = QPushButton("Login")
-        login_btn.clicked.connect(check_login)
-        btn_layout.addWidget(login_btn)
-
-        layout.addStretch()
-        layout.addWidget(btns)
-
-
-class AddUserPage(QWidget):
-    def __init__(self, create_user, goto_select):
-        super().__init__()
-        layout = QVBoxLayout(self)
-
-        layout.addStretch()
-
-        form_container = QWidget()
-        self.form = QFormLayout(form_container)
-        self.form.setLabelAlignment(Qt.AlignVCenter | Qt.AlignRight)
-
-        self.name_edit = QLineEdit()
-        self.name_edit.setObjectName("login")
-        self.form.addRow(VCenterLabel("Name"), self.name_edit)
-
-        self.pass_edit = QLineEdit()
-        self.pass_edit.setObjectName("login")
-        self.pass_edit.setEchoMode(QLineEdit.Password)
-        self.form.addRow(VCenterLabel("Password"), self.pass_edit)
-
-        layout.addWidget(form_container)
-        layout.addStretch()
-
-        btns = QWidget()
-        btn_layout = QHBoxLayout(btns)
-        cancel = QPushButton("Cancel")
-        cancel.clicked.connect(goto_select)
-        btn_layout.addWidget(cancel)
-
-        create = QPushButton("Create")
-        create.clicked.connect(create_user)
-        btn_layout.addWidget(create)
-        layout.addWidget(btns)
+        self.controls = [
+            ft.Container(
+                expand=True,
+                margin=20,
+                content=ft.Column(
+                    expand=True,
+                    scroll=ft.ScrollMode.AUTO,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=8,
+                    controls=[
+                        self.name_edit,
+                        self.pass_edit
+                    ]
+                )
+            ),
+            ft.Container(
+                padding=10,
+                margin=10,
+                content=ft.Row(
+                    controls=[
+                        ft.Button("Cancel", expand=True, on_click=lambda e: goto_select(), **STYLES["button"]),
+                        ft.Button("Create", expand=True, on_click=lambda e: create_user(), **STYLES["button"]),
+                    ]
+                ),                
+            )
+        ]
 
 
 class LoginPage(BasePage):
     def __init__(self, navigator):
         super().__init__(navigator)
+        self.expand = True
+        self.spacing = 0
         self.users = Hub.get_users()
         self.selected_user = None
         self.user_name = None
-
-        self.stack = QStackedLayout()
 
         self.user_page = UserSelectionPage(self.users, self.user_chosen, self.goto_create_user)
         self.pass_page = PasswordPage(self.goto_select_user, self.check_login)
         self.add_page = AddUserPage(self.create_user, self.goto_select_user)
 
-        self.stack.addWidget(self.user_page)
-        self.stack.addWidget(self.pass_page)
-        self.stack.addWidget(self.add_page)
-
-        main_layout = QVBoxLayout(self)
-        main_layout.addLayout(self.stack)
-
         if not self.users:
-            self.stack.setCurrentWidget(self.add_page)
+            start = self.add_page
         elif len(self.users) == 1:
+            start = self.pass_page
             u = self.users[0]
-            self.user_chosen(u["username"], u["id"])
+            self.user_name = u["username"]
+            self.pass_page.user_bubble.set(u["username"], u["id"])
+        else:
+            start = self.user_page
+
+        self.controls = [start]
+
+    def _show(self, widget):
+        self.controls = [widget]
+        self.update()
 
     def goto_create_user(self):
-        self.stack.setCurrentWidget(self.add_page)
+        self._show(self.add_page)
 
     def goto_select_user(self):
-        self.pass_page.password_edit.clear()
-        self.stack.setCurrentWidget(self.user_page)
+        self.pass_page.password_edit.value = ""
+        self._show(self.user_page)
 
     def user_chosen(self, name, uid):
         self.user_name = name
         self.pass_page.user_bubble.set(name, uid)
-        self.stack.setCurrentWidget(self.pass_page)
+        self._show(self.pass_page)
 
     def create_user(self):
-        name = self.add_page.name_edit.text()
-        pwd = self.add_page.pass_edit.text()
+        name = self.add_page.name_edit.value or ""
+        pwd = self.add_page.pass_edit.value or ""
         Hub.create_user(name, pwd)
         if Hub.login_user(name, pwd):
             self.on_successful_login()
@@ -163,7 +160,7 @@ class LoginPage(BasePage):
             logger.error("login failed")
 
     def check_login(self):
-        pwd = self.pass_page.password_edit.text()
+        pwd = self.pass_page.password_edit.value or ""
         if Hub.login_user(self.user_name, pwd):
             self.on_successful_login()
         else:
@@ -171,7 +168,6 @@ class LoginPage(BasePage):
 
     def on_successful_login(self):
         if not Hub.get_user_data():
-            name = self.add_page.name_edit.text()
             self.navigator("profile_wizz", user_profile_mode=True)
         else:
-            self.navigator("contacts")      
+            self.navigator("contacts")

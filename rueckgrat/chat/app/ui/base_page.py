@@ -1,12 +1,13 @@
-from PySide6.QtWidgets import QWidget
+import flet as ft
 
-class BasePage(QWidget):
+
+class BasePage(ft.Column):
     """
     Base class for all pages.
     """
 
-    def __init__(self, navigator, parent=None):
-        super().__init__(parent)
+    def __init__(self, navigator):
+        super().__init__(expand=True, spacing=0)
         self._navigator = navigator
 
     @property

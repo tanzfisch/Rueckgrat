@@ -22,11 +22,13 @@ class Hub:
         cls.config = config
         
         cls.url = f"https://{cls.config.host}:{cls.config.port}"
-        cls.uri = f"wss://{cls.config.host}:{cls.config.port}/ws"
+        cls.uri = f"wss://{cls.config.host}:{cls.config.port}/ws"            
 
+        name = "rueckgrat-caddy.cert"
+        assets = os.getenv("FLET_ASSETS_DIR")
         paths = [
-            Path("/chat/app/rueckgrat-caddy.cert"), 
-            Path(os.path.expanduser('~/.ssh/rueckgrat-caddy.cert'))
+            *( [Path(assets) / name] if assets else [] ),
+            Path.home() / ".ssh" / name,
         ]
 
         cert = next((p for p in paths if p.exists()), None)

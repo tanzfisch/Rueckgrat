@@ -107,11 +107,7 @@ cd Rueckgrat\rueckgrat\chat
 
 ## Development
 
-1. install once (creates `rueckgrat/config/infrastructure.json`)
-2. change code
-3. optional: `./install.sh -s` to rsync this tree to remote hosts from that config
-4. run `./dev.sh` on each machine to restart that host's containers and follow logs
-5. run `./stop.sh` to stop all docker services
+In order to develop this project further there is some helpful notes here `DEVELOPMENT.md`.
 
 ## Models
 

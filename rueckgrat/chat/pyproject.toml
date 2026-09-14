@@ -1,0 +1,4 @@
+[tool.flet.app]
+path = "."
+module = "main"
+exclude = [".venv", "build", ".vscode", "app/build"]
