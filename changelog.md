@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.11.4
+------
+
+- #60 moved model download out of ui process to prevent hang
+
 0.11.3
 ------
 
