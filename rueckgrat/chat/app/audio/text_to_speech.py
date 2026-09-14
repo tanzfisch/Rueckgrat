@@ -4,10 +4,9 @@ import subprocess
 import sys
 import shlex
 from threading import Lock
-from app.utils import Hub, Paths
-from pathlib import Path
+from app.utils import Hub
 
-from app.common import get_logger
+from app.common import get_logger, Utils
 logger = get_logger()
 
 
@@ -27,29 +26,25 @@ class Text_To_Speech:
         if not text.strip():
             return
 
-        logger.debug(f"prep speech \"{text}\" with {model}")
+        logger.info(f"prep speech \"{Utils.shorten(text)}\" with {model}")
 
         try:
             cls.kill_current_speech()
-            speech_task_path = f"{os.getcwd()}/app/audio/text_to_speech_task.py"
 
-            voices_base_path = Paths.get_voices_path()
-            model_path = Path(f"{voices_base_path}/{model}")
-            model_file_path = Path(f"{model_path}/{model}.onnx")
-            model_json_file_path = Path(f"{model_path}/{model}.onnx.json")
-            if not model_file_path.exists() or not model_json_file_path.exists():
-                Hub.get_model(model, model_path)
-
-            if not model_file_path.exists():
-                logger.error(f"failed to retrive voice file for {model}")
-                return        
-
-            command = [sys.executable, str(speech_task_path), "--text", text, "--model", str(model_file_path)]
+            command = [
+                sys.executable, "-m", "app.audio.text_to_speech_task",
+                "--text", text,
+                "--model", model,
+                "--hub-url", Hub.url,
+                "--token", Hub.access_token,
+                "--cert", str(Hub.server_cert or ""),
+            ]
             logger.debug(f"run: {shlex.join(command)}")
             proc = subprocess.Popen(
                 command,
+                cwd=os.getcwd(),
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
             )
 
             with cls._proc_lock:

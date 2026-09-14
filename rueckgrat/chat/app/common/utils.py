@@ -54,6 +54,14 @@ class Utils:
             except json.JSONDecodeError:
                 return data
         return json.dumps(data, indent=4).replace('\\n', '\n')
+
+    @classmethod
+    def shorten(cls, s: str, max_len: int = 40) -> str:
+        if len(s) <= max_len:
+            return s
+        keep = max_len - 3
+        left = keep // 2
+        return f"{s[:left]}...{s[-(keep - left):]}"
     
     @classmethod
     def is_docker(cls):
