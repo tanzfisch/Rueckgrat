@@ -6,7 +6,7 @@ from app.ui.theme import STYLES
 from app.ui import BasePage
 from app.ui.widgets import OneLineBubble, ContactCard, ContactHeader
 from app.utils import Hub, Contact, Paths
-from app.common import get_logger
+from app.common import get_logger, Utils
 
 logger = get_logger()
 
@@ -29,6 +29,16 @@ class ContactsPage(BasePage):
             )
         ]
 
+        Hub.register_incomming_message(self.on_incomming_message)
+
+    def on_incomming_message(self, msg: dict):
+        logger.debug(f"incomming message\n{Utils.pretty_print(msg)}")
+        try:
+            if "new_contact" in msg:
+                self.load_contacts()
+        except Exception as e:
+            logger.error(f"failed to handle incomming message: {e}")
+
     def did_mount(self):
         if self.import_contact_picker not in self.page.services:
             self.page.services.append(self.import_contact_picker)
@@ -37,7 +47,7 @@ class ContactsPage(BasePage):
         self.load_contacts()
 
     def on_leave(self):
-        pass
+        Hub.unregister_incomming_message(self.on_incomming_message)
 
     def _on_add_contact(self, text=None, data=None):
         self.navigator("profile_wizz")

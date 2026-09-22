@@ -15,7 +15,7 @@ class AssistantImageJob(Job):
         self.conversation_id = conversation_id
         self.db = db
         self.infrastructure = infrastructure
-        self.response = None
+        self.response = {}
         self.show_assistant = show_assistant
         self.show_user = show_user
         self.image_type = image_type
@@ -69,9 +69,7 @@ class AssistantImageJob(Job):
             self.add_sub_job(image_job)
             self.wait_for([image_job])
 
-        self.response = image_job.result()
-        if not self.response:
-            logger.error("failed to generate assistant image")
+        self.response = image_job.result()                 
 
     def result(self) -> Dict[str, Any]:
         return self.response

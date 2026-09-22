@@ -19,8 +19,8 @@ class ToolRegistry:
         self._register_tool(ImageGenTool)
         self._register_tool(TakePhotoTool)
 
-        temp = "\n".join(self.tools)
-        logger.debug(f"registered tools:\n{temp}")
+        temp = ", ".join(self.tools)
+        logger.debug(f"registered tools: {temp}")
 
     def _register_tool(self, cls: type[Tool]):
         self.tools[cls.name()] = cls

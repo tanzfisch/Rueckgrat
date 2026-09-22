@@ -4,13 +4,15 @@ import websockets
 from typing import Callable, Optional, List
 from websockets.connection import State
 import ssl
+import inspect
+from typing import Awaitable, Callable, Union
 
 from .utils import Utils
 from .logger import get_logger
 logger = get_logger()
 
 class WebSocketClient:
-    on_incoming_message: List[Callable[[dict], None]] = []
+    incoming_message_handlers: List[Callable[[dict], Union[Awaitable[None], None]]] = []
 
     def __init__(self, uri: str, server_cert: Optional[str] = None):
         self.server_cert = server_cert
@@ -32,18 +34,18 @@ class WebSocketClient:
         )
     
     def unregister_incomming_message(self, callback: Callable[[dict], None]):
-        if callback in self.on_incoming_message:
-            self.on_incoming_message.remove(callback)
+        if callback in self.incoming_message_handlers:
+            self.incoming_message_handlers.remove(callback)
 
     def register_incomming_message(self, callback: Callable[[dict], None]):
-        self.on_incoming_message.append(callback)
+        self.incoming_message_handlers.append(callback)
 
     async def connect(self, token: Optional[str] = None):
         logger.debug(f"connect with {self.uri}")
         if self.is_connected():
             return
         start = asyncio.get_running_loop().time()
-        timeout = 60
+        timeout = 60 * 10
         delay = 1.0
         while True:
             try:
@@ -52,9 +54,9 @@ class WebSocketClient:
                     ssl_context = ssl.create_default_context()
                     if self.server_cert:
                         ssl_context.load_verify_locations(self.server_cert)
-                    self.ws = await websockets.connect(self.uri, ssl=ssl_context, additional_headers=headers)
+                    self.ws = await websockets.connect(self.uri, ssl=ssl_context, additional_headers=headers, ping_interval=30, ping_timeout=60)
                 else:
-                    self.ws = await websockets.connect(self.uri, additional_headers=headers)
+                    self.ws = await websockets.connect(self.uri, additional_headers=headers, ping_interval=30, ping_timeout=60)
                 self._running = True
                 self.loop = asyncio.get_running_loop()
                 logger.info(f"succesfully connected to {self.uri}")
@@ -68,11 +70,10 @@ class WebSocketClient:
                 self._send_task = asyncio.create_task(self._send_loop())
                 return
             except Exception as e:
-                logger.debug(f"failed to connect to {self.uri} - {repr(e)}. Trying again ...")
                 self._running = False
                 if asyncio.get_running_loop().time() - start > timeout:
-                    logger.error(f"timeout while trying to connect with {self.uri}")
-                    raise TimeoutError("WS connect timeout (5min)") from e
+                    logger.error(f"timeout while trying to connect with {self.uri} after {timeout/60}min")
+                    raise TimeoutError(f"WS connect timeout ({timeout/60}min)") from e
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30)
 
@@ -80,10 +81,9 @@ class WebSocketClient:
         try:
             while self._running:
                 msg = await self.ws.recv()
-                #logger.debug(Utils.pretty_print(msg))
-                self._on_incomming_websocket(json.loads(msg))
+                await self._on_incomming_websocket(json.loads(msg))
         except Exception as e:
-            logger.error(f"failed to receive ws: {repr(e)}")
+            logger.error(f"failed to receive ws from {self.uri}: {repr(e)}")
         finally:
             self._running = False
 
@@ -95,16 +95,20 @@ class WebSocketClient:
                     await self.ws.send(msg)
                 self._send_queue.task_done()
         except Exception as e:
-            logger.error(f"failed to send ws: {repr(e)}")
+            logger.error(f"failed to send ws to {self.uri}: {repr(e)}")
         finally:
             self._running = False   
 
-    def _on_incomming_websocket(self, msg: dict):
-        try:
-            for func in self.on_incoming_message:
-                func(msg)
-        except Exception as e:
-            logger.error(f"failed to handle incomming message: {repr(e)}")
+    async def _on_incomming_websocket(self, msg: dict):
+        async def _run(func):
+            try:
+                result = func(msg)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as e:
+                logger.error(f"failed to handle incoming message in {func!r}: {e!r}")
+
+        await asyncio.gather(*(_run(f) for f in list(self.incoming_message_handlers)))
 
     def send_message(self, msg: str):
         if not self.is_connected():

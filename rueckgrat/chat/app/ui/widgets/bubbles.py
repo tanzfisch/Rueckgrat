@@ -1,6 +1,7 @@
 import re
 import flet as ft
 from app.ui.theme import STYLES
+from app.ui.widgets.image import Image
 
 from app.common import get_logger
 logger = get_logger()
@@ -23,40 +24,38 @@ class ChatBubble(ft.Container):
         self.role = role
         self.image_filepath = image_filepath
         self.raw_content = ""
-        self.image_ctrl = None
         self.append_content(content)
 
     def _clear(self):
         self.body.controls.clear()
-        self.image_ctrl = None
 
     def clear_content(self):
         self.raw_content = ""
 
     def append_content(self, content: str):
-        self.raw_content += content
-        self._clear()
+        try:
+            self.raw_content += content
+            self._clear()
 
-        parsable = self.raw_content
-        if parsable.count("```") % 2 == 1:
-            parsable += "\n```"
+            parsable = self.raw_content
+            if parsable.count("```") % 2 == 1:
+                parsable += "\n```"
 
-        items = self._parse_content(parsable)
+            items = self._parse_content(parsable)
 
-        if self.image_filepath:
-            self._add_image(self.image_filepath)
+            if self.image_filepath:
+                self._add_image(self.image_filepath)
 
-        for item in items:
-            if item["type"] == "text":
-                self._add_text(item["value"])
-            elif item["type"] == "code":
-                self._add_code(item["value"])
+            for item in items:
+                if item["type"] == "text":
+                    self._add_text(item["value"])
+                elif item["type"] == "code":
+                    self._add_code(item["value"])
+        except Exception as e:
+            logger.error(f"failed to append content: {repr(e)}")
 
     def set_fixed_width(self, width: int):
-        if self.image_ctrl:
-            self.width = int(width * 0.8)
-        else:
-            self.width = width
+        self.width = width
         if self.page:
             self.update()
 
@@ -91,8 +90,8 @@ class ChatBubble(ft.Container):
         )
 
     def _add_image(self, image_filepath: str):
-        self.image_ctrl = ft.Image(src=image_filepath, fit=ft.BoxFit.CONTAIN)
-        self.body.controls.append(self.image_ctrl)
+        image = Image(image_path=image_filepath)
+        self.body.controls.append(image)
 
     def _parse_content(self, content: str) -> list[dict]:
         parts = []

@@ -176,7 +176,7 @@ class Infrastructure:
 
     def download(self, source_path: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
         node = self.node_by_type["text_to_image"] # not sure about this. how do we know from which node to download?
-        url = f"http://{node.addr}:{node.port}/downloads{source_path}"
+        url = f"http://{node.addr}:{node.port}/downloads/{source_path}"
         if asynchronous:
             self.download_queue.add(
                 url=url, 

@@ -1,17 +1,4 @@
 {
-  "vosk-model-small-en-us-0.15": {
-    "description": "",
-    "type": "stt",
-    "compatibility": ["vosk"],
-    "files": [
-      {
-        "source": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
-        "path": ""
-      }
-    ],
-    "install_path": "stt/vosk-model-small-en-us-0.15"
-  },
-
   "en_US-libritts_r-medium": {
     "description": "",
     "type": "tts",
@@ -508,8 +495,72 @@
       }
     ],
     "install_path": "llm/Ternary-Bonsai-27B-Q2_0"
-  }
+  },
 
+  "Kimi-K3-Uncensored-GGUF": {
+    "description": "",
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested",
+    "files": [
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00001-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00002-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00003-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00004-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00005-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00006-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00007-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00008-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00009-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00010-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00011-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00012-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00013-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00014-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00015-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00016-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00017-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00018-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00019-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00020-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00021-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00022-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00023-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00024-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00025-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00026-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00027-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00028-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00029-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00030-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00031-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00032-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00033-of-00034.gguf", "path": "" },
+      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00034-of-00034.gguf", "path": "" }
+    ],
+    "install_path": "llm/Kimi-K3-Uncensored-GGUF"
+  },
+
+  "laya-F16": {
+    "description": "",
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested",
+    "files": [
+      { "source": "https://huggingface.co/fr0stbit3/laya-gguf/resolve/main/laya-F16.gguf", "path": "" }
+    ],
+    "install_path": "llm/laya-F16"
+  },
+  "laya-Q8_0": {
+    "description": "",
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested",
+    "files": [
+      { "source": "https://huggingface.co/fr0stbit3/laya-gguf/resolve/main/laya-Q8_0.gguf", "path": "" }
+    ],
+    "install_path": "llm/laya-Q8_0"
+  }
 }
 
 

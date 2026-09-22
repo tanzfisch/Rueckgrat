@@ -124,7 +124,7 @@ class Hub:
     def check_health(cls):
         url = f"{cls.url}/health"
         try:
-            response = requests.get(url, timeout=9, verify=cls.server_cert)
+            response = requests.get(url, timeout=30, verify=cls.server_cert)
             if response.status_code == 200:
                 data = response.json()
                 status = data.get("status", "error")
@@ -300,7 +300,7 @@ class Hub:
             if response.status_code in (200, 204):
                 return True
             else:
-                logger.error(f"update contact - {response.status_code} {response.reason}")
+                logger.error(f"failed to update contact: {response.status_code} {response.reason}")
                 return False
 
         except Exception as e:

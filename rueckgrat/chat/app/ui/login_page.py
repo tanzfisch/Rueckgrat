@@ -49,6 +49,7 @@ class PasswordPage(ft.Container):
             password=True,
             can_reveal_password=True,
             text_align=ft.TextAlign.CENTER,
+            autofocus=True,
             on_submit=lambda e: check_login(),
             **STYLES["field"],
         )
@@ -73,7 +74,6 @@ class PasswordPage(ft.Container):
                 ],
             ),
         )
-
 
 class AddUserPage(ft.Column):
     def __init__(self, create_user, goto_select, horizontal_alignment=ft.CrossAxisAlignment.STRETCH):

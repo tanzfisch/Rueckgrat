@@ -2,6 +2,7 @@ import asyncio
 import re
 import flet as ft
 from app.ui.theme import STYLES
+from pathlib import Path
 
 from app.ui import BasePage
 from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker, StatusWidget
@@ -33,7 +34,7 @@ class ChatPage(BasePage):
 
         self._input_focused = False
         self.input_box = ft.TextField(
-            hint_text="Type here... (Ctrl+Enter to send, Enter for newline)",
+            hint_text="Type here...",
             multiline=True,
             min_lines=1,
             max_lines=8,
@@ -113,9 +114,9 @@ class ChatPage(BasePage):
             attachments = Hub.get_attachments(message["id"])
             if attachments:
                 image_path = self._get_image(attachments[0]["file_name"])
-                self.append_history(message["role"], message["content"], image_path)
+                self._append_history(message["role"], message["content"], image_path)
             else:
-                self.append_history(message["role"], message["content"])
+                self._append_history(message["role"], message["content"])
 
         default_piper = (
             "en_US-hfc_male-medium"
@@ -162,7 +163,7 @@ class ChatPage(BasePage):
             self.page.run_task(self._handle_audio_payload, payload)
 
     async def _handle_audio_payload(self, payload: dict):
-        logger.debug(Utils.pretty_print(payload))
+        # logger.debug(Utils.pretty_print(payload))
         kind = payload.get("type")
         text = (payload.get("text") or "").strip()
         if not text:
@@ -177,24 +178,27 @@ class ChatPage(BasePage):
             await self.audio_streamer.stop()
             self.audio_streamer = None
 
-    def append_history(self, role: str, content: str, image_filepath: str = None):
-        bubble = ChatBubble(role, content, image_filepath)
-        if role in ("assistant", "error"):
-            self.replay_content = content
+    def _append_history(self, role: str, content: str, image_filepath: str = None):
+        try:
+            bubble = ChatBubble(role, content, image_filepath)
+            if role in ("assistant", "error"):
+                self.replay_content = content
 
-        style = {
-            "user": STYLES["chat_user"],
-            "assistant": STYLES["chat_assistant"],
-            "error": STYLES["chat_error"],
-        }.get(role, STYLES["chat_assistant"])
+            style = {
+                "user": STYLES["chat_user"],
+                "assistant": STYLES["chat_assistant"],
+                "error": STYLES["chat_error"],
+            }.get(role, STYLES["chat_assistant"])
 
-        bubble_slot = ft.Container(content=bubble, expand=85, **style)
-        spacer = ft.Container(expand=15)
-        row = ft.Row(
-            controls=[spacer, bubble_slot] if role == "user" else [bubble_slot, spacer],
-        )
-        self.history.controls.insert(len(self.history.controls) - 2, row)
-        self.history.update()
+            bubble_slot = ft.Container(content=bubble, expand=85, **style)
+            spacer = ft.Container(expand=15)
+            row = ft.Row(
+                controls=[spacer, bubble_slot] if role == "user" else [bubble_slot, spacer],
+            )
+            self.history.controls.insert(len(self.history.controls) - 2, row)
+            self.history.update()
+        except Exception as e:
+            logger.error(f"failed to append to history: {repr(e)}")            
 
     def replay(self):
         Text_To_Speech.speak(text=self._cleanup_for_speech(self.replay_content), model=self.piper_model)
@@ -226,7 +230,7 @@ class ChatPage(BasePage):
         image_path = Paths.get_image_path() / image_filename
         if not image_path.exists():
             Hub.download_file(f"images/{image_filename}", Paths.get_image_path())
-        return image_path
+        return str(image_path)
 
     def _flush_delta(self):
         if not self.delta_buffer:
@@ -243,19 +247,20 @@ class ChatPage(BasePage):
             return
         self._flush_delta()
 
-    def on_incomming_message(self, msg: dict):
-        #logger.debug(f"incomming message:\n{Utils.pretty_print(msg)}")
-        try:
-            if "status" in msg:
-                self.status_widget.on_status_message(msg["status"])
+    def on_incomming_message(self, message: dict):
+        #logger.debug(f"incomming message:\n{Utils.pretty_print(message)}")
 
-            if "delta" in msg and msg["conversation_id"] == self.conversation_id:
-                self.delta_buffer += msg["delta"]
+        try:
+            if "status" in message:
+                self.status_widget.on_status_message(message["status"])
+
+            if "delta" in message and message["conversation_id"] == self.conversation_id:
+                self.delta_buffer += message["delta"]
                 if self.page:
                     self.page.run_task(self._schedule_flush, self._stream_gen)
 
-            if "chat" in msg:
-                chat = msg["chat"]
+            if "chat" in message:
+                chat = message["chat"]
                 if chat["conversation_id"] == self.conversation_id:
                     self._stream_gen += 1
                     self.delta_buffer = ""
@@ -264,17 +269,17 @@ class ChatPage(BasePage):
                     self.stream_bubble.update()
                     content = self._cleanup_content(chat["content"])
                     role = chat["role"]
-                    if "take_photo" in msg:
-                        image_path = Paths.get_image_path() / msg["take_photo"]["filename"]
-                        self.append_history(role, content, image_path)
-                    elif "generate_image" in msg:
-                        image_path = Paths.get_image_path() / msg["generate_image"]["filename"]
-                        self.append_history(role, content, image_path)
+                    if "take_photo" in message:
+                        image_path = Paths.get_image_path() / message["take_photo"]["filename"]
+                        self._append_history(role, content, str(image_path))
+                    elif "generate_image" in message:
+                        image_path = Paths.get_image_path() / message["generate_image"]["filename"]
+                        self._append_history(role, content, str(image_path))
                     else:
-                        self.append_history(role, content)
+                        self._append_history(role, content)
                     Text_To_Speech.speak(text=self._cleanup_for_speech(content), model=self.piper_model)
         except Exception as e:
-            logger.error(f"failed to handle incomming message {e}")
+            logger.error(f"failed to handle incomming message: {e}")
 
     def send_message(self):
         self.status_widget.clear_status()
@@ -288,5 +293,5 @@ class ChatPage(BasePage):
             return
         self.input_box.value = ""
         self.input_box.update()
-        self.append_history("user", message)
+        self._append_history("user", message)
         Hub.chat(self.contact_id, self.conversation_id, "user", message, self.temperature)

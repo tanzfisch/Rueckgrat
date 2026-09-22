@@ -133,7 +133,7 @@ def on_incomming_message(msg: dict):
             warning = msg["warning"]
             logger.warning(f"[{warning['src']}] {warning['msg']}")
     except Exception as e:
-        logger.error(f"failed to handle incomming message {e}")
+        logger.error(f"failed to handle incomming message: {e}")
 
 
 def main():

@@ -16,3 +16,4 @@ tldextract
 faster-whisper
 torch
 numpy
+silero-vad[onnx-cpu]

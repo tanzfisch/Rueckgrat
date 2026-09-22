@@ -7,7 +7,7 @@ from app.ui.theme import STYLES
 from app.utils import Hub
 from app.ui import BasePage
 from app.ui.widgets import ContactHeader, LabeledSlider, RowSelector
-from app.common import get_logger
+from app.common import get_logger, Utils
 
 logger = get_logger()
 
@@ -16,10 +16,18 @@ ASSETS_DIR = os.getenv("FLET_ASSETS_DIR") or "assets"
 
 class WizardProfilePage(ft.Column):
     male_names = [
+        "Kwesi", "Nnamdi", "Chidi", "Olumide", "Ayodele", "Segun", "Kunle", "Dayo",
+        "Themba", "Bongani", "Sizwe", "Lwazi", "Lungelo", "Nkosi", "Mpho", "Tshepo",
+        "Tendai", "Tafadzwa", "Farai", "Tinashe", "Mwangi", "Otieno", "Wekesa", "Abebe",
+        "Yonas", "Haile", "Chukwudi", "Ifeanyi", "Obiora", "Chinonso",        
+        "Matteo", "Andreas", "Stefan", "Christian", "Daniel", "Sebastian", "Florian", "Philipp",
+        "Julian", "Fabian", "Konstantin", "Matthias", "Patrick", "Marco", "Giovanni", "Alessandro",
+        "Francesco", "Pierre", "Antoine", "Louis", "Hugo", "Erik", "Magnus", "Anders",
+        "Piotr", "Nikolai", "Viktor", "Casper", "Sven", "Bjorn",
         "Hans", "Marcus", "Oliver", "Lukas", "Leon", "Ben", "David", "Tim", "Niklas", "Max",
         "Felix", "Lennart", "Johannes", "Paul", "Simon", "Jonas", "Moritz", "Tom", "Leonard",
         "Nils", "Luca", "Emil", "Jakob", "Oskar", "Henrik", "Alexander", "Lars", "Elias",
-        "Samuel", "Tobias", "Finn", "Mika", "Noah", "Arne", "Lennard", "Linus",
+        "Samuel", "Tobias", "Finn", "Mika", "Noah", "Arne", "Lennard", "Linus", "Martin",
         "Timo", "Jasper", "Rafael", "Lenny", "Fynn", "Anton", "Levi", "Kian", "Liam", "Matti",
         "Caspian", "Ethan", "Jax", "Kai", "Milo", "Nolan", "Quinn", "Rylan", "Soren",
         "Tristan", "Zane", "Aiden", "Brayden", "Cameron", "Declan", "Evan", "Finnley",
@@ -37,10 +45,18 @@ class WizardProfilePage(ft.Column):
         "Thabo", "Sipho", "Lethabo", "Neo", "Mandla", "Sibusiso", "Andile", "Kagiso",
         "Tumelo", "Rashid", "Zuberi", "Jelani", "Omari", "Malik", "Hakim", "Abdul",
         "Faraji", "Jabari", "Amari", "Kamau", "Mosi", "Sekou", "Khamisi", "Baraka",
-        "Ekon", "Nuru", "Obinna", "Chuma", "Dumisani", "Siyabonga", "Vusi",
+        "Ekon", "Nuru", "Obinna", "Chuma", "Dumisani", "Siyabonga", "Vusi", "Luke",
     ]
 
     female_names = [
+        "Chioma", "Nneka", "Adaeze", "Yetunde", "Folake", "Adenike", "Ama", "Akua",
+        "Adwoa", "Efua", "Nandi", "Zinhle", "Nobuhle", "Amahle", "Palesa", "Dineo",
+        "Refilwe", "Rudo", "Chipo", "Tariro", "Wanjiku", "Akinyi", "Nyambura", "Chebet",
+        "Oluchi", "Chisom", "Titilayo", "Bolanle", "Liyana", "Thandiwe",        
+        "Sophia", "Emilia", "Frieda", "Ida", "Mathilda", "Franziska", "Annika", "Ingrid",
+        "Astrid", "Frederike", "Chiara", "Giulia", "Francesca", "Camille", "Claire", "Elise",
+        "Margot", "Adele", "Ines", "Carmen", "Lucia", "Elena", "Klara", "Thea",
+        "Sigrid", "Linnea", "Katja", "Anja", "Petra", "Monika", "Daphne", "Madelein",
         "Anna", "Emma", "Sophie", "Mia", "Hannah", "Lena", "Leonie", "Marie", "Laura", "Sarah",
         "Clara", "Johanna", "Paula", "Nina", "Julia", "Amelie", "Charlotte", "Ella", "Emily",
         "Lisa", "Mila", "Luisa", "Alina", "Helena", "Katharina", "Lina", "Marlene", "Nora",
@@ -50,7 +66,7 @@ class WizardProfilePage(ft.Column):
         "Hailey", "Isla", "Jasmine", "Kayla", "Layla", "Madison", "Natalie", "Ophelia",
         "Penelope", "Quinn", "Ruby", "Scarlett", "Taylor", "Uma", "Valerie", "Willow",
         "Xenia", "Yvonne", "Zara", "Aria", "Bella", "Chloe", "Delilah", "Eva", "Freya",
-        "Gabriella", "Hazel", "Ivy", "Jade", "Kylie", "Lillian", "Melody", "Nova", "Oakley",
+        "Gabrielle", "Hazel", "Ivy", "Jade", "Kylie", "Lillian", "Melody", "Nova", "Oakley",
         "Paisley", "Riley", "Savannah", "Trinity", "Violet", "Winter", "Zoey",
         "Aiko", "Akari", "Emi", "Hana", "Kaori", "Mei", "Sakura", "Yui", "Rin", "Nanami",
         "Jiwoo", "Minji", "Soojin", "Hyejin", "Yuna", "Jihye", "Nari", "Seoyeon",
@@ -332,8 +348,36 @@ class PersonalityPage(ft.Column):
 
 class ProgressPage(ft.Column):
     def __init__(self):
-        super().__init__(expand=True, alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
-        self.controls = [ft.Text("Please wait...")]
+        super().__init__(
+            expand=True,
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        self.controls = [
+            ft.Row(
+                alignment=ft.MainAxisAlignment.CENTER,
+                controls=[
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.ProgressRing(width=56, height=56, stroke_width=3),
+                                ft.Text("Creating character", size=20, weight=ft.FontWeight.W_500),
+                                ft.Text(
+                                    "This may take a moment",
+                                    size=13,
+                                    color=ft.Colors.ON_SURFACE_VARIANT,
+                                ),
+                            ],
+                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                            spacing=16,
+                        ),
+                        padding=40,
+                        border_radius=16,
+                        bgcolor=ft.Colors.SURFACE_CONTAINER,
+                    )
+                ],
+            )
+        ]
 
 
 class ProfileWizard(BasePage):
@@ -364,7 +408,7 @@ class ProfileWizard(BasePage):
                     ],
                 ),
             )
-]
+        ]        
 
     def on_go_back(self, e=None):
         self.navigator("contacts")
@@ -383,15 +427,21 @@ class ProfileWizard(BasePage):
         self.content_slot.update()
         self.update_buttons()
 
+    def _on_generation_timer(self):
+        self.navigator("contacts")
+
     def next_page(self, e=None):
-        if self.current_index < len(self.pages) - 1:
+        if self.current_index < len(self.pages) - 2:
             self.current_index += 1
             self._show()
             return
 
+        # means we are on the last page excluding the progress page
         profile = self.profile_page.get_values()
         if not self.user_profile_mode:
             Hub.generate({"generate_profile": {"profile": profile, "personality": self.personality_page.get_values()}})
+            self.current_index += 1
+            self._show()
         else:
             Hub.update_user_data({"profile": json.dumps(profile)})
             self.navigator("contacts")
@@ -421,8 +471,10 @@ class ProfileWizard(BasePage):
         else:
             self.profile_page = WizardProfilePage()
             self.personality_page = PersonalityPage()
+            self.progress_page = ProgressPage()
             self.add_page(self.profile_page)
             self.add_page(self.personality_page)
+            self.add_page(self.progress_page)
             Hub.register_incomming_message(self.on_incomming_message)
 
         self._show()
@@ -433,7 +485,9 @@ class ProfileWizard(BasePage):
 
     def on_incomming_message(self, msg: dict):
         try:
-            if "contact_id" in msg:
-                self.navigator("contacts")
+            if "new_contact" in msg:
+                profile = self.profile_page.get_values()
+                if profile["name"] == msg["new_contact"]["name"]:
+                    self.navigator("contacts")
         except Exception as e:
-            logger.error(f"failed to handle incomming message: {repr(e)}")
+            logger.error(f"failed to handle incomming message: {e}")            

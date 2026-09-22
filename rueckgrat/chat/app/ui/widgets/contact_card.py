@@ -1,5 +1,6 @@
 import flet as ft
 from app.utils import Contact, Paths
+from app.ui.widgets.image import Image
 
 from app.common import get_logger
 logger = get_logger()
@@ -17,11 +18,9 @@ class ContactCard(ft.Container):
             else ""
         )
 
-        profile_image = ft.Image(
-            src=profile_image_path or None,
-            width=150,
-            height=150,
-            fit=ft.BoxFit.COVER,
+        profile_image = Image(
+            image_path=profile_image_path or None,
+            size=[150,150]
         )
 
         labels = ft.Column(
