@@ -12,7 +12,7 @@ AGPL-3.0. Commercial licensing: see `COMMERCIAL_LICENSE.md`.
 
 ## Features
 
-Rückgrat is a hub/node backend plus a user-facing companion chat client. Quality depends on the models you run.
+Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client. Quality depends on the models you run.
 
 ### Backend
 
@@ -35,21 +35,26 @@ Rückgrat is a hub/node backend plus a user-facing companion chat client. Qualit
     - **generate_image** — generate an image on request or on its own
     - **take_photo** — generate a photo of self, user, or both from current context
 
-Use at least a 24B LLM (e.g. `cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L`). Smaller models fail JSON/tool calls often.
+Use at least a 24B LLM (e.g. `cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L`). Smaller models often fail to generate valid JSON tool calls.
 
 ### Chat Client
 
-- native Linux and Windows
-- optional Docker chat (known issues: no audio, autostart unreliable)
+- running on Linux, Android (iOS and Windows not tested)
 - chat with a locally installed LLM
-- in-chat image generation
-- client-side TTS via Piper
+- in-chat image generation based on use prompt
+- self image generation. Like taking a picture of self based on current context.
+- client-side TTS via Piper (broken on mobile right now since piper does not work there)
 - code highlighting
 - contacts, character templates, character-creation wizard, settings
 
+## Screenshots
+
+Some screenhots of the chat app because people like to see images even if crap.
+
+<img src="docs/screenshots/contact_list.png" width="200" alt="contact list"> <img src="docs/screenshots/chat_code.png" width="200" alt="code in chat"> <img src="docs/screenshots/chat_image.png" width="200" alt="image gen in chat"> <img src="docs/screenshots/chat_foto.png" width="200" alt="self image in chat">
+
 ## Planned
 
-- rewrite the client for mobile, then drop Docker chat
 - character consistency in images
 - Flux support
 - some more productivity oriented frontend
@@ -65,11 +70,11 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The installer supports multi-host deploy, component selection (chat native/Docker, hub, node, llama-server, ImageGen), clean/fresh builds (`-f`), and the distros listed above. Selected Docker services are started; the native chat client is not.
+The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen) Use `./install.sh --help` for more options.
 
-Requires sudo on every target host, same username.
+**Note: Requires sudo on every target host, same username.**
 
-Native chat:
+Run chat:
 
 ```bash
 cd rueckgrat/chat
@@ -104,6 +109,10 @@ cd Rueckgrat\rueckgrat\chat
 .\install.ps1
 .\run.ps1
 ```
+
+### Android
+
+See development docs `DEVELOPMENT.md` about building for android.
 
 ## Development
 
