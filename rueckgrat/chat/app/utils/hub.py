@@ -22,11 +22,13 @@ class Hub:
         cls.config = config
         
         cls.url = f"https://{cls.config.host}:{cls.config.port}"
-        cls.uri = f"wss://{cls.config.host}:{cls.config.port}/ws"
+        cls.uri = f"wss://{cls.config.host}:{cls.config.port}/ws"            
 
+        name = "rueckgrat-caddy.cert"
+        assets = os.getenv("FLET_ASSETS_DIR")
         paths = [
-            Path("/chat/app/rueckgrat-caddy.cert"), 
-            Path(os.path.expanduser('~/.ssh/rueckgrat-caddy.cert'))
+            *( [Path(assets) / name] if assets else [] ),
+            Path.home() / ".ssh" / name,
         ]
 
         cert = next((p for p in paths if p.exists()), None)
@@ -122,7 +124,7 @@ class Hub:
     def check_health(cls):
         url = f"{cls.url}/health"
         try:
-            response = requests.get(url, timeout=9, verify=cls.server_cert)
+            response = requests.get(url, timeout=30, verify=cls.server_cert)
             if response.status_code == 200:
                 data = response.json()
                 status = data.get("status", "error")
@@ -298,7 +300,7 @@ class Hub:
             if response.status_code in (200, 204):
                 return True
             else:
-                logger.error(f"update contact - {response.status_code} {response.reason}")
+                logger.error(f"failed to update contact: {response.status_code} {response.reason}")
                 return False
 
         except Exception as e:

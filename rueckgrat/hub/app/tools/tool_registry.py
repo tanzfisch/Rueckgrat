@@ -19,9 +19,11 @@ class ToolRegistry:
         self._register_tool(ImageGenTool)
         self._register_tool(TakePhotoTool)
 
+        temp = ", ".join(self.tools)
+        logger.debug(f"registered tools: {temp}")
+
     def _register_tool(self, cls: type[Tool]):
         self.tools[cls.name()] = cls
-        logger.debug(f"registered tool: {cls.name()}")
 
     def execute(self, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]) -> None:
         tool_name = tool_call["tool"]

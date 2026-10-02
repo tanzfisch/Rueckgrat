@@ -1,72 +1,56 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QApplication
-from PySide6.QtCore import Qt, QEventLoop, QEvent
-from PySide6.QtGui import QPixmap
-
 from pathlib import Path
+import asyncio
+import flet as ft
 
-class ImageOverlay(QWidget):
-    def __init__(self, image_path: Path, parent=None):
-        super().__init__(parent)
 
-        self.setGeometry(parent.rect())
-        self.setAttribute(Qt.WA_StyledBackground, True)
+class ImageOverlay(ft.Container):
+    def __init__(self, page: ft.Page, image_path: Path | str):
+        self._future = None
+        super().__init__(
+            left=0,
+            top=0,
+            width=page.width,
+            height=page.height,
+            bgcolor=ft.Colors.with_opacity(0.85, ft.Colors.BLACK),
+            alignment=ft.Alignment.CENTER,
+            on_click=self._close,
+            content=ft.Image(
+                src=str(image_path),
+                fit=ft.BoxFit.CONTAIN,
+                width=page.width,
+                height=page.height,
+            ),
+        )
 
-        main_layout = QVBoxLayout(self)
-        main_layout.setAlignment(Qt.AlignCenter)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+    def _close(self, e=None):
+        if self.page and self in self.page.overlay:
+            self.page.overlay.remove(self)
+            self.page.update()
+        if self._future and not self._future.done():
+            self._future.set_result(None)
 
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignCenter)
+    def did_mount(self):
+        self._prev_resize = self.page.on_resize
+        self.page.on_resize = self._on_resize
 
-        self.pixmap = QPixmap(image_path)
-        if self.pixmap.isNull():
-            raise RuntimeError(f"Could not load image: {image_path}")
+    def will_unmount(self):
+        if self.page and self.page.on_resize == self._on_resize:
+            self.page.on_resize = self._prev_resize
 
-        main_layout.addWidget(self.image_label)
-
-        self.updatePixmap()
-
-        parent.installEventFilter(self)        
-
-    def eventFilter(self, watched, event):
-        if watched == self.parent() and event.type() == QEvent.Resize:
-            self.setGeometry(self.parent().rect())
-            self.updatePixmap()
-        return super().eventFilter(watched, event)
-
-    def updatePixmap(self):
-        if not self.pixmap:
-            return
-        
-        if not self.pixmap.isNull():
-            scaled = self.pixmap.scaled(
-                self.width(),
-                self.height(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
-            )
-            self.image_label.setPixmap(scaled)
-
-    def mousePressEvent(self, event):
-        self.close()
-        super().mousePressEvent(event)
-
-    def exec(self):
-        loop = QEventLoop()
-        self.destroyed.connect(loop.quit)
-        self.show()
-        loop.exec()
+    def _on_resize(self, e):
+        self.width = self.height = None
+        self.width = self.page.width
+        self.height = self.page.height
+        self.content.width = self.page.width
+        self.content.height = self.page.height
+        self.update()
+        if self._prev_resize:
+            self._prev_resize(e)
 
     @classmethod
-    def open(cls, image_path):
-        parent = QApplication.activeWindow()
-        if parent is None:
-            raise RuntimeError("No active window found")
-
-        overlay = cls(image_path, parent)
-
-        loop = QEventLoop()
-        overlay.destroyed.connect(loop.quit)
-
-        overlay.show()
-        loop.exec()
+    async def open(cls, page: ft.Page, image_path: Path | str):
+        overlay = cls(page, image_path)
+        overlay._future = asyncio.get_running_loop().create_future()
+        page.overlay.append(overlay)
+        page.update()
+        await overlay._future

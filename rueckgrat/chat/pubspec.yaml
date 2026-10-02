@@ -1,0 +1,8 @@
+name: chat
+environment:
+  sdk: '^3.13.0'
+flutter:
+  assets:
+    - assets/
+    - assets/icons/
+    - assets/rueckgrat-caddy.cert

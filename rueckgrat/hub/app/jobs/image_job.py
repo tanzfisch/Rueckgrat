@@ -26,7 +26,7 @@ class ImageJob(Job):
                 }
             else:
                 self.infrastructure.download(
-                    source_path=f"/{image_path}", # todo why the extra /
+                    source_path=f"{image_path}",
                     download_path=f"/hub/images",
                     asynchronous=False)
 

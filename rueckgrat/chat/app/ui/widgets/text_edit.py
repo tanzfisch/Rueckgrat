@@ -1,7 +1,6 @@
-from PySide6.QtWidgets import QTextEdit
-from PySide6.QtCore import QMimeData
+import flet as ft
 
-class PlainTextEdit(QTextEdit):
-    def insertFromMimeData(self, source: QMimeData):
-        if source.hasText():
-            self.insertPlainText(source.text())
+
+class PlainTextEdit(ft.TextField):
+    def __init__(self, **kwargs):
+        super().__init__(multiline=True, **kwargs)

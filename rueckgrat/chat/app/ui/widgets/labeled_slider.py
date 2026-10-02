@@ -1,38 +1,37 @@
-from PySide6.QtWidgets import (
-    QWidget,
-    QLabel,
-    QSlider,
-    QVBoxLayout,
-    QHBoxLayout,
-)
-from PySide6.QtCore import Qt
+import flet as ft
+from app.ui.theme import STYLES
 
-class LabeledSlider(QWidget):
-    def __init__(self, left_text="Min", right_text="Max", range_min: int = 0, range_max: int = 100, start_value:int = 50, parent=None,):
-        super().__init__(parent)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0,0,0,0)
-
-        # Slider
-        self.slider = QSlider(Qt.Horizontal)
-        self.slider.setRange(range_min, range_max)
-        self.slider.setValue(start_value)   
-        layout.addWidget(self.slider)
-
-        # bottom label row
-        labels_bottom = QHBoxLayout()
-
-        self.left_label = QLabel(left_text)
-        self.left_label.setObjectName("label_slider")
-        labels_bottom.addWidget(self.left_label)
-
-        labels_bottom.addStretch()
-            
-        self.right_label = QLabel(right_text)
-        self.right_label.setObjectName("label_slider")        
-        labels_bottom.addWidget(self.right_label)        
-        layout.addLayout(labels_bottom)
+class LabeledSlider(ft.Column):
+    def __init__(
+        self,
+        left_text="Min",
+        right_text="Max",
+        range_min: int = 0,
+        range_max: int = 100,
+        start_value: int = 50,
+        **kwargs,
+    ):
+        self.slider = ft.Slider(
+            min=range_min,
+            max=range_max,
+            value=start_value,
+            divisions=range_max - range_min,
+        )
+        super().__init__(
+            controls=[
+                self.slider,
+                ft.Row(
+                    [
+                        ft.Text(left_text, style=STYLES["label_slider"]),
+                        ft.Container(expand=True),
+                        ft.Text(right_text, style=STYLES["label_slider"]),
+                    ],
+                ),
+            ],
+            spacing=0,
+            tight=True,
+            **kwargs,
+        )
 
     def get_value(self):
-        return self.slider.value()
+        return int(self.slider.value)
