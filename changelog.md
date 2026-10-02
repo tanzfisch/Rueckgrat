@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.12.0
+------
+
+- #55 switchoing from PySide to flutter for better mobile support
+
 0.11.4
 ------
 
