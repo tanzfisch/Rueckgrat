@@ -1,65 +1,100 @@
-from PySide6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QPushButton)
-from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtCore import Qt, QSize, Signal
+import os
+import flet as ft
+from app.ui.theme import STYLES
 from app.utils import Contact, Paths
 
-class ContactHeader(QWidget):
-    go_back = Signal()
-    open_profile = Signal()
+ASSETS_DIR = os.getenv("FLET_ASSETS_DIR") or "assets"
 
-    def __init__(self, navigator, selected_contact: bool=True, back_button: bool=True, parent=None):
-        super().__init__(parent)
+
+class ContactHeader(ft.Row):
+    def __init__(
+        self,
+        navigator,
+        selected_contact: bool = True,
+        back_button: bool = True,
+        on_go_back=None,
+        on_open_profile=None,
+        **kwargs,
+    ):
         self.navigator = navigator
+        self.on_go_back = on_go_back
+        self.on_open_profile = on_open_profile
+        self.contact = None
 
-        layout = QHBoxLayout(self)
-        layout.setAlignment(Qt.AlignLeft)
+        self.back_btn = ft.IconButton(
+            icon=ft.Image(
+                src=f"{ASSETS_DIR}/icons/back_light.png",
+                width=24,
+                height=24,
+                fit=ft.BoxFit.CONTAIN,
+            ),
+            width=40,
+            height=40,
+            on_click=self.handle_go_back,
+            style=STYLES["icon_button"]["style"],
+        )
 
-        self.back_btn = QPushButton()
-        self.back_btn.setObjectName("flatButton")
-        self.back_btn.setIcon(QIcon("app/icons/back_light.png"))
-        self.back_btn.setIconSize(QSize(24, 24))
-        self.back_btn.setFixedSize(40, 40)
-        self.back_btn.clicked.connect(self.handle_go_back)
+        self.profile_label = ft.Image(
+            src=f"{ASSETS_DIR}/icons/profile_light.png",
+            width=40,
+            height=40,
+            fit=ft.BoxFit.COVER,
+        )
 
-        self.profile_label = QLabel()
-        pixmap = QPixmap("app/icons/profile_light.png")
-        self.profile_label.setScaledContents(True)
-        self.profile_label.setPixmap(pixmap)
-        self.profile_label.setFixedSize(40, 40)
+        self.contact_name = ft.Text("...")
 
-        self.contact_name = QLabel("...")
+        self.menu_btn = ft.IconButton(
+            icon=ft.Image(
+                src=f"{ASSETS_DIR}/icons/menu_light.png",
+                width=24,
+                height=24,
+                fit=ft.BoxFit.CONTAIN,
+            ),
+            width=40,
+            height=40,
+            on_click=self.handle_open_menu,
+            style=STYLES["icon_button"]["style"],
+        )
 
-        self.menu_btn = QPushButton()
-        self.menu_btn.setObjectName("flatButton")
-        self.menu_btn.setIcon(QIcon("app/icons/menu_light.png"))
-        self.menu_btn.setIconSize(QSize(24, 24))
-        self.menu_btn.setFixedSize(40, 40)
-        self.menu_btn.clicked.connect(self.handle_open_menu)
-
+        controls = []
         if back_button:
-            layout.addWidget(self.back_btn)
-
+            controls.append(self.back_btn)
         if selected_contact:
-            layout.addWidget(self.profile_label)
-            layout.addWidget(self.contact_name)     
+            controls.append(
+                ft.GestureDetector(
+                    content=ft.Row(
+                        [self.profile_label, self.contact_name],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    on_tap=self._open_profile,
+                )
+            )
+        controls.append(ft.Container(expand=True))
+        controls.append(self.menu_btn)
 
-        layout.addStretch() 
-        layout.addWidget(self.menu_btn)   
+        super().__init__(
+            controls=controls,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            **kwargs,
+        )
 
     def set_contact(self, contact: Contact):
         self.contact = contact
+        self.contact_name.value = self.contact.get_name()
+        name = self.contact.get_latest_profile_image_name()
+        if name:
+            self.profile_label.src = str(Paths.get_image_path() / name)
+        if self.page:
+            self.update()
 
-        self.contact_name.setText(self.contact.get_name())
-        profile_image_name = self.contact.get_latest_profile_image_name()
-        profile_image_path = Paths.get_image_path() / profile_image_name
-        self.profile_label.setPixmap(QPixmap(str(profile_image_path)))
+    def _open_profile(self, e):
+        if self.on_open_profile:
+            self.on_open_profile()
 
-    def mousePressEvent(self, event):
-        self.open_profile.emit()
-        super().mousePressEvent(event)        
+    def handle_go_back(self, e):
+        if self.on_go_back:
+            self.on_go_back()
 
-    def handle_go_back(self):
-        self.go_back.emit()
-
-    def handle_open_menu(self):
+    def handle_open_menu(self, e):
         self.navigator("settings")

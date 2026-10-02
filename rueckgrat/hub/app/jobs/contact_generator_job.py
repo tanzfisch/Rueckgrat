@@ -40,8 +40,11 @@ class ContactGeneratorJob(Job):
             )
             self.add_sub_job(assistant_image_job)
 
-            self.response = { 
-                "contact_id": contact_id
+            self.response = {
+                "new_contact": {
+                    "contact_id": contact_id,
+                    "name": name
+                }
             }
         except Exception as e:
             logger.error(f"failed to execute ContactGeneratorJob {repr(e)}")                    

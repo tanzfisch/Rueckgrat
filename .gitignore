@@ -210,7 +210,10 @@ cache
 models
 logs
 chat-temp
+rueckgrat/chat/assets/rueckgrat-caddy.cert
+rueckgrat/chat/pubspec.lock
 rueckgrat/config
 rueckgrat/caddy/*.cert
 rueckgrat/caddy/*.key
 rueckgrat/chat/app/*.cert
+.dart_tool

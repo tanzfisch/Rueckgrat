@@ -930,24 +930,35 @@ deploy_chat_native() {
 
     pushd rueckgrat/chat > /dev/null
 
-    CERT_DEST="$HOME/.ssh/rueckgrat-caddy.cert"
+    CERT_NAME="rueckgrat-caddy.cert"
+    CERT_DEST_SSH="$HOME/.ssh/$CERT_NAME"
+    CERT_DEST_ASSETS="$PWD/assets/$CERT_NAME"
+
+    mkdir -p "$HOME/.ssh" assets
+
     if [[ -n "${CADDY_CERT:-}" ]]; then
         echo "🔑 Installing certificate from: $CADDY_CERT"
-        mkdir -p "$HOME/.ssh"
-        cp -f "$CADDY_CERT" "$CERT_DEST"
-        chmod 644 "$CERT_DEST"
-        echo "✅ Certificate installed to $CERT_DEST"
-    elif [[ -f "$CERT_DEST" ]]; then
-        echo "⚠️ Warning: Using existing certificate: $CERT_DEST"
+        cp -f "$CADDY_CERT" "$CERT_DEST_SSH"
+        cp -f "$CADDY_CERT" "$CERT_DEST_ASSETS"
+        chmod 644 "$CERT_DEST_SSH" "$CERT_DEST_ASSETS"
+        echo "✅ Certificate installed to $CERT_DEST_SSH and $CERT_DEST_ASSETS"
+    elif [[ -f "$CERT_DEST_SSH" ]]; then
+        echo "⚠️ Warning: Using existing certificate: $CERT_DEST_SSH"
+        cp -f "$CERT_DEST_SSH" "$CERT_DEST_ASSETS"
+        chmod 644 "$CERT_DEST_ASSETS"
+    elif [[ -f "$CERT_DEST_ASSETS" ]]; then
+        echo "⚠️ Warning: Using existing certificate: $CERT_DEST_ASSETS"
+        cp -f "$CERT_DEST_ASSETS" "$CERT_DEST_SSH"
+        chmod 644 "$CERT_DEST_SSH"
     else
-        echo "❌ Error: No certificate path provided and $CERT_DEST not found."
+        echo "❌ Error: No certificate path provided and neither $CERT_DEST_SSH nor $CERT_DEST_ASSETS found."
         popd > /dev/null
         exit 1
     fi
 
     [ -d .venv ] || python3 -m venv .venv
     source .venv/bin/activate
-    pip install -r requirements.txt
+    pip install -r requirements_desktop.txt
 
     popd > /dev/null
 }
@@ -1242,7 +1253,9 @@ rsync_to_host() {
     sshpass -p "$SUDO_PASSWORD" ssh "${SSH_OPTS[@]}" -o User="$SUDO_USER" -Nf "$host_addr" || { echo "❌ Error: failed to connect with $host_addr"; return 1; }
 
     echo "Copying files to $host_addr..."
-    rsync -az --checksum -e "ssh ${SSH_OPTS[*]}" --exclude='.git' --exclude='logs' ./ "$host_addr:$remote_dir/" || {
+    rsync -az --checksum -e "ssh ${SSH_OPTS[*]}" \
+        --exclude='.git' --exclude='logs' --exclude='build/' \
+        ./ "$host_addr:$remote_dir/" || {
         echo "❌ Error: rsync failed for $host_addr"
         return 1
     }

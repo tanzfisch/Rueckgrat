@@ -1,320 +1,136 @@
-from PySide6.QtWidgets import QWidget, QTextBrowser, QVBoxLayout, QSizePolicy, QStyleOption, QStyle, QLabel
-from PySide6.QtGui import QPainter, QDesktopServices
-from PySide6.QtCore import Qt, Signal, QTimer
-import markdown
-import bleach
 import re
-from .image import Image
+import flet as ft
+from app.ui.theme import STYLES
+from app.ui.widgets.image import Image
 
 from app.common import get_logger
 logger = get_logger()
 
 
-class TextBlock(QTextBrowser):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setOpenLinks(False)
-        self.anchorClicked.connect(
-            lambda url: QDesktopServices.openUrl(url)
+def _open_link(e):
+    url = e.data
+    if url:
+        e.page.launch_url(url)
+
+
+class ChatBubble(ft.Container):
+    def __init__(self, role: str, content: str, image_filepath: str | None = None, **kwargs):
+        self.body = ft.Column(spacing=8, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+        super().__init__(
+            content=self.body,
+            data={"role": role, "id": "chatBubble"},
+            **kwargs,
         )
-
-    def wheelEvent(self, event):
-        delta = event.angleDelta()
-
-        if delta.x() != 0:
-            # handle horizontal scrolling normally
-            super().wheelEvent(event)
-        else:
-            # ignore vertical scrolling
-            event.ignore()
-
-class ChatBubble(QWidget):
-    def __init__(self, role: str, content: str, image_filepath: str = None):
-        super().__init__()
         self.role = role
         self.image_filepath = image_filepath
-        self.image = None
-        self.content = ""
-
-        self.setObjectName("chatBubble")
-        self.setProperty("role", role)
-
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(10, 10, 10, 10)
-        self.layout.setAlignment(Qt.AlignTop)
-
+        self.raw_content = ""
         self.append_content(content)
 
     def _clear(self):
-        while self.layout.count():
-            item = self.layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        self.body.controls.clear()
 
     def clear_content(self):
-        self.content = ""
+        self.raw_content = ""
 
     def append_content(self, content: str):
-        self.content += content
-        self._clear()
+        try:
+            self.raw_content += content
+            self._clear()
 
-        parsable_content = self.content
-        if parsable_content.count("```") % 2 == 1:
-            parsable_content += "\n```"
+            parsable = self.raw_content
+            if parsable.count("```") % 2 == 1:
+                parsable += "\n```"
 
-        content_items = self._parse_content(parsable_content)
+            items = self._parse_content(parsable)
 
-        if self.image_filepath:
-            self._add_image(self.layout, self.image_filepath)
+            if self.image_filepath:
+                self._add_image(self.image_filepath)
 
-        for item in content_items:
-            if item["type"] == "text":
-                self._add_text(self.layout, item["value"], self.role)
-            elif item["type"] == "code":
-                self._add_code(self.layout, item["value"])
+            for item in items:
+                if item["type"] == "text":
+                    self._add_text(item["value"])
+                elif item["type"] == "code":
+                    self._add_code(item["value"])
+        except Exception as e:
+            logger.error(f"failed to append content: {repr(e)}")
 
-    def setFixedWidth(self, width):
-        if self.image:
-            pixmap = self.image.pixmap
-            if pixmap:
-                aspect = pixmap.width() / pixmap.height()
-                if aspect > 1:
-                    super().setFixedWidth(int(width * 0.8))
-                else:
-                    super().setFixedWidth(int(width * 0.6))
-            else:
-                super().setFixedWidth(int(width * 0.6))
-        else:
-            super().setFixedWidth(width)
+    def set_fixed_width(self, width: int):
+        self.width = width
+        if self.page:
+            self.update()
 
-    def _add_code(self, layout, content: str):
-        text = TextBlock()
-        text.setReadOnly(True)
-        text.setObjectName("code")
-        text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-        text.setHtml(self._handle_markdown(content))        
-        layout.addWidget(text)
+    def _md(self, value: str, code: bool = False) -> ft.Markdown:
+        return ft.Markdown(
+            value=value,
+            selectable=True,
+            extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+            code_theme=ft.MarkdownCodeTheme.ATOM_ONE_DARK,
+            on_tap_link=_open_link,
+            shrink_wrap=True,
+        )
 
-        QTimer.singleShot(10, lambda t=text: self._resize_code_edit(t))
-        text.resizeEvent = lambda e: (TextBlock.resizeEvent(text, e), self._resize_code_edit(text))
+    def _add_code(self, content: str):
+        self.body.controls.append(
+            ft.Container(
+                content=ft.Row(
+                    [self._md(content, code=True)],
+                    scroll=ft.ScrollMode.AUTO,
+                    wrap=False,
+                ),
+                data={"id": "code"},
+            )
+        )
 
-    def _resize_code_edit(self, text: TextBlock):
-        text.setFixedHeight(int(text.document().size().height()) + 20)
+    def _add_text(self, content: str):
+        self.body.controls.append(
+            ft.Container(
+                content=self._md(content),
+                data={"id": "text", "role": self.role},
+            )
+        )
 
-    def _add_text(self, layout, content: str, role: str):
-        text = TextBlock()
-        text.setReadOnly(True)
-        text.setObjectName("text")
-        text.setProperty("role", role)
-        text.setLineWrapMode(TextBlock.WidgetWidth)
-        text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-        text.setHtml(self._handle_markdown(content))
-
-        text.resizeEvent = lambda e: (TextBlock.resizeEvent(text, e), self._resize_text_edit(text))
-        layout.addWidget(text)
-
-    def _add_image(self, layout, image_filepath: str):
-        self.image = Image(image_filepath)        
-        layout.addWidget(self.image)
-
-    def _resize_text_edit(self, text: TextBlock):
-        text.setFixedHeight(int(text.document().size().height()))
-        text.verticalScrollBar().setValue(0)
+    def _add_image(self, image_filepath: str):
+        image = Image(image_path=image_filepath)
+        self.body.controls.append(image)
 
     def _parse_content(self, content: str) -> list[dict]:
         parts = []
         last_pos = 0
-
         pattern = r'(```(?:\w+)?\s*\n.*?\n```)|(\[IMAGE:\s*(.*?)\])|(\[MOOD:\s*(.*?)\])'
 
         for m in re.finditer(pattern, content, re.DOTALL):
             if m.start() > last_pos:
                 parts.append({"type": "text", "value": content[last_pos:m.start()].strip()})
-
-            if m.group(1) is not None:      # code block with ``` kept
+            if m.group(1) is not None:
                 parts.append({"type": "code", "value": m.group(1)})
-            elif m.group(3) is not None:    # [IMAGE: ...]
+            elif m.group(3) is not None:
                 parts.append({"type": "image", "value": m.group(3).strip()})
-            elif m.group(5) is not None:    # [MOOD: ...]
+            elif m.group(5) is not None:
                 parts.append({"type": "mood", "value": m.group(5).strip()})
-
             last_pos = m.end()
 
         if last_pos < len(content):
             parts.append({"type": "text", "value": content[last_pos:].strip()})
-
         return parts
 
-    def _handle_markdown(self, content):
-        html_body = markdown.markdown(
-            content,
-            extensions=[
-                "extra",
-                "sane_lists",
-                "tables",
-                "fenced_code",
-                "nl2br",
-                "codehilite"
-            ],
-            extension_configs={
-                "codehilite": {
-                    "guess_lang": True,
-                    "linenums": False
-                }
-            }
+
+class OneLineBubble(ft.Container):
+    def __init__(self, text: str = "", data=None, on_clicked=None, **kwargs):
+        self.on_clicked = on_clicked
+        self.label = ft.Text(text, text_align=ft.TextAlign.CENTER)
+        super().__init__(
+            content=self.label,
+            alignment=ft.Alignment.CENTER,
+            on_click=self._on_click,
+            data=data,
+            **STYLES["one_line_bubble"],
+            **kwargs,
         )
 
-        html_body = bleach.linkify(html_body)
+    def set(self, text, data=None):
+        self.label.value = text
+        self.data = data
 
-        return f"""
-        <html>
-        <head>
-        <style>
-            body {{
-                background: transparent;
-                color: #E0E0E0;
-                font-size: 16px;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-                margin: 0;
-            }}
-
-            pre {{
-                background: transparent;
-            }}
-
-            code {{
-                background: transparent;
-                font-family: 'Courier New', monospace;
-                color: #00889d;
-            }}
-
-            em, i {{
-                color: #a0a0a0;
-            }}     
-
-            pre {{ line-height: 125%; }}
-            td.linenos .normal {{ color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }}
-            span.linenos {{ color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }}
-            td.linenos .special {{ color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }}
-            span.linenos.special {{ color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }}
-            .hll {{ background-color: #49483e }}
-            .c {{ color: #959077 }} /* Comment */
-            .err {{ color: #ED007E; background-color: #1E0010 }} /* Error */
-            .esc {{ color: #F8F8F2 }} /* Escape */
-            .g {{ color: #F8F8F2 }} /* Generic */
-            .k {{ color: #66D9EF }} /* Keyword */
-            .l {{ color: #AE81FF }} /* Literal */
-            .n {{ color: #F8F8F2 }} /* Name */
-            .o {{ color: #FF4689 }} /* Operator */
-            .x {{ color: #F8F8F2 }} /* Other */
-            .p {{ color: #F8F8F2 }} /* Punctuation */
-            .ch {{ color: #959077 }} /* Comment.Hashbang */
-            .cm {{ color: #959077 }} /* Comment.Multiline */
-            .cp {{ color: #959077 }} /* Comment.Preproc */
-            .cpf {{ color: #959077 }} /* Comment.PreprocFile */
-            .c1 {{ color: #959077 }} /* Comment.Single */
-            .cs {{ color: #959077 }} /* Comment.Special */
-            .gd {{ color: #FF4689 }} /* Generic.Deleted */
-            .ge {{ color: #F8F8F2; font-style: italic }} /* Generic.Emph */
-            .ges {{ color: #F8F8F2; font-weight: bold; font-style: italic }} /* Generic.EmphStrong */
-            .gr {{ color: #F8F8F2 }} /* Generic.Error */
-            .gh {{ color: #F8F8F2 }} /* Generic.Heading */
-            .gi {{ color: #A6E22E }} /* Generic.Inserted */
-            .go {{ color: #66D9EF }} /* Generic.Output */
-            .gp {{ color: #FF4689; font-weight: bold }} /* Generic.Prompt */
-            .gs {{ color: #F8F8F2; font-weight: bold }} /* Generic.Strong */
-            .gu {{ color: #959077 }} /* Generic.Subheading */
-            .gt {{ color: #F8F8F2 }} /* Generic.Traceback */
-            .kc {{ color: #66D9EF }} /* Keyword.Constant */
-            .kd {{ color: #66D9EF }} /* Keyword.Declaration */
-            .kn {{ color: #FF4689 }} /* Keyword.Namespace */
-            .kp {{ color: #66D9EF }} /* Keyword.Pseudo */
-            .kr {{ color: #66D9EF }} /* Keyword.Reserved */
-            .kt {{ color: #66D9EF }} /* Keyword.Type */
-            .ld {{ color: #E6DB74 }} /* Literal.Date */
-            .m {{ color: #AE81FF }} /* Literal.Number */
-            .s {{ color: #E6DB74 }} /* Literal.String */
-            .na {{ color: #A6E22E }} /* Name.Attribute */
-            .nb {{ color: #F8F8F2 }} /* Name.Builtin */
-            .nc {{ color: #A6E22E }} /* Name.Class */
-            .no {{ color: #66D9EF }} /* Name.Constant */
-            .nd {{ color: #A6E22E }} /* Name.Decorator */
-            .ni {{ color: #F8F8F2 }} /* Name.Entity */
-            .ne {{ color: #A6E22E }} /* Name.Exception */
-            .nf {{ color: #A6E22E }} /* Name.Function */
-            .nl {{ color: #F8F8F2 }} /* Name.Label */
-            .nn {{ color: #F8F8F2 }} /* Name.Namespace */
-            .nx {{ color: #A6E22E }} /* Name.Other */
-            .py {{ color: #F8F8F2 }} /* Name.Property */
-            .nt {{ color: #FF4689 }} /* Name.Tag */
-            .nv {{ color: #F8F8F2 }} /* Name.Variable */
-            .ow {{ color: #FF4689 }} /* Operator.Word */
-            .pm {{ color: #F8F8F2 }} /* Punctuation.Marker */
-            .w {{ color: #F8F8F2 }} /* Text.Whitespace */
-            .mb {{ color: #AE81FF }} /* Literal.Number.Bin */
-            .mf {{ color: #AE81FF }} /* Literal.Number.Float */
-            .mh {{ color: #AE81FF }} /* Literal.Number.Hex */
-            .mi {{ color: #AE81FF }} /* Literal.Number.Integer */
-            .mo {{ color: #AE81FF }} /* Literal.Number.Oct */
-            .sa {{ color: #E6DB74 }} /* Literal.String.Affix */
-            .sb {{ color: #E6DB74 }} /* Literal.String.Backtick */
-            .sc {{ color: #E6DB74 }} /* Literal.String.Char */
-            .dl {{ color: #E6DB74 }} /* Literal.String.Delimiter */
-            .sd {{ color: #E6DB74 }} /* Literal.String.Doc */
-            .s2 {{ color: #E6DB74 }} /* Literal.String.Double */
-            .se {{ color: #AE81FF }} /* Literal.String.Escape */
-            .sh {{ color: #E6DB74 }} /* Literal.String.Heredoc */
-            .si {{ color: #E6DB74 }} /* Literal.String.Interpol */
-            .sx {{ color: #E6DB74 }} /* Literal.String.Other */
-            .sr {{ color: #E6DB74 }} /* Literal.String.Regex */
-            .s1 {{ color: #E6DB74 }} /* Literal.String.Single */
-            .ss {{ color: #E6DB74 }} /* Literal.String.Symbol */
-            .bp {{ color: #F8F8F2 }} /* Name.Builtin.Pseudo */
-            .fm {{ color: #A6E22E }} /* Name.Function.Magic */
-            .vc {{ color: #F8F8F2 }} /* Name.Variable.Class */
-            .vg {{ color: #F8F8F2 }} /* Name.Variable.Global */
-            .vi {{ color: #F8F8F2 }} /* Name.Variable.Instance */
-            .vm {{ color: #F8F8F2 }} /* Name.Variable.Magic */
-            .il {{ color: #AE81FF }} /* Literal.Number.Integer.Long */
-
-        </style>
-        </head>
-        <body>{html_body}</body>
-        </html>
-        """
-
-    def paintEvent(self, event):
-        opt = QStyleOption()
-        opt.initFrom(self)
-        painter = QPainter(self)
-        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, painter, self)
-
-class OneLineBubble(QWidget):
-    clicked = Signal(str, int)
-
-    def __init__(self, text: str ="", id: int="-1"):
-        super().__init__()
-        self.setAttribute(Qt.WA_StyledBackground, True)
-
-        self.id = id
-
-        layout = QVBoxLayout(self)
-        self.label = QLabel(text)
-        self.label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.label)
-
-    def get_id(self):
-        return self.id
-
-    def set(self, text, id):
-        self.label.setText(text)
-        self.id = id
-
-    def mousePressEvent(self, event):
-        self.clicked.emit(self.label.text(), self.id)
+    def _on_click(self, e):
+        if self.on_clicked:
+            self.on_clicked(self.label.value, self.data)

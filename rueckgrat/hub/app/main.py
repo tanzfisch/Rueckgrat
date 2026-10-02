@@ -1,5 +1,4 @@
-
-import uvicorn
+from silero_vad import load_silero_vad
 import json
 import random
 import asyncio
@@ -7,7 +6,6 @@ import threading
 import os
 from tqdm import tqdm
 from pathlib import Path
-import time
 import numpy as np
 from faster_whisper import WhisperModel
 import torch
@@ -54,9 +52,7 @@ async def lifespan(app: FastAPI):
     app.state.whisper_model_fast = WhisperModel("small", device="cpu", compute_type="int8")
 
     logger.info("loading vad")
-    VAD_PATH = Path(__file__).resolve().parent / "silero_vad" / "silero_vad.jit"
-    app.state.vad = torch.jit.load(str(VAD_PATH), map_location="cpu")   
-    app.state.vad.eval()
+    app.state.vad = load_silero_vad(onnx=True)
     torch.set_num_threads(1)
 
     logger.info("hub initialized")

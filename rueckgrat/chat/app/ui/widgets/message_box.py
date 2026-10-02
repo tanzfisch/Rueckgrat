@@ -1,81 +1,52 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton)
-from PySide6.QtCore import Qt, Signal, QEventLoop
-from PySide6.QtWidgets import QApplication
+import asyncio
+import flet as ft
 
-class MessageBox(QWidget):
-    result = Signal(bool)
 
-    def __init__(self, message="Are you sure?", parent=None):
-        super().__init__(parent)
+class MessageBox(ft.AlertDialog):
+    def __init__(self, message="Are you sure?"):
+        self._future = None
+        super().__init__(
+            modal=True,
+            content=ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Text(message, text_align=ft.TextAlign.CENTER),
+                        ft.Row(
+                            [
+                                ft.Button("Ok", expand=True, on_click=self._ok),
+                                ft.Button("Cancel", expand=True, on_click=self._cancel),
+                            ],
+                        ),
+                    ],
+                    tight=True,
+                    spacing=15,
+                    horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                ),
+                padding=20,
+                width=320,
+                data={"id": "overlay_dialog"},
+            ),
+            on_dismiss=self._dismiss,
+        )
 
-        if parent is None:
-            raise RuntimeError("Parent is required")
+    def _finish(self, value: bool):
+        if self._future and not self._future.done():
+            self._future.set_result(value)
+        if self.page:
+            self.page.close(self)
 
-        self.setGeometry(parent.rect())
-        self.setAttribute(Qt.WA_StyledBackground, True)
+    def _ok(self, e):
+        self._finish(True)
 
-        main_layout = QVBoxLayout(self)
-        main_layout.setAlignment(Qt.AlignCenter)
+    def _cancel(self, e):
+        self._finish(False)
 
-        self.card = QWidget()
-        self.card.setObjectName("overlay_dialog")
-        self.card.setFixedWidth(parent.rect().width() * 0.8)
-
-        card_layout = QVBoxLayout(self.card)
-        card_layout.setContentsMargins(20, 20, 20, 20)
-
-        label = QLabel(message)
-        label.setWordWrap(True)
-        label.setAlignment(Qt.AlignCenter)
-
-        btn_layout = QHBoxLayout()
-        ok_btn = QPushButton("Ok")
-        cancel_btn = QPushButton("Cancel")
-
-        btn_layout.addWidget(ok_btn)
-        btn_layout.addWidget(cancel_btn)
-
-        card_layout.addWidget(label)
-        card_layout.addSpacing(15)
-        card_layout.addLayout(btn_layout)
-
-        main_layout.addWidget(self.card)
-
-        ok_btn.clicked.connect(self._ok)
-        cancel_btn.clicked.connect(self._cancel)
-
-    def _ok(self):
-        self.result.emit(True)
-        self.close()
-
-    def _cancel(self):
-        self.result.emit(False)
-        self.close()
-
-    def exec(self):
-        loop = QEventLoop()
-        self.result.connect(loop.quit)
-        self.show()
-        loop.exec()
+    def _dismiss(self, e):
+        self._finish(False)
 
     @classmethod
-    def open(cls, message="Are you sure?"):
-        parent = QApplication.activeWindow()
-        if parent is None:
-            raise RuntimeError("No active window found")
-
-        overlay = cls(message, parent)
-
-        loop = QEventLoop()
-        result_container = {}
-
-        def store(value):
-            result_container["value"] = value
-            loop.quit()
-
-        overlay.result.connect(store)
-
-        overlay.show()
-        loop.exec()
-
-        return result_container.get("value", False)
+    async def open(cls, page: ft.Page, message="Are you sure?") -> bool:
+        box = cls(message)
+        box._future = asyncio.get_running_loop().create_future()
+        page.open(box)
+        return await box._future

@@ -1,6 +1,5 @@
 import subprocess
 from pathlib import Path
-import sys
 import uuid
 import os
 import re
@@ -9,9 +8,8 @@ import tempfile
 import platform
 import shlex
 
-# todo ugly hack
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from common import get_logger
+from app.utils import Paths, Hub
+from app.common import get_logger
 logger = get_logger()
 
 
@@ -22,14 +20,38 @@ def cleanup_for_speech(text):
     return re.sub(r'\[IMAGE:[^\]]*\]', '', text).strip()
 
 
+def ensure_model(model: str) -> Path:
+    voices_base_path = Paths.get_voices_path()
+    model_dir = Path(voices_base_path) / model
+    model_file = model_dir / f"{model}.onnx"
+    model_json = model_dir / f"{model}.onnx.json"
+
+    if not model_file.exists() or not model_json.exists():
+        logger.debug(f"downloading voice {model}")
+
+        # fake Hub initialisation
+        Hub.url = args.hub_url
+        Hub.access_token = args.token
+        Hub.server_cert = args.cert or False
+
+        Hub.get_model(model, model_dir)
+
+    if not model_file.exists():
+        raise FileNotFoundError(f"failed to retrieve voice file for {model}")
+
+    return model_file
+
+
 def run_speech(text, model):
+    model_file = ensure_model(model)
+
     output_file = os.path.join(
         tempfile.gettempdir(),
-        f"chat_speech_{uuid.uuid4()}.wav"
+        f"chat_speech_{uuid.uuid4()}.wav",
     )
 
     try:
-        command_piper = [".venv/bin/piper", "--model", model, "--output_file", output_file, text]
+        command_piper = [".venv/bin/piper", "--model", str(model_file), "--output_file", output_file, text]
         logger.debug(f"run: {shlex.join(command_piper)}")
         subprocess.run(command_piper, check=True, capture_output=True)
 
@@ -37,7 +59,7 @@ def run_speech(text, model):
             logger.error("failed to generate speech file")
             return
 
-        logger.debug(f"playback speech")
+        logger.debug("playback speech")
         if platform.system() == "Windows":
             import winsound
             winsound.PlaySound(output_file, winsound.SND_FILENAME)
@@ -46,28 +68,20 @@ def run_speech(text, model):
             logger.debug(f"run: {shlex.join(command_aplay)}")
             subprocess.run(command_aplay, check=False)
     except Exception as e:
-        logger.error(f"failed to generate and playback speech: {e}", file=sys.stderr)
+        logger.error(f"failed to generate and playback speech: {e}")
     finally:
-        logger.debug(f"delete speech")
+        logger.debug("delete speech")
         Path(output_file).unlink(missing_ok=True)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Example argument parser")
 
-    parser.add_argument(
-        "--text",
-        type=str,
-        required=True,
-        help="Text input"
-    )
-
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="en_US-hfc_male-medium.onnx",
-        help="the model used to process speech"
-    )
+    parser.add_argument("--text", type=str, required=True, help="Text input")
+    parser.add_argument("--model", type=str, default="en_US-hfc_male-medium.onnx", help="the model used to process speech")
+    parser.add_argument("--hub-url", required=True)
+    parser.add_argument("--token", required=True)
+    parser.add_argument("--cert", required=True)
 
     return parser.parse_args()
 
