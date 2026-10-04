@@ -25,6 +25,7 @@ services:
       - hub_images:/hub/images
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
+      - /var/lib/Rueckgrat/models:/hub/models
     restart: unless-stopped
     stdin_open: true
     tty: true

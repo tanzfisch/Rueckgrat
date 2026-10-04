@@ -1259,7 +1259,7 @@ rsync_to_host() {
         echo "❌ Error: rsync failed for $host_addr"
         return 1
     }
-    echo "✅ Synced to $host_addr:$remote_dir/"
+    echo "✅ Synced to $host_addr:~/$remote_dir/"
 }
 
 sync_on_hosts() {

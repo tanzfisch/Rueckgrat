@@ -48,8 +48,8 @@ async def lifespan(app: FastAPI):
 
     logger.info("loading whisper")
     app.state.whisper_lock = asyncio.Lock()
-    app.state.whisper_model = WhisperModel("medium", device="cpu", compute_type="int8")
-    app.state.whisper_model_fast = WhisperModel("small", device="cpu", compute_type="int8")
+    app.state.whisper_model = WhisperModel("/hub/models/stt/faster-whisper-medium", device="cpu", compute_type="int8")
+    app.state.whisper_model_fast = WhisperModel("/hub/models/stt/faster-whisper-small", device="cpu", compute_type="int8")
 
     logger.info("loading vad")
     app.state.vad = load_silero_vad(onnx=True)
