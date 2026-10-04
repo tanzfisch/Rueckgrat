@@ -560,7 +560,68 @@
       { "source": "https://huggingface.co/fr0stbit3/laya-gguf/resolve/main/laya-Q8_0.gguf", "path": "" }
     ],
     "install_path": "llm/laya-Q8_0"
-  }
+  },
+
+  "faster-whisper-medium": {
+    "description": "",
+    "type": "stt",
+    "compatibility": ["whisper"],
+    "comment": "not tested",
+    "files": [
+      { "source": "https://huggingface.co/Systran/faster-whisper-medium/resolve/main/.gitattributes", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-medium/resolve/main/README.md", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-medium/resolve/main/config.json", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-medium/resolve/main/model.bin", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-medium/resolve/main/tokenizer.json", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-medium/resolve/main/vocabulary.txt", "path": "" }
+    ],
+    "install_path": "stt/faster-whisper-medium"
+  },
+  "faster-whisper-small": {
+    "description": "",
+    "type": "stt",
+    "compatibility": ["whisper"],
+    "comment": "not tested",
+    "files": [
+      { "source": "https://huggingface.co/Systran/faster-whisper-small/resolve/main/.gitattributes", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-small/resolve/main/README.md", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-small/resolve/main/config.json", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-small/resolve/main/model.bin", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-small/resolve/main/tokenizer.json", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-small/resolve/main/vocabulary.txt", "path": "" }
+    ],
+    "install_path": "stt/faster-whisper-small"
+  },  
+  "faster-whisper-tiny": {
+    "description": "",
+    "type": "stt",
+    "compatibility": ["whisper"],
+    "comment": "not tested",
+    "files": [
+      { "source": "https://huggingface.co/Systran/faster-whisper-tiny/resolve/main/.gitattributes", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-tiny/resolve/main/README.md", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-tiny/resolve/main/config.json", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-tiny/resolve/main/model.bin", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-tiny/resolve/main/tokenizer.json", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-tiny/resolve/main/vocabulary.txt", "path": "" }
+    ],
+    "install_path": "stt/faster-whisper-tiny"
+  },    
+  "faster-whisper-base": {
+    "description": "",
+    "type": "stt",
+    "compatibility": ["whisper"],
+    "comment": "not tested",
+    "files": [
+      { "source": "https://huggingface.co/Systran/faster-whisper-base/resolve/main/.gitattributes", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-base/resolve/main/README.md", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-base/resolve/main/config.json", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-base/resolve/main/model.bin", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-base/resolve/main/tokenizer.json", "path": "" },
+      { "source": "https://huggingface.co/Systran/faster-whisper-base/resolve/main/vocabulary.txt", "path": "" }
+    ],
+    "install_path": "stt/faster-whisper-base"
+  }  
 }
 
 

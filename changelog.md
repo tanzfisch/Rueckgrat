@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.13.0
+------
+
+- #70 loading faster whisper from disk instead of downloading it each start of hub
+
 0.12.0
 ------
 

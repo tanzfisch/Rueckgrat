@@ -124,7 +124,7 @@ Edit `rueckgrat/node/data/registry.json` to add models. Copy an existing entry f
 
 Manage installs with the registry manager.
 
-## Registry manager
+### Registry manager
 
 Needs to run inside a node container:
 
