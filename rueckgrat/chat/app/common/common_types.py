@@ -59,3 +59,24 @@ class InstallModelRequest(BaseModel):
 class InstallModelResponse(BaseModel):
     name: str
     size_gb: Optional[float] = None
+
+class GetModelURLResponse(BaseModel):
+    model_urls: list[str]
+
+class GetModelResponse(BaseModel):
+    name: str
+    type: Optional[str] = None
+    description: str = ""
+    comment: str = ""
+    compatibility: Optional[dict | list | str] = None
+    install_path: str = ""
+    files: list[dict] = []
+    installed: bool = False
+    size_bytes: int = 0
+
+class RegisteredModel(BaseModel):
+    name: str
+    type: Optional[str] = None
+
+class GetRegisteredModelsResponse(BaseModel):
+    models: list[RegisteredModel]    

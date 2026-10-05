@@ -2,7 +2,8 @@ from .logger import get_logger
 from .download_queue import DownloadQueue, DownloadJob
 from .common_types import (
     ChatRequest, ChatResponse, ImageRequest, ImageResponse, ChatRequestLlama, 
-    GetMessagesRequest, ModelInfo, GetModelsResponse, InstallModelRequest, InstallModelResponse
+    GetMessagesRequest, ModelInfo, GetModelsResponse, InstallModelRequest, InstallModelResponse,
+    GetModelURLResponse, GetModelURLResponse, GetModelResponse, RegisteredModel, GetRegisteredModelsResponse
 )
 from .utils import Utils
 from .message_queue import MessageQueue
@@ -24,5 +25,10 @@ __all__ = [
     "InstallModelRequest", 
     "InstallModelResponse",
     "MessageQueue",
-    "WebSocketClient"
+    "WebSocketClient",
+    "GetModelURLResponse",
+    "GetModelURLResponse",
+    "GetModelResponse",
+    "RegisteredModel",
+    "GetRegisteredModelsResponse"
 ]

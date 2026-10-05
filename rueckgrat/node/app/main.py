@@ -14,7 +14,9 @@ from app.utils import ModelRegistry, LLamaCppInterface, CleanupWorker
 
 from app.common import (
     get_logger, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse, 
-    ModelInfo, GetModelsResponse, InstallModelResponse, InstallModelRequest, MessageQueue
+    ModelInfo, GetModelsResponse, InstallModelResponse, InstallModelRequest, 
+    GetModelURLResponse, GetModelResponse, RegisteredModel, GetRegisteredModelsResponse,
+    MessageQueue
 )
 logger = get_logger()
 
@@ -109,8 +111,33 @@ async def download_file(file_path: str):
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
-class GetModelURLResponse(BaseModel):
-    model_urls: list[str]
+@app.get("/models/{model_name}", response_model=GetModelResponse)
+def get_model(model_name: str):
+    registry = ModelRegistry()
+    model = registry.get_model(model_name)
+    if not model:
+        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not registered")
+    installed = bool(registry.is_installed(model_name))
+    return GetModelResponse(
+        name=model_name,
+        type=model.get("type"),
+        description=model.get("description") or "",
+        comment=model.get("comment") or "",
+        compatibility=model.get("compatibility"),
+        install_path=model.get("install_path") or "",
+        files=model.get("files") or [],
+        installed=installed,
+        size_bytes=registry.get_size(model_name) if installed else 0,
+    )
+
+@app.get("/models/registered", response_model=GetRegisteredModelsResponse)
+def get_registered_models():
+    registry = ModelRegistry()
+    models = []
+    for model_name in registry.get_models():
+        model = registry.get_model(model_name) or {}
+        models.append(RegisteredModel(name=model_name, type=model.get("type")))
+    return GetRegisteredModelsResponse(models=models)
 
 @app.get("/models/{model_name}/url")
 def get_model_url(model_name: str):
