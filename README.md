@@ -16,16 +16,14 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
 
 ### Backend
 
-- Linux only
+- runs on Linux only
     * Debian ✅
     * Ubuntu (not tested)
     * Fedora (not tested)
     * Arch (not tested)
     * openSUSE (not tested)
-- full conrol over which hardware is used
-- no third-party AI APIs used
 - multi-host: one **hub** (control + DB + STT) and one or more **nodes** (workers)
-- Caddy for HTTPS
+- Caddy for HTTPS (subject to change)
 - **llama.cpp** server in Docker (`text_to_text`)
 - image generation via Diffusers / SDXL (`text_to_image`)
 - STT on the hub: Silero VAD + faster-whisper
@@ -34,8 +32,6 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **websearch** — search the web when requested or needed
     - **generate_image** — generate an image on request or on its own
     - **take_photo** — generate a photo of self, user, or both from current context
-
-Use at least a 24B LLM (e.g. `cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L`). Smaller models often fail to generate valid JSON tool calls.
 
 ### Chat Client
 
@@ -148,15 +144,18 @@ Models live under `/var/lib/Rueckgrat/models` on the host.
 
 `docker logs -f CONTAINER`
 
-Container names: `rueckgrat_hub`, `rueckgrat_node`, `rueckgrat_caddy`, `rueckgrat_llama_server`, `rueckgrat_chat`.
-
-### Chat logs in Docker
-
-`logs/chat.log` and `logs/autostart.log`.
+Container names: `rueckgrat_hub`, `rueckgrat_node`, `rueckgrat_caddy`, `rueckgrat_llama_server`.
 
 ### Native chat logs
 
 Stdout only (`./run.sh` also writes `logs/chat.log` if that path exists).
+
+### FAQ
+
+| Issue/Question | Answer |
+| --- | --- |
+| The chat bot seems to fail doing anything right | Use at least a 24B LLM (e.g. `cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L`). Smaller models often fail to generate valid JSON tool calls. |
+| What does Rückgrat mean? | Rückgrat (or the alternative spelling Rueckgrat) is German for spine. Idea was to create a framework that is the base for a bunch of tools. Plus it looks cool as a logo. |
 
 ## Special thanks to
 

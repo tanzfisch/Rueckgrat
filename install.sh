@@ -34,6 +34,14 @@ print_section() {
     echo ""
 }
 
+print_config_file_hint() {
+    echo ""
+    echo "💾 Saved config to $CONFIG_FILE"
+    echo ""
+    echo "💡 you can use this file for a quicker future install ie:"
+    echo "   ./install -c my_config.json -y"
+}
+
 # read_tty - Read user input from tty, with default and YES-mode support
 # Usage: read_tty <prompt> [default]
 # Args:
@@ -551,10 +559,7 @@ select_hosts_and_components() {
             cp -f $CONFIG_FILE "$WORKING_DIR/rueckgrat/config/infrastructure.json"
             CONFIG_FILE="$WORKING_DIR/rueckgrat/config/infrastructure.json"
 
-            echo "💾 Saved config to $CONFIG_FILE"
-            echo ""
-            echo "💡 you can use this file for a quicker future install ie:"
-            echo "   ./install -c infrastructure.json -y"
+            print_config_file_hint
         else
             echo "❌ Error: Failed to load config from $CONFIG_FILE"
         fi
@@ -603,10 +608,6 @@ select_hosts_and_components() {
             chat_json="\"chat\":{}"
         fi
 
-        if $INSTALL_CHAT_DOCKER; then
-            chat_json="\"chat_docker\":{\"port\":$CHAT_DOCKER_PORT}"
-        fi
-
         host_parts=("\"addr\":\"$host_addr\"")
         [ -n "$node_json" ] && host_parts+=("$node_json")
         [ -n "$hub_json" ] && host_parts+=("$hub_json")
@@ -619,16 +620,18 @@ select_hosts_and_components() {
     printf -v hosts_json '[%s]' "$(IFS=,; echo "${hosts[*]}")"
     hosts_json="{\"hosts\":$hosts_json }"
     echo "$hosts_json" | jq . > "$CONFIG_FILE"
-    echo "💾 Saved config to $CONFIG_FILE"
+    print_config_file_hint
 }
 
 # select_components - Prompt user for which components to install
 # Usage: select_components
-# Sets: INSTALL_CHAT, INSTALL_CHAT_DOCKER, INSTALL_HUB, INSTALL_NODE, INSTALL_LLAMA
+# Sets: INSTALL_CHAT, INSTALL_HUB, INSTALL_NODE, INSTALL_LLAMA
 select_components() {
-    INSTALL_CHAT=false; INSTALL_CHAT_DOCKER=false
-    INSTALL_HUB=false; INSTALL_NODE=false
-    INSTALL_LLAMA=false; INSTALL_LLAMA_MODEL=""
+    INSTALL_CHAT=false;
+    INSTALL_HUB=false;
+    INSTALL_NODE=false
+    INSTALL_LLAMA=false; 
+    INSTALL_LLAMA_MODEL=""
     INSTALL_IMAGE_GEN=false
 
     echo "Select components:"
@@ -637,15 +640,6 @@ select_components() {
     read_tty "Install native chat client? (Y/n): " "Y"
     [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
     echo -e "\e[1A\e[K [$( [[ $INSTALL_CHAT == true ]] && echo '✅' || echo '⚫' )] Native Chat Client"
-
-    read_tty "Install docker chat client? (y/N): " "N"
-    [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_CHAT_DOCKER=true
-    echo -e "\e[1A\e[K [$( [[ $INSTALL_CHAT_DOCKER == true ]] && echo '✅' || echo '⚫' )] Docker Chat Client"
-    if [[ "$INSTALL_CHAT_DOCKER" == true ]]; then
-        read_tty "Chat Docker port? [$CHAT_DOCKER_PORT_DEFAULT]: " "$CHAT_DOCKER_PORT_DEFAULT" $YES
-        CHAT_DOCKER_PORT=$REPLY
-        echo -e "\e[1A\e[K     Port: $CHAT_DOCKER_PORT"
-    fi
 
     read_tty "Install Hub? (Y/n): " "Y"
     [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_HUB=true
@@ -704,7 +698,6 @@ format_hosts() {
   jq -r '
     .hosts[] as $h |
     "\nHost: \($h.addr)",
-    "  "+(if $h.chat_docker then "[✅]" else "[⚫]" end)+" Docker Chat Client",
     "  "+(if $h.chat then "[✅]" else "[⚫]" end)+" Native Chat Client",
     "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub",
     "  "+(if $h.node then "[✅]" else "[⚫]" end)+" Node",
@@ -891,34 +884,6 @@ deploy_llama() {
     popd > /dev/null
 }
 
-# install_chat - Install Chat (Docker)
-# Usage: deploy_chat_docker
-# No arguments
-deploy_chat_docker() {
-    print_section
-    echo "🐋 chat..."
-
-    pushd rueckgrat > /dev/null
-    if [[ -f $CADDY_CERT ]]; then
-        cp "$CADDY_CERT" "$CHAT_DIR/app"
-    else
-        echo "❌ Error: Certificate not found at $CADDY_CERT"
-        exit 1
-    fi
-
-    read_tty "Choose hub to connect this chat to (IP/hostname, empty=done): " ""
-    HUB_ADDR=$REPLY
-    if [ -n "$HUB_ADDR" ]; then
-        validate_ip "$HUB_ADDR"
-    fi
-    
-    set_env_value HUB_ADDR "$HUB_ADDR"
-
-    docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} chat || { echo "❌ Error: Docker compose build of chat failed."; popd; exit 1; }
-    docker compose up -d chat || { echo "❌ Error: Docker compose up of chat failed."; popd; exit 1; }
-    popd > /dev/null
-}
-
 # deploy_chat_native - Install Chat (Native)
 # Usage: deploy_chat_native
 # No arguments
@@ -988,7 +953,6 @@ parse_host_config() {
     [[ -n "$host_config" ]] || { echo "❌ Error: host_config is empty" >&2; exit 1; }
 
     INSTALL_CHAT=false
-    INSTALL_CHAT_DOCKER=false
     INSTALL_HUB=false
     INSTALL_NODE=false
     INSTALL_LLAMA=false
@@ -996,7 +960,6 @@ parse_host_config() {
     INSTALL_LLAMA_MODEL=""
     HUB_PORT=""
     NODE_PORT=""
-    CHAT_DOCKER_PORT=""
     LLAMA_SERVER_PORT=""
 
     if echo "$host_config" | jq -e '.hub' >/dev/null; then
@@ -1006,11 +969,6 @@ parse_host_config() {
 
     if echo "$host_config" | jq -e '.chat' >/dev/null; then
         INSTALL_CHAT=true
-    fi
-
-    if echo "$host_config" | jq -e '.chat_docker' >/dev/null; then
-        INSTALL_CHAT_DOCKER=true
-        CHAT_DOCKER_PORT=$(echo "$host_config" | jq -r '.chat_docker.port // empty')
     fi
 
     if echo "$host_config" | jq -e '.node' >/dev/null; then
@@ -1071,7 +1029,7 @@ write_default_env() {
 }
 
 # deploy_components - Local component installer
-# Usage: deploy_components "hub,node,llama,chat:docker"
+# Usage: deploy_components "hub,node,llama"
 # Args:
 #   $1 - host configuration string
 deploy_components() {
@@ -1124,10 +1082,6 @@ deploy_components() {
 
     if $INSTALL_CHAT; then
         deploy_chat_native
-    fi
-    
-    if $INSTALL_CHAT_DOCKER; then
-        deploy_chat_docker
     fi
 }
 
@@ -1276,7 +1230,6 @@ sync_on_hosts() {
 readonly CONTAINER_MODELS_DIR="/models"
 readonly HUB_PORT_DEFAULT=14223
 readonly NODE_PORT_DEFAULT=7346
-readonly CHAT_DOCKER_PORT_DEFAULT=3001
 readonly LLAMA_SERVER_PORT_DEFAULT=8080
 readonly APP_DATA_DIR=/var/lib/Rueckgrat
 readonly HOST_MODELS_DIR="$APP_DATA_DIR/models"

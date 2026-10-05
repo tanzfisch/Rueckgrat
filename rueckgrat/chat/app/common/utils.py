@@ -62,11 +62,3 @@ class Utils:
         keep = max_len - 3
         left = keep // 2
         return f"{s[:left]}...{s[-(keep - left):]}"
-    
-    @classmethod
-    def is_docker(cls):
-        return (
-            Path('/.dockerenv').exists() or
-            any(k in open('/proc/1/cgroup').read() for k in ('docker', 'kubepod'))
-            if Path('/proc/1/cgroup').exists() else False
-        )

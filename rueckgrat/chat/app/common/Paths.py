@@ -8,7 +8,4 @@ class Paths:
 
     @classmethod
     def get_cache_path(cls):
-        if Utils.is_docker():
-            return Path("/cache")
-        else:
             return Path("cache")
