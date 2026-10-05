@@ -1,5 +1,4 @@
 from app.utils import ModelRegistry
-from pathlib import Path
 import argparse
 import sys
 

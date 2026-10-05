@@ -110,7 +110,6 @@ class Infrastructure:
                     result.nodes.append(f.result())
         return result
     
-    # TODO need to begin working on a common module that can be shared across applications
     def _download_file(self, url, filepath) -> int:
         if os.path.exists(filepath):
             return
@@ -174,22 +173,6 @@ class Infrastructure:
 
         return str(filepath)
 
-    def download(self, source_path: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
-        node = self.node_by_type["text_to_image"] # not sure about this. how do we know from which node to download?
-        url = f"http://{node.addr}:{node.port}/downloads/{source_path}"
-        if asynchronous:
-            self.download_queue.add(
-                url=url, 
-                download_path=download_path,
-                max_retry=max_retry,
-                force_download=force_download,
-                callback=callback)
-        else:
-            self.download_queue.download(
-                url=url, 
-                download_path=download_path, 
-                force_download=force_download)
-
     def _on_incomming_message(self, message: str):
         try:
             data = json.loads(message)
@@ -244,10 +227,26 @@ class Infrastructure:
 
         return None
 
+    def download(self, source_path: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
+        node = self.node_by_type["text_to_image"] # not sure about this. how do we know from which node to download?
+        url = f"http://{node.addr}:{node.port}/downloads/{source_path}"
+        if asynchronous:
+            self.download_queue.add(
+                url=url, 
+                download_path=download_path,
+                max_retry=max_retry,
+                force_download=force_download,
+                callback=callback)
+        else:
+            self.download_queue.download(
+                url=url, 
+                download_path=download_path, 
+                force_download=force_download)    
+
     def get_model_url(self, model_name) -> Response:
-        node = self.node_by_type["text_to_text"] # we can use any node here
+        node = self._get_any_node()
         url = f"http://{node.addr}:{node.port}/models/{model_name}/url"
-        logger.debug(f"get_model_url for {model_name} from {url}")
+        logger.debug(f"get model urls for {model_name} from {url}")
         
         try:
             response = requests.get(
@@ -259,10 +258,98 @@ class Infrastructure:
                 data = response.json()
                 return data.get("model_urls", [])
 
-            logger.error(f"failed to get_model_url response {response.status_code} {response.reason}")
+            logger.error(f"failed to get model urls {response.status_code} {response.reason}")
             return []
 
         except Exception as e:
-            logger.error(f"failed to get_model_url response {repr(e)}")
+            logger.error(f"failed to get model urls {repr(e)}")
 
         return []
+
+    def _get_any_node(self):
+        if len(self.nodes) == 0:
+            logger.error(f"no nodes contacted")
+
+        return self.nodes[0]
+
+    def get_registered_models(self) -> list:
+        node = self._get_any_node()
+        url = f"http://{node.addr}:{node.port}/models/registered"
+        logger.debug(f"get registered models from {url}")
+
+        try:
+            response = requests.get(url, timeout=30)
+            if response.status_code == 200:
+                return response.json().get("models", [])
+            logger.error(f"failed to get registered models {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get registered models {repr(e)}")
+        return []
+
+    def get_model(self, model_name: str) -> dict:
+        node = self._get_any_node()
+        url = f"http://{node.addr}:{node.port}/models/{model_name}"
+        logger.debug(f"get model for {model_name} from {url}")
+
+        try:
+            response = requests.get(url, timeout=30)
+            if response.status_code == 200:
+                return response.json()
+            logger.error(f"failed to get model info {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get model info {repr(e)}")
+        return {}
+
+    def install_model(self, model_name: str, force: bool = False) -> bool:
+        if not force and self.is_installed(model_name):
+                return True
+
+        model = self.get_model(model_name)
+        if not model or not model.get("files"):
+            logger.error(f"model {model_name} not registered")
+            return False
+
+        files = model["files"]
+        install_path = model.get("install_path") or ""
+        urls = self.get_model_url(model_name) or []
+        url_by_name = {os.path.basename(urlparse(u).path): u for u in urls}
+
+        base = Path("/hub/models")
+        ok = True
+
+        for file in files:
+            source_url = file["source"]
+            source_path = file.get("path") or ""
+            filename = os.path.basename(urlparse(source_url).path)
+            target_dir = base / install_path / source_path if source_path else base / install_path
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / filename
+
+            if force and target.exists():
+                target.unlink(missing_ok=True)
+
+            url = url_by_name.get(filename, source_url)
+            try:
+                self._download_file(url, target)
+            except Exception as e:
+                logger.error(f"failed to install {model_name} ({filename}): {e}")
+                ok = False
+
+        return ok    
+
+    def is_installed(self, model_name: str) -> bool:
+        model = self.get_model(model_name)
+        if not model or not model.get("files"):
+            return False
+
+        install_path = model.get("install_path") or ""
+        base = Path("/hub/models")
+
+        for file in model["files"]:
+            source_path = file.get("path") or ""
+            filename = os.path.basename(urlparse(file["source"]).path)
+            target_dir = base / install_path / source_path if source_path else base / install_path
+            if not (target_dir / filename).exists():
+                return False
+
+        return True    
