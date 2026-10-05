@@ -79,7 +79,6 @@ echo "Hub      $INSTALL_HUB"
 echo "Node     $INSTALL_NODE"
 echo "Llama    $INSTALL_LLAMA ${INSTALL_LLAMA_MODEL:+($INSTALL_LLAMA_MODEL)}"
 echo "ImageGen $INSTALL_IMAGE_GEN"
-echo "Chat     $INSTALL_CHAT_DOCKER"
 echo ""
 
 if $INSTALL_HUB; then
@@ -92,12 +91,6 @@ if $INSTALL_NODE; then
         [[ -n "$INSTALL_LLAMA_MODEL" ]] || { echo "❌ Error: llama-server has no model in config"; exit 1; }
         deploy_llama "$INSTALL_LLAMA_MODEL"
     fi
-fi
-
-if $INSTALL_CHAT_DOCKER; then
-    CHAT_DIR="$WORKING_DIR/rueckgrat/chat"
-    CADDY_CERT="$WORKING_DIR/rueckgrat/caddy/rueckgrat-caddy.cert"
-    deploy_chat_docker
 fi
 
 print_section

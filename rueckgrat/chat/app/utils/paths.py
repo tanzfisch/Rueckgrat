@@ -6,7 +6,7 @@ logger = get_logger()
 class Paths:
     @staticmethod
     def get_cache_base_path():
-        return Path("/chat/cache") if Utils.is_docker() else Path("../../cache")
+        return Path("../../cache")
 
     @staticmethod
     def get_image_path():

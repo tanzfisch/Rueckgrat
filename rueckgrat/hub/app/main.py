@@ -25,7 +25,7 @@ from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
-from app.common import get_logger, ChatRequest, GetMessagesRequest, MessageQueue
+from app.common import get_logger, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse
 logger = get_logger()
 
 @asynccontextmanager
@@ -48,8 +48,12 @@ async def lifespan(app: FastAPI):
 
     logger.info("loading whisper")
     app.state.whisper_lock = asyncio.Lock()
-    app.state.whisper_model = WhisperModel("medium", device="cpu", compute_type="int8")
-    app.state.whisper_model_fast = WhisperModel("small", device="cpu", compute_type="int8")
+
+    app.state.infrastructure.install_model("faster-whisper-medium")
+    app.state.infrastructure.install_model("faster-whisper-small")
+
+    app.state.whisper_model = WhisperModel("/hub/models/stt/faster-whisper-medium", device="cpu", compute_type="int8")
+    app.state.whisper_model_fast = WhisperModel("/hub/models/stt/faster-whisper-small", device="cpu", compute_type="int8")
 
     logger.info("loading vad")
     app.state.vad = load_silero_vad(onnx=True)
@@ -296,9 +300,6 @@ def get_messages(message_id: int, username: str = Depends(get_current_user)):
     return {"attachments": attachments}
 
 ########### model handling
-class GetModelURLResponse(BaseModel):
-    model_urls: list[str]
-
 @app.get("/models/{model_name}/url", response_model=GetModelURLResponse)
 def get_model_url(model_name: str, username: str = Depends(get_current_user)):
     sources = app.state.infrastructure.get_model_url(model_name)

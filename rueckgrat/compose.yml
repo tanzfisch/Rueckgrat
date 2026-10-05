@@ -25,6 +25,7 @@ services:
       - hub_images:/hub/images
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
+      - /var/lib/Rueckgrat/models:/hub/models
     restart: unless-stopped
     stdin_open: true
     tty: true
@@ -51,33 +52,6 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"    
-
-  chat:
-    container_name: rueckgrat_chat
-    build:
-      context: ./chat
-      dockerfile: Dockerfile
-    ports:
-      - "3001:3001"
-    volumes:
-      - ../logs:/app
-      - chat_cache:/chat/cache
-      - /var/lib/Rueckgrat/models:/node/models
-    stdin_open: true
-    tty: true      
-    restart: unless-stopped
-    environment:
-      - TITLE=Rueckgrat
-      - PIXELFLUX_WAYLAND=true
-      #- HARDEN_DESKTOP=true
-      #- DISABLE_OPEN_TOOLS=true
-      #- DISABLE_SUDO=true
-      #- DISABLE_TERMINALS=true
-      #- NO_DECOR=true
-      #- RESTART_APP=true
-    extra_hosts:
-      - "${HUB_HOST}:${HUB_ADDR}"
-
 
   llama-server:
     container_name: rueckgrat_llama_server

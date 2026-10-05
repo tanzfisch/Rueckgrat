@@ -138,7 +138,7 @@ def on_incomming_message(msg: dict):
 
 def main():
     logger.debug(
-        f"platform: {platform.system()}{' (inside docker)' if Utils.is_docker() else ''}"
+        f"platform: {platform.system()}"
     )
     config = RueckgratConfig()
     Hub.init(config)
