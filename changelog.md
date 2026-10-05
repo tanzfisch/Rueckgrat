@@ -5,6 +5,7 @@ Changelog
 ------
 
 - #70 loading faster whisper from disk instead of downloading it each start of hub
+- #64 removed chat via docker support
 
 0.12.0
 ------
