@@ -11,6 +11,9 @@ class RueckgratConfig:
         "hub": {
             "rueckgrat_hub_host": "rueckgrat.hub",
             "rueckgrat_hub_port": "443"
+        },
+        "chat": {
+            "log_level": "ERROR"
         }
     }
 
@@ -89,3 +92,16 @@ class RueckgratConfig:
     @port.setter
     def port(self, value):
         self._set("hub", "rueckgrat_hub_port", value)
+
+    @property
+    def log_level(self):
+        return self._get("chat", "log_level", "ERROR")
+
+    _LEVELS = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
+
+    @log_level.setter
+    def log_level(self, value):
+        name = str(value).upper()
+        if name not in _LEVELS:
+            raise ValueError(f"invalid log level: {value}")
+        self._set("chat", "log_level", name)

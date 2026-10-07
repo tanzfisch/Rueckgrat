@@ -1,4 +1,4 @@
-from .logger import get_logger
+from .logger import get_logger, set_log_level
 from .download_queue import DownloadQueue, DownloadJob
 from .common_types import (
     ChatRequest, ChatResponse, ImageRequest, ImageResponse, ChatRequestLlama, 
@@ -10,7 +10,8 @@ from .message_queue import MessageQueue
 from .websocket_client import WebSocketClient
 
 __all__ = [
-    "get_logger", 
+    "get_logger",
+    "set_log_level",
     "DownloadQueue", 
     "DownloadJob", 
     "ChatRequest", 

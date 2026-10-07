@@ -154,3 +154,12 @@ class Logger:
 
 def get_logger(level=logging.DEBUG):
     return Logger(level).get_logger()
+
+def set_log_level(level):
+    name = str(level).upper()
+    logging._checkLevel(name)
+    for log_name in ("Rückgrat", "uvicorn", "uvicorn.error", "uvicorn.access"):
+        log = logging.getLogger(log_name)
+        log.setLevel(name)
+        for handler in log.handlers:
+            handler.setLevel(name)

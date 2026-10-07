@@ -44,6 +44,9 @@ class Hub:
 
         cls.websocket_client = WebSocketClient(cls.uri, cls.server_cert)
 
+        # keep for debugging
+        # cls.set_log_level(cls.config.log_level)
+
     @classmethod
     def get_user_name(cls):
         return cls.user_name
@@ -138,6 +141,19 @@ class Hub:
                 return False
         except Exception as e:
             logger.error(f"failed health check: {repr(e)}")
+            return False
+
+    @classmethod
+    def set_log_level(cls, level):
+        url = f"{cls.url}/log-level/{level}"
+        try:
+            response = requests.put(url, timeout=5, verify=cls.server_cert)
+            if response.status_code == 200:
+                return True
+            logger.error(f"failed to set log level - {response.status_code}")
+            return False
+        except Exception as e:
+            logger.error(f"failed to set log level: {repr(e)}")
             return False
 
     @classmethod

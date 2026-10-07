@@ -5,6 +5,8 @@ Changelog
 ------
 
 - #76 configurable models path (during installation)
+- #44 made log level configurable for client
+      allows to change log level across the whole system at runtime see /log-level/{level}
 
 0.13.0
 ------
