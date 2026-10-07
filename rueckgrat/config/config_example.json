@@ -2,12 +2,13 @@
   "hosts": [
     {
       "addr": "192.168.2.39",
+      "models_dir": "/media/martin/data1/models",
       "node": {
         "port": 7346,
         "services": [
           {
             "type": "text_to_text",
-            "name": "llama-server",
+            "name": "llama_server",
             "port": 8080,
             "model": "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L"
           }
@@ -16,20 +17,20 @@
       "hub": {
         "port": 14223
       },
-      "chat": {
-      }
+      "chat": {}
     },
     {
       "addr": "192.168.2.158",
+      "models_dir": "/var/lib/Rueckgrat/models",
       "node": {
         "port": 7346,
-        "modules": [
+        "services": [
           {
             "type": "text_to_image",
             "name": "image_gen"
           }
         ]
       }
-    }    
+    }
   ]
 }

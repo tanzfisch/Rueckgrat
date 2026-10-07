@@ -1,9 +1,0 @@
-#!/bin/bash
-
-echo "auto start" > /app/autostart.log
-echo "launch chat" >> /app/autostart.log
-cd /chat
-python -m app.main --logfile /chat/app/chat.log
-
-echo "chat ended" >> /app/autostart.log
-
