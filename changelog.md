@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.14.0
+------
+
+- #76 configurable models path (during installation)
+
 0.13.0
 ------
 

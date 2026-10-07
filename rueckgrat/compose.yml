@@ -25,7 +25,7 @@ services:
       - hub_images:/hub/images
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
-      - /var/lib/Rueckgrat/models:/hub/models
+      - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/hub/models
     restart: unless-stopped
     stdin_open: true
     tty: true
@@ -45,7 +45,7 @@ services:
     volumes:
       - node_images:/node/images
       - ./config:/node/config
-      - /var/lib/Rueckgrat/models:/node/models
+      - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/node/models
       - ./chat/app/common:/node/app/common
     stdin_open: true
     tty: true
@@ -58,7 +58,7 @@ services:
     image: ghcr.io/ggml-org/llama.cpp:server-${LLAMA_SERVER_BACKEND}
     privileged: true
     volumes:
-      - /var/lib/Rueckgrat/models:/models
+      - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/models
     ports:
       - "${LLAMA_SERVER_PORT}:${LLAMA_SERVER_PORT}"
     restart: unless-stopped

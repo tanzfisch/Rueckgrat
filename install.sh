@@ -608,7 +608,7 @@ select_hosts_and_components() {
             chat_json="\"chat\":{}"
         fi
 
-        host_parts=("\"addr\":\"$host_addr\"")
+        host_parts=("\"addr\":\"$host_addr\"" "\"models_dir\":\"$HOST_MODELS_DIR\"")
         [ -n "$node_json" ] && host_parts+=("$node_json")
         [ -n "$hub_json" ] && host_parts+=("$hub_json")
         [ -n "$chat_json" ] && host_parts+=("$chat_json")
@@ -687,6 +687,10 @@ select_components() {
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_IMAGE_GEN=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_IMAGE_GEN == true ]] && echo '✅' || echo '⚫' )] ImageGen"
     fi
+
+    read_tty "Models folder? [$HOST_MODELS_DIR_DEFAULT]: " "$HOST_MODELS_DIR_DEFAULT" $YES
+    HOST_MODELS_DIR="$REPLY"
+    echo -e "\e[1A\e[K     Models: $HOST_MODELS_DIR"
 }
 
 format_hosts() {
@@ -729,6 +733,9 @@ confirm_install_configuration() {
 deploy_hub() {
     print_section
     echo "🐋 hub & caddy..."
+
+    set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
+
     pushd rueckgrat > /dev/null
     docker compose stop hub caddy 2>/dev/null || true
     docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} hub caddy || { echo "❌ Error: Docker compose build of hub & cdaddy failed."; popd; exit 1; }
@@ -773,6 +780,8 @@ gen_caddy_cert() {
 deploy_node() {
     print_section
     echo "🐋 node..."
+
+    set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
 
     BUILD_ARGS=()
     COMPOSE_FILES=(-f compose.yml)
@@ -849,6 +858,8 @@ deploy_llama() {
     print_section
     echo "🐋 llama-server..."
     echo "running $LLM_MODEL on $LLAMA_SERVER_BACKEND"
+
+    set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
 
     check_llama_server_backend "$LLAMA_SERVER_BACKEND"
 
@@ -928,15 +939,17 @@ deploy_chat_native() {
     popd > /dev/null
 }
 
-# prep_app_data_dir - creates models directory
-# Usage: prep_app_data_dir
+# prep_data_dirs - creates essential directories
+# Usage: prep_data_dirs
 # No arguments
-prep_app_data_dir() {
-    echo "prep /var/lib/Rueckgrat ..."
-    echo "$SUDO_PASSWORD" | sudo -S mkdir -p $APP_DATA_DIR
-    echo "$SUDO_PASSWORD" | sudo -S mkdir -p $HOST_MODELS_DIR
-    echo "$SUDO_PASSWORD" | sudo -S chown -R root:root $APP_DATA_DIR
-    echo "$SUDO_PASSWORD" | sudo -S chmod -R 777 $APP_DATA_DIR
+prep_data_dirs() {
+    if [[ -d "$HOST_MODELS_DIR" ]]; then
+        return
+    fi    
+    echo "prep $HOST_MODELS_DIR ..."
+    echo "$SUDO_PASSWORD" | sudo -S mkdir -p "$HOST_MODELS_DIR"
+    echo "$SUDO_PASSWORD" | sudo -S chown -R root:root "$HOST_MODELS_DIR"
+    echo "$SUDO_PASSWORD" | sudo -S chmod -R 777 "$HOST_MODELS_DIR"
 }
 
 check_docker_group() {
@@ -997,6 +1010,9 @@ parse_host_config() {
             fi
         done
     fi
+
+    HOST_MODELS_DIR=$(echo "$host_config" | jq -r '.models_dir // empty')
+    HOST_MODELS_DIR="${HOST_MODELS_DIR:-$HOST_MODELS_DIR_DEFAULT}"    
 }
 
 write_default_env() {
@@ -1005,6 +1021,8 @@ write_default_env() {
     # hub hostname
     set_env_value HUB_HOST "rueckgrat.hub"
     set_env_value HUB_ADDR "127.0.0.1"
+
+    set_env_value HOST_MODELS_DIR $HOST_MODELS_DIR_DEFAULT
 
     # models that work with Rückgrat (tested with 24GB vram)
     # cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L (autor's preffered option)
@@ -1049,12 +1067,12 @@ deploy_components() {
     CADDY_KEY="$CADDY_DIR/rueckgrat-caddy.key"
     CADDY_CERT="$CADDY_DIR/rueckgrat-caddy.cert"
 
-    write_default_env
+    write_default_env    
 
     check_docker_group
     volume_cleanup
     gen_caddy_cert
-    prep_app_data_dir
+    prep_data_dirs
 
     echo "deploy..."
 
@@ -1231,8 +1249,7 @@ readonly CONTAINER_MODELS_DIR="/models"
 readonly HUB_PORT_DEFAULT=14223
 readonly NODE_PORT_DEFAULT=7346
 readonly LLAMA_SERVER_PORT_DEFAULT=8080
-readonly APP_DATA_DIR=/var/lib/Rueckgrat
-readonly HOST_MODELS_DIR="$APP_DATA_DIR/models"
+readonly HOST_MODELS_DIR_DEFAULT="/var/lib/Rueckgrat/models"
 
 main() {   
     export DOCKER_BUILDKIT=1
@@ -1253,6 +1270,7 @@ main() {
     SUDO_PASSWORD=""
     NO_CACHE=""
     SYNC_ONLY=false
+    HOST_MODELS_DIR=HOST_MODELS_DIR_DEFAULT
 
     while [[ $# -gt 0 ]]; do
         case $1 in
