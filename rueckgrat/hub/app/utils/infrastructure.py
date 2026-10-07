@@ -109,6 +109,23 @@ class Infrastructure:
                 for f in as_completed(futs):
                     result.nodes.append(f.result())
         return result
+
+    def set_log_level(self, level):
+        ok = True
+        for host in self.hosts:
+            if "node" not in host:
+                continue
+            node = host["node"]
+            url = f"http://{host['addr']}:{node['port']}/log-level/{level}"
+            try:
+                response = requests.put(url, timeout=5)
+                if response.status_code != 200:
+                    logger.error(f"failed to set log level - {response.status_code}")
+                    ok = False
+            except Exception as e:
+                logger.error(f"failed to set log level: {repr(e)}")
+                ok = False
+        return ok
     
     def _download_file(self, url, filepath) -> int:
         if os.path.exists(filepath):

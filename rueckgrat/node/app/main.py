@@ -13,7 +13,7 @@ from typing import List, Optional
 from app.utils import ModelRegistry, LLamaCppInterface, CleanupWorker
 
 from app.common import (
-    get_logger, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse, 
+    get_logger, set_log_level, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse, 
     ModelInfo, GetModelsResponse, InstallModelResponse, InstallModelRequest, 
     GetModelURLResponse, GetModelResponse, RegisteredModel, GetRegisteredModelsResponse,
     MessageQueue
@@ -56,6 +56,16 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.put("/log-level/{level}")
+def _set_log_level(level: str):
+    name = level.upper()
+    try:
+        set_log_level(name)
+    except ValueError:
+        logger.error("failed to set log level %s", level)
+        raise HTTPException(status_code=400, detail=f"invalid log level: {level}")
+    return {"log_level": name}
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequestLlama):

@@ -41,7 +41,6 @@ class WebSocketClient:
         self.incoming_message_handlers.append(callback)
 
     async def connect(self, token: Optional[str] = None):
-        logger.debug(f"connect with {self.uri}")
         if self.is_connected():
             return
         start = asyncio.get_running_loop().time()

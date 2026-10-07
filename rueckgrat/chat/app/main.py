@@ -23,7 +23,7 @@ from app.utils import Paths
 from app.utils.config import RueckgratConfig
 from app.utils.hub import Hub
 
-from app.common import get_logger, Utils
+from app.common import get_logger, set_log_level, Utils
 logger = get_logger()
 
 PAGES = {
@@ -137,10 +137,13 @@ def on_incomming_message(msg: dict):
 
 
 def main():
+    config = RueckgratConfig()
+    set_log_level(config.log_level)
+
     logger.debug(
         f"platform: {platform.system()}"
     )
-    config = RueckgratConfig()
+
     Hub.init(config)
 
     if sys.platform != "android":

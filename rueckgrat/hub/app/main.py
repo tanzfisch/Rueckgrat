@@ -25,7 +25,7 @@ from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
-from app.common import get_logger, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse
+from app.common import get_logger, set_log_level, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse
 logger = get_logger()
 
 @asynccontextmanager
@@ -204,6 +204,17 @@ def health():
             return {"status": "error", "message": f"{node.url} {node.error}"}
 
     return {"status": "ok"}
+
+@app.put("/log-level/{level}")
+def _set_log_level(level: str):
+    name = level.upper()
+    try:
+        set_log_level(name)
+        app.state.infrastructure.set_log_level(name)
+    except ValueError:
+        logger.error("failed to set log level %s", level)
+        raise HTTPException(status_code=400, detail=f"invalid log level: {level}")
+    return {"log_level": name}
 
 ########### contact handling
 @app.get("/contacts")
