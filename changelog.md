@@ -7,6 +7,10 @@ Changelog
 - #76 configurable models path (during installation)
 - #44 made log level configurable for client
       allows to change log level across the whole system at runtime see /log-level/{level}
+- #78 more flexible llama config per model in registry.json (model_file for split GGUFs, defaults for all LLMs)
+      precedence: host config > registry llama block > installer defaults
+      fixed llama.cpp request handling (reasoning_content, system role, max_tokens)
+      faster reinstalls: fixed flags passed to remote installs (no forced --no-cache), quiet builds, single torch install in node image
 
 0.13.0
 ------
