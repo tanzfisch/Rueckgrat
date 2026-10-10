@@ -15,7 +15,7 @@ def print_list(registry, type: None, verbose: bool):
     GRAY_BG = "\033[48;5;236m"
     RESET = "\033[0m"
 
-    header = f"{'NAME':<80} {'INST.':<6} {'SIZE':<10}  {'AVAIL.':<10} "
+    header = f"{'NAME':<80} {'INST.':<6} {'SIZE':<10}  {'LOC. AVAIL.':<10} "
     print()
     print(f"{GRAY_BG}{header:<130}{RESET}")
 
