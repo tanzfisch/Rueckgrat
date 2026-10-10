@@ -8,7 +8,8 @@ RUN useradd -m hubuser \
 
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --index-url https://download.pytorch.org/whl/cpu torch && \
+    pip install -r requirements.txt
 
 COPY app app
 

@@ -203,7 +203,7 @@ class Infrastructure:
         except Exception as e:
             logger.error(f"failed to handle incomming message from node {repr(e)}")
 
-    def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 512, context_size: int=8192) -> str:
+    def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 1024, context_size: int=8192) -> str:
         try:
             chat_request = ChatRequestLlama(
                 messages=messages,

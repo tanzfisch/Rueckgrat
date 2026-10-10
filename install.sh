@@ -745,7 +745,7 @@ deploy_hub() {
 
     pushd rueckgrat > /dev/null
     docker compose stop hub caddy 2>/dev/null || true
-    docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} hub caddy || { echo "❌ Error: Docker compose build of hub & cdaddy failed."; popd; exit 1; }
+    docker compose build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} hub caddy || { echo "❌ Error: Docker compose build of hub & cdaddy failed."; popd; exit 1; }
     docker compose up -d hub caddy || { echo "❌ Error: Docker compose up of hub & cdaddy failed."; popd; exit 1; }
     popd > /dev/null
 }
@@ -828,8 +828,8 @@ deploy_node() {
     fi
 
     docker compose "${COMPOSE_FILES[@]}" stop node 2>/dev/null || true
-    docker compose --progress=$DOCKER_PROGRESS_MODE "${COMPOSE_FILES[@]}" \
-        build ${NO_CACHE:-} "${BUILD_ARGS[@]}" node \
+    docker compose "${COMPOSE_FILES[@]}" \
+        build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} "${BUILD_ARGS[@]}" node \
         || { echo "❌ Error: Docker compose build of node failed."; popd; exit 1; }
     docker compose "${COMPOSE_FILES[@]}" up -d node \
         || { echo "❌ Error: Docker compose up of node failed."; popd; exit 1; }
@@ -904,7 +904,7 @@ deploy_llama() {
     fi    
 
     docker compose "${COMPOSE_FILES[@]}" stop llama-server 2>/dev/null || true
-    docker compose --progress=$DOCKER_PROGRESS_MODE "${COMPOSE_FILES[@]}" build ${NO_CACHE:-} llama-server || { echo "❌ Error: Docker compose build of llama-server failed."; popd; exit 1; }
+    docker compose "${COMPOSE_FILES[@]}" build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} llama-server || { echo "❌ Error: Docker compose build of llama-server failed."; popd; exit 1; }
     docker compose "${COMPOSE_FILES[@]}" up -d llama-server || { echo "❌ Error: Docker compose up of llama-server failed."; popd; exit 1; }
     popd > /dev/null
 }
@@ -1188,7 +1188,7 @@ deploy_components_remote() {
         set -euo pipefail
         cd $remote_dir
         chmod +x install.sh
-        ./install.sh --local-config '$clean_config' ${CLEAN_BUILD:+-f} ${VERBOSE:+-v} ${YES:+-y} -p $SUDO_PASSWORD -u $SUDO_USER
+        ./install.sh --local-config '$clean_config' $([[ $CLEAN_BUILD == true ]] && echo -f) $([[ $VERBOSE == true ]] && echo -v) $([[ $YES == true ]] && echo -y) -p $SUDO_PASSWORD -u $SUDO_USER
     " || echo "❌ Error: Installation failed on $host_addr"
 }
 
@@ -1309,7 +1309,7 @@ main() {
     
     CONFIG_FILE=""
     VERBOSE=false
-    DOCKER_PROGRESS_MODE="quiet"
+    DOCKER_QUIET_BUILD="--quiet"
     CLEAN_BUILD=false
     HOST_CONFIG=""
     LOCAL_CONFIG=""
@@ -1382,7 +1382,7 @@ main() {
                 SUDO_PASSWORD="$2"
                 shift 2
                 ;;
-            -v|--verbose) VERBOSE=true; DOCKER_PROGRESS_MODE="auto"; shift ;;
+            -v|--verbose) VERBOSE=true; DOCKER_QUIET_BUILD=""; shift ;;
             -f|--fresh) CLEAN_BUILD=true; NO_CACHE="--no-cache"; shift ;;
             -s|--sync) SYNC_ONLY=true; shift ;;
             -y|--yes) YES=true; shift ;;

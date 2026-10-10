@@ -10,7 +10,7 @@
             "type": "text_to_text",
             "name": "llama_server",
             "port": 8080,
-            "model": "Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S"
+            "model": "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L"
           }
         ]
       },
