@@ -1,4 +1,5 @@
 
+import asyncio
 import json
 import os
 import requests
@@ -9,7 +10,6 @@ from pathlib import Path
 from typing import Optional, Dict, Callable
 from dataclasses import dataclass
 from ..jobs.image_job import ImageRequest
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.common import get_logger, ChatRequestLlama, DownloadQueue, Utils, WebSocketClient
 logger = get_logger()
@@ -60,8 +60,9 @@ class Infrastructure:
                 node = host["node"]
                 websocket_node = WebSocketClientNode(host["addr"], node["port"])
                 self.nodes.append(websocket_node)
-                await websocket_node.connect()
-                logger.debug(f"connecting with node {host['addr']}:{node['port']}")
+                # non-blocking: connects whenever the node comes up, reconnects if it restarts
+                websocket_node.start()
+                logger.debug(f"connecting with node {host['addr']}:{node['port']} in background")
 
                 if "services" in node:
                     services = node["services"]
@@ -80,35 +81,34 @@ class Infrastructure:
         else:
             node = self.node_by_type["text_to_text"]
             node.register_incomming_message(self._on_incomming_message)
+            node.register_disconnect(self._fail_pending_streams)
 
         if not "text_to_image" in self.node_by_type:
             logger.warning("couldn't find text_to_image generator")        
 
     def get_status(self) -> StatusResult:
-        result = StatusResult()
-        hosts = [h for h in self.hosts if "node" in h]
+        # the websocket supervisor already tracks every node, no need to poll them over http
+        return StatusResult([
+            ServerResult(node.uri, node.is_connected(), None if node.is_connected() else "not connected")
+            for node in self.nodes
+        ])
 
-        def check(host):
+    def set_log_level(self, level):
+        ok = True
+        for host in self.hosts:
+            if "node" not in host:
+                continue
             node = host["node"]
-            url = f"http://{host['addr']}:{node['port']}/health"
+            url = f"http://{host['addr']}:{node['port']}/log-level/{level}"
             try:
-                r = requests.get(url, timeout=1)
-                ok = (
-                    r.status_code == 200
-                    and r.json() == {"status": "ok"}
-                    and r.headers.get("content-type", "").startswith("application/json")
-                )
-                err = None if ok else str(r.status_code)
-                return ServerResult(url, ok, error=err)
+                response = requests.put(url, timeout=5)
+                if response.status_code != 200:
+                    logger.error(f"failed to set log level - {response.status_code}")
+                    ok = False
             except Exception as e:
-                return ServerResult(url, False, error=repr(e))
-
-        if hosts:
-            with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
-                futs = [pool.submit(check, h) for h in hosts]
-                for f in as_completed(futs):
-                    result.nodes.append(f.result())
-        return result
+                logger.error(f"failed to set log level: {repr(e)}")
+                ok = False
+        return ok
     
     def _download_file(self, url, filepath) -> int:
         if os.path.exists(filepath):
@@ -173,6 +173,22 @@ class Infrastructure:
 
         return str(filepath)
 
+    @staticmethod
+    def _error_response(conversation_id: int, error: str) -> str:
+        # same shape as a final node response so waiting jobs finish
+        return json.dumps({"conversation_id": conversation_id, "response": "", "error": error})
+
+    def _fail_pending_streams(self):
+        """connection to the node dropped: in-flight streams will never finish, fail them now"""
+        pending = list(self.callback_handlers.items())
+        self.callback_handlers.clear()
+        for conversation_id, callback in pending:
+            logger.error(f"connection lost during stream for conversation {conversation_id}")
+            try:
+                callback(self._error_response(conversation_id, "connection to node lost"))
+            except Exception as e:
+                logger.error(f"failed to notify conversation {conversation_id}: {e!r}")
+
     def _on_incomming_message(self, message: str):
         try:
             data = json.loads(message)
@@ -186,7 +202,7 @@ class Infrastructure:
         except Exception as e:
             logger.error(f"failed to handle incomming message from node {repr(e)}")
 
-    def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 512, context_size: int=8192) -> str:
+    def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 1024, context_size: int=8192) -> str:
         try:
             chat_request = ChatRequestLlama(
                 messages=messages,
@@ -207,6 +223,11 @@ class Infrastructure:
                     logger.error(f"need callback for streaming")
                     return None
                 
+                if not node.is_connected():
+                    logger.error(f"node {node.uri} not connected, failing chat request")
+                    callback(self._error_response(conversation_id, "node not connected"))
+                    return None
+
                 self.callback_handlers[conversation_id] = callback
                 payload = {"chat": chat_request.model_dump()}
                 node.send_message(json.dumps(payload))
@@ -270,7 +291,19 @@ class Infrastructure:
         if len(self.nodes) == 0:
             logger.error(f"no nodes contacted")
 
+        # prefer a node we are actually connected to
+        for node in self.nodes:
+            if node.is_connected():
+                return node
         return self.nodes[0]
+
+    async def wait_for_any_node(self, poll: float = 1.0):
+        """block until at least one node is connected, then return it"""
+        while True:
+            for node in self.nodes:
+                if node.is_connected():
+                    return node
+            await asyncio.sleep(poll)
 
     def get_registered_models(self) -> list:
         node = self._get_any_node()
@@ -286,7 +319,8 @@ class Infrastructure:
             logger.error(f"failed to get registered models {repr(e)}")
         return []
 
-    def get_model(self, model_name: str) -> dict:
+    def get_model(self, model_name: str) -> Optional[dict]:
+        """model info from a node. {} if the node doesn't know it, None if no node is reachable (yet)"""
         node = self._get_any_node()
         url = f"http://{node.addr}:{node.port}/models/{model_name}"
         logger.debug(f"get model for {model_name} from {url}")
@@ -296,6 +330,10 @@ class Infrastructure:
             if response.status_code == 200:
                 return response.json()
             logger.error(f"failed to get model info {response.status_code} {response.reason}")
+        except requests.exceptions.ConnectionError:
+            # node not started yet - not an error
+            logger.info(f"model info for {model_name} not available yet, node {node.addr}:{node.port} not reachable")
+            return None
         except Exception as e:
             logger.error(f"failed to get model info {repr(e)}")
         return {}
@@ -305,6 +343,9 @@ class Infrastructure:
                 return True
 
         model = self.get_model(model_name)
+        if model is None:
+            logger.info(f"skipping install of {model_name}, no node reachable yet")
+            return False
         if not model or not model.get("files"):
             logger.error(f"model {model_name} not registered")
             return False

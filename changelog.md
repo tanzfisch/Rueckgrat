@@ -1,6 +1,23 @@
 Changelog
 =========
 
+0.14.0
+------
+
+- #76 configurable models path (during installation)
+- #44 made log level configurable for client
+      allows to change log level across the whole system at runtime see /log-level/{level}
+- #78 more flexible llama config per model in registry.json (model_file for split GGUFs, defaults for all LLMs)
+      precedence: host config > registry llama block > installer defaults
+      fixed llama.cpp request handling (reasoning_content, system role, max_tokens)
+      faster reinstalls: fixed flags passed to remote installs (no forced --no-cache), quiet builds, single torch install in node image
+- #73 hub and nodes can start in any order and reconnect automatically after a connection loss
+      in-flight chat streams fail promptly when the node connection drops
+      whisper models are loaded in the background once a node is reachable instead of during hub startup
+      missing nodes are logged as info instead of errors
+      quieter health check: only logs on state changes (missing node warning, unreachable hub error), silent when healthy
+      hub health uses node websocket state instead of polling every node over http
+
 0.13.0
 ------
 

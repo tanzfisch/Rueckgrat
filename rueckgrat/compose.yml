@@ -25,7 +25,7 @@ services:
       - hub_images:/hub/images
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
-      - /var/lib/Rueckgrat/models:/hub/models
+      - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/hub/models
     restart: unless-stopped
     stdin_open: true
     tty: true
@@ -45,7 +45,7 @@ services:
     volumes:
       - node_images:/node/images
       - ./config:/node/config
-      - /var/lib/Rueckgrat/models:/node/models
+      - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/node/models
       - ./chat/app/common:/node/app/common
     stdin_open: true
     tty: true
@@ -58,11 +58,23 @@ services:
     image: ghcr.io/ggml-org/llama.cpp:server-${LLAMA_SERVER_BACKEND}
     privileged: true
     volumes:
-      - /var/lib/Rueckgrat/models:/models
+      - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/models
     ports:
       - "${LLAMA_SERVER_PORT}:${LLAMA_SERVER_PORT}"
     restart: unless-stopped
-    command: -m ${LLAMA_SERVER_MODEL} --host 0.0.0.0 --ctx-size ${LLAMA_SERVER_MAX_CONTEXT} --n-gpu-layers ${LLAMA_SERVER_GPU_LAYERS}
+
+    environment:
+      LLAMA_ARG_MODEL: ${LLAMA_SERVER_MODEL}
+      LLAMA_ARG_HOST: 0.0.0.0
+      LLAMA_ARG_PORT: ${LLAMA_SERVER_PORT}
+      LLAMA_ARG_CTX_SIZE: ${LLAMA_SERVER_MAX_CONTEXT}
+      LLAMA_ARG_N_GPU_LAYERS: ${LLAMA_SERVER_GPU_LAYERS}
+      LLAMA_ARG_FLASH_ATTN: ${LLAMA_SERVER_FLASH_ATTN}
+      LLAMA_ARG_TEMP: ${LLAMA_SERVER_TEMP}
+      LLAMA_ARG_N_PARALLEL: ${LLAMA_SERVER_N_PARALLEL}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "exec /app/llama-server ${LLAMA_SERVER_EXTRA_ARGS:-}"
 
 volumes:
   caddy_data:

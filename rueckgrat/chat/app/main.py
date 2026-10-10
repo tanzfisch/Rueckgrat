@@ -23,7 +23,7 @@ from app.utils import Paths
 from app.utils.config import RueckgratConfig
 from app.utils.hub import Hub
 
-from app.common import get_logger, Utils
+from app.common import get_logger, set_log_level, Utils
 logger = get_logger()
 
 PAGES = {
@@ -101,8 +101,7 @@ class App:
     async def _heartbeat_loop(self):
         while True:
             await asyncio.sleep(10)
-            if not Hub.check_health():
-                logger.error("system unhealthy")
+            Hub.check_health()  # logs state changes itself
 
     async def _on_disconnect(self, e):
         await Hub.stop_websocket()
@@ -137,10 +136,13 @@ def on_incomming_message(msg: dict):
 
 
 def main():
+    config = RueckgratConfig()
+    set_log_level(config.log_level)
+
     logger.debug(
         f"platform: {platform.system()}"
     )
-    config = RueckgratConfig()
+
     Hub.init(config)
 
     if sys.platform != "android":

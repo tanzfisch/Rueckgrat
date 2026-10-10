@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 import asyncio
 import json
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 from app.common import get_logger, DownloadQueue, ChatRequest, GetMessagesRequest, WebSocketClient
 logger = get_logger()
@@ -16,6 +16,7 @@ class Hub:
     download_queue = DownloadQueue()
     ws_task = None
     websocket_client = None
+    _last_health: Optional[str] = None
 
     @classmethod
     def init(cls, config):
@@ -43,6 +44,9 @@ class Hub:
         logger.info(f"hub cert: {cls.server_cert}")
 
         cls.websocket_client = WebSocketClient(cls.uri, cls.server_cert)
+
+        # keep for debugging
+        # cls.set_log_level(cls.config.log_level)
 
     @classmethod
     def get_user_name(cls):
@@ -118,26 +122,47 @@ class Hub:
     @classmethod
     def generate(cls, prompt: dict):
         payload = {"generate": prompt}
-        cls.websocket_client.send_message(json.dumps(payload))
+        cls.websocket_client.send_message(json.dumps(payload))    
 
     @classmethod
     def check_health(cls):
+        """returns True when everything is up. only logs when the state changes"""
         url = f"{cls.url}/health"
         try:
             response = requests.get(url, timeout=30, verify=cls.server_cert)
             if response.status_code == 200:
                 data = response.json()
                 status = data.get("status", "error")
-                if status == "error":
-                    logger.error(f"failed to check health: {data.get('message', '')}")
-                    return False
-                #logger.debug("system is healthy")
-                return True
+                message = data.get("message", "")
             else:
-                logger.error(f"lost connection - {response.status_code}")
-                return False
+                status, message = "unreachable", f"http {response.status_code}"
         except Exception as e:
-            logger.error(f"failed health check: {repr(e)}")
+            status, message = "unreachable", repr(e)
+
+        if status != cls._last_health:
+            if status == "ok":
+                pass  # success is silent
+            elif status == "degraded":
+                logger.warning(f"some nodes not connected: {message}")
+            elif status == "unreachable":
+                logger.error(f"hub not reachable: {message}")
+            else:
+                logger.error(f"system unhealthy: {message}")
+            cls._last_health = status
+
+        return status == "ok"
+
+    @classmethod
+    def set_log_level(cls, level):
+        url = f"{cls.url}/log-level/{level}"
+        try:
+            response = requests.put(url, timeout=5, verify=cls.server_cert)
+            if response.status_code == 200:
+                return True
+            logger.error(f"failed to set log level - {response.status_code}")
+            return False
+        except Exception as e:
+            logger.error(f"failed to set log level: {repr(e)}")
             return False
 
     @classmethod
