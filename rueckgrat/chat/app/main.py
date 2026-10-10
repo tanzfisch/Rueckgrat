@@ -101,8 +101,7 @@ class App:
     async def _heartbeat_loop(self):
         while True:
             await asyncio.sleep(10)
-            if not Hub.check_health():
-                logger.error("system unhealthy")
+            Hub.check_health()  # logs state changes itself
 
     async def _on_disconnect(self, e):
         await Hub.stop_websocket()
