@@ -18,55 +18,41 @@ class LLamaCppInterface:
         response = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
         return think, response
 
-    def chat(self, request: ChatRequestLlama, callback=None) -> ChatResponse:
-        payload = {
-            "messages": request.messages,
+    def _split(self, content: str, reasoning: str):
+        # reasoning_content (native reasoning) plus inline <think> tags as fallback
+        think, resp = self.extract_think_and_response(content or "")
+        think = "\n".join(x for x in ((reasoning or "").strip(), think) if x)
+        return think, resp
+
+    def _normalize_messages(self, messages: list) -> list:
+        system, rest = [], []
+        for m in messages:
+            if m.get("role") in ("system", "developer"):
+                system.append(m["content"])
+            else:
+                rest.append(m)
+        return ([{"role": "system", "content": "\n\n".join(system)}] if system else []) + rest
+
+    def _build_payload(self, request: ChatRequestLlama) -> dict:
+        # sampling settings (top_k, top_p, min_p, repeat_penalty, ...) come from the
+        # server's extra_args so they can be configured per model in registry.json
+        return {
+            "messages": self._normalize_messages(request.messages),
             "temperature": request.temperature,
-            "top_p": 0.9,
-            "top_k": 50,
-            "min_p": 0.1,
-            "do_sample": True,
-            "repetition_penalty": 1.15,
-            "no_repeat_ngram_size": 4,
-            "presence_penalty": 0.0,
-            "frequency_penalty": 0.1,
-            "typical_p": 0.9,
-            "tfs_z": 1.0,
-
-            # More stable decoding
-            "mirostat": 0,
-
-            "max_new_tokens": request.max_new_tokens,
-            "max_tokens": request.context_size,
-
-            "stop": [
-                "<|start_header_id|>",
-                "<|end_header_id|>",
-                "<|im_end|>",
-                "<|im_start|>",
-                "assistant:",
-                ". assistant",
-                "\" assistant",
-                "user:",
-                ". user",
-                "\" user",
-                "\nuser",
-                "\nassistant"
-            ],
-
-            "n_ctx": request.context_size,
-            "rope_freq_base": 10000,
-            "rope_freq_scale": 1.0,
-
-            "n_batch": 512,
-
-            "num_experts_per_token": 2,
+            "seed": request.seed,
+            "max_tokens": request.max_new_tokens,
             "stream": request.stream
         }
 
+    def _check_finish_reason(self, finish_reason):
+        if finish_reason == "length":
+            logger.warning("llama.cpp stopped because max_tokens was reached; response may be truncated")
+
+    def chat(self, request: ChatRequestLlama, callback=None) -> ChatResponse:
+        payload = self._build_payload(request)
         headers = {
             "Content-Type": "application/json"
-        }   
+        }
         try:
             if request.stream:
                 logger.info("using stream")
@@ -75,51 +61,64 @@ class LLamaCppInterface:
                     return ChatResponse(role="error", content="No callback")
 
                 full_content = ""
-                with requests.post(self.url, json=payload, headers=headers, stream=True, timeout=240) as response:
-                    response.raise_for_status()
-                    for line in response.iter_lines():
-                        if line:
-                            line = line.decode('utf-8')
-                            if line.startswith("data: "):
-                                data = json.loads(line[6:])
-                                if data.get("choices"):
-                                    delta = data["choices"][0]["delta"].get("content", "")
-                                    if delta:
-                                        full_content += delta
-                                        response = {
-                                            "conversation_id": request.conversation_id,
-                                            "delta": delta
-                                        }
-                                        callback(json.dumps(response))
-                                    if data.get("choices", [{}])[0].get("finish_reason"):
-                                        break
-               
-                think, resp = self.extract_think_and_response(full_content)
-                response = {
-                    "conversation_id": request.conversation_id,               
+                full_reasoning = ""
+                with requests.post(self.url, json=payload, headers=headers, stream=True, timeout=240) as http_response:
+                    http_response.raise_for_status()
+                    for line in http_response.iter_lines():
+                        if not line:
+                            continue
+                        line = line.decode('utf-8')
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        data = json.loads(data_str)
+                        choices = data.get("choices")
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta", {})
+
+                        reasoning = delta.get("reasoning_content")
+                        if reasoning:
+                            full_reasoning += reasoning
+
+                        content = delta.get("content")
+                        if content:
+                            full_content += content
+                            callback(json.dumps({
+                                "conversation_id": request.conversation_id,
+                                "delta": content
+                            }))
+
+                        finish_reason = choices[0].get("finish_reason")
+                        if finish_reason:
+                            self._check_finish_reason(finish_reason)
+                            break
+
+                think, resp = self._split(full_content, full_reasoning)
+                callback(json.dumps({
+                    "conversation_id": request.conversation_id,
                     "response": resp,
                     "thinking": think
-                }
-                callback(json.dumps(response))
+                }))
                 return ChatResponse(role="assistant", content=resp, think=think)
-            
+
             else:
-                response = requests.post(
+                http_response = requests.post(
                     self.url,
                     json=payload,
                     headers=headers,
                     timeout=240
                 )
+                http_response.raise_for_status()
 
-                response.raise_for_status()
+                choice = http_response.json()["choices"][0]
+                self._check_finish_reason(choice.get("finish_reason"))
+                message = choice["message"]
+                think, resp = self._split(message.get("content"), message.get("reasoning_content"))
+                return ChatResponse(role="assistant", content=resp, think=think)
 
-                if response.status_code == 200:
-                    content = response.json()["choices"][0]["message"]["content"]
-                    think, response = self.extract_think_and_response(content)
-                    return ChatResponse(role = "assistant", content = response, think = think)
-
-                return ChatResponse(role="error", content=f"llama.cpp error: {response.status_code} {response.reason}")
-            
         except requests.exceptions.RequestException as e:
             logger.error(f"Request failed: {str(e)}")
             return ChatResponse(role="error", content=f"Request failed: {str(e)}")

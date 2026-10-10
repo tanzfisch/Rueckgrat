@@ -198,7 +198,7 @@ class ModelRegistry:
                 if not url:
                     print(f"Error: can't find download source for {model_name}")
                 else:
-                    self._download_from_url(url, install_path, force_install)
+                    self._download_from_url(url, local_path, force_install)
 
             return model if self.is_installed(model_name) else None
 

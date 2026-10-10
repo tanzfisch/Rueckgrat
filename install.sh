@@ -451,28 +451,6 @@ install_nvidia_toolkit() {
     fi
 }
 
-# install_caddy - Install Caddy if not present
-# Usage: install_caddy
-# No arguments
-install_caddy() {
-    command -v caddy &> /dev/null && return
-
-    print_section
-    echo "📦 detected missing caddy"
-
-    read_tty "Install caddy? (Y/n): " "Y" $YES
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" -o /tmp/caddy
-        echo "$SUDO_PASSWORD" | sudo -S install -m 755 /tmp/caddy /usr/local/bin/caddy
-        rm -f /tmp/caddy
-
-        echo "✅ Caddy installed."
-     else
-        echo "⚠️ Warning: Aborted by user"
-        exit 0
-    fi   
-}
-
 # safe_rm_rf - Safely remove file/dir, using sudo only if needed
 # Usage: safe_rm_rf <path>
 # Args:
@@ -556,70 +534,88 @@ select_hosts_and_components() {
             echo "📂 found valid config at $CONFIG_FILE"
 
             mkdir -p "$WORKING_DIR/rueckgrat/config"
-            cp -f $CONFIG_FILE "$WORKING_DIR/rueckgrat/config/infrastructure.json"
+            cp -f "$CONFIG_FILE" "$WORKING_DIR/rueckgrat/config/infrastructure.json"
             CONFIG_FILE="$WORKING_DIR/rueckgrat/config/infrastructure.json"
 
             print_config_file_hint
         else
             echo "❌ Error: Failed to load config from $CONFIG_FILE"
+            exit 1
         fi
         return
-    fi 
+    fi
 
     echo "Select hosts and their configuration"
-    
-    hosts=()
+
+    local hosts_json='[]'
+    local host_addr host_json services_json
+
     while true; do
         echo ""
         read_tty "Target host (IP/hostname, empty=done): " ""
         host_addr=$REPLY
         [[ -z "$host_addr" ]] && break
 
-        validate_ip $host_addr
+        validate_ip "$host_addr"
 
         select_components
 
-        node_json=""       
-        hub_json=""
-        chat_json=""
+        host_json=$(jq -n \
+            --arg addr "$host_addr" \
+            --arg models_dir "$HOST_MODELS_DIR" \
+            '{addr: $addr, models_dir: $models_dir}')
 
         if $INSTALL_NODE; then
-            services=()
-            modules=()
+            services_json='[]'
 
             if $INSTALL_LLAMA; then
-                services+=("$(service_json "text_to_text" "llama_server" $LLAMA_SERVER_PORT "model" "$INSTALL_LLAMA_MODEL")")
+                services_json=$(jq \
+                    --arg port       "$LLAMA_SERVER_PORT" \
+                    --arg model      "$INSTALL_LLAMA_MODEL" \
+                    --arg ctx        "$LLAMA_SERVER_MAX_CONTEXT" \
+                    --arg gpu_layers "$LLAMA_SERVER_GPU_LAYERS" \
+                    --arg flash_attn "$LLAMA_SERVER_FLASH_ATTN" \
+                    --arg temp       "$LLAMA_SERVER_TEMP" \
+                    --arg n_parallel "$LLAMA_SERVER_N_PARALLEL" \
+                    --arg extra_args "$LLAMA_SERVER_EXTRA_ARGS" \
+                    '. + [{
+                        type: "text_to_text",
+                        name: "llama_server",
+                        port:        ($port       | tonumber),
+                        model:       $model,
+                        max_context: ($ctx        | tonumber),
+                        gpu_layers:  ($gpu_layers | tonumber),
+                        flash_attn:  $flash_attn,
+                        temp:        ($temp       | tonumber),
+                        n_parallel:  ($n_parallel | tonumber),
+                        extra_args:  $extra_args
+                    }]' <<< "$services_json")
             fi
 
             if $INSTALL_IMAGE_GEN; then
-                services+=("$(module_json "text_to_image" "image_gen")")
+                services_json=$(jq '. + [{type: "text_to_image", name: "image_gen"}]' <<< "$services_json")
             fi
-            
-            printf -v services_json '[%s]' "$(IFS=,; echo "${services[*]}")"
 
-            node_json="\"node\":{\"port\":$NODE_PORT,\"services\":$services_json}"
+            host_json=$(jq \
+                --arg port "$NODE_PORT" \
+                --argjson services "$services_json" \
+                '. + {node: {port: ($port | tonumber), services: $services}}' <<< "$host_json")
         fi
 
         if $INSTALL_HUB; then
-            hub_json="\"hub\":{\"port\":$HUB_PORT}"
+            host_json=$(jq --arg port "$HUB_PORT" \
+                '. + {hub: {port: ($port | tonumber)}}' <<< "$host_json")
         fi
 
-        if $INSTALL_CHAT; then            
-            chat_json="\"chat\":{}"
+        if $INSTALL_CHAT; then
+            host_json=$(jq '. + {chat: {}}' <<< "$host_json")
         fi
 
-        host_parts=("\"addr\":\"$host_addr\"" "\"models_dir\":\"$HOST_MODELS_DIR\"")
-        [ -n "$node_json" ] && host_parts+=("$node_json")
-        [ -n "$hub_json" ] && host_parts+=("$hub_json")
-        [ -n "$chat_json" ] && host_parts+=("$chat_json")
-        host_json="{$(IFS=,; echo "${host_parts[*]}")}"
-        hosts+=("$host_json")
+        hosts_json=$(jq --argjson host "$host_json" '. + [$host]' <<< "$hosts_json")
     done
 
-    CONFIG_FILE=$WORKING_DIR/rueckgrat/config/infrastructure.json
-    printf -v hosts_json '[%s]' "$(IFS=,; echo "${hosts[*]}")"
-    hosts_json="{\"hosts\":$hosts_json }"
-    echo "$hosts_json" | jq . > "$CONFIG_FILE"
+    CONFIG_FILE="$WORKING_DIR/rueckgrat/config/infrastructure.json"
+    jq '{hosts: .}' <<< "$hosts_json" > "$CONFIG_FILE"
     print_config_file_hint
 }
 
@@ -666,8 +662,7 @@ select_components() {
             LLAMA_SERVER_PORT=$REPLY
             echo -e "\e[1A\e[K         Port: $LLAMA_SERVER_PORT"
             # your model selection code here (multi-line, no overwrite)
-            DEFAULT_LLM="cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L"
-            REGISTRY_JSON="$WORKING_DIR/rueckgrat/node/data/registry.json"
+            DEFAULT_LLM="cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L"            
             TYPE="llm"
             mapfile -t models < <(jq -r --arg t "$TYPE" 'to_entries[] | select(.value.type == $t) | .key' "$REGISTRY_JSON")
             DEFAULT_IDX=0
@@ -680,6 +675,18 @@ select_components() {
             read_tty "         📋 Select model by index [$DEFAULT_IDX]: " "$DEFAULT_IDX"
             idx=$REPLY
             INSTALL_LLAMA_MODEL="${models[idx-1]}"
+
+            eval "$(jq -r --arg k "$INSTALL_LLAMA_MODEL" --arg np "$LLAMA_SERVER_N_PARALLEL_DEFAULT" --arg mc "$LLAMA_SERVER_MAX_CONTEXT_DEFAULT" --arg gl "$LLAMA_SERVER_GPU_LAYERS_DEFAULT" --arg fa "$LLAMA_SERVER_FLASH_ATTN_DEFAULT" --arg tp "$LLAMA_SERVER_TEMP_DEFAULT" '
+            .[$k].llama // {} | [
+                "LLAMA_SERVER_MAX_CONTEXT=\(.max_context // $mc | @sh)",
+                "LLAMA_SERVER_GPU_LAYERS=\(.gpu_layers // $gl | @sh)",
+                "LLAMA_SERVER_FLASH_ATTN=\(.flash_attn // $fa | @sh)",
+                "LLAMA_SERVER_TEMP=\(.temp // $tp | @sh)",
+                "LLAMA_SERVER_N_PARALLEL=\(.n_parallel // $np | @sh)",
+                "LLAMA_SERVER_EXTRA_ARGS=\(.extra_args // "" | @sh)"
+            ] | join("\n")
+            ' "$REGISTRY_JSON")"
+
             echo -e "         Selected model: $INSTALL_LLAMA_MODEL"
         fi
 
@@ -738,7 +745,7 @@ deploy_hub() {
 
     pushd rueckgrat > /dev/null
     docker compose stop hub caddy 2>/dev/null || true
-    docker compose --progress=$DOCKER_PROGRESS_MODE build ${NO_CACHE:-} hub caddy || { echo "❌ Error: Docker compose build of hub & cdaddy failed."; popd; exit 1; }
+    docker compose build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} hub caddy || { echo "❌ Error: Docker compose build of hub & cdaddy failed."; popd; exit 1; }
     docker compose up -d hub caddy || { echo "❌ Error: Docker compose up of hub & cdaddy failed."; popd; exit 1; }
     popd > /dev/null
 }
@@ -821,8 +828,8 @@ deploy_node() {
     fi
 
     docker compose "${COMPOSE_FILES[@]}" stop node 2>/dev/null || true
-    docker compose --progress=$DOCKER_PROGRESS_MODE "${COMPOSE_FILES[@]}" \
-        build ${NO_CACHE:-} "${BUILD_ARGS[@]}" node \
+    docker compose "${COMPOSE_FILES[@]}" \
+        build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} "${BUILD_ARGS[@]}" node \
         || { echo "❌ Error: Docker compose build of node failed."; popd; exit 1; }
     docker compose "${COMPOSE_FILES[@]}" up -d node \
         || { echo "❌ Error: Docker compose up of node failed."; popd; exit 1; }
@@ -880,9 +887,16 @@ deploy_llama() {
     echo "   compose=${COMPOSE_FILES[*]}"
     [ "${GPU_VENDOR:-}" = "amd" ] && echo "   amd_gids=video:$HOST_AMD_VIDEO render:$HOST_AMD_RENDER"
 
+    set_env_value LLAMA_SERVER_MAX_CONTEXT "${LLAMA_SERVER_MAX_CONTEXT}"
+    set_env_value LLAMA_SERVER_GPU_LAYERS "${LLAMA_SERVER_GPU_LAYERS}"
+    set_env_value LLAMA_SERVER_FLASH_ATTN "${LLAMA_SERVER_FLASH_ATTN}"
+    set_env_value LLAMA_SERVER_TEMP "${LLAMA_SERVER_TEMP}"
+    set_env_value LLAMA_SERVER_N_PARALLEL "${LLAMA_SERVER_N_PARALLEL}"
+    set_env_value LLAMA_SERVER_EXTRA_ARGS "${LLAMA_SERVER_EXTRA_ARGS}"
+
     pushd rueckgrat > /dev/null
-    GGUF_FILE_PATH="$CONTAINER_MODELS_DIR/llm/$LLM_MODEL/$LLM_MODEL.gguf"
-    set_env_value LLAMA_SERVER_MODEL "$GGUF_FILE_PATH"
+    set_env_value LLAMA_SERVER_MODEL "$LLAMA_SERVER_MODEL"
+    
     set_env_value LLAMA_SERVER_BACKEND "$LLAMA_SERVER_BACKEND"
     if [ "${GPU_VENDOR:-}" = "amd" ]; then
         set_env_value HOST_AMD_VIDEO "$HOST_AMD_VIDEO"
@@ -890,7 +904,7 @@ deploy_llama() {
     fi    
 
     docker compose "${COMPOSE_FILES[@]}" stop llama-server 2>/dev/null || true
-    docker compose --progress=$DOCKER_PROGRESS_MODE "${COMPOSE_FILES[@]}" build ${NO_CACHE:-} llama-server || { echo "❌ Error: Docker compose build of llama-server failed."; popd; exit 1; }
+    docker compose "${COMPOSE_FILES[@]}" build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} llama-server || { echo "❌ Error: Docker compose build of llama-server failed."; popd; exit 1; }
     docker compose "${COMPOSE_FILES[@]}" up -d llama-server || { echo "❌ Error: Docker compose up of llama-server failed."; popd; exit 1; }
     popd > /dev/null
 }
@@ -959,11 +973,28 @@ check_docker_group() {
     fi
 }
 
+# resolve_model_file - print container path of the GGUF llama-server should load
+# Usage: resolve_model_file <model name>
+# Uses llama.model_file from the registry, else the first .gguf in files
+resolve_model_file() {
+    local model="$1" rel
+    rel=$(jq -r --arg k "$model" '
+        .[$k] as $m
+        | ($m.llama.model_file
+            // ($m.files // [] | map(select(.source | endswith(".gguf"))) | first // empty
+                | (if .path == "" then "" else .path + "/" end) + (.source | split("/") | last)))
+        | $m.install_path + "/" + .
+    ' "$REGISTRY_JSON")
+    [[ -n "$rel" && "$rel" != "null" ]] || return 1
+    echo "$CONTAINER_MODELS_DIR/$rel"
+}
+
 # parse_host_config - set INSTALL_* flags from one host JSON object
 # Usage: parse_host_config '<host json>'
 parse_host_config() {
-    local host_config="$1"    
+    local host_config="$1"
     [[ -n "$host_config" ]] || { echo "❌ Error: host_config is empty" >&2; exit 1; }
+    [[ -f "${REGISTRY_JSON:-}" ]] || { echo "❌ Error: REGISTRY_JSON not set or missing" >&2; exit 1; }
 
     INSTALL_CHAT=false
     INSTALL_HUB=false
@@ -974,6 +1005,13 @@ parse_host_config() {
     HUB_PORT=""
     NODE_PORT=""
     LLAMA_SERVER_PORT=""
+    LLAMA_SERVER_MODEL=""
+    LLAMA_SERVER_MAX_CONTEXT="${LLAMA_SERVER_MAX_CONTEXT_DEFAULT}"
+    LLAMA_SERVER_GPU_LAYERS="${LLAMA_SERVER_GPU_LAYERS_DEFAULT}"
+    LLAMA_SERVER_FLASH_ATTN="${LLAMA_SERVER_FLASH_ATTN_DEFAULT}"
+    LLAMA_SERVER_TEMP="${LLAMA_SERVER_TEMP_DEFAULT}"
+    LLAMA_SERVER_N_PARALLEL="${LLAMA_SERVER_N_PARALLEL_DEFAULT}"
+    LLAMA_SERVER_EXTRA_ARGS=""
 
     if echo "$host_config" | jq -e '.hub' >/dev/null; then
         INSTALL_HUB=true
@@ -987,63 +1025,66 @@ parse_host_config() {
     if echo "$host_config" | jq -e '.node' >/dev/null; then
         INSTALL_NODE=true
         NODE_PORT=$(echo "$host_config" | jq -r '.node.port // empty')
-        # todo use NODE_PORT
 
-        local item type name
-        for item in $(echo "$host_config" | jq -c '.node.services // [] | .[]'); do
+        local item type name reg
+        while IFS= read -r item; do
+            [[ -z "$item" ]] && continue
             type=$(echo "$item" | jq -r '.type')
             name=$(echo "$item" | jq -r '.name')
             if [[ "$type" == "text_to_text" || "$name" == "llama_server" || "$name" == "llama-server" ]]; then
                 INSTALL_LLAMA=true
                 INSTALL_LLAMA_MODEL=$(echo "$item" | jq -r '.model // empty')
                 LLAMA_SERVER_PORT=$(echo "$item" | jq -r '.port // empty')
+
+                # precedence: host config > registry llama block > install.sh default
+                reg=$(jq -c --arg k "$INSTALL_LLAMA_MODEL" '.[$k].llama // {}' "$REGISTRY_JSON")
+                eval "$(jq -r --argjson r "$reg" '
+                    def pick(k): (.[k] // $r[k] // empty) | tostring | @sh;
+                    "LLAMA_SERVER_MAX_CONTEXT_CFG=\(pick("max_context"))",
+                    "LLAMA_SERVER_GPU_LAYERS_CFG=\(pick("gpu_layers"))",
+                    "LLAMA_SERVER_FLASH_ATTN_CFG=\(pick("flash_attn"))",
+                    "LLAMA_SERVER_TEMP_CFG=\(pick("temp"))",
+                    "LLAMA_SERVER_N_PARALLEL_CFG=\(pick("n_parallel"))",
+                    "LLAMA_SERVER_EXTRA_ARGS_CFG=\(pick("extra_args"))"
+                ' <<< "$item")"
+
+                LLAMA_SERVER_MAX_CONTEXT="${LLAMA_SERVER_MAX_CONTEXT_CFG:-$LLAMA_SERVER_MAX_CONTEXT_DEFAULT}"
+                LLAMA_SERVER_GPU_LAYERS="${LLAMA_SERVER_GPU_LAYERS_CFG:-$LLAMA_SERVER_GPU_LAYERS_DEFAULT}"
+                LLAMA_SERVER_FLASH_ATTN="${LLAMA_SERVER_FLASH_ATTN_CFG:-$LLAMA_SERVER_FLASH_ATTN_DEFAULT}"
+                LLAMA_SERVER_TEMP="${LLAMA_SERVER_TEMP_CFG:-$LLAMA_SERVER_TEMP_DEFAULT}"
+                LLAMA_SERVER_N_PARALLEL="${LLAMA_SERVER_N_PARALLEL_CFG:-$LLAMA_SERVER_N_PARALLEL_DEFAULT}"
+                LLAMA_SERVER_EXTRA_ARGS="${LLAMA_SERVER_EXTRA_ARGS_CFG:-}"
+
+                LLAMA_SERVER_MODEL=$(resolve_model_file "$INSTALL_LLAMA_MODEL") \
+                    || { echo "❌ Error: no GGUF found for $INSTALL_LLAMA_MODEL in $REGISTRY_JSON" >&2; exit 1; }
             fi
             if [[ "$type" == "text_to_image" || "$name" == "image_gen" ]]; then
                 INSTALL_IMAGE_GEN=true
             fi
-        done
-        for item in $(echo "$host_config" | jq -c '.node.modules // [] | .[]'); do
+        done < <(echo "$host_config" | jq -c '.node.services // [] | .[]')
+
+        while IFS= read -r item; do
+            [[ -z "$item" ]] && continue
             type=$(echo "$item" | jq -r '.type')
             name=$(echo "$item" | jq -r '.name')
             if [[ "$type" == "text_to_image" || "$name" == "image_gen" ]]; then
                 INSTALL_IMAGE_GEN=true
             fi
-        done
+        done < <(echo "$host_config" | jq -c '.node.modules // [] | .[]')
     fi
 
     HOST_MODELS_DIR=$(echo "$host_config" | jq -r '.models_dir // empty')
-    HOST_MODELS_DIR="${HOST_MODELS_DIR:-$HOST_MODELS_DIR_DEFAULT}"    
+    HOST_MODELS_DIR="${HOST_MODELS_DIR:-$HOST_MODELS_DIR_DEFAULT}"
 }
 
 write_default_env() {
-    [ -f "$WORKING_DIR/rueckgrat/.env" ] && return
-
-    # hub hostname
     set_env_value HUB_HOST "rueckgrat.hub"
     set_env_value HUB_ADDR "127.0.0.1"
 
-    set_env_value HOST_MODELS_DIR $HOST_MODELS_DIR_DEFAULT
+    set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR_DEFAULT"
 
-    # models that work with Rückgrat (tested with 24GB vram)
-    # cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L (autor's preffered option)
-    # Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-ggml-model-Q3_K
-    # NousResearch_Hermes-4.3-36B-Q4_K_S
-    # Huihui-Qwen3.6-27B-abliterated-ggml-model-Q5_K (had issues with json generation, maybe ran out of mem, unclear)
-    # Huihui-Qwen3.6-27B-abliterated-ggml-model-Q4_K
-    # dolphin-2.9.1-yi-1.5-34b-Q4_K_M (very fast 24GB a bit too tight)
-    set_env_value LLAMA_SERVER_MODEL "$CONTAINER_MODELS_DIR/llm/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L/cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L.gguf"
-
-    # max context in tokens
-    set_env_value LLAMA_SERVER_MAX_CONTEXT 4096
-
-    # GPU layers
-    set_env_value LLAMA_SERVER_GPU_LAYERS -1 # -1 means all layers run on GPU
-
-    # llama-server port
-    set_env_value LLAMA_SERVER_PORT 8080
-
-    # llama-server backend ie. rocm, cuda, intel
-    set_env_value LLAMA_SERVER_BACKEND rocm
+    set_env_value LLAMA_SERVER_PORT "$LLAMA_SERVER_PORT_DEFAULT"
+    set_env_value LLAMA_SERVER_BACKEND "$LLAMA_SERVER_BACKEND_DEFAULT"
 }
 
 # deploy_components - Local component installer
@@ -1057,6 +1098,9 @@ deploy_components() {
     echo "deploy components..."
     
     echo "reading config $host_config"
+    REGISTRY_JSON="$(pwd)/rueckgrat/node/data/registry.json"
+    [[ -f "$REGISTRY_JSON" ]] || { echo "❌ Error: registry file missing at $REGISTRY_JSON"; exit 1; }
+
     parse_host_config "$host_config"
 
     # pretend to be in build dir
@@ -1082,7 +1126,6 @@ deploy_components() {
     fi
 
     if $INSTALL_HUB; then
-        install_caddy
         deploy_hub
     fi
 
@@ -1145,7 +1188,7 @@ deploy_components_remote() {
         set -euo pipefail
         cd $remote_dir
         chmod +x install.sh
-        ./install.sh --local-config '$clean_config' ${CLEAN_BUILD:+-f} ${VERBOSE:+-v} ${YES:+-y} -p $SUDO_PASSWORD -u $SUDO_USER
+        ./install.sh --local-config '$clean_config' $([[ $CLEAN_BUILD == true ]] && echo -f) $([[ $VERBOSE == true ]] && echo -v) $([[ $YES == true ]] && echo -y) -p $SUDO_PASSWORD -u $SUDO_USER
     " || echo "❌ Error: Installation failed on $host_addr"
 }
 
@@ -1153,10 +1196,10 @@ deploy_components_remote() {
 # Usage: deploy_on_hosts
 # No arguments
 deploy_on_hosts() {
-    host_configs=$(jq -c '.hosts[]' "$CONFIG_FILE")
-    for host_config in $host_configs; do
-        deploy_components_remote "$host_config"        
-    done
+    while IFS= read -r host_config; do
+        [[ -z "$host_config" ]] && continue
+        deploy_components_remote "$host_config"
+    done < <(jq -c '.hosts[]' "$CONFIG_FILE")
 }
 
 # usage - Display help message and exit
@@ -1248,8 +1291,15 @@ sync_on_hosts() {
 readonly CONTAINER_MODELS_DIR="/models"
 readonly HUB_PORT_DEFAULT=14223
 readonly NODE_PORT_DEFAULT=7346
-readonly LLAMA_SERVER_PORT_DEFAULT=8080
 readonly HOST_MODELS_DIR_DEFAULT="/var/lib/Rueckgrat/models"
+
+readonly LLAMA_SERVER_MAX_CONTEXT_DEFAULT=4096
+readonly LLAMA_SERVER_GPU_LAYERS_DEFAULT=-1       # -1 means all layers run on GPU
+readonly LLAMA_SERVER_PORT_DEFAULT=8080
+readonly LLAMA_SERVER_FLASH_ATTN_DEFAULT="on"
+readonly LLAMA_SERVER_TEMP_DEFAULT=0.7
+readonly LLAMA_SERVER_N_PARALLEL_DEFAULT=2
+readonly LLAMA_SERVER_BACKEND_DEFAULT=rocm        # llama-server backend ie. rocm, cuda, intel
 
 main() {   
     export DOCKER_BUILDKIT=1
@@ -1259,7 +1309,7 @@ main() {
     
     CONFIG_FILE=""
     VERBOSE=false
-    DOCKER_PROGRESS_MODE="quiet"
+    DOCKER_QUIET_BUILD="--quiet"
     CLEAN_BUILD=false
     HOST_CONFIG=""
     LOCAL_CONFIG=""
@@ -1291,7 +1341,7 @@ main() {
                 YES=true
                 shift 2
                 ;;
-            --local-config|-lc) # don't use --local-config unless you know what you are doing
+            --local-config|-lc) # don't use --local-config manually unless you know what you are doing
                 if [[ -z "${2:-}" ]]; then
                     echo "❌ Error: --local-config requires config string for one host"
                     exit 1
@@ -1332,7 +1382,7 @@ main() {
                 SUDO_PASSWORD="$2"
                 shift 2
                 ;;
-            -v|--verbose) VERBOSE=true; DOCKER_PROGRESS_MODE="auto"; shift ;;
+            -v|--verbose) VERBOSE=true; DOCKER_QUIET_BUILD=""; shift ;;
             -f|--fresh) CLEAN_BUILD=true; NO_CACHE="--no-cache"; shift ;;
             -s|--sync) SYNC_ONLY=true; shift ;;
             -y|--yes) YES=true; shift ;;

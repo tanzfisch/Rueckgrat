@@ -24,18 +24,14 @@ ARG TORCH_ROCM_INDEX=rocm6.3
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     if [ "$INSTALL_IMAGE_GEN" = "true" ]; then \
-      pip install -r requirements_image_gen.txt; \
       case "$TORCH_BACKEND" in \
-        rocm) pip install --force-reinstall \
-                --index-url "https://download.pytorch.org/whl/${TORCH_ROCM_INDEX}" \
-                torch torchvision torchaudio ;; \
-        cuda) pip install --force-reinstall \
-                --index-url "https://download.pytorch.org/whl/${TORCH_CUDA_INDEX}" \
-                torch torchvision torchaudio ;; \
-        xpu)  pip install --force-reinstall \
-                --index-url https://download.pytorch.org/whl/xpu \
-                torch torchvision torchaudio ;; \
+        rocm) IDX="https://download.pytorch.org/whl/${TORCH_ROCM_INDEX}" ;; \
+        cuda) IDX="https://download.pytorch.org/whl/${TORCH_CUDA_INDEX}" ;; \
+        xpu)  IDX="https://download.pytorch.org/whl/xpu" ;; \
+        *)    IDX="https://download.pytorch.org/whl/cpu" ;; \
       esac; \
+      pip install --index-url "$IDX" torch torchvision torchaudio && \
+      pip install -r requirements_image_gen.txt; \
     fi
 
 ARG INSTALL_LLAMA=false

@@ -70,6 +70,7 @@ host_config="$(find_local_host_config)" || {
     exit 1
 }
 
+REGISTRY_JSON="$(pwd)/rueckgrat/node/data/registry.json"
 parse_host_config "$host_config"
 
 print_header "🔧 Rückgrat Dev"
