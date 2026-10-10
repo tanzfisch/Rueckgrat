@@ -710,7 +710,7 @@
       "gpu_layers": 99,
       "flash_attn": "on",
       "temp": 0.7,
-      "n_parallel": 1,
+      "n_parallel": 2,
       "extra_args": "--n-cpu-moe 35 -ot per_layer_token_embd.weight=CPU --cache-type-k q8_0 --cache-type-v q8_0 --no-warmup --top-p 0.95 --top-k 20"
     },    
     "install_path": "llm/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S"
@@ -782,7 +782,7 @@
       "gpu_layers": 99,
       "flash_attn": "on",
       "temp": 0.7,
-      "n_parallel": 1,
+      "n_parallel": 2,
       "extra_args": ""
     },
     "install_path": "llm/laya-F16"
@@ -800,7 +800,7 @@
       "gpu_layers": 99,
       "flash_attn": "on",
       "temp": 0.7,
-      "n_parallel": 1,
+      "n_parallel": 2,
       "extra_args": ""
     },
     "install_path": "llm/laya-Q8_0"
