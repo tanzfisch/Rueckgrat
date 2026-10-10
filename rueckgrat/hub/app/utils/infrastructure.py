@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Optional, Dict, Callable
 from dataclasses import dataclass
 from ..jobs.image_job import ImageRequest
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.common import get_logger, ChatRequestLlama, DownloadQueue, Utils, WebSocketClient
 logger = get_logger()
@@ -88,30 +87,11 @@ class Infrastructure:
             logger.warning("couldn't find text_to_image generator")        
 
     def get_status(self) -> StatusResult:
-        result = StatusResult()
-        hosts = [h for h in self.hosts if "node" in h]
-
-        def check(host):
-            node = host["node"]
-            url = f"http://{host['addr']}:{node['port']}/health"
-            try:
-                r = requests.get(url, timeout=1)
-                ok = (
-                    r.status_code == 200
-                    and r.json() == {"status": "ok"}
-                    and r.headers.get("content-type", "").startswith("application/json")
-                )
-                err = None if ok else str(r.status_code)
-                return ServerResult(url, ok, error=err)
-            except Exception as e:
-                return ServerResult(url, False, error=repr(e))
-
-        if hosts:
-            with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
-                futs = [pool.submit(check, h) for h in hosts]
-                for f in as_completed(futs):
-                    result.nodes.append(f.result())
-        return result
+        # the websocket supervisor already tracks every node, no need to poll them over http
+        return StatusResult([
+            ServerResult(node.uri, node.is_connected(), None if node.is_connected() else "not connected")
+            for node in self.nodes
+        ])
 
     def set_log_level(self, level):
         ok = True

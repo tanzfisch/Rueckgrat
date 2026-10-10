@@ -216,10 +216,11 @@ def login(data: LoginRequest):
 ########### system handling
 @app.get("/health")
 def health():
+    # hub is up; missing nodes make the system degraded, not broken
     status = app.state.infrastructure.get_status()
-    for node in status.nodes:
-        if not node.ok:
-            return {"status": "error", "message": f"{node.url} {node.error}"}
+    missing = [f"{node.url} {node.error}" for node in status.nodes if not node.ok]
+    if missing:
+        return {"status": "degraded", "message": ", ".join(missing)}
 
     return {"status": "ok"}
 

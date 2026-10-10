@@ -15,6 +15,8 @@ Changelog
       in-flight chat streams fail promptly when the node connection drops
       whisper models are loaded in the background once a node is reachable instead of during hub startup
       missing nodes are logged as info instead of errors
+      quieter health check: only logs on state changes (missing node warning, unreachable hub error), silent when healthy
+      hub health uses node websocket state instead of polling every node over http
 
 0.13.0
 ------
