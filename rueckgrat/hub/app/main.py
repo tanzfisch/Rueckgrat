@@ -28,6 +28,24 @@ from datetime import datetime, timedelta, timezone
 from app.common import get_logger, set_log_level, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse
 logger = get_logger()
 
+async def _load_whisper(app: FastAPI):
+    infrastructure = app.state.infrastructure
+    while True:
+        node = await infrastructure.wait_for_any_node()
+        logger.info(f"node {node.addr}:{node.port} is up, installing whisper models")
+        ok_medium = await asyncio.to_thread(infrastructure.install_model, "faster-whisper-medium")
+        ok_small = await asyncio.to_thread(infrastructure.install_model, "faster-whisper-small")
+        if ok_medium and ok_small:
+            break
+        logger.info("whisper models not installed yet, retrying in 30s")
+        await asyncio.sleep(30)
+
+    app.state.whisper_model = await asyncio.to_thread(
+        WhisperModel, "/hub/models/stt/faster-whisper-medium", device="cpu", compute_type="int8")
+    app.state.whisper_model_fast = await asyncio.to_thread(
+        WhisperModel, "/hub/models/stt/faster-whisper-small", device="cpu", compute_type="int8")
+    logger.info("whisper loaded")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("connecting infrastructure")
@@ -49,11 +67,10 @@ async def lifespan(app: FastAPI):
     logger.info("loading whisper")
     app.state.whisper_lock = asyncio.Lock()
 
-    app.state.infrastructure.install_model("faster-whisper-medium")
-    app.state.infrastructure.install_model("faster-whisper-small")
-
-    app.state.whisper_model = WhisperModel("/hub/models/stt/faster-whisper-medium", device="cpu", compute_type="int8")
-    app.state.whisper_model_fast = WhisperModel("/hub/models/stt/faster-whisper-small", device="cpu", compute_type="int8")
+    # whisper models come from a node, so load them in the background once a node is up
+    app.state.whisper_model = None
+    app.state.whisper_model_fast = None
+    app.state.whisper_task = asyncio.create_task(_load_whisper(app))
 
     logger.info("loading vad")
     app.state.vad = load_silero_vad(onnx=True)
@@ -63,6 +80,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    app.state.whisper_task.cancel()
     app.state.job_queue.stop()
 
     logger.info("hub shut down")
@@ -491,6 +509,9 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
 
     async def transcribe(model, wav, kind: str):
         nonlocal busy
+        if model is None:
+            logger.info("speech recognition not ready yet, waiting for whisper to load")
+            return
         if kind == "partial" and (busy or app.state.whisper_lock.locked()):
             return
         busy = True

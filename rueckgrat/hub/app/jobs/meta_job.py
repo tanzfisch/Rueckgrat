@@ -43,6 +43,9 @@ class MetaJob(Job):
                 "message_id": self.message_id
             })
 
+        if data.get("error"):
+            logger.error(f"chat stream failed: {data['error']}")
+
         if "response" in data:
             self.response["chat"] = {
                 "conversation_id": self.request.conversation_id,
