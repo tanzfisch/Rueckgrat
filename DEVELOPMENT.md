@@ -34,9 +34,7 @@ Check if it is available with `adb devices`
 Install on android phone and open logging
 
 ```
-adb uninstall com.flet.chat
-adb install build/apk/*.apk
-adb logcat -s flet.python
+adb uninstall com.flet.chat && adb install build/apk/*.apk && adb logcat -s flet.python
 ```
 
 Open app on the phone
