@@ -1,6 +1,6 @@
 import re
 import flet as ft
-from app.ui.theme import STYLES
+from app.ui.theme import STYLES, MARKDOWN_STYLE
 from app.ui.widgets.image import Image
 
 from app.common import get_logger
@@ -67,6 +67,7 @@ class ChatBubble(ft.Container):
             code_theme=ft.MarkdownCodeTheme.ATOM_ONE_DARK,
             on_tap_link=_open_link,
             shrink_wrap=True,
+            md_style_sheet=None if code else MARKDOWN_STYLE,
         )
 
     def _add_code(self, content: str):

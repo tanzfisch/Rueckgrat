@@ -1,4 +1,4 @@
-flet
+flet==1.0.4
 pathvalidate
 websockets
 markdown

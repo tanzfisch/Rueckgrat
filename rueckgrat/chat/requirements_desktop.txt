@@ -1,4 +1,5 @@
-flet[all]
+flet[all]==1.0.4
+flet-audio-recorder==1.0.4
 pathvalidate
 websockets
 markdown

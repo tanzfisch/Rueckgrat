@@ -946,9 +946,9 @@ deploy_chat_native() {
         exit 1
     fi
 
-    [ -d .venv ] || python3 -m venv .venv
+    [ -x .venv/bin/python ] || { rm -rf .venv; python3 -m venv .venv; }
     source .venv/bin/activate
-    pip install -r requirements_desktop.txt
+    .venv/bin/python -m pip install -r requirements_desktop.txt
 
     popd > /dev/null
 }
@@ -1146,6 +1146,19 @@ deploy_components() {
     fi
 }
 
+# is_local_host - true if the address points at this machine
+# Usage: is_local_host <addr>
+is_local_host() {
+    local addr="${1#*@}"   # strip user@
+    [[ "$addr" == "localhost" || "$addr" == 127.* || "$addr" == "::1" ]] && return 0
+    [[ "$addr" == "$(hostname)" || "$addr" == "$(hostname -f 2>/dev/null)" ]] && return 0
+    local ip
+    for ip in $(hostname -I 2>/dev/null); do
+        [[ "$addr" == "$ip" ]] && return 0
+    done
+    return 1
+}
+
 remove_line_breaks() {
     echo -n "${1//$'\n'$'\r'/}"
 }
@@ -1158,6 +1171,15 @@ deploy_components_remote() {
     local host_config="$1"
     host_addr=$(echo "$host_config" | jq -r '.addr')
     clean_config=$(remove_line_breaks "$host_config")
+
+    # --in-place: same host -> install right here in the working dir, no copy, no ssh
+    if $IN_PLACE && is_local_host "$host_addr"; then
+        print_section
+        echo "🏠 Installing $host_addr in place ($(pwd))"
+        ./install.sh --local-config "$clean_config" $([[ $CLEAN_BUILD == true ]] && echo -f) $([[ $VERBOSE == true ]] && echo -v) $([[ $YES == true ]] && echo -y) -p "$SUDO_PASSWORD" -u "$SUDO_USER" \
+            || echo "❌ Error: Installation failed on $host_addr"
+        return
+    fi
 
     install_dependencies rsync sshpass
 
@@ -1178,7 +1200,7 @@ deploy_components_remote() {
     fi
 
     echo "Copying files..."
-    rsync -az --checksum -e "ssh ${SSH_OPTS[*]}" --exclude='.git' --exclude='logs' ./ "$host_addr:$remote_dir/" || {
+    rsync -az --checksum -e "ssh ${SSH_OPTS[*]}" --exclude='.git' --exclude='logs' --exclude='.venv' ./ "$host_addr:$remote_dir/" || {
         echo "❌ Error: rsync failed for $host_addr"
         return 1
     }
@@ -1219,6 +1241,7 @@ usage() {
     echo "  --yes | -y                          Non interactive where possible"
     echo "  --host-config | -hc    STRING       partial config for just one host"    
     echo "  --sync | -s                         Dev mode: rsync local tree to remote hosts only"
+    echo "  --in-place                          Install in the current directory when the target is this host"
     echo "  --user | -u            USER         Sudo username"
     echo "  --password | -p        PASSWORD     Sudo password"
     echo "  --info | -i                         Print system info"
@@ -1320,6 +1343,7 @@ main() {
     SUDO_PASSWORD=""
     NO_CACHE=""
     SYNC_ONLY=false
+    IN_PLACE=false
     HOST_MODELS_DIR=HOST_MODELS_DIR_DEFAULT
 
     while [[ $# -gt 0 ]]; do
@@ -1385,6 +1409,7 @@ main() {
             -v|--verbose) VERBOSE=true; DOCKER_QUIET_BUILD=""; shift ;;
             -f|--fresh) CLEAN_BUILD=true; NO_CACHE="--no-cache"; shift ;;
             -s|--sync) SYNC_ONLY=true; shift ;;
+            --in-place) IN_PLACE=true; shift ;;
             -y|--yes) YES=true; shift ;;
             -h|--help) usage; exit 0 ;;
             -i|--info) info; exit 0 ;;

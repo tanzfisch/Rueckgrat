@@ -47,6 +47,28 @@ def apply_theme(page: ft.Page):
         ),      
     )
 
+# text font + color emoji fallback (#68). code blocks keep markdown's monospace default
+TEXT_FONT = "DejaVu Sans"
+EMOJI_FALLBACK = ["Noto Color Emoji"]
+
+def _md_text(size: float) -> ft.TextStyle:
+    return ft.TextStyle(size=size*SIZE_FACTOR, color=TEXT, font_family=TEXT_FONT, font_family_fallback=EMOJI_FALLBACK)
+
+# sizes follow flutter_markdown's defaults (body_medium for text, headline_small..body_large for headings)
+MARKDOWN_STYLE = ft.MarkdownStyleSheet(
+    p_text_style=_md_text(14),             # paragraphs and list items
+    list_bullet_text_style=_md_text(14),
+    blockquote_text_style=_md_text(14),
+    table_head_text_style=_md_text(14),
+    table_body_text_style=_md_text(14),
+    h1_text_style=_md_text(24),
+    h2_text_style=_md_text(22),
+    h3_text_style=_md_text(16),
+    h4_text_style=_md_text(16),
+    h5_text_style=_md_text(16),
+    h6_text_style=_md_text(16),
+)
+
 STYLES = {
     "one_line_bubble": dict(bgcolor=TEAL, border_radius=RADIUS, padding=10),
     "chat_bubble": dict(bgcolor=TEAL, border_radius=RADIUS, padding=10),
