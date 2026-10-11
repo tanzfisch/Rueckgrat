@@ -231,8 +231,11 @@ get_info() {
 # Usage: print_info_block
 # No arguments
 print_info_block() {
-    echo "Rückgrat ver   ${RUECKGRAT_VERSION:----}"
-    echo ""
+    # remote runs (--local-config) have no git checkout, so no version to show
+    if [[ -z "${LOCAL_CONFIG:-}" ]]; then
+        echo "Rückgrat ver   ${RUECKGRAT_VERSION:----}"
+        echo ""
+    fi
     echo "Host           $HOSTNAME"
     echo "IP             $HOST_ADDR"
     echo "OS             $PRETTY_NAME"
@@ -596,6 +599,10 @@ select_hosts_and_components() {
                 services_json=$(jq '. + [{type: "text_to_image", name: "image_gen"}]' <<< "$services_json")
             fi
 
+            if $INSTALL_TTS; then
+                services_json=$(jq '. + [{type: "text_to_speech", name: "tts"}]' <<< "$services_json")
+            fi
+
             host_json=$(jq \
                 --arg port "$NODE_PORT" \
                 --argjson services "$services_json" \
@@ -629,6 +636,8 @@ select_components() {
     INSTALL_LLAMA=false; 
     INSTALL_LLAMA_MODEL=""
     INSTALL_IMAGE_GEN=false
+    INSTALL_TTS=false
+    REGISTRY_JSON="${REGISTRY_JSON:-$WORKING_DIR/rueckgrat/node/data/registry.json}"
 
     echo "Select components:"
     echo ""
@@ -693,6 +702,10 @@ select_components() {
         read_tty "Install image generation on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_IMAGE_GEN=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_IMAGE_GEN == true ]] && echo '✅' || echo '⚫' )] ImageGen"
+
+        read_tty "Install text to speech (Chatterbox) on Node? (Y/n): " "Y"
+        [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_TTS=true
+        echo -e "\e[1A\e[K     [$( [[ $INSTALL_TTS == true ]] && echo '✅' || echo '⚫' )] TTS"
     fi
 
     read_tty "Models folder? [$HOST_MODELS_DIR_DEFAULT]: " "$HOST_MODELS_DIR_DEFAULT" $YES
@@ -795,6 +808,13 @@ deploy_node() {
 
     if [ "$INSTALL_IMAGE_GEN" = true ]; then
         BUILD_ARGS+=(--build-arg INSTALL_IMAGE_GEN=true)
+    fi
+
+    if [ "$INSTALL_TTS" = true ]; then
+        BUILD_ARGS+=(--build-arg INSTALL_TTS=true)
+    fi
+
+    if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_TTS" == true ]]; then
         BUILD_ARGS+=(--build-arg "TORCH_BACKEND=${TORCH_BACKEND:-cpu}")
         BUILD_ARGS+=(--build-arg "TORCH_CUDA_INDEX=${TORCH_CUDA_INDEX:-cu128}")
         BUILD_ARGS+=(--build-arg "TORCH_ROCM_INDEX=${TORCH_ROCM_INDEX:-rocm6.3}")
@@ -1001,6 +1021,7 @@ parse_host_config() {
     INSTALL_NODE=false
     INSTALL_LLAMA=false
     INSTALL_IMAGE_GEN=false
+    INSTALL_TTS=false
     INSTALL_LLAMA_MODEL=""
     HUB_PORT=""
     NODE_PORT=""
@@ -1061,6 +1082,9 @@ parse_host_config() {
             if [[ "$type" == "text_to_image" || "$name" == "image_gen" ]]; then
                 INSTALL_IMAGE_GEN=true
             fi
+            if [[ "$type" == "text_to_speech" || "$name" == "tts" ]]; then
+                INSTALL_TTS=true
+            fi
         done < <(echo "$host_config" | jq -c '.node.services // [] | .[]')
 
         while IFS= read -r item; do
@@ -1069,6 +1093,9 @@ parse_host_config() {
             name=$(echo "$item" | jq -r '.name')
             if [[ "$type" == "text_to_image" || "$name" == "image_gen" ]]; then
                 INSTALL_IMAGE_GEN=true
+            fi
+            if [[ "$type" == "text_to_speech" || "$name" == "tts" ]]; then
+                INSTALL_TTS=true
             fi
         done < <(echo "$host_config" | jq -c '.node.modules // [] | .[]')
     fi
@@ -1130,7 +1157,7 @@ deploy_components() {
     fi
 
     if $INSTALL_NODE; then
-        if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_LLAMA" == true ]]; then
+        if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_TTS" == true || "$INSTALL_LLAMA" == true ]]; then
             install_nvidia_toolkit
         fi
 
@@ -1463,6 +1490,7 @@ main() {
         deploy_on_hosts
 
         echo "All done! Enjoy Rueckgrat ✨"
+        echo "follow live logs of all services in this compose project: cd rueckgrat && docker compose logs -f"
         print_section
     fi
 }

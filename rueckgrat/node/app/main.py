@@ -4,7 +4,7 @@ import asyncio
 
 from tqdm import tqdm
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from contextlib import asynccontextmanager
 from pathlib import Path
 import os
@@ -16,7 +16,7 @@ from app.common import (
     get_logger, set_log_level, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse, 
     ModelInfo, GetModelsResponse, InstallModelResponse, InstallModelRequest, 
     GetModelURLResponse, GetModelResponse, RegisteredModel, GetRegisteredModelsResponse,
-    MessageQueue
+    MessageQueue, NodeTTSRequest
 )
 logger = get_logger()
 
@@ -38,6 +38,12 @@ async def lifespan(app: FastAPI):
         app.state.image_gen = ImageGen()  
     else:
         app.state.image_gen = None
+
+    if os.getenv("USE_TTS") == "true":
+        from app.utils.tts import TextToSpeech
+        app.state.tts = TextToSpeech()  # model loads lazily on first request
+    else:
+        app.state.tts = None
 
     # keep image cache clean
     app.state.cleanup_worker = CleanupWorker(folder="/node/images")
@@ -93,6 +99,17 @@ def image(request: ImageRequest):
     if not response:
         logger.error("failed to generate image with comfyui")
     return response
+
+@app.post("/tts")
+def tts(request: NodeTTSRequest):
+    if not app.state.tts:
+        raise HTTPException(status_code=503, detail="Node has no tts module loaded")
+    try:
+        wav = app.state.tts.speak(request.text, request.voice, request.exaggeration, request.cfg_weight)
+    except Exception as e:
+        logger.error(f"tts failed: {e!r}")
+        raise HTTPException(status_code=500, detail="tts failed")
+    return Response(content=wav, media_type="audio/wav")
 
 @app.get("/downloads/{file_path:path}")
 async def download_file(file_path: str):

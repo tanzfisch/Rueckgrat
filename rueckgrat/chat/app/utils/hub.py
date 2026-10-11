@@ -589,6 +589,24 @@ class Hub:
         return False
 
     @classmethod
+    def tts(cls, text: str, voice: str = "") -> Optional[bytes]:
+        """ask the hub to speak text, returns wav bytes or None"""
+        try:
+            response = requests.post(
+                f"{cls.url}/tts",
+                json={"text": text, "voice": voice},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=240,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.content
+            logger.error(f"tts - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to tts {repr(e)}")
+        return None
+
+    @classmethod
     def get_model(cls, model_name: str, model_path: Path):
         url = f"{cls.url}/models/{model_name}/url"
 

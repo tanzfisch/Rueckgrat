@@ -22,11 +22,11 @@ class Text_To_Speech:
                 cls._current_proc.wait()
 
     @classmethod
-    def speak(cls, text: str, model: str = ""):
+    def speak(cls, text: str, voice: str = ""):
         if not text.strip():
             return
 
-        logger.info(f"prep speech \"{Utils.shorten(text)}\" with {model}")
+        logger.info(f"prep speech \"{Utils.shorten(text)}\" with voice \"{voice or 'default'}\"")
 
         try:
             cls.kill_current_speech()
@@ -34,7 +34,7 @@ class Text_To_Speech:
             command = [
                 sys.executable, "-m", "app.audio.text_to_speech_task",
                 "--text", text,
-                "--model", model,
+                "--voice", voice,
                 "--hub-url", Hub.url,
                 "--token", Hub.access_token,
                 "--cert", str(Hub.server_cert or ""),

@@ -10,7 +10,7 @@ import numpy as np
 from faster_whisper import WhisperModel
 import torch
 
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.security import HTTPBearer
 
@@ -25,7 +25,7 @@ from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
-from app.common import get_logger, set_log_level, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse
+from app.common import get_logger, set_log_level, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
 logger = get_logger()
 
 async def _load_whisper(app: FastAPI):
@@ -328,6 +328,14 @@ def get_messages(conversation_id: int, request: GetMessagesRequest, username: st
 def get_messages(message_id: int, username: str = Depends(get_current_user)):
     attachments = app.state.db.get_attachments_for_message(message_id)
     return {"attachments": attachments}
+
+########### text to speech
+@app.post("/tts")
+def text_to_speech(request: HubTTSRequest, username: str = Depends(get_current_user)):
+    wav = app.state.infrastructure.tts(request.text, request.voice)
+    if wav is None:
+        raise HTTPException(status_code=503, detail="text to speech not available")
+    return Response(content=wav, media_type="audio/wav")
 
 ########### model handling
 @app.get("/models/{model_name}/url", response_model=GetModelURLResponse)
