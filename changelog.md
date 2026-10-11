@@ -5,7 +5,7 @@ Changelog
 ------
 
 - #11 text to speech moved from client side piper to chatterbox running as a node service
-      animation in ui when speaking user detected
+- #81 animation in ui when speaking user detected
 
 0.14.1
 ------
