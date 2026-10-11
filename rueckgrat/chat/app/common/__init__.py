@@ -3,7 +3,8 @@ from .download_queue import DownloadQueue, DownloadJob
 from .common_types import (
     ChatRequest, ChatResponse, ImageRequest, ImageResponse, ChatRequestLlama, 
     GetMessagesRequest, ModelInfo, GetModelsResponse, InstallModelRequest, InstallModelResponse,
-    GetModelURLResponse, GetModelURLResponse, GetModelResponse, RegisteredModel, GetRegisteredModelsResponse
+    GetModelURLResponse, GetModelURLResponse, GetModelResponse, RegisteredModel, GetRegisteredModelsResponse,
+    NodeTTSRequest, HubTTSRequest
 )
 from .utils import Utils
 from .message_queue import MessageQueue
@@ -31,5 +32,7 @@ __all__ = [
     "GetModelURLResponse",
     "GetModelResponse",
     "RegisteredModel",
-    "GetRegisteredModelsResponse"
+    "GetRegisteredModelsResponse",
+    "NodeTTSRequest",
+    "HubTTSRequest"
 ]

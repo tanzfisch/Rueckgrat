@@ -86,6 +86,9 @@ class Infrastructure:
         if not "text_to_image" in self.node_by_type:
             logger.warning("couldn't find text_to_image generator")        
 
+        if not "text_to_speech" in self.node_by_type:
+            logger.warning("couldn't find text_to_speech generator")
+
     def get_status(self) -> StatusResult:
         # the websocket supervisor already tracks every node, no need to poll them over http
         return StatusResult([
@@ -172,6 +175,24 @@ class Infrastructure:
             return None        
 
         return str(filepath)
+
+    def tts(self, text: str, voice: str = "") -> Optional[bytes]:
+        """forward a speech request to the tts node, returns wav bytes or None"""
+        if not "text_to_speech" in self.node_by_type:
+            logger.error("no text to speech generator available")
+            return None
+
+        node = self.node_by_type["text_to_speech"]
+        url = f"http://{node.addr}:{node.port}/tts"
+        try:
+            response = requests.post(url, json={"text": text, "voice": voice}, timeout=240)
+            if response.status_code != 200:
+                logger.error(f"failed tts request: {response.status_code} {response.reason}")
+                return None
+            return response.content
+        except Exception as e:
+            logger.error(f"failed to get a tts response {repr(e)}")
+            return None
 
     @staticmethod
     def _error_response(conversation_id: int, error: str) -> str:

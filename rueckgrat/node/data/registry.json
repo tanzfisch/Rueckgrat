@@ -68,6 +68,38 @@
     "install_path": "voices/en_US-hfc_female-medium"
   },  
 
+  "chatterbox": {
+    "description": "Resemble AI Chatterbox, English zero-shot voice cloning",
+    "type": "tts",
+    "compatibility": [
+      "chatterbox-tts"
+    ],
+    "comment": "load with ChatterboxTTS.from_local, conds.pt is the built-in default voice",
+    "files": [
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/ve.safetensors",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/t3_cfg.safetensors",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/s3gen.safetensors",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/tokenizer.json",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/conds.pt",
+        "path": ""
+      }
+    ],
+    "install_path": "voices/chatterbox"
+  },
+
  "lustifySDXLNSFW_ggwpV7": {
     "description": "",
     "type": "image",

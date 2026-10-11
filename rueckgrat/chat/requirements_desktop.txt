@@ -13,7 +13,6 @@ click
 tqdm
 pydantic
 
-piper-tts
 onnxruntime
 sounddevice
 soundfile
