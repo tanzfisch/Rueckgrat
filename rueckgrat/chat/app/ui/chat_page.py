@@ -41,6 +41,10 @@ class ChatPage(BasePage):
             expand=True,
             on_focus=lambda e: setattr(self, "_input_focused", True),
             on_blur=lambda e: setattr(self, "_input_focused", False),
+            text_style=ft.TextStyle(
+                font_family="DejaVu Sans",
+                font_family_fallback=["Noto Color Emoji"],
+            ),            
         )
 
         self.mic_btn = ft.IconButton(
