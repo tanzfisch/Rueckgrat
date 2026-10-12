@@ -65,8 +65,10 @@ class Text_To_Speech:
             with cls._proc_lock:
                 generation = cls._generation
             args = (cls._cleanup_for_speech(text), voice, generation)
-            if cls._page:
-                # run_thread sets flet's page context, so services like flet_audio.Audio register themselves
+            if cls._page and cls._is_mobile():
+                # run_thread sets flet's page context, so services like flet_audio.Audio register themselves.
+                # mobile only: run_thread workers are not daemon threads, on desktop they would block
+                # interpreter exit until aplay finished, so the atexit kill_current_speech came too late
                 cls._page.run_thread(cls._run_speech, *args)
             else:
                 threading.Thread(target=cls._run_speech, args=args, daemon=True).start()

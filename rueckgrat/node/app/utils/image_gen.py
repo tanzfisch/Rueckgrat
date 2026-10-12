@@ -8,6 +8,9 @@ from app.utils import ModelRegistry
 from app.common import get_logger, ImageRequest, ImageResponse
 logger = get_logger()
 
+# default sdxl configs from stabilityai/stable-diffusion-xl-base-1.0, no weights
+SDXL_BASE_CONFIG_DIR = Path("/node/models/image_gen/stable-diffusion-xl-base-1.0-config")
+
 class ImageGen:
     def __init__(self):
         self.device = self._pick_device()
@@ -89,7 +92,16 @@ class ImageGen:
         logger.info(f"loading model {model} dtype={dtype} device={self.device} ...")
 
         cls = FluxPipeline if is_flux else StableDiffusionXLPipeline
-        pipe = cls.from_single_file(str(model), torch_dtype=dtype)
+        if is_flux:
+            pipe = cls.from_single_file(str(model), torch_dtype=dtype)
+        else:
+            # use the model's own pipeline configs next to the safetensors (see registry.json),
+            # models without their own (e.g. lustify) fall back to the default sdxl base configs
+            config_dir = Path(model).parent
+            if not (config_dir / "model_index.json").exists():
+                config_dir = SDXL_BASE_CONFIG_DIR
+            logger.debug(f"sdxl pipeline config from {config_dir}")
+            pipe = cls.from_single_file(str(model), torch_dtype=dtype, config=str(config_dir), local_files_only=True)
         pipe.to(self.device)
 
         if self.device == "cuda":

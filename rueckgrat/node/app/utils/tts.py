@@ -1,3 +1,4 @@
+import copy
 import io
 import re
 from pathlib import Path
@@ -9,7 +10,7 @@ import torch
 from app.common import get_logger
 logger = get_logger()
 
-VOICES_DIR = Path("/node/data/voices")
+VOICES_DIR = Path("/node/voices")
 MODEL_DIR = Path("/node/models/voices/chatterbox")  # installed via registry.json
 MODEL_FILES = ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]
 
@@ -20,6 +21,7 @@ class TextToSpeech:
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model = None
+        self.default_conds = None  # chatterbox built-in voice, saved before any voice overwrites it
         self.lock = Lock()
         logger.info(f"startup tts interface on {self.device}")
 
@@ -32,6 +34,7 @@ class TextToSpeech:
             else:
                 logger.warning(f"chatterbox model not found in {MODEL_DIR}, downloading from huggingface")
                 self.model = ChatterboxTTS.from_pretrained(device=self.device)
+            self.default_conds = copy.deepcopy(self.model.conds)
         return self.model
 
     @staticmethod
@@ -49,10 +52,14 @@ class TextToSpeech:
         """returns the speech as wav file bytes"""
         with self.lock:  # one generation at a time on the gpu
             model = self._load()
+            voice_path = self._voice_path(voice)
+            if voice_path is None:
+                # chatterbox keeps the last voice in model.conds, so without this an empty voice would reuse it
+                model.conds = copy.deepcopy(self.default_conds)
             logger.info("generate audio")
             wav = model.generate(
                 text,
-                audio_prompt_path=self._voice_path(voice),
+                audio_prompt_path=voice_path,
                 exaggeration=exaggeration,
                 cfg_weight=cfg_weight,
             )

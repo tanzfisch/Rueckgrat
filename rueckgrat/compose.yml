@@ -23,6 +23,7 @@ services:
     volumes:
       - hub_db:/hub/db
       - hub_images:/hub/images
+      - hub_voices:/hub/voices
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
       - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/hub/models
@@ -47,7 +48,7 @@ services:
       - node_images:/node/images
       - ./config:/node/config
       - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/node/models
-      - ${HOST_VOICES_DIR:-/media/martin/data1/voices}:/node/data/voices
+      - node_voices:/node/voices
       - ./chat/app/common:/node/app/common
     stdin_open: true
     tty: true
@@ -82,6 +83,8 @@ volumes:
   caddy_data:
   caddy_config:
   node_images:
+  node_voices:
   hub_db:
   hub_images:
+  hub_voices:
   chat_cache:

@@ -4,7 +4,7 @@ from pathlib import Path
 from app.ui.theme import STYLES
 
 from app.ui import BasePage
-from app.ui.widgets import OneLineBubble, ContactCard, ContactHeader
+from app.ui.widgets import OneLineBubble, ContactCard, ContactHeader, MessageBox
 from app.utils import Hub, Contact, Paths
 from app.common import get_logger, Utils
 
@@ -134,21 +134,16 @@ class ContactsPage(BasePage):
         self.navigator("conversations", contact_id=contact_id)
 
     def delete_contact(self, contact_id):
-        def confirm(e):
-            self.page.pop_dialog()
+        def delete():
             Hub.delete_contact(contact_id)
             self.load_contacts()
 
-        self.page.show_dialog(
-            ft.AlertDialog(
-                modal=True,
-                title=ft.Text("Delete contact"),
-                content=ft.Text("Are you sure you want to delete this contact?"),
-                actions=[
-                    ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog(), style=STYLES["button"]["style"]),
-                    ft.TextButton("Delete", on_click=confirm, style=STYLES["button"]["style"]),
-                ],
-            )
+        MessageBox.confirm(
+            self.page,
+            "Are you sure you want to delete this contact?",
+            on_confirm=delete,
+            title="Delete contact",
+            ok_text="Delete",
         )
 
     def edit_contact(self, contact_id):
