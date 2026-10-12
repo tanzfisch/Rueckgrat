@@ -153,6 +153,7 @@ def main():
 
     def flet_main(page: ft.Page):
         apply_theme(page)
+        Text_To_Speech.attach(page)
         page.padding = 0
         App(page, config.has_config())
 

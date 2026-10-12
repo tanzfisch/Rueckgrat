@@ -13,7 +13,7 @@ class RueckgratConfig:
             "rueckgrat_hub_port": "443"
         },
         "chat": {
-            "log_level": "ERROR"
+            "log_level": "DEBUG"
         }
     }
 

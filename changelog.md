@@ -6,6 +6,8 @@ Changelog
 
 - #11 text to speech moved from client side piper to chatterbox running as a node service
 - #81 animation in ui when speaking user detected
+- #82 fixed speech playback on android, wav is played in app with flet-audio instead of aplay
+      speech runs in page.run_thread so the player connects to the page, player released after playback, added flet-audio 1.0.4 dependency
 
 0.14.1
 ------
