@@ -603,6 +603,10 @@ select_hosts_and_components() {
                 services_json=$(jq '. + [{type: "text_to_speech", name: "tts"}]' <<< "$services_json")
             fi
 
+            if $INSTALL_STT; then
+                services_json=$(jq '. + [{type: "speech_to_text", name: "stt"}]' <<< "$services_json")
+            fi
+
             host_json=$(jq \
                 --arg port "$NODE_PORT" \
                 --argjson services "$services_json" \
@@ -637,6 +641,7 @@ select_components() {
     INSTALL_LLAMA_MODEL=""
     INSTALL_IMAGE_GEN=false
     INSTALL_TTS=false
+    INSTALL_STT=false
     REGISTRY_JSON="${REGISTRY_JSON:-$WORKING_DIR/rueckgrat/node/data/registry.json}"
 
     echo "Select components:"
@@ -706,6 +711,10 @@ select_components() {
         read_tty "Install text to speech (Chatterbox) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_TTS=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_TTS == true ]] && echo '✅' || echo '⚫' )] TTS"
+
+        read_tty "Install speech to text (faster-whisper) on Node? (Y/n): " "Y"
+        [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_STT=true
+        echo -e "\e[1A\e[K     [$( [[ $INSTALL_STT == true ]] && echo '✅' || echo '⚫' )] STT"
     fi
 
     read_tty "Models folder? [$HOST_MODELS_DIR_DEFAULT]: " "$HOST_MODELS_DIR_DEFAULT" $YES
@@ -812,6 +821,10 @@ deploy_node() {
 
     if [ "$INSTALL_TTS" = true ]; then
         BUILD_ARGS+=(--build-arg INSTALL_TTS=true)
+    fi
+
+    if [ "$INSTALL_STT" = true ]; then
+        BUILD_ARGS+=(--build-arg INSTALL_STT=true)
     fi
 
     if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_TTS" == true ]]; then
@@ -1022,6 +1035,7 @@ parse_host_config() {
     INSTALL_LLAMA=false
     INSTALL_IMAGE_GEN=false
     INSTALL_TTS=false
+    INSTALL_STT=false
     INSTALL_LLAMA_MODEL=""
     HUB_PORT=""
     NODE_PORT=""
@@ -1085,6 +1099,9 @@ parse_host_config() {
             if [[ "$type" == "text_to_speech" || "$name" == "tts" ]]; then
                 INSTALL_TTS=true
             fi
+            if [[ "$type" == "speech_to_text" || "$name" == "stt" ]]; then
+                INSTALL_STT=true
+            fi
         done < <(echo "$host_config" | jq -c '.node.services // [] | .[]')
 
         while IFS= read -r item; do
@@ -1096,6 +1113,9 @@ parse_host_config() {
             fi
             if [[ "$type" == "text_to_speech" || "$name" == "tts" ]]; then
                 INSTALL_TTS=true
+            fi
+            if [[ "$type" == "speech_to_text" || "$name" == "stt" ]]; then
+                INSTALL_STT=true
             fi
         done < <(echo "$host_config" | jq -c '.node.modules // [] | .[]')
     fi
@@ -1157,7 +1177,7 @@ deploy_components() {
     fi
 
     if $INSTALL_NODE; then
-        if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_TTS" == true || "$INSTALL_LLAMA" == true ]]; then
+        if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_TTS" == true || "$INSTALL_STT" == true || "$INSTALL_LLAMA" == true ]]; then
             install_nvidia_toolkit
         fi
 

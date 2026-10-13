@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.16.0
+------
+
+- #75 moving faster whisper from hub to node
+
 0.15.0
 ------
 

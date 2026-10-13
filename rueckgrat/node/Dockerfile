@@ -13,12 +13,14 @@ COPY requirements_base.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements_base.txt
 
-COPY requirements_image_gen.txt requirements_tts.txt ./
+COPY requirements_image_gen.txt requirements_tts.txt requirements_stt.txt ./
 ARG INSTALL_IMAGE_GEN=false
 ARG INSTALL_TTS=false
+ARG INSTALL_STT=false
 ARG TORCH_BACKEND=cpu
 ENV USE_IMAGE_GEN=$INSTALL_IMAGE_GEN
 ENV USE_TTS=$INSTALL_TTS
+ENV USE_STT=$INSTALL_STT
 ENV TORCH_BACKEND=$TORCH_BACKEND
 
 ARG TORCH_CUDA_INDEX=cu128
@@ -40,6 +42,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     if [ "$INSTALL_TTS" = "true" ]; then \
       pip install -r requirements_tts.txt && \
       pip install --no-deps chatterbox-tts; \
+    fi && \
+    if [ "$INSTALL_STT" = "true" ]; then \
+      pip install -r requirements_stt.txt; \
     fi
 
 ARG INSTALL_LLAMA=false
