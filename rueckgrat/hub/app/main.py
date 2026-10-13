@@ -10,7 +10,6 @@ import hashlib
 from tqdm import tqdm
 from pathlib import Path
 import numpy as np
-from faster_whisper import WhisperModel
 import torch
 
 from fastapi.responses import StreamingResponse, Response
@@ -31,24 +30,6 @@ from datetime import datetime, timedelta, timezone
 from app.common import get_logger, set_log_level, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
 logger = get_logger()
 
-async def _load_whisper(app: FastAPI):
-    infrastructure = app.state.infrastructure
-    while True:
-        node = await infrastructure.wait_for_any_node()
-        logger.info(f"node {node.addr}:{node.port} is up, installing whisper models")
-        ok_medium = await asyncio.to_thread(infrastructure.install_model, "faster-whisper-medium")
-        ok_small = await asyncio.to_thread(infrastructure.install_model, "faster-whisper-small")
-        if ok_medium and ok_small:
-            break
-        logger.info("whisper models not installed yet, retrying in 30s")
-        await asyncio.sleep(30)
-
-    app.state.whisper_model = await asyncio.to_thread(
-        WhisperModel, "/hub/models/stt/faster-whisper-medium", device="cpu", compute_type="int8")
-    app.state.whisper_model_fast = await asyncio.to_thread(
-        WhisperModel, "/hub/models/stt/faster-whisper-small", device="cpu", compute_type="int8")
-    logger.info("whisper loaded")
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("connecting infrastructure")
@@ -67,14 +48,6 @@ async def lifespan(app: FastAPI):
         job_queue=app.state.job_queue
     )
 
-    logger.info("loading whisper")
-    app.state.whisper_lock = asyncio.Lock()
-
-    # whisper models come from a node, so load them in the background once a node is up
-    app.state.whisper_model = None
-    app.state.whisper_model_fast = None
-    app.state.whisper_task = asyncio.create_task(_load_whisper(app))
-
     logger.info("loading vad")
     app.state.vad = load_silero_vad(onnx=True)
     torch.set_num_threads(1)
@@ -83,7 +56,6 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    app.state.whisper_task.cancel()
     app.state.job_queue.stop()
 
     logger.info("hub shut down")
@@ -576,20 +548,14 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
     meta = {"sample_rate": 16000, "channels": 1, "encoding": "pcm_s16le"}
     frame = 512
 
-    async def transcribe(model, wav, kind: str):
+    async def transcribe(wav, kind: str):
         nonlocal busy
-        if model is None:
-            logger.info("speech recognition not ready yet, waiting for whisper to load")
-            return
-        if kind == "partial" and (busy or app.state.whisper_lock.locked()):
+        if kind == "partial" and busy:
             return
         busy = True
         try:
-            async with app.state.whisper_lock:
-                segments, _ = await asyncio.to_thread(
-                    model.transcribe, wav, vad_filter=False
-                )
-            text = "".join(s.text for s in segments).strip()
+            pcm16 = (np.clip(wav, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+            text = await asyncio.to_thread(app.state.infrastructure.stt, pcm16, kind)
             if text:
                 await websocket.send_json({"type": kind, "text": text})
                 logger.debug(text)
@@ -630,13 +596,13 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
                     if spoken_ms >= PARTIAL_MS:
                         spoken_ms = 0
                         wav = np.concatenate(utterance)
-                        await transcribe(app.state.whisper_model_fast, wav, "partial")
+                        await transcribe(wav, "partial")
                 elif voiced:
                     silence += frame / 16
                     utterance.append(piece)
                     if silence >= SILENCE_MS:
                         wav = np.concatenate(utterance)
-                        await transcribe(app.state.whisper_model, wav, "final")
+                        await transcribe(wav, "final")
                         utterance = []
                         voiced = False
                         silence = 0

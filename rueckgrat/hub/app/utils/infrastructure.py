@@ -89,6 +89,9 @@ class Infrastructure:
         if not "text_to_speech" in self.node_by_type:
             logger.warning("couldn't find text_to_speech generator")
 
+        if not "speech_to_text" in self.node_by_type:
+            logger.warning("couldn't find speech_to_text recognizer")
+
     def get_status(self) -> StatusResult:
         # the websocket supervisor already tracks every node, no need to poll them over http
         return StatusResult([
@@ -195,6 +198,31 @@ class Infrastructure:
             return response.content
         except Exception as e:
             logger.error(f"failed to get a tts response {repr(e)}")
+            return None
+
+    def stt(self, pcm16: bytes, kind: str) -> Optional[str]:
+        """forward 16 kHz mono pcm_s16le audio to the stt node, returns the text or None.
+        kind: final (accurate model) or partial (fast model)"""
+        if not "speech_to_text" in self.node_by_type:
+            logger.error("no speech to text recognizer available")
+            return None
+
+        node = self.node_by_type["speech_to_text"]
+        url = f"http://{node.addr}:{node.port}/stt"
+        try:
+            response = requests.post(
+                url,
+                params={"kind": kind},
+                data=pcm16,
+                headers={"Content-Type": "application/octet-stream"},
+                timeout=120,
+            )
+            if response.status_code != 200:
+                logger.error(f"failed stt request: {response.status_code} {response.reason}")
+                return None
+            return response.json().get("text", "")
+        except Exception as e:
+            logger.error(f"failed to get a stt response {repr(e)}")
             return None
 
     def drop_voice(self, voice: str) -> bool:

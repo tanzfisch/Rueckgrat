@@ -48,6 +48,12 @@ async def lifespan(app: FastAPI):
     else:
         app.state.tts = None
 
+    if os.getenv("USE_STT") == "true":
+        from app.utils.stt import SpeechToText
+        app.state.stt = SpeechToText()  # models load lazily on first request
+    else:
+        app.state.stt = None
+
     # keep image cache clean
     app.state.cleanup_worker = CleanupWorker(folder="/node/images")
     app.state.cleanup_worker.start()
@@ -113,6 +119,31 @@ def tts(request: NodeTTSRequest):
         logger.error(f"tts failed: {e!r}")
         raise HTTPException(status_code=500, detail="tts failed")
     return Response(content=wav, media_type="audio/wav")
+
+@app.post("/stt")
+async def stt(request: Request, kind: str = "final"):
+    """body: raw 16 kHz mono pcm_s16le audio. kind: final (accurate model) or partial (fast model)"""
+    if not app.state.stt:
+        raise HTTPException(status_code=503, detail="Node has no stt module loaded")
+    from app.utils.stt import STT_MODELS
+    if kind not in STT_MODELS:
+        raise HTTPException(status_code=400, detail=f"unknown kind {kind}")
+    model_name = STT_MODELS[kind]
+    registry = ModelRegistry()
+    if not registry.is_installed(model_name):
+        try:
+            await asyncio.to_thread(_install_model, model_name)
+        except Exception as e:
+            logger.error(f"Model installation failed for {model_name}: {e}")
+            raise HTTPException(status_code=503, detail=f"stt model {model_name} not installed")
+
+    pcm16 = await request.body()
+    try:
+        text = await asyncio.to_thread(app.state.stt.transcribe, pcm16, kind, registry.get_install_path(model_name))
+    except Exception as e:
+        logger.error(f"stt failed: {e!r}")
+        raise HTTPException(status_code=500, detail="stt failed")
+    return {"text": text}
 
 VOICE_ID_PATTERN = r"[\w.-]+"
 MAX_VOICE_BYTES = 20 * 1024 * 1024
