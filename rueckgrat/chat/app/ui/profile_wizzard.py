@@ -143,7 +143,6 @@ class WizardProfilePage(ft.Column):
     def __init__(self, profile: dict = None, name: str = None, simple: bool = False):
         super().__init__(expand=True, spacing=14, scroll=ft.ScrollMode.AUTO)
         self.profile = profile
-        # simple: new character page with name, gender, voice, backstory and sfw only, the hub infers the rest
         self.simple = simple
 
         if name:

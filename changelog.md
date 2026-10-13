@@ -10,6 +10,7 @@ Changelog
       speech runs in page.run_thread so the player connects to the page, player released after playback, added flet-audio 1.0.4 dependency
 - #80 allow user to upload voice samples for characters
 - #62 simplified character generation ui and backend
+- #83 improved character editing
 
 0.14.1
 ------
