@@ -1,11 +1,12 @@
 # Develop Rückgrat
 
-1. install once (creates `rueckgrat/config/infrastructure.json`)
+1. install once manually with your settings
 2. change code
 3. optional: `./install.sh -s` to rsync this tree to remote hosts from that config
 4. run `./dev.sh` on each machine to restart that host's containers and follow logs
    run `cd rueckgrat/chat && ./run.sh` to start the native chat
 5. run `./stop.sh` to stop all docker services
+
 
 ## Chat
 

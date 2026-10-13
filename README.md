@@ -87,7 +87,7 @@ cd Rueckgrat
 ./install.sh
 ```
 
-Config-driven install. Walk the installer until it recaps the plan; the written file is `rueckgrat/config/infrastructure.json`. Example:
+Config-driven install. Walk the installer manually until it recaps the plan; the written file is `rueckgrat/config/infrastructure.json`. Make a copy for later use without manually setting it again. Example:
 
 ```bash
 ./install.sh -c rueckgrat/config/config_example.json -y

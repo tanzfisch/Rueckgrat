@@ -92,8 +92,6 @@ class ChatDB:
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
 
-        # uploaded reference voices for tts, the wav lives in /hub/voices/<file_key>
-        # contact_id stays NULL until the contact is created
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS voices (
             id TEXT PRIMARY KEY,
@@ -108,7 +106,13 @@ class ChatDB:
             FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL
         )""")
 
-        # at most one voice per contact, any number of voices without contact
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS images (
+            file_key TEXT PRIMARY KEY,
+            generation TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )""")
+
         cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_voices_contact
             ON voices(contact_id) WHERE contact_id IS NOT NULL
@@ -273,6 +277,29 @@ class ChatDB:
                 logger.error(f"failed creating contact: {e}")
                 
         return -1    
+
+    def save_image_generation(self, file_key: str, generation: dict) -> bool:
+        """stores everything that went into an image (prompts, seed, model, size, steps, cfg ...) as json"""
+        with self.get_connection() as conn:
+            try:
+                conn.execute("""
+                    INSERT OR REPLACE INTO images (file_key, generation)
+                    VALUES (?, ?)
+                """, (file_key, json.dumps(generation)))
+                conn.commit()
+                return True
+            except Exception as e:
+                logger.error(f"Failed saving generation for image {file_key}: {e}")
+        return False
+
+    def get_image_generation(self, file_key: str) -> dict | None:
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("SELECT generation FROM images WHERE file_key = ?", (file_key,)).fetchone()
+                return json.loads(row[0]) if row else None
+            except Exception as e:
+                logger.error(f"Failed reading generation for image {file_key}: {e}")
+        return None
 
     def add_contact_image(self, contact_id: int, file_name: str, image_type: str) -> int:
         with self.get_connection() as conn:
@@ -614,6 +641,46 @@ class ChatDB:
             except Exception as e:
                 logger.error(f"failed deleting conversation: {e}")
 
+        return False
+
+    def owns_contact(self, user_id: int, contact_id: int) -> bool:
+        """False for foreign and unknown contacts alike"""
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("SELECT 1 FROM contacts WHERE id = ? AND user_id = ?", (contact_id, user_id)).fetchone()
+                return row is not None
+            except Exception as e:
+                logger.error(f"failed checking contact owner: {e}")
+        return False
+
+    def owns_conversation(self, user_id: int, conversation_id: int) -> bool:
+        """False for foreign and unknown conversations alike"""
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("SELECT 1 FROM conversations WHERE id = ? AND user_id = ?", (conversation_id, user_id)).fetchone()
+                return row is not None
+            except Exception as e:
+                logger.error(f"failed checking conversation owner: {e}")
+        return False
+
+    def owns_message(self, user_id: int, message_id: int) -> bool:
+        """False for foreign and unknown messages alike, a message belongs to the owner of its conversation"""
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("SELECT 1 FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.id = ? AND c.user_id = ?", (message_id, user_id)).fetchone()
+                return row is not None
+            except Exception as e:
+                logger.error(f"failed checking message owner: {e}")
+        return False
+
+    def owns_image(self, user_id: int, file_key: str) -> bool:
+        """False for foreign and unknown images alike, an image belongs to the owner of its contact"""
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("SELECT 1 FROM contact_images ci JOIN contacts c ON c.id = ci.contact_id WHERE ci.file_key = ? AND c.user_id = ?", (file_key, user_id)).fetchone()
+                return row is not None
+            except Exception as e:
+                logger.error(f"failed checking image owner: {e}")
         return False
 
     def delete_contact(self, contact_id: int) -> bool:

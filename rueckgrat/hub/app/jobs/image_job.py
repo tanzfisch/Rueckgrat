@@ -5,14 +5,18 @@ from app.common import get_logger, ImageRequest
 logger = get_logger()
 
 class ImageJob(Job):
-    def __init__(self, request: ImageRequest, infrastructure):
+    def __init__(self, request: ImageRequest, infrastructure, db=None):
         super().__init__()
         self.request = request
         self.infrastructure = infrastructure
+        self.db = db
         self.response = {}
 
     def execute(self) -> None:
         try:
+            if self.db and self.request.output:
+                self.db.save_image_generation(self.request.output, self.request.model_dump(exclude={"output"}))
+
             image_filename = self.infrastructure.image(self.request)
             image_path = f"images/{image_filename}"
 
