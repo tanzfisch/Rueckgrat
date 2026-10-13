@@ -244,7 +244,7 @@ class ChatPage(BasePage):
             logger.error(f"failed to append to history: {repr(e)}")            
 
     def replay(self):
-        Text_To_Speech.speak(text=self._cleanup_for_speech(self.replay_content))
+        Text_To_Speech.speak(text=self._cleanup_for_speech(self.replay_content), voice=self.contact.get_voice_id())
 
     def _remove_excess_linebreaks(self, text: str) -> str:
         code_block_pattern = r"```.*?```"
@@ -320,7 +320,7 @@ class ChatPage(BasePage):
                         self._append_history(role, content, str(image_path))
                     else:
                         self._append_history(role, content)
-                    Text_To_Speech.speak(text=self._cleanup_for_speech(content))
+                    Text_To_Speech.speak(text=self._cleanup_for_speech(content), voice=self.contact.get_voice_id())
         except Exception as e:
             logger.error(f"failed to handle incomming message: {e}")
 

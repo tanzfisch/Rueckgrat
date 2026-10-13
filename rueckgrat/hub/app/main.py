@@ -4,6 +4,9 @@ import random
 import asyncio
 import threading
 import os
+import io
+import wave
+import hashlib
 from tqdm import tqdm
 from pathlib import Path
 import numpy as np
@@ -11,7 +14,7 @@ from faster_whisper import WhisperModel
 import torch
 
 from fastapi.responses import StreamingResponse, Response
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer
 
 from pydantic import BaseModel
@@ -336,6 +339,63 @@ def text_to_speech(request: HubTTSRequest, username: str = Depends(get_current_u
     if wav is None:
         raise HTTPException(status_code=503, detail="text to speech not available")
     return Response(content=wav, media_type="audio/wav")
+
+########### voice handling
+MAX_VOICE_UPLOAD_BYTES = 20 * 1024 * 1024
+
+@app.post("/voices")
+async def upload_voice(request: Request, username: str = Depends(get_current_user)):
+    """
+    raw wav bytes in the request body (content-type audio/wav), no multipart.
+    saves the file as /hub/voices/<uuid>.wav and returns the uuid. the voice is not linked to a contact yet
+    """
+    user_id = app.state.db.get_user_id(username)
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty upload")
+    if len(data) > MAX_VOICE_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="voice file too large")
+
+    try:
+        with wave.open(io.BytesIO(data), "rb") as w:
+            frames, sample_rate = w.getnframes(), w.getframerate()
+            if w.getnchannels() < 1 or frames <= 0 or sample_rate <= 0:
+                raise ValueError("no audio")
+            duration = frames / sample_rate
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"not a valid wav file: {e}")
+
+    # same file uploaded again by this user -> reuse the stored voice
+    content_hash = hashlib.sha256(data).hexdigest()
+    existing_id = app.state.db.find_voice_by_hash(user_id, content_hash)
+    if existing_id and (ChatDB.VOICES_DIR / f"{existing_id}.wav").exists():
+        logger.debug(f"reusing voice {existing_id} for user {user_id} (same content hash)")
+        return {"status": "ok", "voice_id": existing_id}
+
+    voice_id = app.state.db.add_voice(user_id, sample_rate, duration, content_hash=content_hash)
+    if voice_id is None:
+        raise HTTPException(status_code=500, detail="failed to store voice")
+
+    path = ChatDB.VOICES_DIR / f"{voice_id}.wav"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    except Exception as e:
+        logger.error(f"failed writing voice file {path}: {e}")
+        app.state.db.remove_voice(voice_id)
+        raise HTTPException(status_code=500, detail="failed to store voice")
+
+    logger.debug(f"stored voice {voice_id} for user {user_id} ({duration:.1f}s, {sample_rate} Hz)")
+    return {"status": "ok", "voice_id": voice_id}
+
+@app.delete("/voices/{voice_id}")
+def delete_voice(voice_id: str, username: str = Depends(get_current_user)):
+    # only the owner can remove a voice, an unknown or foreign id looks the same to the client
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.remove_voice(voice_id, user_id):
+        raise HTTPException(status_code=404, detail="voice not found")
+    app.state.infrastructure.drop_voice(voice_id)
+    return {"status": "ok", "voice_id": voice_id}
 
 ########### model handling
 @app.get("/models/{model_name}/url", response_model=GetModelURLResponse)

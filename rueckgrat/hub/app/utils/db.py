@@ -1,5 +1,7 @@
 import sqlite3
 import json
+import uuid
+from pathlib import Path
 
 from app.common import get_logger
 logger = get_logger()
@@ -89,6 +91,28 @@ class ChatDB:
             profile TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
+
+        # uploaded reference voices for tts, the wav lives in /hub/voices/<file_key>
+        # contact_id stays NULL until the contact is created
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS voices (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            contact_id INTEGER DEFAULT NULL,
+            file_key TEXT NOT NULL,
+            sample_rate INTEGER,
+            duration REAL,
+            content_hash TEXT DEFAULT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL
+        )""")
+
+        # at most one voice per contact, any number of voices without contact
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_voices_contact
+            ON voices(contact_id) WHERE contact_id IS NOT NULL
+        """)
 
         conn.commit()
         conn.close()
@@ -749,3 +773,68 @@ class ChatDB:
                 logger.error(f"Failed fetching attachments for message {message_id}: {e}")
         
         return []    
+
+    # ---- voices ---------------------------------------------------------
+    # the wav file lives in VOICES_DIR/<file_key>, the row only knows the file key
+
+    VOICES_DIR = Path("/hub/voices")
+
+    def add_voice(self, user_id: int, sample_rate: int, duration: float, contact_id: int | None = None, file_key: str | None = None, content_hash: str | None = None) -> str | None:
+        """inserts a voice row and returns its uuid, or None on failure. file_key defaults to <uuid>.wav"""
+        voice_id = str(uuid.uuid4())
+        file_key = file_key or f"{voice_id}.wav"
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO voices (id, user_id, contact_id, file_key, sample_rate, duration, content_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (voice_id, user_id, contact_id, file_key, sample_rate, duration, content_hash))
+                conn.commit()
+                return voice_id
+
+            except Exception as e:
+                logger.error(f"failed adding voice for user {user_id}: {e}")
+
+        return None
+
+    def find_voice_by_hash(self, user_id: int, content_hash: str) -> str | None:
+        """returns the id of a voice of this user with the same sha256, or None"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM voices WHERE user_id = ? AND content_hash = ? LIMIT 1", (user_id, content_hash))
+                row = cursor.fetchone()
+                return row["id"] if row else None
+            except Exception as e:
+                logger.error(f"failed looking up voice hash for user {user_id}: {e}")
+        return None
+
+    def remove_voice(self, voice_id: str, user_id: int | None = None) -> bool:
+        """deletes the voice row and its wav file. with user_id only a voice owned by that user is removed"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                if user_id is None:
+                    cursor.execute("SELECT file_key FROM voices WHERE id = ?", (voice_id,))
+                else:
+                    cursor.execute("SELECT file_key FROM voices WHERE id = ? AND user_id = ?", (voice_id, user_id))
+                row = cursor.fetchone()
+                if not row:
+                    logger.warning(f"voice {voice_id} not found")
+                    return False
+
+                cursor.execute("DELETE FROM voices WHERE id = ?", (voice_id,))
+                conn.commit()
+
+            except Exception as e:
+                logger.error(f"failed removing voice {voice_id}: {e}")
+                return False
+
+        # file is removed after the row, a leftover file is harmless, a row without file is not
+        try:
+            (self.VOICES_DIR / row["file_key"]).unlink(missing_ok=True)
+        except Exception as e:
+            logger.error(f"failed deleting voice file {row['file_key']}: {e}")
+
+        return True

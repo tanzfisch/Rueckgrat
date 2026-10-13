@@ -6,8 +6,8 @@ RUN useradd -m nodeuser \
  && groupadd -f video \
  && groupadd -f render \
  && usermod -aG video,render nodeuser \
- && mkdir -p /node/images \
- && chown -R nodeuser:nodeuser /node/images
+ && mkdir -p /node/images /node/voices \
+ && chown -R nodeuser:nodeuser /node/images /node/voices
 
 COPY requirements_base.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \

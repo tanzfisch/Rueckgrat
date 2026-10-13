@@ -1,0 +1,12 @@
+{
+  "voices": [
+    {"id": "ljspeech_female", "name": "LJ (LJSpeech)", "gender": "female", "language": "en",
+     "license": "public domain", "attribution": "none required (LJSpeech 1.1, Keith Ito / LibriVox)",
+     "source_url": "https://huggingface.co/datasets/keithito/lj_speech (utterances LJ001-0001 + LJ001-0002)",
+     "file": "ljspeech_female.wav", "sample_rate": 24000, "duration_s": 11.42},
+    {"id": "librivox_male", "name": "Bob Neufeld (LibriVox)", "gender": "male", "language": "en",
+     "license": "public domain (CC PDM 1.0)", "attribution": "none required (LibriVox: Civil Disobedience by H. D. Thoreau, read by Bob Neufeld)",
+     "source_url": "https://archive.org/download/civil_disobedience_bn_librivox/civildisobedience_01_thoreau.mp3 (57.7s-68.7s)",
+     "file": "librivox_male.wav", "sample_rate": 24000, "duration_s": 10.68}
+  ]
+}

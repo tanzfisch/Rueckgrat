@@ -607,6 +607,36 @@ class Hub:
         return None
 
     @classmethod
+    def upload_voice(cls, wav: bytes | str | Path, gender: str = "") -> Optional[str]:
+        """uploads a wav voice sample to the hub, returns the voice uuid or None"""
+        try:
+            data = wav if isinstance(wav, bytes) else Path(wav).read_bytes()
+        except Exception as e:
+            logger.error(f"failed to read voice file {repr(e)}")
+            return None
+
+        try:
+            response = requests.post(
+                f"{cls.url}/voices",
+                data=data,
+                params={"gender": gender} if gender else None,
+                headers={
+                    "Authorization": f"Bearer {cls.access_token}",
+                    "Content-Type": "audio/wav"
+                },
+                timeout=60,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                voice_id = response.json().get("voice_id")
+                logger.debug(f"uploaded voice. got id {voice_id}")
+                return voice_id
+            logger.error(f"upload_voice - {response.status_code} {response.text}")
+        except Exception as e:
+            logger.error(f"failed to upload_voice {repr(e)}")
+        return None
+
+    @classmethod
     def get_model(cls, model_name: str, model_path: Path):
         url = f"{cls.url}/models/{model_name}/url"
 
