@@ -61,7 +61,7 @@
             "model": "default"
         },
         "tts_parameters": {
-            "piper_voice_model": "en_US-hfc_female-medium"
+            "voice_id": ""
         }
     }
 }

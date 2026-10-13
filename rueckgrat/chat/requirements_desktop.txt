@@ -13,9 +13,9 @@ click
 tqdm
 pydantic
 
-piper-tts
 onnxruntime
 sounddevice
 soundfile
 pip-system-certs
 truststore
+flet-audio==1.0.4

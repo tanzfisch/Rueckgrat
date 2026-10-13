@@ -1,22 +1,31 @@
 Changelog
 =========
 
+0.15.0
+------
+
+- #11 text to speech moved from client side piper to chatterbox running as a node service
+- #81 animation in ui when speaking user detected
+- #82 fixed speech playback on android, wav is played in app with flet-audio instead of aplay
+      speech runs in page.run_thread so the player connects to the page, player released after playback, added flet-audio 1.0.4 dependency
+- #80 allow user to upload voice samples for characters
+- #62 simplified character generation ui and backend
+- #83 improved character editing
+
+0.14.1
+------
+
+- #68 fixed colored emojies
+
 0.14.0
 ------
 
 - #76 configurable models path (during installation)
 - #44 made log level configurable for client
       allows to change log level across the whole system at runtime see /log-level/{level}
-- #78 more flexible llama config per model in registry.json (model_file for split GGUFs, defaults for all LLMs)
-      precedence: host config > registry llama block > installer defaults
-      fixed llama.cpp request handling (reasoning_content, system role, max_tokens)
-      faster reinstalls: fixed flags passed to remote installs (no forced --no-cache), quiet builds, single torch install in node image
+- #78 more flexible llama config per model in registry.json
+      faster reinstalls
 - #73 hub and nodes can start in any order and reconnect automatically after a connection loss
-      in-flight chat streams fail promptly when the node connection drops
-      whisper models are loaded in the background once a node is reachable instead of during hub startup
-      missing nodes are logged as info instead of errors
-      quieter health check: only logs on state changes (missing node warning, unreachable hub error), silent when healthy
-      hub health uses node websocket state instead of polling every node over http
 
 0.13.0
 ------

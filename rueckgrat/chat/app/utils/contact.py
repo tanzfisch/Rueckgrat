@@ -20,9 +20,9 @@ class Contact:
     def get_gender(self) -> str:
         return Utils.get_nested_value(self.data, ["gender"], "")
 
-    def get_voice_model(self) -> str:
+    def get_voice_id(self) -> str:
         return Utils.get_nested_value(
-            self.data, ["profile", "tts_parameters", "piper_voice_model"], ""
+            self.data, ["profile", "tts_parameters", "voice_id"], ""
         )
 
     def get_llm_temperature(self) -> float:

@@ -1,13 +1,15 @@
+import io
 import json
 import os
+import wave
 import random
 import flet as ft
 from app.ui.theme import STYLES
 
 from app.utils import Hub
 from app.ui import BasePage
-from app.ui.widgets import ContactHeader, LabeledSlider, RowSelector
-from app.common import get_logger, Utils
+from app.ui.widgets import ContactHeader, RowSelector, OneLineBubble, MessageBox
+from app.common import get_logger
 
 logger = get_logger()
 
@@ -138,9 +140,10 @@ class WizardProfilePage(ft.Column):
         "obese": f"{ASSETS_DIR}/icons/body_morbidly_obese_light.png",
     }
 
-    def __init__(self, profile: dict = None, name: str = None):
+    def __init__(self, profile: dict = None, name: str = None, simple: bool = False):
         super().__init__(expand=True, spacing=14, scroll=ft.ScrollMode.AUTO)
         self.profile = profile
+        self.simple = simple
 
         if name:
             name_value, name_enabled = name, False
@@ -164,6 +167,10 @@ class WizardProfilePage(ft.Column):
         self.gender = RowSelector({"male": f"{ASSETS_DIR}/icons/male_light.png", "female": f"{ASSETS_DIR}/icons/female_light.png"})
         self.gender.on_selection_changed = self.on_gender_changed
         self.gender.select(profile["gender"] if profile else "male")
+
+        if simple:
+            self._build_simple()
+            return
 
         self.age = RowSelector(self.male_ages)
         if profile:
@@ -210,6 +217,30 @@ class WizardProfilePage(ft.Column):
             self._row("Backstory", self.backstory, top=True),
         ]
 
+    def _build_simple(self):
+        self.backstory = ft.TextField(
+            hint_text="Who are they? Include looks like hair colour, eyes, build, plus personality and what they want from you ...",
+            multiline=True,
+            min_lines=10,
+            max_lines=20,
+            value="",
+            filled=True,
+            bgcolor="#2C2C2C",
+            border_radius=16,
+            border_color="transparent",
+            focused_border_color="#0D7377",
+            content_padding=16,
+        )
+        self.sfw_switch = ft.Switch(value=True, active_color="#0D7377")
+
+        self.controls = [
+            self._row("Name", self.name_input),
+            self._row("Gender", self.gender),
+            self._row("Voice", self._build_voice_row()),
+            self._row("Backstory", self.backstory, top=True),
+            self._row("SFW", self.sfw_switch),
+        ]
+
     def _row(self, label, control, top=False):
         return ft.Row(
             [
@@ -225,19 +256,104 @@ class WizardProfilePage(ft.Column):
             spacing=12,
         )
 
+    def _build_voice_row(self):
+        # optional reference voice (wav) for tts, kept in local state only
+        self.voice_file_name = None
+        self.voice_file_path = None
+        self.voice_file_bytes = None
+        self.file_picker = None
+
+        self.voice_upload_btn = OneLineBubble("upload voice (wav)", on_clicked=lambda text, data: self.page.run_task(self.on_pick_voice), height=48, expand=True)
+        self.voice_name_text = ft.Text("", color="#C8C8C8", visible=False)
+        self.voice_clear_btn = ft.IconButton(icon=ft.Icons.CLOSE, tooltip="Remove voice", on_click=self.on_clear_voice, visible=False)
+        return ft.Row([self.voice_upload_btn, self.voice_name_text, self.voice_clear_btn], spacing=8)
+
+    @staticmethod
+    def _validate_wav(data: bytes) -> str | None:
+        # returns an error message, or None if the wav looks usable
+        try:
+            with wave.open(io.BytesIO(data), "rb") as w:
+                if w.getnchannels() < 1:
+                    return "WAV has no channels"
+                if w.getnframes() <= 0:
+                    return "WAV contains no audio"
+                if not 8000 <= w.getframerate() <= 192000:
+                    return f"unsupported sample rate {w.getframerate()} Hz"
+                if w.getsampwidth() not in (1, 2, 3, 4):
+                    return f"unsupported sample width {w.getsampwidth()} bytes"
+        except Exception as e:
+            return f"not a valid WAV file ({e})"
+        return None
+
+    async def on_pick_voice(self, e=None):
+        # FilePicker is a service in flet 1.0, create it lazily inside the event handler so a page context exists
+        if self.file_picker is None:
+            self.file_picker = ft.FilePicker()
+        files = await self.file_picker.pick_files(
+            dialog_title="Select voice sample",
+            file_type=ft.FilePickerFileType.CUSTOM,
+            allowed_extensions=["wav"],
+            allow_multiple=False,
+            with_data=True,  # on android/web path is None, so we need the bytes
+        )
+        if not files:
+            return
+        file = files[0]
+        data = file.bytes
+        if data is None and file.path:
+            with open(file.path, "rb") as f:
+                data = f.read()
+
+        error = self._validate_wav(data) if data else "could not read file"
+        if error:
+            logger.warning(f"rejected voice file {file.name}: {error}")
+            MessageBox.error(self.page, f"File \"{file.name}\" can not be used as voice. Error: {error}", title="Invalid voice file")
+            return
+
+        self.voice_file_name = file.name
+        self.voice_file_path = file.path
+        self.voice_file_bytes = data
+        self.voice_name_text.value = file.name
+        self.voice_name_text.visible = True
+        self.voice_clear_btn.visible = True
+        self.update()
+
+    def on_clear_voice(self, e=None):
+        self.voice_file_name = None
+        self.voice_file_path = None
+        self.voice_file_bytes = None
+        self.voice_name_text.visible = False
+        self.voice_clear_btn.visible = False
+        self.update()
+
+    def get_voice(self):
+        # kept out of get_values() because those values are json encoded and sent to the hub
+        if not self.voice_file_bytes:
+            return None
+        return {"name": self.voice_file_name, "path": self.voice_file_path, "bytes": self.voice_file_bytes}
+
     def on_gender_changed(self, gender: str):
         if gender == "male":
             if not self.profile:
                 self.name_input.value = random.choice(self.male_names)
                 self.name_input.update()
-            self.age.update_images(self.male_ages)
+            if not self.simple:
+                self.age.update_images(self.male_ages)
         else:
             if not self.profile:
                 self.name_input.value = random.choice(self.female_names)
                 self.name_input.update()
-            self.age.update_images(self.female_ages)
+            if not self.simple:
+                self.age.update_images(self.female_ages)
 
     def get_values(self):
+        if self.simple:
+            return {
+                "name": self.name_input.value or "",
+                "gender": self.gender.get_selected(),
+                "backstory": self.backstory.value or "",
+                "sfw": "SFW" if self.sfw_switch.value else "NSFW",
+            }
         return {
             "name": self.name_input.value or "",
             "gender": self.gender.get_selected(),
@@ -247,102 +363,6 @@ class WizardProfilePage(ft.Column):
             "ethnicity": self.ethnicity.get_selected(),
             "body_type": self.body.get_selected(),
             "backstory": self.backstory.value or "",
-        }
-
-
-class PersonalityPage(ft.Column):
-    roles = [
-        "Assistant", "Friend", "Partner", "Coach",
-        "Therapist", "Mentor", "Rival", "Companion",
-        "Motivator", "Teacher", "Muse", "Critic",
-        "Cheerleader", "Pet",
-    ]
-
-    perosnality_attributes = {
-        "Warmth": {"tags": ["cold", "warm"], "trait": ["cold", "distant", "reserved", "indifferent", "approachable", "friendly", "warm"]},
-        "Formality": {"tags": ["casual", "formal"], "trait": ["informal", "casual", "semi-casual", "semi-formal", "very formal", "extremely formal", "excessively formal"]},
-        "Energy": {"tags": ["calm", "energetic"], "trait": ["calm", "composed", "collected", "alert", "enthusiastic", "energetic", "passionate"]},
-        "Humor": {"tags": ["serious", "funny"], "trait": ["serious", "thoughtful", "analytical", "humorous", "playful", "witty", "funny"]},
-        "Directness": {"tags": ["gentle", "blunt"], "trait": ["gentle", "mild", "soft-spoken", "straightforward", "frank", "direct", "blunt"]},
-        "Familiarity": {"tags": ["stranger", "best friend"], "trait": ["stranger", "acquaintance", "companion", "familiar", "friend", "close friend", "best friend"]},
-        "Power": {"tags": ["submissive", "dominant"], "trait": ["submissive", "accommodating", "cooperative", "influential", "assertive", "confident", "dominant"]},
-        "Initiative": {"tags": ["reactive", "active"], "trait": ["reactive", "responsive", "adaptable", "proactive", "initiative-taking", "pioneering", "active"]},
-        "Honesty": {"tags": ["agreeable", "liar"], "trait": ["agreeable", "cooperative", "accommodating", "assertive", "confrontational", "challenging", "liar"]},
-        "Intent": {"tags": ["manipulative", "benevolent"], "trait": ["manipulative", "exploitative", "self-serving", "prudent", "empathetic", "generous", "benevolent"]},
-    }
-
-    def __init__(self):
-        super().__init__(expand=True, spacing=14, scroll=ft.ScrollMode.AUTO)
-        self.perosnality_sliders = {}
-
-        self.role = ft.Dropdown(
-            options=[ft.DropdownOption(key=r, text=r) for r in self.roles],
-            value="Assistant",
-        )
-        rows = [self._row("Role", self.role)]
-
-        for name, item in self.perosnality_attributes.items():
-            slider = LabeledSlider(
-                left_text=item["tags"][0],
-                right_text=item["tags"][1],
-                range_min=0,
-                range_max=len(item["trait"]) - 1,
-                start_value=len(item["trait"]) / 2 - 1,
-            )
-            self.perosnality_sliders[name] = slider
-            rows.append(self._row(name, slider))
-
-        self.objective = ft.TextField(
-            hint_text="Be helpful",
-            multiline=True,
-            min_lines=3,
-            max_lines=6,
-            value="Be helpful",
-            filled=True,
-            bgcolor="#2C2C2C",
-            border_radius=16,
-            border_color=ft.Colors.TRANSPARENT,
-            focused_border_color="#0D7377",
-            content_padding=ft.Padding.all(16),
-        )
-        self.sfw = RowSelector(
-            {"SFW": f"{ASSETS_DIR}/icons/sfw_light.png", "NSFW": f"{ASSETS_DIR}/icons/nsfw_light.png"},
-            False,
-        )
-        self.sfw.select("SFW")
-        rows += [
-            self._row("Objective", self.objective, top=True),
-            self._row("NSFW", self.sfw),
-        ]
-        self.controls = rows
-
-    def _row(self, label, control, top=False):
-        return ft.Row(
-            [
-                ft.Container(
-                    content=ft.Text(label, color="#C8C8C8"),
-                    width=LABEL_WIDTH,
-                    padding=ft.Padding.only(top=12) if top else None,
-                    alignment=ft.Alignment.TOP_LEFT if top else ft.Alignment.CENTER_LEFT,
-                ),
-                ft.Container(content=control, expand=True),
-            ],
-            vertical_alignment=ft.CrossAxisAlignment.START if top else ft.CrossAxisAlignment.CENTER,
-            spacing=12,
-        )
-
-    def get_values(self):
-        personality = ""
-        for name, item in self.perosnality_attributes.items():
-            value = int(self.perosnality_sliders[name].get_value())
-            trait = item["trait"][value]
-            if trait:
-                personality = f"{personality}, {trait}" if personality else trait
-        return {
-            "role": self.role.value or "",
-            "personality": personality,
-            "objective": self.objective.value or "",
-            "sfw": self.sfw.get_selected(),
         }
 
 
@@ -381,19 +401,18 @@ class ProgressPage(ft.Column):
 
 
 class ProfileWizard(BasePage):
-    selected_role = ""
+    """one form: the simple new character form, or the full form for the user's own profile"""
 
     def __init__(self, navigator):
         super().__init__(navigator)
         self.user_profile_mode = False
-        self.current_index = 0
-        self.pages = []
 
         self.contact_header = ContactHeader(navigator, False)
         self.contact_header.on_go_back = self.on_go_back
         self.content_slot = ft.Container(expand=True)
-        self.back_btn = ft.Button("...", on_click=self.prev_page, expand=True, visible=False, **STYLES["button"])
-        self.next_btn = ft.Button("...", on_click=self.next_page, expand=True, **STYLES["button"])
+        self.submit_btn = ft.Button("...", on_click=self.on_submit, expand=True, **STYLES["button"])
+        # only shown when the user edits their own profile, discards the changes
+        self.cancel_btn = ft.Button("Cancel", on_click=self.on_go_back, expand=True, visible=False, **STYLES["button"])
 
         self.controls = [
             ft.Container(
@@ -404,80 +423,55 @@ class ProfileWizard(BasePage):
                     controls=[
                         self.contact_header,
                         self.content_slot,
-                        ft.Row(controls=[self.back_btn, self.next_btn]),
+                        ft.Row(controls=[self.cancel_btn, self.submit_btn]),
                     ],
                 ),
             )
-        ]        
+        ]
 
     def on_go_back(self, e=None):
         self.navigator("contacts")
 
-    def add_page(self, widget):
-        self.pages.append(widget)
+    def _show(self, content, button_text: str = None):
+        # button_text None hides the button, e.g. while the character is generated
+        self.content_slot.content = content
+        self.submit_btn.visible = button_text is not None
+        self.submit_btn.content = button_text or ""
+        self.cancel_btn.visible = self.user_profile_mode and button_text is not None
+        self.update()
 
-    def clear_pages(self):
-        self.pages.clear()
-        self.current_index = 0
-
-    def _show(self):
-        if not self.pages:
-            return
-        self.content_slot.content = self.pages[self.current_index]
-        self.content_slot.update()
-        self.update_buttons()
-
-    def _on_generation_timer(self):
-        self.navigator("contacts")
-
-    def next_page(self, e=None):
-        if self.current_index < len(self.pages) - 2:
-            self.current_index += 1
-            self._show()
-            return
-
-        # means we are on the last page excluding the progress page
+    def on_submit(self, e=None):
         profile = self.profile_page.get_values()
-        if not self.user_profile_mode:
-            Hub.generate({"generate_profile": {"profile": profile, "personality": self.personality_page.get_values()}})
-            self.current_index += 1
-            self._show()
-        else:
+        if self.user_profile_mode:
             Hub.update_user_data({"profile": json.dumps(profile)})
             self.navigator("contacts")
+            return
 
-    def prev_page(self, e=None):
-        if self.current_index > 0:
-            self.current_index -= 1
-            self._show()
+        # the hub infers role, personality and looks from the backstory
+        generate_profile = {"profile": profile}
+        voice = self.profile_page.get_voice()
+        if voice:
+            # blocking upload, the hub answers with the uuid of the stored voice
+            voice_id = Hub.upload_voice(voice["bytes"], profile.get("gender", ""))
+            if voice_id:
+                generate_profile["voice_id"] = voice_id
 
-    def update_buttons(self):
-        back = {0: (False, ""), 1: (True, "Back"), 2: (False, "")}
-        next = {0: (True, "Next"), 1: (True, "Finish"), 2: (False, "")}
-        self.back_btn.visible, self.back_btn.content = back.get(self.current_index, (False, ""))
-        self.next_btn.visible, self.next_btn.content = next.get(self.current_index, (False, ""))
-        self.update()
+        Hub.generate({"generate_profile": generate_profile})
+        self._show(ProgressPage())
 
     def on_enter(self, **kwargs):
         self.user_profile_mode = kwargs.get("user_profile_mode", False)
-        self.clear_pages()
 
         if self.user_profile_mode:
             data = Hub.get_user_data()
             name = Hub.get_user_name()
             profile = data["profile"] if data and "profile" in data else None
             self.profile_page = WizardProfilePage(profile=profile, name=name)
-            self.add_page(self.profile_page)
+            self._show(self.profile_page, "Save")
         else:
-            self.profile_page = WizardProfilePage()
-            self.personality_page = PersonalityPage()
-            self.progress_page = ProgressPage()
-            self.add_page(self.profile_page)
-            self.add_page(self.personality_page)
-            self.add_page(self.progress_page)
+            self.profile_page = WizardProfilePage(simple=True)
             Hub.register_incomming_message(self.on_incomming_message)
-
-        self._show()
+            self._show(self.profile_page, "Create")
 
     def on_leave(self):
         if not self.user_profile_mode:
@@ -490,4 +484,4 @@ class ProfileWizard(BasePage):
                 if profile["name"] == msg["new_contact"]["name"]:
                     self.navigator("contacts")
         except Exception as e:
-            logger.error(f"failed to handle incomming message: {e}")            
+            logger.error(f"failed to handle incomming message: {e}")

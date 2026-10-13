@@ -1,7 +1,8 @@
 import asyncio
+import random
 import re
 import flet as ft
-from app.ui.theme import STYLES
+from app.ui.theme import STYLES, TEAL_BRIGHT
 from pathlib import Path
 
 from app.ui import BasePage
@@ -20,6 +21,8 @@ class ChatPage(BasePage):
         self.conversation_id = None
         self.contact = None
         self.audio_streamer = None
+        self.play_wave_animation = False
+        self._wave_task = None
         self.delta_buffer = ""
         self._stream_gen = 0
         self.replay_content = ""
@@ -54,6 +57,24 @@ class ChatPage(BasePage):
             on_click=self.on_mic_toggle,
         )
 
+        # faint bouncing bars behind the text field while play_wave_animation is true
+        self.wave_bars = [
+            ft.Container(
+                width=4, height=4, border_radius=2, bgcolor=TEAL_BRIGHT,
+                animate=ft.Animation(150, ft.AnimationCurve.EASE_IN_OUT),
+            )
+            for _ in range(24)
+        ]
+        self.wave = ft.Container(
+            left=0, right=0, top=0, bottom=0,
+            opacity=0.2, visible=False,
+            content=ft.Row(
+                controls=self.wave_bars, spacing=6,
+                alignment=ft.MainAxisAlignment.CENTER,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        )
+
         self.controls = [
             ft.Container(
                 expand=True,
@@ -70,7 +91,7 @@ class ChatPage(BasePage):
                                     icon=ft.Icons.MENU,
                                     items=[ft.PopupMenuItem(content="... replay", on_click=lambda e: self.replay())],
                                 ),
-                                self.input_box,
+                                ft.Stack(expand=True, controls=[self.wave, self.input_box]),
                                 ft.IconButton(icon=ft.Icons.EMOJI_EMOTIONS, icon_size=24, on_click=self.open_emoji_picker),
                                 self.mic_btn,
                                 ft.IconButton(icon=ft.Icons.SEND, icon_size=24, on_click=lambda e: self.send_message()),
@@ -122,12 +143,6 @@ class ChatPage(BasePage):
             else:
                 self._append_history(message["role"], message["content"])
 
-        default_piper = (
-            "en_US-hfc_male-medium"
-            if self.contact.get_gender() == "male"
-            else "en_US-libritts_r-medium"
-        )
-        self.piper_model = self.contact.get_voice_model() or default_piper
         self.temperature = float(self.contact.get_llm_temperature())
         Hub.register_incomming_message(self.on_incomming_message)
 
@@ -161,6 +176,21 @@ class ChatPage(BasePage):
         )
         self.audio_streamer.attach(self.page)
         await self.audio_streamer.start()
+        self._wave_task = asyncio.create_task(self._wave_loop())
+
+    async def _wave_loop(self):
+        """follows play_wave_animation while the mic is on"""
+        try:
+            while True:
+                if self.play_wave_animation:
+                    for bar in self.wave_bars:
+                        bar.height = random.uniform(4, 32)
+                if self.wave.visible != self.play_wave_animation or self.play_wave_animation:
+                    self.wave.visible = self.play_wave_animation
+                    self.wave.update()
+                await asyncio.sleep(0.15)
+        except asyncio.CancelledError:
+            pass
 
     def _on_audio_message(self, payload: dict):
         if self.page:
@@ -172,12 +202,21 @@ class ChatPage(BasePage):
         text = (payload.get("text") or "").strip()
         if not text:
             return
+        self.play_wave_animation = True
         self.input_box.value = text
         self.input_box.update()
         if kind == "final":
+            self.play_wave_animation = False
             self.send_message()
+            
 
     async def _stop_mic(self):
+        self.play_wave_animation = False
+        if self._wave_task:
+            self._wave_task.cancel()
+            self._wave_task = None
+            self.wave.visible = False
+            self.wave.update()
         if self.audio_streamer:
             await self.audio_streamer.stop()
             self.audio_streamer = None
@@ -205,7 +244,7 @@ class ChatPage(BasePage):
             logger.error(f"failed to append to history: {repr(e)}")            
 
     def replay(self):
-        Text_To_Speech.speak(text=self._cleanup_for_speech(self.replay_content), model=self.piper_model)
+        Text_To_Speech.speak(text=self._cleanup_for_speech(self.replay_content), voice=self.contact.get_voice_id())
 
     def _remove_excess_linebreaks(self, text: str) -> str:
         code_block_pattern = r"```.*?```"
@@ -281,7 +320,7 @@ class ChatPage(BasePage):
                         self._append_history(role, content, str(image_path))
                     else:
                         self._append_history(role, content)
-                    Text_To_Speech.speak(text=self._cleanup_for_speech(content), model=self.piper_model)
+                    Text_To_Speech.speak(text=self._cleanup_for_speech(content), voice=self.contact.get_voice_id())
         except Exception as e:
             logger.error(f"failed to handle incomming message: {e}")
 

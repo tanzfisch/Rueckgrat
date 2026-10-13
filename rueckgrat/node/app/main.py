@@ -1,12 +1,15 @@
 import json
+import re
 import os
 import asyncio
 
 from tqdm import tqdm
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse, Response
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+TTS_VOICES_DIR = Path("/node/voices")  # same folder as VOICES_DIR in utils/tts.py
 import os
 from pydantic import BaseModel
 from typing import List, Optional
@@ -16,7 +19,7 @@ from app.common import (
     get_logger, set_log_level, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse, 
     ModelInfo, GetModelsResponse, InstallModelResponse, InstallModelRequest, 
     GetModelURLResponse, GetModelResponse, RegisteredModel, GetRegisteredModelsResponse,
-    MessageQueue
+    MessageQueue, NodeTTSRequest
 )
 logger = get_logger()
 
@@ -38,6 +41,12 @@ async def lifespan(app: FastAPI):
         app.state.image_gen = ImageGen()  
     else:
         app.state.image_gen = None
+
+    if os.getenv("USE_TTS") == "true":
+        from app.utils.tts import TextToSpeech
+        app.state.tts = TextToSpeech()  # model loads lazily on first request
+    else:
+        app.state.tts = None
 
     # keep image cache clean
     app.state.cleanup_worker = CleanupWorker(folder="/node/images")
@@ -93,6 +102,52 @@ def image(request: ImageRequest):
     if not response:
         logger.error("failed to generate image with comfyui")
     return response
+
+@app.post("/tts")
+def tts(request: NodeTTSRequest):
+    if not app.state.tts:
+        raise HTTPException(status_code=503, detail="Node has no tts module loaded")
+    try:
+        wav = app.state.tts.speak(request.text, request.voice, request.exaggeration, request.cfg_weight)
+    except Exception as e:
+        logger.error(f"tts failed: {e!r}")
+        raise HTTPException(status_code=500, detail="tts failed")
+    return Response(content=wav, media_type="audio/wav")
+
+VOICE_ID_PATTERN = r"[\w.-]+"
+MAX_VOICE_BYTES = 20 * 1024 * 1024
+
+@app.head("/voices/{voice_id}")
+def has_voice(voice_id: str):
+    """lets the hub check whether a voice wav is already in the local cache"""
+    if not re.fullmatch(VOICE_ID_PATTERN, voice_id) or not (TTS_VOICES_DIR / f"{voice_id}.wav").exists():
+        raise HTTPException(status_code=404, detail="voice not found")
+    return Response(status_code=200)
+
+@app.put("/voices/{voice_id}")
+async def store_voice(voice_id: str, request: Request):
+    """the hub pushes a voice wav here (raw body). the node never calls the hub"""
+    if not re.fullmatch(VOICE_ID_PATTERN, voice_id):
+        raise HTTPException(status_code=400, detail="invalid voice id")
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty voice file")
+    if len(data) > MAX_VOICE_BYTES:
+        raise HTTPException(status_code=413, detail="voice file too large")
+    TTS_VOICES_DIR.mkdir(parents=True, exist_ok=True)
+    path = TTS_VOICES_DIR / f"{voice_id}.wav"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_bytes(data)
+    tmp.replace(path)  # atomic, a half written file is never used by tts
+    logger.debug(f"cached voice {voice_id} ({len(data)} bytes)")
+    return {"status": "ok", "voice_id": voice_id}
+
+@app.delete("/voices/{voice_id}")
+def drop_voice(voice_id: str):
+    """the hub removes a cached voice after it was deleted on the hub"""
+    if re.fullmatch(VOICE_ID_PATTERN, voice_id):
+        (TTS_VOICES_DIR / f"{voice_id}.wav").unlink(missing_ok=True)
+    return {"status": "ok", "voice_id": voice_id}
 
 @app.get("/downloads/{file_path:path}")
 async def download_file(file_path: str):

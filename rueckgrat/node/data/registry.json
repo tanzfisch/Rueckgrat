@@ -68,6 +68,38 @@
     "install_path": "voices/en_US-hfc_female-medium"
   },  
 
+  "chatterbox": {
+    "description": "Resemble AI Chatterbox, English zero-shot voice cloning",
+    "type": "tts",
+    "compatibility": [
+      "chatterbox-tts"
+    ],
+    "comment": "load with ChatterboxTTS.from_local, conds.pt is the built-in default voice",
+    "files": [
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/ve.safetensors",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/t3_cfg.safetensors",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/s3gen.safetensors",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/tokenizer.json",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/conds.pt",
+        "path": ""
+      }
+    ],
+    "install_path": "voices/chatterbox"
+  },
+
  "lustifySDXLNSFW_ggwpV7": {
     "description": "",
     "type": "image",
@@ -92,6 +124,62 @@
       {
         "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_v2.safetensors",
         "path": ""
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/model_index.json",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/scheduler/scheduler_config.json",
+        "path": "scheduler"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer/vocab.json",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer/merges.txt",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer/special_tokens_map.json",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer/tokenizer_config.json",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer_2/vocab.json",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer_2/merges.txt",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer_2/special_tokens_map.json",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer_2/tokenizer_config.json",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/text_encoder/config.json",
+        "path": "text_encoder"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/text_encoder_2/config.json",
+        "path": "text_encoder_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/unet/config.json",
+        "path": "unet"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/vae/config.json",
+        "path": "vae"
       }
     ],
     "install_path": "image_gen/DreamShaperXL_Turbo_v2"
@@ -105,6 +193,62 @@
       {
         "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_v2_1.safetensors",
         "path": ""
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/model_index.json",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/scheduler/scheduler_config.json",
+        "path": "scheduler"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer/vocab.json",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer/merges.txt",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer/special_tokens_map.json",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer/tokenizer_config.json",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer_2/vocab.json",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer_2/merges.txt",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer_2/special_tokens_map.json",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer_2/tokenizer_config.json",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/text_encoder/config.json",
+        "path": "text_encoder"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/text_encoder_2/config.json",
+        "path": "text_encoder_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/unet/config.json",
+        "path": "unet"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/vae/config.json",
+        "path": "vae"
       }
     ],
     "install_path": "image_gen/DreamShaperXL_Turbo_v2_1"
@@ -118,9 +262,131 @@
       {
         "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_V2-SFW.safetensors",
         "path": ""
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/model_index.json",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/scheduler/scheduler_config.json",
+        "path": "scheduler"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer/vocab.json",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer/merges.txt",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer/special_tokens_map.json",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer/tokenizer_config.json",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer_2/vocab.json",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer_2/merges.txt",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer_2/special_tokens_map.json",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/tokenizer_2/tokenizer_config.json",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/text_encoder/config.json",
+        "path": "text_encoder"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/text_encoder_2/config.json",
+        "path": "text_encoder_2"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/unet/config.json",
+        "path": "unet"
+      },
+      {
+        "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/vae/config.json",
+        "path": "vae"
       }
     ],
     "install_path": "image_gen/DreamShaperXL_Turbo_V2-SFW"
+  },
+
+  "sdxl-base-config": {
+    "description": "SDXL base pipeline configs and tokenizers, no weights",
+    "type": "config",
+    "compatibility": ["ImageGen"],
+    "comment": "fallback config= for sdxl single files that ship no configs of their own (e.g. lustify)",
+    "files": [
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/model_index.json",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/scheduler/scheduler_config.json",
+        "path": "scheduler"
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/tokenizer/vocab.json",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/tokenizer/merges.txt",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/tokenizer/special_tokens_map.json",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/tokenizer/tokenizer_config.json",
+        "path": "tokenizer"
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/tokenizer_2/vocab.json",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/tokenizer_2/merges.txt",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/tokenizer_2/special_tokens_map.json",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/tokenizer_2/tokenizer_config.json",
+        "path": "tokenizer_2"
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/text_encoder/config.json",
+        "path": "text_encoder"
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/text_encoder_2/config.json",
+        "path": "text_encoder_2"
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/unet/config.json",
+        "path": "unet"
+      },
+      {
+        "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/vae/config.json",
+        "path": "vae"
+      }
+    ],
+    "install_path": "image_gen/stable-diffusion-xl-base-1.0-config"
   },
 
   "sd3.5_large": {

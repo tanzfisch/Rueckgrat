@@ -1,0 +1,13 @@
+# chatterbox-tts itself is installed with --no-deps (see Dockerfile), because it
+# hard-pins torch==2.6.0 and diffusers==0.29.0, which would clash with image_gen.
+# These are its runtime dependencies, left unpinned on purpose.
+numpy<2.0.0
+librosa
+s3tokenizer
+transformers
+resemble-perth
+conformer
+safetensors
+pyloudnorm
+omegaconf
+soundfile

@@ -12,3 +12,4 @@ click
 tqdm
 pydantic
 flet-audio-recorder
+flet-audio==1.0.4

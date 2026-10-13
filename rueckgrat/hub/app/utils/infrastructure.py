@@ -86,6 +86,9 @@ class Infrastructure:
         if not "text_to_image" in self.node_by_type:
             logger.warning("couldn't find text_to_image generator")        
 
+        if not "text_to_speech" in self.node_by_type:
+            logger.warning("couldn't find text_to_speech generator")
+
     def get_status(self) -> StatusResult:
         # the websocket supervisor already tracks every node, no need to poll them over http
         return StatusResult([
@@ -172,6 +175,66 @@ class Infrastructure:
             return None        
 
         return str(filepath)
+
+    def tts(self, text: str, voice: str = "") -> Optional[bytes]:
+        """forward a speech request to the tts node, returns wav bytes or None"""
+        if not "text_to_speech" in self.node_by_type:
+            logger.error("no text to speech generator available")
+            return None
+
+        node = self.node_by_type["text_to_speech"]
+        base = f"http://{node.addr}:{node.port}"
+        if voice and not self._push_voice(base, voice):
+            logger.warning(f"voice {voice} not available on the tts node, using default voice")
+        url = f"{base}/tts"
+        try:
+            response = requests.post(url, json={"text": text, "voice": voice}, timeout=240)
+            if response.status_code != 200:
+                logger.error(f"failed tts request: {response.status_code} {response.reason}")
+                return None
+            return response.content
+        except Exception as e:
+            logger.error(f"failed to get a tts response {repr(e)}")
+            return None
+
+    def drop_voice(self, voice: str) -> bool:
+        """removes a cached voice from the tts node after it was deleted on the hub. best effort"""
+        if not "text_to_speech" in self.node_by_type:
+            return False  # no tts node right now, nothing to clean up
+        node = self.node_by_type["text_to_speech"]
+        try:
+            response = requests.delete(f"http://{node.addr}:{node.port}/voices/{voice}", timeout=10)
+            if response.status_code != 200:
+                logger.warning(f"failed dropping voice {voice} on tts node: {response.status_code} {response.reason}")
+                return False
+            return True
+        except Exception as e:
+            logger.warning(f"failed dropping voice {voice} on tts node {repr(e)}")
+            return False
+
+    @staticmethod
+    def _push_voice(base: str, voice: str) -> bool:
+        """makes sure the node has the voice wav. hub to node only, the node never calls back"""
+        path = Path("/hub/voices") / f"{voice}.wav"
+        if not path.exists():
+            return False  # not a hub stored voice, the node decides what to do with it
+        try:
+            if requests.head(f"{base}/voices/{voice}", timeout=10).status_code == 200:
+                return True  # already cached on the node
+            response = requests.put(
+                f"{base}/voices/{voice}",
+                data=path.read_bytes(),
+                headers={"Content-Type": "audio/wav"},
+                timeout=60,
+            )
+            if response.status_code != 200:
+                logger.error(f"failed pushing voice {voice}: {response.status_code} {response.reason}")
+                return False
+            logger.debug(f"pushed voice {voice} to tts node")
+            return True
+        except Exception as e:
+            logger.error(f"failed pushing voice {voice} {repr(e)}")
+            return False
 
     @staticmethod
     def _error_response(conversation_id: int, error: str) -> str:

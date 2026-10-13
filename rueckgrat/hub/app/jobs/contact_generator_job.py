@@ -55,34 +55,16 @@ class ContactGeneratorJob(Job):
     def has_response(self) -> bool:
         return True        
 
-    def age_to_text(self, age: int):
-        if age < 18: return ""
-        elif age < 22: return "young"
-        elif age < 27: return "young adult"
-        elif age < 45: return "mature"
-        elif age < 60: return "middle-aged"
-        else: return "senior"
-
     def _generate_contact(self, user_input: Dict[str, Any]) -> Dict[str, Any]:
         try:
             logger.debug(f"{json.dumps(user_input, indent=4)}")
 
             profile_input = user_input["profile"]
-            personality_input = user_input["personality"]
-
             name = profile_input["name"]
-            gender = profile_input["gender"]
-            age = self.age_to_text(int(profile_input["age"]))
-            hair_color = profile_input["hair_color"]
-            eye_color = profile_input["eye_color"]
-            ethnicity = profile_input["ethnicity"]
-            body_type = profile_input["body_type"]
-            backstory = f"\nBackstory: {profile_input['backstory']}"
-
-            role = personality_input["role"]
-            personality = personality_input["personality"]
-            objective = personality_input["objective"]
-            if personality_input["sfw"].lower() == "sfw":
+            gender = profile_input.get("gender", "")
+            backstory = profile_input.get("backstory", "")
+            sfw_value = profile_input.get("sfw") or "SFW"
+            if sfw_value.lower() == "sfw":
                 image_gen = "default"
                 cfg = 5.0
                 sfw = "Create a safe-for-work character. Keep personality, appearance, and backstory fully appropriate, professional, and free of any sexual, explicit, or adult elements."
@@ -91,25 +73,25 @@ class ContactGeneratorJob(Job):
                 cfg = 8.5           
                 sfw = "Create a character without restrictions. Allow them to be sexual, explicit, and uncensored. Freely include adult, erotic, and NSFW traits in personality, and backstory."
 
+            user_lines = [f"Name: {name}"]
+            if gender:
+                user_lines.append(f"Gender: {gender}")
+            if backstory:
+                user_lines.append(f"Backstory: {backstory}")
+            user_input_text = "\n".join(user_lines)
 
             query = f"""
-Create a new profile.
+Create a new character profile.
 
 USER INPUT:
-Name: {name}
-Gender: {gender}
-Age: {age}
-Role: {role}{backstory}
-Personality: {personality}
-Primary Objective: {objective}
-
-Hair Color: {hair_color}
-Eye Color: {eye_color}
-Ethnicity: {ethnicity}
-Body Type: {body_type}
+{user_input_text}
 
 EXAMPLE PROFILE:
 {{
+    "role": "Coach",
+    "age": "young adult",
+    "personality": "warm, energetic, playful, direct, assertive, proactive, empathetic",
+    "primary_objective": "help the user reach their fitness goals",
     "background_hook": "former collegiate athlete with a winning mindset",
     "relationship": "you became friends after he was your personal trainer for 2 years",
     "body_language": "dynamic energy, assertive posture, enthusiastic gestures, maintains eye contact, shows constant encouragement",
@@ -154,7 +136,9 @@ EXAMPLE PROFILE:
 INSTRUCTIONS:
 - Invent a new profile based on the user input
 - Fill in information as applicable
-- background_hook -> invent an interessting and elaborate background story (max 100 words)
+- role, age, personality, primary_objective -> infer them from gender and backstory
+- appearance -> use what the backstory says, invent fitting details for the rest
+- background_hook -> invent an interessting and elaborate background story based on the given backstory (max 100 words)
 - relationship -> make up a past between this character and the user (max 200 words)
 - {sfw}
 
@@ -179,6 +163,12 @@ OUTPUT:
             logger.error(f"failed to generate new context from\n {response_content}") 
             return None
             
+        # take what the llm inferred, with a safe default if it left something out
+        role = Utils.get_nested_value(reply, ["role"], "Assistant")
+        age = Utils.get_nested_value(reply, ["age"], "young adult")
+        personality = Utils.get_nested_value(reply, ["personality"], "")
+        objective = Utils.get_nested_value(reply, ["primary_objective"], "be helpful")
+
         # making sure we can guarantee a valid json structure
         new_contact = {
             "identity": {
@@ -194,7 +184,7 @@ OUTPUT:
                 "relationship": Utils.get_nested_value(reply, ["relationship"], ""),
                 "body_language": Utils.get_nested_value(reply, ["body_language"], ""),
                 "style": Utils.get_nested_value(reply, ["style"], ""),
-                "sfw": personality_input["sfw"],
+                "sfw": sfw_value,
 
                 "appearance": {
                     "image_style": "studio",
@@ -230,23 +220,23 @@ OUTPUT:
                 },                 
 
                 "behaviour_parameters": {
-                "mood_gen_chance": 0.3
+                    "mood_gen_chance": 0.3
                 },
 
                 "llm_parameters": {
-                "temperature": "0.15",
-                "preffered_context_size": "8000"
+                    "temperature": "0.15",
+                    "preffered_context_size": "8000"
                 },
 
                 "image_parameters": {      
-                "seed": random.randint(0,999999),
-                "steps": 40,
-                "cfg": cfg,
-                "model": image_gen
+                    "seed": random.randint(0,999999),
+                    "steps": 40,
+                    "cfg": cfg,
+                    "model": image_gen
                 },
 
                 "tts_parameters": {
-                    "piper_voice_model": "en_US-libritts_r-medium" if gender == "female" else "en_US-hfc_male-medium"
+                    "voice_id": user_input.get("voice_id", ""),
                 },
             }
         }     

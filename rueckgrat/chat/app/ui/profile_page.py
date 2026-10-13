@@ -1,3 +1,4 @@
+import copy
 import json
 import flet as ft
 from app.ui.theme import STYLES
@@ -9,6 +10,80 @@ from app.common import get_logger, Utils
 
 logger = get_logger()
 
+PROFILE_SECTIONS = [
+    ("Story", [
+        ("Background", ["background_hook"], "text"),
+        ("Relationship to you", ["relationship"], "text"),
+        ("Body language", ["body_language"], "text"),
+        ("Style", ["style"], "text"),
+    ]),
+    ("Objectives", [
+        ("Primary objective", ["objectives", "primary"], "text"),
+        ("Secondary objectives (one per line)", ["objectives", "secondary"], "list"),
+    ]),
+    ("Interaction", [
+        ("Tone", ["interaction_style", "tone"], "text"),
+        ("Engagement", ["interaction_style", "engagement"], "text"),
+        ("Quirks (one per line)", ["interaction_style", "quirks"], "list"),
+    ]),
+    ("Appearance", [
+        ("General", ["appearance", "general"], "text"),
+        ("Face", ["appearance", "face"], "text"),
+        ("Hair", ["appearance", "hair"], "text"),
+        ("Skin", ["appearance", "skin"], "text"),
+        ("Upper body", ["appearance", "upper_body"], "text"),
+        ("Body", ["appearance", "body"], "text"),
+    ]),
+    ("Profile picture setting", [
+        ("Location", ["profile_picture_context", "location"], "text"),
+        ("Topic", ["profile_picture_context", "topic"], "text"),
+        ("Action", ["profile_picture_context", "assistant", "action"], "text"),
+        ("Head", ["profile_picture_context", "assistant", "head"], "text"),
+        ("Upper body clothing", ["profile_picture_context", "assistant", "upper_body"], "text"),
+        ("Lower body clothing", ["profile_picture_context", "assistant", "body"], "text"),
+    ]),
+    ("Image Generation", [
+        ("Seed", ["image_parameters", "seed"], "long"),
+        ("Steps", ["image_parameters", "steps"], "long"),
+        ("Cfg", ["image_parameters", "cfg"], "float"),
+    ]),    
+]
+
+
+def _text_field(label: str, kind: str) -> ft.TextField:
+    if kind == "long":
+        return ft.TextField(
+            label=label, 
+            multiline=True, 
+            min_lines=1, 
+            max_lines=None,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            input_filter=ft.NumbersOnlyInputFilter(),
+        )
+    elif kind == "float":
+        return ft.TextField(
+            label=label, 
+            multiline=True, 
+            min_lines=1, 
+            max_lines=None,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            input_filter=ft.InputFilter(
+                allow=True,
+                regex_string=r"^[0-9]*\.?[0-9]*$",
+                replacement_string="",
+            ),
+        )    
+    else:
+        return ft.TextField(label=label, multiline=True, min_lines=1, max_lines=None)
+
+
+def _set_nested_value(data: dict, keys: list[str], value):
+    for key in keys[:-1]:
+        if not isinstance(data.get(key), dict):
+            data[key] = {}
+        data = data[key]
+    data[keys[-1]] = value
+
 
 class ProfilePage(BasePage):
     def __init__(self, navigator):
@@ -18,42 +93,55 @@ class ProfilePage(BasePage):
         self.contact_header = ContactHeader(navigator, False, True)
         self.contact_header.on_go_back = self.on_go_back
 
-        self.name = ft.TextField(label="Name")
+        self.name = _text_field("Name", "text")
         self.male_radio = ft.Radio(value="male", label="Male")
         self.female_radio = ft.Radio(value="female", label="Female")
         self.gender_group = ft.RadioGroup(
             value="male",
             content=ft.Row(controls=[self.male_radio, self.female_radio]),
         )
-        self.role = ft.TextField(label="Role", multiline=True, min_lines=3, max_lines=5)
-        self.personality = ft.TextField(label="Persona", multiline=True, min_lines=3, max_lines=5)
-        self.profile = ft.TextField(
-            label="Profile",
-            multiline=True,
-            min_lines=8,
-            max_lines=16,
-        )
+        self.role = _text_field("Role", "text")
+        self.personality = _text_field("Persona", "text")
+        self.age = _text_field("Age", "text")
+
+        # original profile dict, so fields without a form entry survive a save
+        self.profile_base = {}
+        self.profile_fields = []  # (key path, kind, TextField)
+        profile_controls = []
+        for section, fields in PROFILE_SECTIONS:
+            profile_controls.append(ft.Text(section, weight=ft.FontWeight.BOLD, size=16))
+            for label, path, kind in fields:
+                field = _text_field(label, kind)
+                self.profile_fields.append((path, kind, field))
+                profile_controls.append(field)
         self.file_picker = ft.FilePicker()
 
         self.controls = [
-            self.contact_header,
+            
             ft.Container(
                 expand=True,
                 margin=20,
                 content=ft.Column(
                     expand=True,
                     controls=[
+                        self.contact_header,
                         ft.ListView(
                             expand=True,
                             spacing=12,
                             padding=12,
                             controls=[
                                 self.name,
-                                ft.Text("Gender"),
-                                self.gender_group,
+                                ft.Row(
+                                    tight=True,
+                                    controls=[
+                                        ft.Text("Gender"),
+                                        self.gender_group,
+                                    ]
+                                ),
+                                self.age,
                                 self.role,
                                 self.personality,
-                                self.profile,
+                                *profile_controls,
                             ],
                         ),
                         ft.Column(
@@ -85,7 +173,10 @@ class ProfilePage(BasePage):
         self.name.value = ""
         self.role.value = ""
         self.personality.value = ""
-        self.profile.value = ""
+        self.age.value = ""
+        self.profile_base = {}
+        for _, _, field in self.profile_fields:
+            field.value = ""
         self.set_gender("male")
         self.update()
 
@@ -94,8 +185,14 @@ class ProfilePage(BasePage):
         self.set_gender(Utils.get_nested_value(contact, ["identity", "gender"], ""))
         self.role.value = Utils.get_nested_value(contact, ["identity", "role"], "")
         self.personality.value = Utils.get_nested_value(contact, ["identity", "personality"], "")
-        data = Utils.get_nested_value(contact, ["profile"], "")
-        self.profile.value = json.dumps(data, indent=4)
+        self.age.value = Utils.get_nested_value(contact, ["identity", "age"], "")
+        profile = Utils.get_nested_value(contact, ["profile"], {}) or {}
+        self.profile_base = copy.deepcopy(profile)
+        for path, kind, field in self.profile_fields:
+            value = Utils.get_nested_value(profile, path, "")
+            if kind == "list":
+                value = "\n".join(str(v) for v in value) if isinstance(value, list) else str(value or "")
+            field.value = value if isinstance(value, str) else json.dumps(value)
         self.update()
 
     def load_profile(self):
@@ -141,12 +238,23 @@ class ProfilePage(BasePage):
 
     def get_data(self):
         gender = self.gender_group.value or "male"
-        profile = json.loads(self.profile.value or "{}")
+        profile = copy.deepcopy(self.profile_base)
+        for path, kind, field in self.profile_fields:
+            text = field.value or ""
+            if kind == "list":
+                _set_nested_value(profile, path, [line.strip() for line in text.splitlines() if line.strip()])
+            elif kind == "long":
+                _set_nested_value(profile, path, int(text))
+            elif kind == "float":
+                _set_nested_value(profile, path, float(text))
+            else:
+                _set_nested_value(profile, path, text)
         return {
             "identity": {
                 "name": self.name.value or "",
                 "gender": gender,
                 "role": self.role.value or "",
+                "age": self.age.value or "",
                 "personality": self.personality.value or "",
             },
             "profile": profile,

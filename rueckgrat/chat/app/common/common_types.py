@@ -80,3 +80,13 @@ class RegisteredModel(BaseModel):
 
 class GetRegisteredModelsResponse(BaseModel):
     models: list[RegisteredModel]    
+
+class NodeTTSRequest(BaseModel):
+    text: str
+    voice: str = ""          # reference voice id, empty = chatterbox default voice
+    exaggeration: float = 0.5
+    cfg_weight: float = 0.5
+
+class HubTTSRequest(BaseModel):
+    text: str
+    voice: str = ""  # TODO(#11): per-contact voice scheme not decided yet    
