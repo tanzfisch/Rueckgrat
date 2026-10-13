@@ -164,10 +164,10 @@ OUTPUT:
             return None
             
         # take what the llm inferred, with a safe default if it left something out
-        role = Utils.get_nested_value(reply, ["role"], "") or "Companion"
-        age = Utils.get_nested_value(reply, ["age"], "") or "young adult"
-        personality = Utils.get_nested_value(reply, ["personality"], "") 
-        objective = Utils.get_nested_value(reply, ["primary_objective"], "") or "Be helpful"
+        role = Utils.get_nested_value(reply, ["role"], "Assistant")
+        age = Utils.get_nested_value(reply, ["age"], "young adult")
+        personality = Utils.get_nested_value(reply, ["personality"], "")
+        objective = Utils.get_nested_value(reply, ["primary_objective"], "be helpful")
 
         # making sure we can guarantee a valid json structure
         new_contact = {
