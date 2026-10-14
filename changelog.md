@@ -5,6 +5,8 @@ Changelog
 ------
 
 - #75 moving faster whisper from hub to node
+- #87 using android back button
+- #66 storing image gen prompt when generating images for later use
 
 0.15.0
 ------

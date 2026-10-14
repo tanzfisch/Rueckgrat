@@ -44,7 +44,7 @@ class RequestedImageJob(Job):
             self.db.add_contact_image(self.contact_id, self.output_file, "gallery")
             image_request.output = self.output_file
 
-            image_job = ImageJob(image_request, self.infrastructure)
+            image_job = ImageJob(image_request, self.infrastructure, self.db)
             self.add_sub_job(image_job)
             self.wait_for([image_job])
 

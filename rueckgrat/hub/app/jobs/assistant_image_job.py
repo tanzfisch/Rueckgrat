@@ -65,7 +65,7 @@ class AssistantImageJob(Job):
         # skip generation if it already exists
         downloaded_file = Path(f"/hub/images/{self.output_file}")
         if not downloaded_file.exists():
-            image_job = ImageJob(image_request, self.infrastructure)
+            image_job = ImageJob(image_request, self.infrastructure, self.db)
             self.add_sub_job(image_job)
             self.wait_for([image_job])
 

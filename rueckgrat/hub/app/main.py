@@ -224,6 +224,9 @@ def get_contacts(username: str = Depends(get_current_user)):
 
 @app.get("/contact/{contact_id}")
 def get_contact(contact_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
     contact = app.state.db.get_contact_by_id(contact_id)
     images = app.state.db.get_contact_images(contact_id)
     contact["images"] = images
@@ -243,6 +246,8 @@ class UpdateContactRequest(BaseModel):
 @app.patch("/contacts/{contact_id}")
 def update_contact(contact_id: int, request: UpdateContactRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
     app.state.db.update_contact(user_id, contact_id, request.contact_data)
     
     job = AssistantImageJob(
@@ -261,6 +266,9 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
 
 @app.delete("/contacts/{contact_id}")
 def delete_conversation(contact_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
     if app.state.db.delete_contact(contact_id):
         return {"status": "ok"}
     else:
@@ -275,6 +283,9 @@ def get_conversations(contact_id: int, username: str = Depends(get_current_user)
 
 @app.get("/conversations/{conversation_id}")
 def get_conversation(conversation_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_conversation(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="conversation not found")
     conversation = app.state.db.get_conversation(conversation_id)
     return {"conversation": conversation}
 
@@ -284,11 +295,16 @@ class CreateConversationRequest(BaseModel):
 @app.post("/conversations")
 def create_conversation(request: CreateConversationRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, request.contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
     conversation_id = app.state.db.create_conversation(user_id, request.contact_id)
     return {"conversation_id": conversation_id}
 
 @app.delete("/conversations/{conversation_id}")
 def delete_conversation(conversation_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_conversation(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="conversation not found")
     if app.state.db.delete_conversation(conversation_id):
         return {"status": "ok"}
     else:
@@ -296,11 +312,17 @@ def delete_conversation(conversation_id: int, username: str = Depends(get_curren
 
 @app.get("/conversations/{conversation_id}/messages")
 def get_messages(conversation_id: int, request: GetMessagesRequest, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_conversation(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="conversation not found")
     messages = app.state.db.get_messages_by_conversation(conversation_id, request.max_messages)
     return {"messages": messages}
 
 @app.get("/messages/{message_id}/attachments")
 def get_messages(message_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_message(user_id, message_id):
+        raise HTTPException(status_code=404, detail="message not found")
     attachments = app.state.db.get_attachments_for_message(message_id)
     return {"attachments": attachments}
 
@@ -368,6 +390,18 @@ def delete_voice(voice_id: str, username: str = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="voice not found")
     app.state.infrastructure.drop_voice(voice_id)
     return {"status": "ok", "voice_id": voice_id}
+
+########### image generation info
+@app.get("/images/{file_key}/generation")
+def get_image_generation(file_key: str, username: str = Depends(get_current_user)):
+    """everything that went into one image (prompts, seed, model, size, steps, cfg)"""
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_image(user_id, file_key):
+        raise HTTPException(status_code=404, detail="no generation info for this image")
+    generation = app.state.db.get_image_generation(file_key)
+    if generation is None:
+        raise HTTPException(status_code=404, detail="no generation info for this image")
+    return {"file_key": file_key, "generation": generation}
 
 ########### model handling
 @app.get("/models/{model_name}/url", response_model=GetModelURLResponse)

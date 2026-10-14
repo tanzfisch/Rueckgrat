@@ -92,16 +92,34 @@ class App:
                 ],
             )
 
+        # android system back button handler
+        if self._header_go_back() is not None:
+            view.can_pop = False
+            view.on_confirm_pop = self._on_system_back
+
         self.page.views.clear()
         self.page.views.append(view)
         self.page.update()
         self.current_page.on_enter(**self._kwargs)
         self._kwargs = {}
 
+    def _header_go_back(self):
+        """the back handler of the current page's contact header, None if it has no visible back button"""
+        header = getattr(self.current_page, "contact_header", None)
+        if header is None or header.back_btn not in header.controls or not header.back_btn.visible:
+            return None
+        return header.on_go_back
+
+    async def _on_system_back(self, e):
+        await e.control.confirm_pop(False)
+        go_back = self._header_go_back()
+        if go_back:
+            go_back()
+
     async def _heartbeat_loop(self):
         while True:
             await asyncio.sleep(10)
-            Hub.check_health()  # logs state changes itself
+            Hub.check_health()
 
     async def _on_disconnect(self, e):
         await Hub.stop_websocket()
