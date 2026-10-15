@@ -1,5 +1,7 @@
+import array
 import asyncio
 import json
+import math
 import queue
 import ssl
 import threading
@@ -32,6 +34,7 @@ class AudioStreamer:
         self._stream = None
         self._send_thread = None
         self._page = None
+        self.level = 0.0
         self.recorder = far.AudioRecorder(
             configuration=far.AudioRecorderConfiguration(
                 encoder=far.AudioEncoder.PCM16BITS,
@@ -56,14 +59,32 @@ class AudioStreamer:
         if self._stop.is_set():
             return
         try:
-            self._q.put_nowait(bytes(indata))
+            chunk = bytes(indata)
+            self._update_level(chunk)
+            self._q.put_nowait(chunk)
         except queue.Full:
             pass
+
+    def _update_level(self, chunk: bytes):
+        samples = array.array("h", chunk[: len(chunk) // 2 * 2])
+        if not samples:
+            return
+        rms = math.sqrt(sum(s * s for s in samples) / len(samples)) / 32768.0
+        k = 5.0
+        rms = (math.exp(k * rms) - 1) / (math.exp(k) - 1)
+
+        db = 20 * math.log10(rms) if rms > 0 else -60.0
+        new_level = min(1.0, max(0.0, (db + 60.0) / 60.0))
+
+        # smooth
+        alpha = 0.2
+        self.level = alpha * new_level + (1 - alpha) * self.level
 
     def _on_flet_stream(self, e: far.AudioRecorderStreamEvent):
         if self._stop.is_set() or not e.chunk:
             return
         try:
+            self._update_level(e.chunk)
             self._q.put_nowait(e.chunk)
         except queue.Full:
             pass

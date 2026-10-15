@@ -2,7 +2,7 @@ import asyncio
 import random
 import re
 import flet as ft
-from app.ui.theme import STYLES, TEAL_BRIGHT
+from app.ui.theme import STYLES, TEXT
 from pathlib import Path
 
 from app.ui import BasePage
@@ -23,14 +23,17 @@ class ChatPage(BasePage):
         self.audio_streamer = None
         self.play_wave_animation = False
         self._wave_task = None
+        self._tts_running = False   # tts bars on the mute button are animating
         self.delta_buffer = ""
         self._stream_gen = 0
+        self._stream_message_id = None
+        self._finished_message_ids = set()
         self.replay_content = ""
 
         self.contact_header = ContactHeader(navigator)
         self.contact_header.on_go_back = self.on_go_back
 
-        self.history = ft.ListView(expand=True, spacing=10, padding=8, auto_scroll=True)
+        self.history = ft.ListView(expand=True, spacing=10, padding=0, auto_scroll=True)
         self.status_widget = StatusWidget()
         self.stream_bubble = ChatBubble("assistant", "", None)
         self.stream_bubble.visible = False
@@ -42,6 +45,7 @@ class ChatPage(BasePage):
             min_lines=1,
             max_lines=8,
             expand=True,
+            border=ft.InputBorder.NONE,
             on_focus=lambda e: setattr(self, "_input_focused", True),
             on_blur=lambda e: setattr(self, "_input_focused", False),
             text_style=ft.TextStyle(
@@ -50,28 +54,87 @@ class ChatPage(BasePage):
             ),            
         )
 
+        self.icon_size = 24
+
+        self.menu_btn = ft.PopupMenuButton(
+            icon=ft.Icons.MENU,
+            icon_size=self.icon_size,
+            items=[ft.PopupMenuItem(content="... replay", on_click=lambda e: self.replay())],
+        )
+
+        self.emoji_btn = ft.IconButton(
+            icon=ft.Icons.EMOJI_EMOTIONS, 
+            icon_size=self.icon_size,
+            on_click=self.open_emoji_picker
+        )
+
         self.mic_btn = ft.IconButton(
             icon=ft.Icons.MIC_OFF,
-            icon_size=24,
+            icon_size=self.icon_size,
             selected=False,
             on_click=self.on_mic_toggle,
         )
 
-        # faint bouncing bars behind the text field while play_wave_animation is true
-        self.wave_bars = [
-            ft.Container(
-                width=4, height=4, border_radius=2, bgcolor=TEAL_BRIGHT,
-                animate=ft.Animation(150, ft.AnimationCurve.EASE_IN_OUT),
-            )
-            for _ in range(24)
-        ]
-        self.wave = ft.Container(
-            left=0, right=0, top=0, bottom=0,
-            opacity=0.2, visible=False,
+        self.mute_btn = ft.IconButton(
+            icon=ft.Icons.VOLUME_OFF,
+            icon_size=self.icon_size,
+            selected=False,
+            on_click=self.on_mute_toggle,
+        )        
+
+        self.send_btn = ft.IconButton(
+            icon=ft.Icons.SEND, 
+            icon_size=self.icon_size,
+            on_click=lambda e: self.send_message()
+        )
+
+        self.wave_bars, self.wave = self._make_wave()            # over the mic button
+        self.tts_wave_bars, self.tts_wave = self._make_wave()    # over the mute button
+
+        self.bubble = ft.Container(
+            border_radius=20,
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
+            padding=ft.Padding(left=8, top=8, right=8, bottom=8),
             content=ft.Row(
-                controls=self.wave_bars, spacing=6,
-                alignment=ft.MainAxisAlignment.CENTER,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=0,
+                controls=[
+                    ft.Container(
+                        expand=True,
+                        content=ft.Column(
+                            expand=True,
+                            controls=[
+                                self.input_box,                                
+                                ft.Container(
+                                    expand=True,
+                                    content=ft.Row(
+                                        expand=True,
+                                        controls=[
+                                            self.menu_btn,
+                                            ft.Container(expand=True),  # spacer
+                                            self.emoji_btn,
+                                            ft.Container(
+                                                content=ft.Stack(
+                                                    expand=True,
+                                                    controls=[self.mute_btn, self.tts_wave],
+                                                ),
+                                            ),
+                                            ft.Container(
+                                                padding=ft.Padding(left=8, top=0, right=8, bottom=0),
+                                                content=ft.Stack(
+                                                    expand=True,
+                                                    controls=[self.mic_btn, self.wave],
+                                                ),
+                                            ),                                            
+                                            self.send_btn,
+                                        ]
+                                    )
+                                )
+
+                            ],                       
+                        ),
+                    ),
+                ],
             ),
         )
 
@@ -84,19 +147,7 @@ class ChatPage(BasePage):
                     controls=[
                         self.contact_header,
                         self.history,
-                        ft.Row(
-                            vertical_alignment=ft.CrossAxisAlignment.END,
-                            controls=[
-                                ft.PopupMenuButton(
-                                    icon=ft.Icons.MENU,
-                                    items=[ft.PopupMenuItem(content="... replay", on_click=lambda e: self.replay())],
-                                ),
-                                ft.Stack(expand=True, controls=[self.wave, self.input_box]),
-                                ft.IconButton(icon=ft.Icons.EMOJI_EMOTIONS, icon_size=24, on_click=self.open_emoji_picker),
-                                self.mic_btn,
-                                ft.IconButton(icon=ft.Icons.SEND, icon_size=24, on_click=lambda e: self.send_message()),
-                            ],
-                        ),
+                        self.bubble,
                     ],
                 ),
             ),
@@ -122,6 +173,8 @@ class ChatPage(BasePage):
         self.status_widget.clear_status()
         self.stream_bubble.clear_content()
         self.stream_bubble.visible = False
+        self._stream_message_id = None
+        self._finished_message_ids.clear()
         self.history.controls = [
             ft.Row(controls=[self.status_widget]),
             ft.Row(controls=[self.stream_bubble]),
@@ -166,6 +219,15 @@ class ChatPage(BasePage):
                 self.page.run_task(self._stop_mic)
         self.mic_btn.update()
 
+    def on_mute_toggle(self, e=None):
+        self.mute_btn.selected = not self.mute_btn.selected
+        if self.mute_btn.selected:
+            self.mute_btn.icon = ft.Icons.VOLUME_UP
+        else:
+            self.mute_btn.icon = ft.Icons.VOLUME_OFF
+            Text_To_Speech.kill_current_speech()
+        self.mute_btn.update()
+
     async def _start_mic(self):
         await self._stop_mic()
         self.audio_streamer = AudioStreamer(
@@ -179,15 +241,19 @@ class ChatPage(BasePage):
         self._wave_task = asyncio.create_task(self._wave_loop())
 
     async def _wave_loop(self):
-        """follows play_wave_animation while the mic is on"""
         try:
             while True:
+                level = self.audio_streamer.level if self.audio_streamer else 0.0
+                if not self.play_wave_animation:
+                    self.play_wave_animation = level > 0.05
+
                 if self.play_wave_animation:
-                    for bar in self.wave_bars:
-                        bar.height = random.uniform(4, 32)
+                    self._scroll_wave(self.wave_bars, level)
+
                 if self.wave.visible != self.play_wave_animation or self.play_wave_animation:
                     self.wave.visible = self.play_wave_animation
                     self.wave.update()
+
                 await asyncio.sleep(0.15)
         except asyncio.CancelledError:
             pass
@@ -201,14 +267,12 @@ class ChatPage(BasePage):
         kind = payload.get("type")
         text = (payload.get("text") or "").strip()
         if not text:
-            return
-        self.play_wave_animation = True
+            return       
         self.input_box.value = text
         self.input_box.update()
         if kind == "final":
             self.play_wave_animation = False
             self.send_message()
-            
 
     async def _stop_mic(self):
         self.play_wave_animation = False
@@ -244,7 +308,75 @@ class ChatPage(BasePage):
             logger.error(f"failed to append to history: {repr(e)}")            
 
     def replay(self):
-        Text_To_Speech.speak(text=self._cleanup_for_speech(self.replay_content), voice=self.contact.get_voice_id())
+        if self.mute_btn.selected:
+            self._speak(self.replay_content)
+
+    def _speak(self, content: str):
+        """speaks a message and animates the bars on the mute button while it is generated and played"""
+        Text_To_Speech.speak(text=self._cleanup_for_speech(content), voice=self.contact.get_voice_id())
+        if not self._tts_running and self.page:
+            self._tts_running = True
+            self.page.run_task(self._tts_loop)
+
+    @staticmethod
+    def _make_wave():
+        """the scrolling bars overlay, put into a Stack on top of a button"""
+        bars = [
+            ft.Container(
+                width=4, height=0, border_radius=2, bgcolor=TEXT,
+                animate=ft.Animation(150, ft.AnimationCurve.EASE_IN_OUT),
+            )
+            for _ in range(5)
+        ]
+        wave = ft.Container(
+            left=0, right=0, top=0, bottom=0,
+            opacity=0.5, visible=False,
+            ignore_interactions=True,  # it lies on top of the button, taps must go through to it
+            content=ft.Row(
+                controls=bars, spacing=4,
+                alignment=ft.MainAxisAlignment.CENTER,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        )
+        return bars, wave
+
+    @staticmethod
+    def _scroll_wave(bars, level: float):
+        """shift the bars left and add the newest level (0..1) on the right"""
+        for left, right in zip(bars, bars[1:]):
+            left.height = right.height
+        bars[-1].height = level * 64
+
+    async def _tts_loop(self):
+        """follows Text_To_Speech.state: low pulse while the hub generates, speech-like bars while it plays"""
+        tick = 0
+        restart = True
+        try:
+            self.tts_wave.visible = True
+            while Text_To_Speech.state != "idle":
+                if Text_To_Speech.state == "playing":
+                    level = random.uniform(0.1, 0.6)  # no playback level available, jitter in the range of normal speech
+                else:
+                    level = 0.1 if tick % 2 else 0.05  # generating: small pulse
+                self._scroll_wave(self.tts_wave_bars, level)
+                self.tts_wave.update()
+                tick += 1
+                await asyncio.sleep(0.15)
+        except Exception as e:
+            restart = False
+            logger.debug(f"tts bars stopped: {repr(e)}")  # e.g. the page went away
+        finally:
+            self._tts_running = False
+            try:
+                for bar in self.tts_wave_bars:
+                    bar.height = 0
+                self.tts_wave.visible = False
+                self.tts_wave.update()
+            except Exception:
+                pass
+            if restart and Text_To_Speech.state != "idle" and self.page:
+                self._tts_running = True  # a new speech started while we were stopping
+                self.page.run_task(self._tts_loop)
 
     def _remove_excess_linebreaks(self, text: str) -> str:
         code_block_pattern = r"```.*?```"
@@ -298,6 +430,10 @@ class ChatPage(BasePage):
                 self.status_widget.on_status_message(message["status"])
 
             if "delta" in message and message["conversation_id"] == self.conversation_id:
+                message_id = message.get("message_id")
+                if message_id is not None and message_id in self._finished_message_ids:
+                    return
+                self._stream_message_id = message_id
                 self.delta_buffer += message["delta"]
                 if self.page:
                     self.page.run_task(self._schedule_flush, self._stream_gen)
@@ -305,6 +441,9 @@ class ChatPage(BasePage):
             if "chat" in message:
                 chat = message["chat"]
                 if chat["conversation_id"] == self.conversation_id:
+                    if self._stream_message_id is not None:
+                        self._finished_message_ids.add(self._stream_message_id)
+                        self._stream_message_id = None
                     self._stream_gen += 1
                     self.delta_buffer = ""
                     self.stream_bubble.clear_content()
@@ -320,7 +459,9 @@ class ChatPage(BasePage):
                         self._append_history(role, content, str(image_path))
                     else:
                         self._append_history(role, content)
-                    Text_To_Speech.speak(text=self._cleanup_for_speech(content), voice=self.contact.get_voice_id())
+
+                    if self.mute_btn.selected:
+                        self._speak(content)
         except Exception as e:
             logger.error(f"failed to handle incomming message: {e}")
 
