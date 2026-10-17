@@ -773,6 +773,8 @@ deploy_hub() {
     set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
     set_env_value SIGNUP_MODE "${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
     echo "   signup mode: ${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
+    set_env_value HUB_PORT "${HUB_PORT:-$HUB_PORT_DEFAULT}"
+    echo "   port: ${HUB_PORT:-$HUB_PORT_DEFAULT}"
 
     pushd rueckgrat > /dev/null
     docker compose stop hub caddy 2>/dev/null || true
@@ -820,6 +822,8 @@ deploy_node() {
     echo "🐋 node..."
 
     set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
+    set_env_value NODE_PORT "${NODE_PORT:-$NODE_PORT_DEFAULT}"
+    echo "   port: ${NODE_PORT:-$NODE_PORT_DEFAULT}"
 
     BUILD_ARGS=()
     COMPOSE_FILES=(-f compose.yml)

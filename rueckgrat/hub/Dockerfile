@@ -15,7 +15,5 @@ COPY app app
 
 USER hubuser
 
-EXPOSE 14223
-
-ENTRYPOINT ["uvicorn", "app.main:app"]
-CMD ["--host", "0.0.0.0", "--port", "14223"]
+EXPOSE ${HUB_PORT}
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${HUB_PORT}"]
