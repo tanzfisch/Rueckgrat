@@ -59,7 +59,7 @@ class Hub:
     @classmethod
     def download_file(cls, image_path: str, download_path: str, max_retry: int = 5):
         url = f"{cls.url}/downloads/{image_path}"
-        cls.download(url, download_path, max_retry)
+        cls.download(url, download_path, max_retry=max_retry)
 
     @classmethod
     def download(cls, url: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
@@ -684,6 +684,42 @@ class Hub:
             logger.error(f"upload_voice - {response.status_code} {response.text}")
         except Exception as e:
             logger.error(f"failed to upload_voice {repr(e)}")
+        return None
+
+    @classmethod
+    def get_predefined_voices(cls) -> list:
+        """the voices that come with rueckgrat, each with id, name, description, gender and language"""
+        try:
+            response = requests.get(
+                f"{cls.url}/voices/predefined",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("voices", [])
+            logger.error(f"get_predefined_voices - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_predefined_voices {repr(e)}")
+        return []
+
+    @classmethod
+    def use_predefined_voice(cls, predefined_id: str) -> Optional[str]:
+        """lets the hub copy a predefined voice to the user's voices, returns the voice uuid or None"""
+        try:
+            response = requests.post(
+                f"{cls.url}/voices/predefined/{predefined_id}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=60,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                voice_id = response.json().get("voice_id")
+                logger.debug(f"using predefined voice {predefined_id}. got id {voice_id}")
+                return voice_id
+            logger.error(f"use_predefined_voice - {response.status_code} {response.text}")
+        except Exception as e:
+            logger.error(f"failed to use_predefined_voice {repr(e)}")
         return None
 
     @classmethod

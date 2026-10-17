@@ -7,6 +7,7 @@ Changelog
 - #90 fixed character images not showing in web mode (flet run --web)
 - #91 added invite based signup
 - #33 ports are now configureable for hub, node and llama.cpp
+- #92 adding more default voices
 
 0.16.0
 ------
