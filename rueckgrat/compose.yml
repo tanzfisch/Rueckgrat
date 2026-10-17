@@ -58,6 +58,7 @@ services:
       - ./chat/app/common:/node/app/common
     environment:
       NODE_PORT: ${NODE_PORT}
+      LLAMA_SERVER_PORT: ${LLAMA_SERVER_PORT}
     stdin_open: true
     tty: true
     restart: unless-stopped

@@ -897,6 +897,10 @@ set_env_value() {
     if grep -q "^${key}=" "$file"; then
         sed -i "s|^${key}=.*|${key}=${value}|" "$file"
     else
+        # make sure the last line is terminated before appending
+        if [ -s "$file" ] && [ -n "$(tail -c1 "$file")" ]; then
+            echo >> "$file"
+        fi
         echo "${key}=${value}" >> "$file"
     fi
 }
