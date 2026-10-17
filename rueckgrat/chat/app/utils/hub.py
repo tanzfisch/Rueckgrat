@@ -418,7 +418,6 @@ class Hub:
             if response.status_code == 200:
                 data = response.json()
                 user_id = data.get("user_id")
-                # open mode answers 200 with user_id null when the name is taken
                 if user_id is None:
                     return -1, "username already exists"
                 return user_id, None

@@ -199,7 +199,6 @@ def create_user(user: UserCreate):
 
 @app.get("/signup-mode")
 def get_signup_mode():
-    # lets the chat app decide whether to show the invite fields
     return {"mode": SIGNUP_MODE}
 
 class LoginRequest(BaseModel):
