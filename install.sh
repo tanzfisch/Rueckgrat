@@ -772,9 +772,10 @@ deploy_hub() {
 
     set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
     set_env_value SIGNUP_MODE "${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
-    echo "   signup mode: ${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
     set_env_value HUB_PORT "${HUB_PORT:-$HUB_PORT_DEFAULT}"
-    echo "   port: ${HUB_PORT:-$HUB_PORT_DEFAULT}"
+
+    echo "   signup mode  ${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
+    echo "   port         ${HUB_PORT:-$HUB_PORT_DEFAULT}"
 
     pushd rueckgrat > /dev/null
     docker compose stop hub caddy 2>/dev/null || true
@@ -823,7 +824,6 @@ deploy_node() {
 
     set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
     set_env_value NODE_PORT "${NODE_PORT:-$NODE_PORT_DEFAULT}"
-    echo "   port: ${NODE_PORT:-$NODE_PORT_DEFAULT}"
 
     BUILD_ARGS=()
     COMPOSE_FILES=(-f compose.yml)
@@ -862,9 +862,12 @@ deploy_node() {
         nvidia) COMPOSE_FILES+=(-f compose.nvidia.yml) ;;
     esac
 
-    echo "   vendor=${GPU_VENDOR:-cpu} backend=${TORCH_BACKEND:-cpu} cuda_index=${TORCH_CUDA_INDEX:-n/a}"
-    echo "   compose=${COMPOSE_FILES[*]}"
-    echo "   build_args=${BUILD_ARGS[*]:-none}"
+    echo "   port        ${NODE_PORT:-$NODE_PORT_DEFAULT}"
+    echo "   vendor      ${GPU_VENDOR:-cpu}"
+    echo "   backend     ${TORCH_BACKEND:-cpu}"
+    echo "   cuda_index  ${TORCH_CUDA_INDEX:-n/a}"
+    echo "   compose     ${COMPOSE_FILES[*]}"
+    echo "   build_args  ${BUILD_ARGS[*]:-none}"
     [ "${GPU_VENDOR:-}" = "amd" ] && echo "   amd_gids=video:$HOST_AMD_VIDEO render:$HOST_AMD_RENDER"
 
     pushd rueckgrat > /dev/null
@@ -1151,6 +1154,9 @@ write_default_env() {
 
     set_env_value LLAMA_SERVER_PORT "$LLAMA_SERVER_PORT_DEFAULT"
     set_env_value LLAMA_SERVER_BACKEND "$LLAMA_SERVER_BACKEND_DEFAULT"
+
+    set_env_value HUB_PORT "$HUB_PORT_DEFAULT"
+    set_env_value NODE_PORT "$NODE_PORT_DEFAULT"
 }
 
 # deploy_components - Local component installer
@@ -1412,6 +1418,9 @@ main() {
     SYNC_ONLY=false
     IN_PLACE=false
     HOST_MODELS_DIR=HOST_MODELS_DIR_DEFAULT
+    NODE_PORT=NODE_PORT_DEFAULT
+    HUB_PORT=HUB_PORT_DEFAULT
+    LLAMA_SERVER_PORT=LLAMA_SERVER_PORT_DEFAULT
 
     while [[ $# -gt 0 ]]; do
         case $1 in
