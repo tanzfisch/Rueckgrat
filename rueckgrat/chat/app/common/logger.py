@@ -112,7 +112,7 @@ class HealthFilter(logging.Filter):
 class Logger:
     def __init__(self, level=logging.DEBUG):
         if sys.platform != "android":
-            parser = argparse.ArgumentParser()
+            parser = argparse.ArgumentParser(add_help=False)
             parser.add_argument("--logfile", default=None)
             args, _ = parser.parse_known_args()
             logfile = args.logfile

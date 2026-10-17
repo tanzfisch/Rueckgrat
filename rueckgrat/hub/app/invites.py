@@ -15,7 +15,19 @@ from app.utils.db import ChatDB
 DB_PATH = "/hub/db/chat.db"
 
 def main():
-    parser = argparse.ArgumentParser(description="manage signup invites")
+    parser = argparse.ArgumentParser(
+        prog="python -m app.invites",
+        description="manage signup invites",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""commands:
+  create --by NAME [--email EMAIL] [--days N] [--max-uses N]
+      --by        who creates the invite (required)
+      --email     only this email may use the invite
+      --days      days until expiry, 0 for never (default 7)
+      --max-uses  how many signups the invite allows (default 1)
+  list            list all invites, 'email': None means not bound
+  remove ID       delete an invite by its id (see list)""",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     create = sub.add_parser("create", help="create an invite and print its token")
@@ -27,7 +39,7 @@ def main():
     sub.add_parser("list", help="list invites")
 
     remove = sub.add_parser("remove", help="delete an invite")
-    remove.add_argument("id", type=int)
+    remove.add_argument("id", type=int, help="invite id as shown by list")
 
     args = parser.parse_args()
     db = ChatDB(DB_PATH)
@@ -38,7 +50,10 @@ def main():
         token = db.create_invite(args.by, args.email, args.days or None, args.max_uses)
         print(token)
     elif args.cmd == "list":
-        for invite in db.get_invites():
+        invites = db.get_invites()
+        if not invites:
+            print("No invites")
+        for invite in invites:
             print(invite)
     elif args.cmd == "remove":
         print("removed" if db.remove_invite(args.id) else "not found")
