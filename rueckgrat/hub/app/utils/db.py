@@ -1,6 +1,9 @@
 import sqlite3
 import json
 import uuid
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.common import get_logger
@@ -83,6 +86,23 @@ class ChatDB:
                 username TEXT UNIQUE NOT NULL,
                 password TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )""")
+
+        # invites gate signup when the hub runs with SIGNUP_MODE=invite
+        # only a sha256 of the token is stored, the plain token is shown once on creation
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS invites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_hash TEXT UNIQUE NOT NULL,
+                created_by TEXT NOT NULL,
+                email TEXT DEFAULT NULL,
+                expires_at TEXT DEFAULT NULL,
+                max_uses INTEGER NOT NULL DEFAULT 1,
+                uses INTEGER NOT NULL DEFAULT 0,
+                used_at TEXT DEFAULT NULL,
+                used_by INTEGER DEFAULT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (used_by) REFERENCES users(id) ON DELETE SET NULL
         )""")
 
         cursor.execute("""
@@ -905,3 +925,97 @@ class ChatDB:
             logger.error(f"failed deleting voice file {row['file_key']}: {e}")
 
         return True
+
+
+    ########### invites
+    @staticmethod
+    def _now() -> str:
+        # one fixed format so expiry strings compare correctly as text
+        return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    @staticmethod
+    def _hash_token(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def create_invite(self, created_by: str, email: str | None = None, expires_in_days: float | None = 7, max_uses: int = 1) -> str:
+        """
+        Creates an invite and returns the plain token. Only its hash is stored.
+        """
+        token = secrets.token_urlsafe(24)
+        expires_at = None
+        if expires_in_days is not None:
+            expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_in_days)).isoformat(timespec="seconds")
+
+        with self.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO invites (token_hash, created_by, email, expires_at, max_uses) VALUES (?, ?, ?, ?, ?)",
+                (self._hash_token(token), created_by, email.lower() if email else None, expires_at, max_uses)
+            )
+        logger.info(f"invite created by {created_by}")
+        return token
+
+    def get_invites(self) -> list:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT id, created_by, email, expires_at, max_uses, uses, used_at, used_by, created_at FROM invites ORDER BY id"
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def remove_invite(self, invite_id: int) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM invites WHERE id = ?", (invite_id,))
+            return cursor.rowcount > 0
+
+    def create_user_with_invite(self, username: str, passwd: str, token: str, email: str | None = None) -> tuple[int | None, str | None]:
+        """
+        Redeems an invite and creates the user in one transaction.
+        Returns (user_id, None) on success or (None, reason) on failure.
+        If the user can't be created the invite use is rolled back.
+        """
+        now = self._now()
+        conn = self.get_connection()
+        try:
+            # take the write lock up front so two signups can't redeem the last use at once
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT id, email, expires_at, max_uses, uses FROM invites WHERE token_hash = ?",
+                (self._hash_token(token),)
+            ).fetchone()
+
+            if row is None:
+                reason = "unknown"
+            elif row["expires_at"] is not None and row["expires_at"] <= now:
+                reason = "expired"
+            elif row["uses"] >= row["max_uses"]:
+                reason = "exhausted"
+            elif row["email"] is not None and (email or "").lower() != row["email"]:
+                reason = "email mismatch"
+            else:
+                reason = None
+
+            if reason:
+                conn.rollback()
+                return None, reason
+
+            try:
+                cursor = conn.execute(
+                    "INSERT INTO users (username, password) VALUES (?, ?)",
+                    (username, passwd)
+                )
+            except sqlite3.IntegrityError:
+                conn.rollback()
+                return None, "username exists"
+
+            user_id = cursor.lastrowid
+            conn.execute(
+                "UPDATE invites SET uses = uses + 1, used_at = ?, used_by = ? WHERE id = ?",
+                (now, user_id, row["id"])
+            )
+            conn.commit()
+            logger.info(f"created user via invite {row['id']}")
+            return user_id, None
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()

@@ -4,7 +4,7 @@ from app.ui import BasePage
 from app.ui.widgets import OneLineBubble
 from app.utils import Hub
 from app.common import get_logger
-from app.ui.theme import STYLES
+from app.ui.theme import STYLES, ERROR
 
 logger = get_logger()
 
@@ -76,10 +76,14 @@ class PasswordPage(ft.Container):
         )
 
 class AddUserPage(ft.Column):
-    def __init__(self, create_user, goto_select, horizontal_alignment=ft.CrossAxisAlignment.STRETCH):
+    def __init__(self, create_user, goto_select, invite_required=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH):
         super().__init__(expand=True, spacing=8)
         self.name_edit = ft.TextField(label="Name", expand=True, **STYLES["field"])
         self.pass_edit = ft.TextField(label="Password", password=True, can_reveal_password=True, expand=True, **STYLES["field"])
+        # only shown when the hub runs in invite mode
+        self.invite_edit = ft.TextField(label="Invite code", visible=invite_required, expand=True, **STYLES["field"])
+        self.email_edit = ft.TextField(label="Email (if the invite is for one)", visible=invite_required, expand=True, **STYLES["field"])
+        self.error_text = ft.Text("", color=ERROR, visible=False, text_align=ft.TextAlign.CENTER)
 
         self.controls = [
             ft.Container(
@@ -92,7 +96,10 @@ class AddUserPage(ft.Column):
                     spacing=8,
                     controls=[
                         self.name_edit,
-                        self.pass_edit
+                        self.pass_edit,
+                        self.invite_edit,
+                        self.email_edit,
+                        self.error_text,
                     ]
                 )
             ),
@@ -108,6 +115,11 @@ class AddUserPage(ft.Column):
             )
         ]
 
+    def show_error(self, message: str | None):
+        self.error_text.value = message or ""
+        self.error_text.visible = bool(message)
+        self.update()
+
 
 class LoginPage(BasePage):
     def __init__(self, navigator):
@@ -120,7 +132,8 @@ class LoginPage(BasePage):
 
         self.user_page = UserSelectionPage(self.users, self.user_chosen, self.goto_create_user)
         self.pass_page = PasswordPage(self.goto_select_user, self.check_login)
-        self.add_page = AddUserPage(self.create_user, self.goto_select_user)
+        self.invite_required = Hub.get_signup_mode() == "invite"
+        self.add_page = AddUserPage(self.create_user, self.goto_select_user, self.invite_required)
 
         if not self.users:
             start = self.add_page
@@ -151,13 +164,29 @@ class LoginPage(BasePage):
         self._show(self.pass_page)
 
     def create_user(self):
-        name = self.add_page.name_edit.value or ""
+        name = (self.add_page.name_edit.value or "").strip()
         pwd = self.add_page.pass_edit.value or ""
-        Hub.create_user(name, pwd)
+        invite = None
+        email = None
+
+        if self.invite_required:
+            invite = (self.add_page.invite_edit.value or "").strip()
+            email = (self.add_page.email_edit.value or "").strip() or None
+            if not invite:
+                self.add_page.show_error("an invite code is required to sign up")
+                return
+
+        user_id, error = Hub.create_user(name, pwd, invite, email)
+        if error:
+            self.add_page.show_error(error)
+            return
+
+        self.add_page.show_error(None)
         if Hub.login_user(name, pwd):
             self.on_successful_login()
         else:
             logger.error("login failed")
+            self.add_page.show_error("account created but login failed")
 
     def check_login(self):
         pwd = self.pass_page.password_edit.value or ""

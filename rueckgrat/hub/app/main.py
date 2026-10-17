@@ -87,6 +87,8 @@ def hash_password(password: str) -> str:
     return ph.hash(password)
 
 def verify_password(password: str, hashed: str) -> bool:
+    if not hashed:
+        return False
     try:
         ph.verify(hashed, password)
         return True
@@ -158,14 +160,48 @@ def update_contact(request: UpdateUserDataRequest, username: str = Depends(get_c
     else:
         return {"status": "failed"}
 
+# "open": anyone can create an account (default, fine for local use)
+# "invite": signup needs a valid invite token, use this when the hub is reachable from the internet
+SIGNUP_MODE = os.environ.get("SIGNUP_MODE", "open").lower()
+if SIGNUP_MODE not in ("open", "invite"):
+    raise RuntimeError(f"invalid SIGNUP_MODE {SIGNUP_MODE}, expected open or invite")
+
+INVITE_ERRORS = {
+    "unknown": "this invite code is not valid",
+    "expired": "this invite has expired",
+    "exhausted": "this invite has already been used",
+    "email mismatch": "this invite belongs to a different email address",
+}
+
 class UserCreate(BaseModel):
     user_name: str
     user_passwd: str
+    invite_token: str | None = None
+    email: str | None = None
 
 @app.post("/users")
 def create_user(user: UserCreate):
-    user_id = app.state.db.create_user(user.user_name, hash_password(user.user_passwd))
+    if SIGNUP_MODE == "open":
+        user_id = app.state.db.create_user(user.user_name, hash_password(user.user_passwd))
+        return {"user_id": user_id}
+
+    if not user.invite_token:
+        raise HTTPException(status_code=403, detail="invite required")
+
+    user_id, reason = app.state.db.create_user_with_invite(
+        user.user_name, hash_password(user.user_passwd), user.invite_token, user.email
+    )
+    if reason == "username exists":
+        raise HTTPException(status_code=409, detail="username already exists")
+    if reason:
+        logger.warning(f"signup rejected for {user.user_name}: invite {reason}")
+        raise HTTPException(status_code=403, detail=INVITE_ERRORS.get(reason, "invite not accepted"))
+
     return {"user_id": user_id}
+
+@app.get("/signup-mode")
+def get_signup_mode():
+    return {"mode": SIGNUP_MODE}
 
 class LoginRequest(BaseModel):
     user_name: str
@@ -178,7 +214,7 @@ def login(data: LoginRequest):
     if not user:
         raise HTTPException(status_code=401)
 
-    if data.user_passwd and not verify_password(data.user_passwd, user["password"]):
+    if not verify_password(data.user_passwd or "", user["password"]):
         raise HTTPException(status_code=401)
 
     token = create_access_token(user["username"])

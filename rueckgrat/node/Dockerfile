@@ -57,7 +57,5 @@ RUN mkdir -p /node/app/config && chown -R nodeuser:nodeuser /node/app/config
 
 USER nodeuser
 
-EXPOSE 7346
-
-ENTRYPOINT ["python", "-u", "-m", "uvicorn", "app.main:app"]
-CMD ["--host", "0.0.0.0", "--port", "7346"]
+EXPOSE ${NODE_PORT}
+CMD ["sh", "-c", "exec python -u -m uvicorn app.main:app --host 0.0.0.0 --port ${NODE_PORT}"]
