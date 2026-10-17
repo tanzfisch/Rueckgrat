@@ -9,10 +9,43 @@ Admin tool for signup invites, run inside the hub container:
 Whoever can run docker on the host is trusted as admin.
 """
 import argparse
+from datetime import datetime, timezone
 
 from app.utils.db import ChatDB
 
 DB_PATH = "/hub/db/chat.db"
+# placeholder until the real domain is known
+SIGNUP_URL = "https://rickratz.com/?invite={token}"
+
+def print_invites(invites):
+    GRAY_BG = "\033[48;5;236m"
+    RESET = "\033[0m"
+
+    header = f"{'ID':<5} {'BY':<12} {'EMAIL':<28} {'USES':<6} {'EXPIRES (UTC)':<17} {'STATUS'}"
+    print()
+    print(f"{GRAY_BG}{header:<100}{RESET}")
+
+    if not invites:
+        print("No invites")
+        return
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    for i, invite in enumerate(invites):
+        expires_at = invite["expires_at"]
+        if invite["uses"] >= invite["max_uses"]:
+            status = "used"
+        elif expires_at is not None and expires_at <= now:
+            status = "expired"
+        else:
+            status = "open"
+        # stored as 2026-10-24T20:20:34+00:00, show 2026-10-24 20:20
+        expires = expires_at[:16].replace("T", " ") if expires_at else "never"
+        email = invite["email"] or "-"
+        uses = f"{invite['uses']}/{invite['max_uses']}"
+        bg = GRAY_BG if i % 2 else ""
+        line = f"{str(invite['id']):<5} {invite['created_by']:<12} {email:<28} {uses:<6} {expires:<17} {status}"
+        print(f"{bg}{line:<100}{RESET}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -48,13 +81,10 @@ def main():
         if args.max_uses < 1:
             parser.error("--max-uses must be at least 1")
         token = db.create_invite(args.by, args.email, args.days or None, args.max_uses)
-        print(token)
+        print(f"created new token: {token}")
+        print(f"signup url: {SIGNUP_URL.format(token=token)}")
     elif args.cmd == "list":
-        invites = db.get_invites()
-        if not invites:
-            print("No invites")
-        for invite in invites:
-            print(invite)
+        print_invites(db.get_invites())
     elif args.cmd == "remove":
         print("removed" if db.remove_invite(args.id) else "not found")
 
