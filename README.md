@@ -24,9 +24,11 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     * openSUSE (not tested)
 - multi-host: one **hub** (control + DB + STT) and one or more **nodes** (workers)
 - Caddy for HTTPS (subject to change)
-- **llama.cpp** server in Docker (`text_to_text`)
-- image generation via Diffusers / SDXL (`text_to_image`)
-- STT on the hub: Silero VAD + faster-whisper
+- nodes
+    * llama.cpp
+    * image generation via Diffusers / SDXL
+    * STT using Silero VAD + faster-whisper
+    * TTS using Chatterbox
 - GPU: NVIDIA and AMD. Intel GPUs are not supported/tested.
 - AI tools
     - **websearch** — search the web when requested or needed
@@ -39,7 +41,6 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
 - chat with a locally installed LLM
 - in-chat image generation based on use prompt
 - self image generation. Like taking a picture of self based on current context.
-- client-side TTS via Piper (broken on mobile right now since piper does not work there)
 - code highlighting
 - contacts, character templates, character-creation wizard, settings
 
@@ -87,7 +88,7 @@ cd Rueckgrat
 ./install.sh
 ```
 
-Config-driven install. Walk the installer until it recaps the plan; the written file is `rueckgrat/config/infrastructure.json`. Example:
+Config-driven install. Walk the installer manually until it recaps the plan; the written file is `rueckgrat/config/infrastructure.json`. Make a copy for later use without manually setting it again. Example:
 
 ```bash
 ./install.sh -c rueckgrat/config/config_example.json -y

@@ -25,6 +25,7 @@ class Text_To_Speech:
     _page = None          # flet page, needed for in-app playback on mobile
     _current_audio = None # running flet Audio service on mobile, if any
     _audio_done = None    # set when in-app playback ends
+    state = "idle"        # "idle" / "generating" / "playing", written by the speech thread, polled by the chat page
 
     @classmethod
     def attach(cls, page: ft.Page):
@@ -39,6 +40,7 @@ class Text_To_Speech:
     def kill_current_speech(cls):
         with cls._proc_lock:
             cls._generation += 1
+            cls.state = "idle"
             proc = cls._current_proc
             cls._current_proc = None
             audio, done = cls._current_audio, cls._audio_done
@@ -64,6 +66,7 @@ class Text_To_Speech:
             cls.kill_current_speech()
             with cls._proc_lock:
                 generation = cls._generation
+                cls.state = "generating"
             args = (cls._cleanup_for_speech(text), voice, generation)
             if cls._page and cls._is_mobile():
                 # run_thread sets flet's page context, so services like flet_audio.Audio register themselves.
@@ -73,6 +76,7 @@ class Text_To_Speech:
             else:
                 threading.Thread(target=cls._run_speech, args=args, daemon=True).start()
         except Exception as e:
+            cls.state = "idle"
             logger.error(f"failed to run speech generation {e}")
 
     @staticmethod
@@ -88,10 +92,18 @@ class Text_To_Speech:
             return generation == cls._generation
 
     @classmethod
+    def _set_state(cls, generation: int, state: str):
+        """only the current speech may change the state, a killed one must not overwrite its successor"""
+        with cls._proc_lock:
+            if generation == cls._generation:
+                cls.state = state
+
+    @classmethod
     def _run_speech(cls, text: str, voice: str, generation: int):
         wav = Hub.tts(text, voice)
         if not wav:
             logger.error("failed to get speech from hub")
+            cls._set_state(generation, "idle")
             return
         if not cls._is_current(generation):
             return  # a newer speak() or a kill happened while we waited for the hub
@@ -101,6 +113,7 @@ class Text_To_Speech:
                 cls._play_in_app(wav, generation)
             except Exception as e:
                 logger.error(f"failed to playback speech: {e}")
+            cls._set_state(generation, "idle")
             return
 
         output_file = os.path.join(tempfile.gettempdir(), f"chat_speech_{uuid.uuid4()}.wav")
@@ -112,12 +125,14 @@ class Text_To_Speech:
         finally:
             logger.debug("delete speech")
             Path(output_file).unlink(missing_ok=True)
+            cls._set_state(generation, "idle")
 
     @classmethod
     def _play(cls, wav_file: str, generation: int):
         logger.debug("playback speech")
         if platform.system() == "Windows":
             import winsound
+            cls._set_state(generation, "playing")
             winsound.PlaySound(wav_file, winsound.SND_FILENAME)
             return
 
@@ -128,6 +143,7 @@ class Text_To_Speech:
                 return
             proc = subprocess.Popen(command_aplay, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             cls._current_proc = proc
+            cls.state = "playing"
         proc.wait()
         with cls._proc_lock:
             if cls._current_proc is proc:
@@ -150,6 +166,7 @@ class Text_To_Speech:
             if generation != cls._generation:
                 return
             cls._current_audio, cls._audio_done = audio, done
+            cls.state = "playing"
         try:
             done.wait(timeout=600)  # blocks only this background thread
         finally:

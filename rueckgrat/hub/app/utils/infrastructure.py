@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import requests
+import uuid
 from tqdm import tqdm
 from urllib.parse import urlparse
 from requests.models import Response
@@ -38,7 +39,7 @@ class WebSocketClientNode(WebSocketClient):
         super().__init__(self.uri)
 
 class Infrastructure:
-    callback_handlers: Dict[int, Callable[[str], None]] = {}
+    callback_handlers: Dict[str, tuple[int, Callable[[str], None]]] = {}
 
     def __init__(self):
         if not INFRASTRUCTURE_CONFIG_PATH.exists():
@@ -88,6 +89,9 @@ class Infrastructure:
 
         if not "text_to_speech" in self.node_by_type:
             logger.warning("couldn't find text_to_speech generator")
+
+        if not "speech_to_text" in self.node_by_type:
+            logger.warning("couldn't find speech_to_text recognizer")
 
     def get_status(self) -> StatusResult:
         # the websocket supervisor already tracks every node, no need to poll them over http
@@ -197,6 +201,31 @@ class Infrastructure:
             logger.error(f"failed to get a tts response {repr(e)}")
             return None
 
+    def stt(self, pcm16: bytes, kind: str) -> Optional[str]:
+        """forward 16 kHz mono pcm_s16le audio to the stt node, returns the text or None.
+        kind: final (accurate model) or partial (fast model)"""
+        if not "speech_to_text" in self.node_by_type:
+            logger.error("no speech to text recognizer available")
+            return None
+
+        node = self.node_by_type["speech_to_text"]
+        url = f"http://{node.addr}:{node.port}/stt"
+        try:
+            response = requests.post(
+                url,
+                params={"kind": kind},
+                data=pcm16,
+                headers={"Content-Type": "application/octet-stream"},
+                timeout=120,
+            )
+            if response.status_code != 200:
+                logger.error(f"failed stt request: {response.status_code} {response.reason}")
+                return None
+            return response.json().get("text", "")
+        except Exception as e:
+            logger.error(f"failed to get a stt response {repr(e)}")
+            return None
+
     def drop_voice(self, voice: str) -> bool:
         """removes a cached voice from the tts node after it was deleted on the hub. best effort"""
         if not "text_to_speech" in self.node_by_type:
@@ -237,30 +266,29 @@ class Infrastructure:
             return False
 
     @staticmethod
-    def _error_response(conversation_id: int, error: str) -> str:
-        # same shape as a final node response so waiting jobs finish
-        return json.dumps({"conversation_id": conversation_id, "response": "", "error": error})
+    def _error_response(conversation_id: int, stream_id: str, error: str) -> str:
+        return json.dumps({"conversation_id": conversation_id, "stream_id": stream_id, "response": "", "error": error})
 
     def _fail_pending_streams(self):
         """connection to the node dropped: in-flight streams will never finish, fail them now"""
         pending = list(self.callback_handlers.items())
         self.callback_handlers.clear()
-        for conversation_id, callback in pending:
+        for stream_id, (conversation_id, callback) in pending:
             logger.error(f"connection lost during stream for conversation {conversation_id}")
             try:
-                callback(self._error_response(conversation_id, "connection to node lost"))
+                callback(self._error_response(conversation_id, stream_id, "connection to node lost"))
             except Exception as e:
                 logger.error(f"failed to notify conversation {conversation_id}: {e!r}")
 
     def _on_incomming_message(self, message: str):
         try:
             data = json.loads(message)
-            conversation_id = data.get("conversation_id")
+            stream_id = data.get("stream_id")
 
-            if conversation_id in self.callback_handlers:
-                self.callback_handlers[conversation_id](message)
+            if stream_id in self.callback_handlers:
+                self.callback_handlers[stream_id][1](message)
                 if "response" in data:
-                    del self.callback_handlers[conversation_id]
+                    del self.callback_handlers[stream_id]
 
         except Exception as e:
             logger.error(f"failed to handle incomming message from node {repr(e)}")
@@ -274,7 +302,8 @@ class Infrastructure:
                 max_new_tokens=max_new_tokens,
                 context_size=context_size,
                 stream=stream,
-                conversation_id=conversation_id
+                conversation_id=conversation_id,
+                stream_id=uuid.uuid4().hex if stream else None  # own routing key per stream
             )
 
             #logger.debug(f"sending query to llm:\n{Utils.pretty_print(chat_request.model_dump())}")
@@ -288,10 +317,10 @@ class Infrastructure:
                 
                 if not node.is_connected():
                     logger.error(f"node {node.uri} not connected, failing chat request")
-                    callback(self._error_response(conversation_id, "node not connected"))
+                    callback(self._error_response(conversation_id, chat_request.stream_id, "node not connected"))
                     return None
 
-                self.callback_handlers[conversation_id] = callback
+                self.callback_handlers[chat_request.stream_id] = (conversation_id, callback)
                 payload = {"chat": chat_request.model_dump()}
                 node.send_message(json.dumps(payload))
             else:
@@ -394,7 +423,6 @@ class Infrastructure:
                 return response.json()
             logger.error(f"failed to get model info {response.status_code} {response.reason}")
         except requests.exceptions.ConnectionError:
-            # node not started yet - not an error
             logger.info(f"model info for {model_name} not available yet, node {node.addr}:{node.port} not reachable")
             return None
         except Exception as e:

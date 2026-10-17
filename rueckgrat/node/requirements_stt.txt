@@ -1,0 +1,3 @@
+# faster-whisper runs on ctranslate2, it does not need torch
+faster-whisper
+numpy

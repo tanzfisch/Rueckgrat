@@ -88,6 +88,7 @@ class LLamaCppInterface:
                             full_content += content
                             callback(json.dumps({
                                 "conversation_id": request.conversation_id,
+                                "stream_id": request.stream_id,
                                 "delta": content
                             }))
 
@@ -99,6 +100,7 @@ class LLamaCppInterface:
                 think, resp = self._split(full_content, full_reasoning)
                 callback(json.dumps({
                     "conversation_id": request.conversation_id,
+                    "stream_id": request.stream_id,
                     "response": resp,
                     "thinking": think
                 }))
@@ -120,11 +122,19 @@ class LLamaCppInterface:
                 return ChatResponse(role="assistant", content=resp, think=think)
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {str(e)}")
-            return ChatResponse(role="error", content=f"Request failed: {str(e)}")
+            return self._fail(request, callback, f"Request failed: {str(e)}")
         except (KeyError, IndexError, json.JSONDecodeError) as e:
-            logger.error(f"Invalid response: {str(e)}")
-            return ChatResponse(role="error", content=f"Invalid response: {str(e)}")
+            return self._fail(request, callback, f"Invalid response: {str(e)}")
         except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
-            return ChatResponse(role="error", content=f"Unexpected error: {str(e)}")
+            return self._fail(request, callback, f"Unexpected error: {str(e)}")
+
+    def _fail(self, request: ChatRequestLlama, callback, error: str) -> ChatResponse:
+        logger.error(error)
+        if request.stream and callback:
+            callback(json.dumps({
+                "conversation_id": request.conversation_id,
+                "stream_id": request.stream_id,
+                "response": "",
+                "error": error
+            }))
+        return ChatResponse(role="error", content=error)

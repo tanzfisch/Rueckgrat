@@ -10,7 +10,6 @@ import hashlib
 from tqdm import tqdm
 from pathlib import Path
 import numpy as np
-from faster_whisper import WhisperModel
 import torch
 
 from fastapi.responses import StreamingResponse, Response
@@ -31,24 +30,6 @@ from datetime import datetime, timedelta, timezone
 from app.common import get_logger, set_log_level, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
 logger = get_logger()
 
-async def _load_whisper(app: FastAPI):
-    infrastructure = app.state.infrastructure
-    while True:
-        node = await infrastructure.wait_for_any_node()
-        logger.info(f"node {node.addr}:{node.port} is up, installing whisper models")
-        ok_medium = await asyncio.to_thread(infrastructure.install_model, "faster-whisper-medium")
-        ok_small = await asyncio.to_thread(infrastructure.install_model, "faster-whisper-small")
-        if ok_medium and ok_small:
-            break
-        logger.info("whisper models not installed yet, retrying in 30s")
-        await asyncio.sleep(30)
-
-    app.state.whisper_model = await asyncio.to_thread(
-        WhisperModel, "/hub/models/stt/faster-whisper-medium", device="cpu", compute_type="int8")
-    app.state.whisper_model_fast = await asyncio.to_thread(
-        WhisperModel, "/hub/models/stt/faster-whisper-small", device="cpu", compute_type="int8")
-    logger.info("whisper loaded")
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("connecting infrastructure")
@@ -67,14 +48,6 @@ async def lifespan(app: FastAPI):
         job_queue=app.state.job_queue
     )
 
-    logger.info("loading whisper")
-    app.state.whisper_lock = asyncio.Lock()
-
-    # whisper models come from a node, so load them in the background once a node is up
-    app.state.whisper_model = None
-    app.state.whisper_model_fast = None
-    app.state.whisper_task = asyncio.create_task(_load_whisper(app))
-
     logger.info("loading vad")
     app.state.vad = load_silero_vad(onnx=True)
     torch.set_num_threads(1)
@@ -83,7 +56,6 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    app.state.whisper_task.cancel()
     app.state.job_queue.stop()
 
     logger.info("hub shut down")
@@ -252,6 +224,9 @@ def get_contacts(username: str = Depends(get_current_user)):
 
 @app.get("/contact/{contact_id}")
 def get_contact(contact_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
     contact = app.state.db.get_contact_by_id(contact_id)
     images = app.state.db.get_contact_images(contact_id)
     contact["images"] = images
@@ -271,6 +246,8 @@ class UpdateContactRequest(BaseModel):
 @app.patch("/contacts/{contact_id}")
 def update_contact(contact_id: int, request: UpdateContactRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
     app.state.db.update_contact(user_id, contact_id, request.contact_data)
     
     job = AssistantImageJob(
@@ -289,6 +266,9 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
 
 @app.delete("/contacts/{contact_id}")
 def delete_conversation(contact_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
     if app.state.db.delete_contact(contact_id):
         return {"status": "ok"}
     else:
@@ -303,6 +283,9 @@ def get_conversations(contact_id: int, username: str = Depends(get_current_user)
 
 @app.get("/conversations/{conversation_id}")
 def get_conversation(conversation_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_conversation(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="conversation not found")
     conversation = app.state.db.get_conversation(conversation_id)
     return {"conversation": conversation}
 
@@ -312,11 +295,16 @@ class CreateConversationRequest(BaseModel):
 @app.post("/conversations")
 def create_conversation(request: CreateConversationRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, request.contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
     conversation_id = app.state.db.create_conversation(user_id, request.contact_id)
     return {"conversation_id": conversation_id}
 
 @app.delete("/conversations/{conversation_id}")
 def delete_conversation(conversation_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_conversation(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="conversation not found")
     if app.state.db.delete_conversation(conversation_id):
         return {"status": "ok"}
     else:
@@ -324,11 +312,17 @@ def delete_conversation(conversation_id: int, username: str = Depends(get_curren
 
 @app.get("/conversations/{conversation_id}/messages")
 def get_messages(conversation_id: int, request: GetMessagesRequest, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_conversation(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="conversation not found")
     messages = app.state.db.get_messages_by_conversation(conversation_id, request.max_messages)
     return {"messages": messages}
 
 @app.get("/messages/{message_id}/attachments")
 def get_messages(message_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_message(user_id, message_id):
+        raise HTTPException(status_code=404, detail="message not found")
     attachments = app.state.db.get_attachments_for_message(message_id)
     return {"attachments": attachments}
 
@@ -396,6 +390,18 @@ def delete_voice(voice_id: str, username: str = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="voice not found")
     app.state.infrastructure.drop_voice(voice_id)
     return {"status": "ok", "voice_id": voice_id}
+
+########### image generation info
+@app.get("/images/{file_key}/generation")
+def get_image_generation(file_key: str, username: str = Depends(get_current_user)):
+    """everything that went into one image (prompts, seed, model, size, steps, cfg)"""
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_image(user_id, file_key):
+        raise HTTPException(status_code=404, detail="no generation info for this image")
+    generation = app.state.db.get_image_generation(file_key)
+    if generation is None:
+        raise HTTPException(status_code=404, detail="no generation info for this image")
+    return {"file_key": file_key, "generation": generation}
 
 ########### model handling
 @app.get("/models/{model_name}/url", response_model=GetModelURLResponse)
@@ -576,20 +582,14 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
     meta = {"sample_rate": 16000, "channels": 1, "encoding": "pcm_s16le"}
     frame = 512
 
-    async def transcribe(model, wav, kind: str):
+    async def transcribe(wav, kind: str):
         nonlocal busy
-        if model is None:
-            logger.info("speech recognition not ready yet, waiting for whisper to load")
-            return
-        if kind == "partial" and (busy or app.state.whisper_lock.locked()):
+        if kind == "partial" and busy:
             return
         busy = True
         try:
-            async with app.state.whisper_lock:
-                segments, _ = await asyncio.to_thread(
-                    model.transcribe, wav, vad_filter=False
-                )
-            text = "".join(s.text for s in segments).strip()
+            pcm16 = (np.clip(wav, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+            text = await asyncio.to_thread(app.state.infrastructure.stt, pcm16, kind)
             if text:
                 await websocket.send_json({"type": kind, "text": text})
                 logger.debug(text)
@@ -630,13 +630,13 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
                     if spoken_ms >= PARTIAL_MS:
                         spoken_ms = 0
                         wav = np.concatenate(utterance)
-                        await transcribe(app.state.whisper_model_fast, wav, "partial")
+                        await transcribe(wav, "partial")
                 elif voiced:
                     silence += frame / 16
                     utterance.append(piece)
                     if silence >= SILENCE_MS:
                         wav = np.concatenate(utterance)
-                        await transcribe(app.state.whisper_model, wav, "final")
+                        await transcribe(wav, "final")
                         utterance = []
                         voiced = False
                         silence = 0
