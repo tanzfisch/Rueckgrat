@@ -87,6 +87,8 @@ def hash_password(password: str) -> str:
     return ph.hash(password)
 
 def verify_password(password: str, hashed: str) -> bool:
+    if not hashed:
+        return False
     try:
         ph.verify(hashed, password)
         return True
@@ -212,7 +214,7 @@ def login(data: LoginRequest):
     if not user:
         raise HTTPException(status_code=401)
 
-    if data.user_passwd and not verify_password(data.user_passwd, user["password"]):
+    if not verify_password(data.user_passwd or "", user["password"]):
         raise HTTPException(status_code=401)
 
     token = create_access_token(user["username"])
