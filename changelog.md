@@ -10,6 +10,7 @@ Changelog
 - #46 added mute button to chat
 - #89 fixed issue with websearch
 - #88 animate mute button when generating tts
+- #69 improve robustness of chat stream
 
 0.15.0
 ------
