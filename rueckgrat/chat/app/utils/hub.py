@@ -95,6 +95,22 @@ class Hub:
                 pass
 
     @classmethod
+    async def logout(cls):
+        """
+        Forgets the session and closes the websocket. The hub keeps no sessions,
+        so there is nothing to tell it, the token is simply dropped.
+        """
+        await cls.stop_websocket()
+        if cls.websocket_client:
+            await cls.websocket_client.close()
+
+        logger.info(f"logged out {cls.user_name} id:{cls.user_id}")
+    
+        cls.access_token = ""
+        cls.user_id = -1
+        cls.user_name = ""
+
+    @classmethod
     async def _start_websocket(cls, token: str):
         await cls.websocket_client.connect(token)
 

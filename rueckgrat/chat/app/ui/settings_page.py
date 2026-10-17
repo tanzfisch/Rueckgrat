@@ -3,7 +3,7 @@ from app.ui.theme import STYLES
 
 from app.ui import BasePage
 from app.ui.widgets import RowSelector, ContactHeader
-from app.utils import RueckgratConfig
+from app.utils import RueckgratConfig, Hub
 
 
 class NetworkSettingsPage(ft.Column):
@@ -49,11 +49,19 @@ class UserProfileSettingsPage(ft.Column):
         self.navigator = navigator
         self.controls = [
             ft.Button("edit", on_click=self.on_click_user_profile, style=STYLES["button"]["style"]),
+            ft.Button("logout", on_click=self.on_click_logout, style=STYLES["button"]["style"]),
             ft.Container(expand=True),
         ]
 
     def on_click_user_profile(self, e=None):
         self.navigator("profile_wizz", user_profile_mode=True)
+
+    def on_click_logout(self, e=None):
+        self.page.run_task(self._logout)
+
+    async def _logout(self):
+        await Hub.logout()
+        self.navigator("login")
 
 
 class SettingsPage(BasePage):
