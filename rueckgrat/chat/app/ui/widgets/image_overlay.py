@@ -2,6 +2,8 @@ from pathlib import Path
 import asyncio
 import flet as ft
 
+from app.utils import Paths
+
 
 class ImageOverlay(ft.Container):
     def __init__(self, page: ft.Page, image_path: Path | str):
@@ -15,7 +17,7 @@ class ImageOverlay(ft.Container):
             alignment=ft.Alignment.CENTER,
             on_click=self._close,
             content=ft.Image(
-                src=str(image_path),
+                src=Paths.image_src(image_path, page.web),
                 fit=ft.BoxFit.CONTAIN,
                 width=page.width,
                 height=page.height,

@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.17.0
+------
+
+- #90 fixed character images not showing in web mode (flet run --web)
+
 0.16.0
 ------
 
