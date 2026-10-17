@@ -13,7 +13,6 @@ class ChatResponse(BaseModel):
     role: str
     content: str
     think: str = ""
-    attachments: list[str] = []
 
 class ChatRequestLlama(BaseModel):
     messages: list[dict]
@@ -23,6 +22,7 @@ class ChatRequestLlama(BaseModel):
     context_size: int
     stream: bool = False
     conversation_id: int = -1
+    stream_id: str | None = None
 
 class ImageRequest(BaseModel):
     positive_prompt: str
@@ -83,10 +83,10 @@ class GetRegisteredModelsResponse(BaseModel):
 
 class NodeTTSRequest(BaseModel):
     text: str
-    voice: str = ""          # reference voice id, empty = chatterbox default voice
+    voice: str = ""
     exaggeration: float = 0.5
     cfg_weight: float = 0.5
 
 class HubTTSRequest(BaseModel):
     text: str
-    voice: str = ""  # TODO(#11): per-contact voice scheme not decided yet    
+    voice: str = ""
