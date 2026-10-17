@@ -164,6 +164,13 @@ SIGNUP_MODE = os.environ.get("SIGNUP_MODE", "open").lower()
 if SIGNUP_MODE not in ("open", "invite"):
     raise RuntimeError(f"invalid SIGNUP_MODE {SIGNUP_MODE}, expected open or invite")
 
+INVITE_ERRORS = {
+    "unknown": "this invite code is not valid",
+    "expired": "this invite has expired",
+    "exhausted": "this invite has already been used",
+    "email mismatch": "this invite belongs to a different email address",
+}
+
 class UserCreate(BaseModel):
     user_name: str
     user_passwd: str
@@ -186,9 +193,14 @@ def create_user(user: UserCreate):
         raise HTTPException(status_code=409, detail="username already exists")
     if reason:
         logger.warning(f"signup rejected for {user.user_name}: invite {reason}")
-        raise HTTPException(status_code=403, detail="invalid or expired invite")
+        raise HTTPException(status_code=403, detail=INVITE_ERRORS.get(reason, "invite not accepted"))
 
     return {"user_id": user_id}
+
+@app.get("/signup-mode")
+def get_signup_mode():
+    # lets the chat app decide whether to show the invite fields
+    return {"mode": SIGNUP_MODE}
 
 class LoginRequest(BaseModel):
     user_name: str
