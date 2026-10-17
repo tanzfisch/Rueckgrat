@@ -5,6 +5,7 @@ Changelog
 ------
 
 - #90 fixed character images not showing in web mode (flet run --web)
+- #91 added invite based signup
 
 0.16.0
 ------

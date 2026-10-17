@@ -27,6 +27,8 @@ services:
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
       - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/hub/models
+    environment:
+      SIGNUP_MODE: ${SIGNUP_MODE:-open}
     restart: unless-stopped
     stdin_open: true
     tty: true

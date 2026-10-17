@@ -158,13 +158,36 @@ def update_contact(request: UpdateUserDataRequest, username: str = Depends(get_c
     else:
         return {"status": "failed"}
 
+# "open": anyone can create an account (default, fine for local use)
+# "invite": signup needs a valid invite token, use this when the hub is reachable from the internet
+SIGNUP_MODE = os.environ.get("SIGNUP_MODE", "open").lower()
+if SIGNUP_MODE not in ("open", "invite"):
+    raise RuntimeError(f"invalid SIGNUP_MODE {SIGNUP_MODE}, expected open or invite")
+
 class UserCreate(BaseModel):
     user_name: str
     user_passwd: str
+    invite_token: str | None = None
+    email: str | None = None
 
 @app.post("/users")
 def create_user(user: UserCreate):
-    user_id = app.state.db.create_user(user.user_name, hash_password(user.user_passwd))
+    if SIGNUP_MODE == "open":
+        user_id = app.state.db.create_user(user.user_name, hash_password(user.user_passwd))
+        return {"user_id": user_id}
+
+    if not user.invite_token:
+        raise HTTPException(status_code=403, detail="invite required")
+
+    user_id, reason = app.state.db.create_user_with_invite(
+        user.user_name, hash_password(user.user_passwd), user.invite_token, user.email
+    )
+    if reason == "username exists":
+        raise HTTPException(status_code=409, detail="username already exists")
+    if reason:
+        logger.warning(f"signup rejected for {user.user_name}: invite {reason}")
+        raise HTTPException(status_code=403, detail="invalid or expired invite")
+
     return {"user_id": user_id}
 
 class LoginRequest(BaseModel):
