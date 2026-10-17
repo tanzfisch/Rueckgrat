@@ -25,7 +25,8 @@
         ]
       },
       "hub": {
-        "port": 14223
+        "port": 14223,
+        "signup_mode": "open"
       },
       "chat": {}
     },

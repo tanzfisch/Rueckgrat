@@ -614,8 +614,8 @@ select_hosts_and_components() {
         fi
 
         if $INSTALL_HUB; then
-            host_json=$(jq --arg port "$HUB_PORT" \
-                '. + {hub: {port: ($port | tonumber)}}' <<< "$host_json")
+            host_json=$(jq --arg port "$HUB_PORT" --arg signup_mode "$SIGNUP_MODE" \
+                '. + {hub: {port: ($port | tonumber), signup_mode: $signup_mode}}' <<< "$host_json")
         fi
 
         if $INSTALL_CHAT; then
@@ -658,6 +658,13 @@ select_components() {
         read_tty "Hub port? [$HUB_PORT_DEFAULT]: " "$HUB_PORT_DEFAULT" $YES
         HUB_PORT=$REPLY
         echo -e "\e[1A\e[K     Port: $HUB_PORT"
+        while true; do
+            read_tty "Signup mode, open or invite? [$SIGNUP_MODE_DEFAULT]: " "$SIGNUP_MODE_DEFAULT" $YES
+            [[ "$REPLY" == "open" || "$REPLY" == "invite" ]] && break
+            echo -e "\e[1A\e[K     ⚠️ please answer open or invite"
+        done
+        SIGNUP_MODE=$REPLY
+        echo -e "\e[1A\e[K     Signup: $SIGNUP_MODE"
     fi
 
     read_tty "Install Node? (Y/n): " "Y"
@@ -732,7 +739,7 @@ format_hosts() {
     .hosts[] as $h |
     "\nHost: \($h.addr)",
     "  "+(if $h.chat then "[✅]" else "[⚫]" end)+" Native Chat Client",
-    "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub",
+    "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub"+(if $h.hub.signup_mode then " (signup: \($h.hub.signup_mode))" else "" end),
     "  "+(if $h.node then "[✅]" else "[⚫]" end)+" Node",
     "  "+($h.node.services[]? | "    [✅] \(.name)"),
     "  "+($h.node.modules[]? | "    [✅] \(.name)")
@@ -764,6 +771,8 @@ deploy_hub() {
     echo "🐋 hub & caddy..."
 
     set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
+    set_env_value SIGNUP_MODE "${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
+    echo "   signup mode: ${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
 
     pushd rueckgrat > /dev/null
     docker compose stop hub caddy 2>/dev/null || true
@@ -1038,6 +1047,7 @@ parse_host_config() {
     INSTALL_STT=false
     INSTALL_LLAMA_MODEL=""
     HUB_PORT=""
+    SIGNUP_MODE=""
     NODE_PORT=""
     LLAMA_SERVER_PORT=""
     LLAMA_SERVER_MODEL=""
@@ -1051,6 +1061,7 @@ parse_host_config() {
     if echo "$host_config" | jq -e '.hub' >/dev/null; then
         INSTALL_HUB=true
         HUB_PORT=$(echo "$host_config" | jq -r '.hub.port // empty')
+        SIGNUP_MODE=$(echo "$host_config" | jq -r '.hub.signup_mode // empty')
     fi
 
     if echo "$host_config" | jq -e '.chat' >/dev/null; then
@@ -1360,6 +1371,7 @@ sync_on_hosts() {
 
 readonly CONTAINER_MODELS_DIR="/models"
 readonly HUB_PORT_DEFAULT=14223
+readonly SIGNUP_MODE_DEFAULT="open"                # open: anyone can sign up, invite: signup needs an invite token
 readonly NODE_PORT_DEFAULT=7346
 readonly HOST_MODELS_DIR_DEFAULT="/var/lib/Rueckgrat/models"
 
