@@ -16,3 +16,4 @@ tldextract
 torch
 numpy
 silero-vad[onnx-cpu]
+ddgs==9.16.0

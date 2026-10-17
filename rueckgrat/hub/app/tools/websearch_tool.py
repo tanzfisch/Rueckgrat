@@ -4,8 +4,11 @@ from .tool import Tool
 from app.jobs.find_answer_job import FindAnswerJob
 import requests
 import datetime
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 import tldextract
 from bs4 import BeautifulSoup
+from ddgs import DDGS
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -213,35 +216,85 @@ class WebsearchTool(Tool):
         ]
         return query + " " + " ".join(improvements)
 
+    # all ddgs 9.16.0 text engines, best first (results of higher engines come first). every engine runs in its
+    # own thread with its own try/except: ddgs' own multi-backend search drops good results when another engine
+    # fails first (ddgs issue #427)
+    # (backend, attempts)   status measured from this network on 2026-10-17
+    SEARCH_BACKENDS = [
+        ("yahoo", 3),       # works, ~7 results, but empty in ~40% of calls -> retries
+        ("duckduckgo", 1),  # mostly blocked (HTTP 202 bot challenge), 10 results when it gets through
+        ("wikipedia", 1),   # 1 article, only for single-topic queries
+        ("grokipedia", 1),  # 1 article, only for single-topic queries
+        ("startpage", 1),   # HTTP 200 but no results
+        ("mojeek", 1),      # HTTP 200 but no results
+        ("brave", 1),       # blocked (HTTP 429)
+        ("google", 1),      # blocked (HTTP 403)
+    ]
+    SEARCH_DEADLINE = 20  # seconds for the whole search, all engines and retries together
+
+    def _search_engine(self, backend, attempts, query, max_results, deadline):
+        """runs in a worker thread, returns the engine's hits or [] (never raises)"""
+        for attempt in range(1, attempts + 1):
+            remaining = deadline - time.monotonic()
+            if remaining < 1:
+                break
+            try:
+                return DDGS(timeout=min(10, int(remaining))).text(query, max_results=max_results, backend=backend)
+            except Exception as e:
+                logger.warning(f"websearch {backend} attempt {attempt}/{attempts} failed {repr(e)}")
+                if attempt < attempts:
+                    time.sleep(min(1, max(0, deadline - time.monotonic())))
+        return []
+
     def _web_search(self, query, num_results):
-        try:
-            url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(query)}"
-            logger.debug(f"search query: {url}")
-            headers = {"User-Agent": "Mozilla/5.0"}
-            resp = requests.get(url, headers=headers)
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            results = []
-            seen = set()
-            for g in soup.select('.result')[:num_results * 2]:  # extra buffer
-                title = g.select_one('.result__title')
-                link = g.select_one('.result__url')
-                snippet = g.select_one('.result__snippet')
-                if title and link:
-                    url = 'https:' + link.get('href') if link.get('href', '').startswith('//') else link.get('href') or ''
-                    if url and url not in seen:
+        logger.debug(f"search query: {query}")
+        deadline = time.monotonic() + self.SEARCH_DEADLINE
+        hits_by_backend = {}
+
+        def merged():
+            # dedupe by url, results of higher ranked engines first
+            results, seen, contributed = [], set(), []
+            for backend, _ in self.SEARCH_BACKENDS:
+                added = 0
+                for hit in hits_by_backend.get(backend, []):
+                    url = hit.get("href") or ""
+                    if url and url not in seen and len(results) < num_results:
                         seen.add(url)
                         results.append({
-                            'title': title.get_text(strip=True),
+                            'title': hit.get("title", ""),
                             'url': url,
-                            'snippet': snippet.get_text(strip=True) if snippet else ''                        
+                            'snippet': hit.get("body", "")
                         })
-                        if len(results) >= num_results:
-                            break
-            return results
-        except Exception as e:
-            logger.error(f"failed websearch {repr(e)}")
+                        added += 1
+                if added:
+                    contributed.append(f"{backend}:{added}")
+            return results, contributed
 
-        return None
+        executor = ThreadPoolExecutor(max_workers=len(self.SEARCH_BACKENDS), thread_name_prefix="websearch")
+        futures = {
+            executor.submit(self._search_engine, backend, attempts, query, num_results * 2, deadline): backend  # extra buffer
+            for backend, attempts in self.SEARCH_BACKENDS
+        }
+        try:
+            for future in as_completed(futures, timeout=max(0, deadline - time.monotonic())):
+                try:
+                    hits_by_backend[futures[future]] = future.result()
+                except Exception as e:
+                    logger.warning(f"websearch {futures[future]} failed {repr(e)}")
+                if len(merged()[0]) >= num_results:
+                    break
+        except FuturesTimeoutError:
+            logger.warning(f"websearch deadline of {self.SEARCH_DEADLINE}s reached")
+        finally:
+            # don't wait for stragglers, their ddgs timeout ends them in the background
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        results, contributed = merged()
+        if results:
+            logger.debug(f"websearch got {len(results)} results from {', '.join(contributed)}")
+        else:
+            logger.error(f"failed websearch, no engine gave results for {query}")
+        return results
 
     def execute(self) -> None:
         try:
@@ -292,6 +345,9 @@ class WebsearchTool(Tool):
                     title = result["title"]
 
                     answer = job.result()
+                    if not answer:
+                        logger.debug(f"no answer for {url}")
+                        continue
                     if answer["quality"] > threshold:
                         good_results.append({ 
                             "answer": answer['answer'], 

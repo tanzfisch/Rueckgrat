@@ -1,7 +1,7 @@
 import sys
 import flet as ft
 
-BG = "#121212"
+BACKGROUND = "#121212"
 SURFACE = "#1E1E1E"
 SURFACE_2 = "#262626"
 SURFACE_3 = "#2A2A2A"
@@ -19,7 +19,7 @@ SIZE_FACTOR = 1.2 if sys.platform not in ("android", "ios") else 1.0
 
 def apply_theme(page: ft.Page):
     page.theme_mode = ft.ThemeMode.DARK
-    page.bgcolor = BG
+    page.bgcolor = BACKGROUND
     page.theme = ft.Theme(
         color_scheme=ft.ColorScheme(
             primary=TEAL,
