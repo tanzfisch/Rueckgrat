@@ -8,8 +8,6 @@
  * Author has no clue about security, auth, certs, or Caddy. Help welcome.
  * See the [changelog](https://github.com/tanzfisch/Rueckgrat/blob/master/changelog.md) for more details.
 
-AGPL-3.0. Commercial licensing: see `COMMERCIAL_LICENSE.md`.
-
 ## Features
 
 Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client. Quality depends on the models you run.
@@ -165,6 +163,7 @@ Stdout only (`./run.sh` also writes `logs/chat.log` if that path exists).
 | --- | --- |
 | The chat bot seems to fail doing anything right | Use at least a 24B LLM (e.g. `cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L`). Smaller models often fail to generate valid JSON tool calls. |
 | What does Rückgrat mean? | Rückgrat (or the alternative spelling Rueckgrat) is German for spine. Idea was to create a framework that is the base for a bunch of tools. Plus it looks cool as a logo. |
+| Can I use Rückgrat for commercial projects? | Yes. Check out for commercial licensing here `COMMERCIAL_LICENSE.md`. |
 
 ## Special thanks to
 
