@@ -4,6 +4,7 @@ from .tool import Tool
 from .image_gen_tool import ImageGenTool
 from .take_photo_tool import TakePhotoTool
 from .websearch_tool import WebsearchTool
+from .conversion_tool import ConversionTool
 
 from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
@@ -18,6 +19,7 @@ class ToolRegistry:
         self._register_tool(WebsearchTool)  
         self._register_tool(ImageGenTool)
         self._register_tool(TakePhotoTool)
+        self._register_tool(ConversionTool)
 
         temp = ", ".join(self.tools)
         logger.debug(f"registered tools: {temp}")

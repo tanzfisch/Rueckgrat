@@ -4,7 +4,7 @@ from .job_queue import Job
 from .chat_job import ChatJob
 from .thinking_job import ThinkingJob
 from .update_context_job import UpdateContextJob
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from app.common import get_logger, ChatRequest, Utils, MessageQueue
 logger = get_logger()
@@ -55,6 +55,41 @@ class MetaJob(Job):
             }
             self.done = True
             
+    def _format_websearch_results(self) -> Optional[str]:
+        """removes the websearch tool result from self.response, returns the WEBSEARCH_RESULT block or None"""
+        if not "websearch_results" in self.response:
+            return None
+
+        websearch_response = ""
+        websearch_results = self.response.pop("websearch_results")
+        if len(websearch_results) > 0:
+            websearch_response += f"\nWebsearch results in order of accuracy: "
+            for websearch_result in websearch_results:
+                websearch_response += f"\n{websearch_result['title']} - {websearch_result['answer']} - source {websearch_result['source']}"
+        else:
+            logger.error("empty tool response from websearch")
+
+        if websearch_response == "":
+            return None
+        return f"\n\nWEBSEARCH_RESULT{websearch_response}\n"
+
+    def _format_conversion_results(self) -> Optional[str]:
+        """removes the convert tool results from self.response, returns the CONVERSION_RESULT block or None"""
+        if not "conversion_results" in self.response:
+            return None
+
+        conversion_response = ""
+        for conversion in self.response.pop("conversion_results"):
+            if "error" in conversion:
+                conversion_response += f"\n{conversion['amount']} {conversion['from']} -> {conversion['to']}: failed - {conversion['error']}"
+            else:
+                date = f", rate date {conversion['date']}" if "date" in conversion else ""
+                conversion_response += f"\n{conversion['text']} - source {conversion['source']}{date}"
+
+        if conversion_response == "":
+            return None
+        return f"\n\nCONVERSION_RESULT{conversion_response}\n"
+
     def execute(self) -> None:
         self.response = {}
 
@@ -97,20 +132,13 @@ class MetaJob(Job):
             MessageQueue().send_status_message("compile response")
 
             compiled_response = thinking_response['content']
-            if "websearch_results" in self.response:
-                websearch_response = ""
-                websearch_results = self.response["websearch_results"]
-                self.response.pop("websearch_results")
-                if len(websearch_results) > 0:
-                    websearch_response += f"\nWebsearch results in order of accuracy: "
-                    for websearch_result in websearch_results:                        
-                        websearch_response += f"\n{websearch_result['title']} - {websearch_result['answer']} - source {websearch_result['source']}"
-                else:
-                    logger.error("empty tool response from websearch")
+            websearch_block = self._format_websearch_results()
+            if websearch_block:
+                compiled_response += websearch_block
 
-                if websearch_response != "":
-                    compiled_response += f"\n\nWEBSEARCH_RESULT{websearch_response}\n"
-
+            conversion_block = self._format_conversion_results()
+            if conversion_block:
+                compiled_response += conversion_block
             
             logger.debug(f"compiled response:\n{compiled_response}")
 

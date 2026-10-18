@@ -126,6 +126,7 @@ You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_bo
         return """
 INSTRUCTIONS:
 * When a WEBSEARCH_RESULT section is provided, base your answer on it. Do not invent or add any information. Answer concisely.
+* When a CONVERSION_RESULT section is provided, use its numbers exactly. If a conversion failed, say so briefly instead of guessing.
 """
 
     def _build_thinking(self) -> str:
