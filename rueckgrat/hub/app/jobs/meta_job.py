@@ -4,7 +4,7 @@ from .job_queue import Job
 from .chat_job import ChatJob
 from .thinking_job import ThinkingJob
 from .update_context_job import UpdateContextJob
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 from app.common import get_logger, ChatRequest, Utils, MessageQueue
 logger = get_logger()
@@ -90,6 +90,36 @@ class MetaJob(Job):
             return None
         return f"\n\nCONVERSION_RESULT{conversion_response}\n"
 
+    def _format_tool_results(self) -> Optional[str]:
+        """removes the results of the simple tools (calculate, current_time, date_calc, wikipedia, weather) from self.response, returns the TOOL_RESULT block or None"""
+        if not "tool_results" in self.response:
+            return None
+
+        tool_response = ""
+        for tool_result in self.response.pop("tool_results"):
+            if "error" in tool_result:
+                tool_response += f"\n{tool_result['tool']}: failed - {tool_result['error']}"
+            else:
+                tool_response += f"\n{tool_result['tool']}: {tool_result['text']}"
+
+        if tool_response == "":
+            return None
+        return f"\n\nTOOL_RESULT{tool_response}\n"
+
+    def _run_thinking(self, tool_names: Optional[List[str]] = None) -> Dict[str, Any]:
+        """one thinking call as a sub job. tool_names None: with the tool index. a list: with the full prompts
+        of these tools, the same path no matter who selected them (request_tools today, other selectors later)"""
+        thinking_job = ThinkingJob(
+            request=self.request,
+            db=self.db,
+            infrastructure=self.infrastructure,
+            tool_registry=self.tool_registry,
+            tool_names=tool_names
+        )
+        self.add_sub_job(thinking_job)
+        self.wait_for([thinking_job])
+        return thinking_job.result()
+
     def execute(self) -> None:
         self.response = {}
 
@@ -107,18 +137,17 @@ class MetaJob(Job):
             MessageQueue().send_status_message("thinking")
             contact = self.db.get_contact_by_id(self.request.contact_id)
 
-            thinking_job = ThinkingJob(
-                request=self.request,
-                db=self.db,
-                infrastructure=self.infrastructure,
-                tool_registry=self.tool_registry
-            )
-            self.add_sub_job(thinking_job)
-            self.wait_for([thinking_job])
-            thinking_response = thinking_job.result()                        
-            tool_calls = thinking_response["tool_calls"]
+            thinking_response = self._run_thinking()
+            logger.debug(f"thinking response (1):\n{Utils.pretty_print(thinking_response)}")
 
-            logger.debug(f"thinking response:\n{Utils.pretty_print(thinking_response)}")
+            tool_request = thinking_response.get("tool_request")
+            if tool_request and tool_request["names"]:
+                # the model asked for tools: second thinking call with their full prompts, its tool calls get executed
+                logger.debug(f"tools requested: {tool_request['names']}")
+                MessageQueue().send_status_message("thinking some more")
+                thinking_response = self._run_thinking(tool_request["names"])
+                logger.debug(f"thinking response (2):\n{Utils.pretty_print(thinking_response)}")
+            tool_calls = thinking_response["tool_calls"]
 
             for tool_call in tool_calls:                
                 self.tool_registry.execute(
@@ -139,6 +168,10 @@ class MetaJob(Job):
             conversion_block = self._format_conversion_results()
             if conversion_block:
                 compiled_response += conversion_block
+
+            tool_block = self._format_tool_results()
+            if tool_block:
+                compiled_response += tool_block
             
             logger.debug(f"compiled response:\n{compiled_response}")
 

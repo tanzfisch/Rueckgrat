@@ -6,6 +6,8 @@ Changelog
 
 - #84 auto install of models on demand for stt, tts and image gen
 - #15 added conversion tool
+- #59 tool index as first step to nested tooling
+      new tools: calculator, current time, date calc, wikipedia, weather, url fetcher
 
 0.17.0
 ------

@@ -1,11 +1,14 @@
 from typing import Dict,  Any
-from .tool import Tool
+from .tool import Tool, ToolCategory
 from app.jobs.requested_image_job import RequestedImageJob
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 class ImageGenTool(Tool):
+    category = ToolCategory.MEDIA
+    description = "generates a picture from a description when the user asks for an image"
+
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
 
