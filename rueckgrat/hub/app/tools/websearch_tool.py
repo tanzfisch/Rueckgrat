@@ -1,6 +1,6 @@
 from typing import Dict,  Any
 import re
-from .tool import Tool
+from .tool import Tool, ToolCategory
 from app.jobs.find_answer_job import FindAnswerJob
 import requests
 import datetime
@@ -14,6 +14,9 @@ from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 class WebsearchTool(Tool):
+    category = ToolCategory.WEB
+    description = "searches the web for current, factual or local information (news, events, prices, stocks, opening hours)"
+
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
 
