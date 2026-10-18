@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
 
     if os.getenv("USE_LLAMA") == "true":
         host = "host.docker.internal"
-        app.state.llamacpp = LLamaCppInterface(host, "8080")
+        app.state.llamacpp = LLamaCppInterface(host, os.getenv("LLAMA_SERVER_PORT"))
     else:
         app.state.llamacpp = None
 

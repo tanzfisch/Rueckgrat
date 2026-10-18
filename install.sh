@@ -614,8 +614,8 @@ select_hosts_and_components() {
         fi
 
         if $INSTALL_HUB; then
-            host_json=$(jq --arg port "$HUB_PORT" \
-                '. + {hub: {port: ($port | tonumber)}}' <<< "$host_json")
+            host_json=$(jq --arg port "$HUB_PORT" --arg signup_mode "$SIGNUP_MODE" \
+                '. + {hub: {port: ($port | tonumber), signup_mode: $signup_mode}}' <<< "$host_json")
         fi
 
         if $INSTALL_CHAT; then
@@ -658,6 +658,13 @@ select_components() {
         read_tty "Hub port? [$HUB_PORT_DEFAULT]: " "$HUB_PORT_DEFAULT" $YES
         HUB_PORT=$REPLY
         echo -e "\e[1A\e[K     Port: $HUB_PORT"
+        while true; do
+            read_tty "Signup mode, open or invite? [$SIGNUP_MODE_DEFAULT]: " "$SIGNUP_MODE_DEFAULT" $YES
+            [[ "$REPLY" == "open" || "$REPLY" == "invite" ]] && break
+            echo -e "\e[1A\e[K     ⚠️ please answer open or invite"
+        done
+        SIGNUP_MODE=$REPLY
+        echo -e "\e[1A\e[K     Signup: $SIGNUP_MODE"
     fi
 
     read_tty "Install Node? (Y/n): " "Y"
@@ -732,7 +739,7 @@ format_hosts() {
     .hosts[] as $h |
     "\nHost: \($h.addr)",
     "  "+(if $h.chat then "[✅]" else "[⚫]" end)+" Native Chat Client",
-    "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub",
+    "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub"+(if $h.hub.signup_mode then " (signup: \($h.hub.signup_mode))" else "" end),
     "  "+(if $h.node then "[✅]" else "[⚫]" end)+" Node",
     "  "+($h.node.services[]? | "    [✅] \(.name)"),
     "  "+($h.node.modules[]? | "    [✅] \(.name)")
@@ -764,6 +771,11 @@ deploy_hub() {
     echo "🐋 hub & caddy..."
 
     set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
+    set_env_value SIGNUP_MODE "${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
+    set_env_value HUB_PORT "${HUB_PORT:-$HUB_PORT_DEFAULT}"
+
+    echo "   signup mode  ${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
+    echo "   port         ${HUB_PORT:-$HUB_PORT_DEFAULT}"
 
     pushd rueckgrat > /dev/null
     docker compose stop hub caddy 2>/dev/null || true
@@ -811,6 +823,7 @@ deploy_node() {
     echo "🐋 node..."
 
     set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
+    set_env_value NODE_PORT "${NODE_PORT:-$NODE_PORT_DEFAULT}"
 
     BUILD_ARGS=()
     COMPOSE_FILES=(-f compose.yml)
@@ -849,9 +862,12 @@ deploy_node() {
         nvidia) COMPOSE_FILES+=(-f compose.nvidia.yml) ;;
     esac
 
-    echo "   vendor=${GPU_VENDOR:-cpu} backend=${TORCH_BACKEND:-cpu} cuda_index=${TORCH_CUDA_INDEX:-n/a}"
-    echo "   compose=${COMPOSE_FILES[*]}"
-    echo "   build_args=${BUILD_ARGS[*]:-none}"
+    echo "   port        ${NODE_PORT:-$NODE_PORT_DEFAULT}"
+    echo "   vendor      ${GPU_VENDOR:-cpu}"
+    echo "   backend     ${TORCH_BACKEND:-cpu}"
+    echo "   cuda_index  ${TORCH_CUDA_INDEX:-n/a}"
+    echo "   compose     ${COMPOSE_FILES[*]}"
+    echo "   build_args  ${BUILD_ARGS[*]:-none}"
     [ "${GPU_VENDOR:-}" = "amd" ] && echo "   amd_gids=video:$HOST_AMD_VIDEO render:$HOST_AMD_RENDER"
 
     pushd rueckgrat > /dev/null
@@ -884,6 +900,10 @@ set_env_value() {
     if grep -q "^${key}=" "$file"; then
         sed -i "s|^${key}=.*|${key}=${value}|" "$file"
     else
+        # make sure the last line is terminated before appending
+        if [ -s "$file" ] && [ -n "$(tail -c1 "$file")" ]; then
+            echo >> "$file"
+        fi
         echo "${key}=${value}" >> "$file"
     fi
 }
@@ -1038,6 +1058,7 @@ parse_host_config() {
     INSTALL_STT=false
     INSTALL_LLAMA_MODEL=""
     HUB_PORT=""
+    SIGNUP_MODE=""
     NODE_PORT=""
     LLAMA_SERVER_PORT=""
     LLAMA_SERVER_MODEL=""
@@ -1051,6 +1072,7 @@ parse_host_config() {
     if echo "$host_config" | jq -e '.hub' >/dev/null; then
         INSTALL_HUB=true
         HUB_PORT=$(echo "$host_config" | jq -r '.hub.port // empty')
+        SIGNUP_MODE=$(echo "$host_config" | jq -r '.hub.signup_mode // empty')
     fi
 
     if echo "$host_config" | jq -e '.chat' >/dev/null; then
@@ -1132,6 +1154,9 @@ write_default_env() {
 
     set_env_value LLAMA_SERVER_PORT "$LLAMA_SERVER_PORT_DEFAULT"
     set_env_value LLAMA_SERVER_BACKEND "$LLAMA_SERVER_BACKEND_DEFAULT"
+
+    set_env_value HUB_PORT "$HUB_PORT_DEFAULT"
+    set_env_value NODE_PORT "$NODE_PORT_DEFAULT"
 }
 
 # deploy_components - Local component installer
@@ -1360,6 +1385,7 @@ sync_on_hosts() {
 
 readonly CONTAINER_MODELS_DIR="/models"
 readonly HUB_PORT_DEFAULT=14223
+readonly SIGNUP_MODE_DEFAULT="open"                # open: anyone can sign up, invite: signup needs an invite token
 readonly NODE_PORT_DEFAULT=7346
 readonly HOST_MODELS_DIR_DEFAULT="/var/lib/Rueckgrat/models"
 
@@ -1392,6 +1418,9 @@ main() {
     SYNC_ONLY=false
     IN_PLACE=false
     HOST_MODELS_DIR=HOST_MODELS_DIR_DEFAULT
+    NODE_PORT=NODE_PORT_DEFAULT
+    HUB_PORT=HUB_PORT_DEFAULT
+    LLAMA_SERVER_PORT=LLAMA_SERVER_PORT_DEFAULT
 
     while [[ $# -gt 0 ]]; do
         case $1 in

@@ -11,6 +11,8 @@ services:
     volumes:
       - caddy_data:/data
       - caddy_config:/config
+    environment:
+      HUB_PORT: ${HUB_PORT}
     restart: unless-stopped
 
   hub:
@@ -19,14 +21,18 @@ services:
       context: ./hub
       dockerfile: Dockerfile
     ports:
-      - "14223:14223"
+      - "${HUB_PORT}:${HUB_PORT}"
     volumes:
       - hub_db:/hub/db
       - hub_images:/hub/images
       - hub_voices:/hub/voices
+      - ../characters/voices:/hub/predefined_voices:ro
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
       - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/hub/models
+    environment:
+      SIGNUP_MODE: ${SIGNUP_MODE:-open}
+      HUB_PORT: ${HUB_PORT}
     restart: unless-stopped
     stdin_open: true
     tty: true
@@ -44,13 +50,16 @@ services:
         TORCH_BACKEND: ${TORCH_BACKEND:-cpu}
         TORCH_CUDA_INDEX: ${TORCH_CUDA_INDEX:-cu121}
     ports:
-      - "7346:7346"
+      - "${NODE_PORT}:${NODE_PORT}"
     volumes:
       - node_images:/node/images
       - ./config:/node/config
       - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/node/models
       - node_voices:/node/voices
       - ./chat/app/common:/node/app/common
+    environment:
+      NODE_PORT: ${NODE_PORT}
+      LLAMA_SERVER_PORT: ${LLAMA_SERVER_PORT}
     stdin_open: true
     tty: true
     restart: unless-stopped

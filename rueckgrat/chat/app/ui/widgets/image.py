@@ -6,6 +6,7 @@ import flet as ft
 from .image_overlay import ImageOverlay
 
 from app.common import get_logger
+from app.utils import Paths
 logger = get_logger()
 
 ASSETS_DIR = os.getenv("FLET_ASSETS_DIR") or "assets"
@@ -54,7 +55,7 @@ class Image(ft.GestureDetector):
         
         while True:
             if self.image_path.exists():
-                self.photo.src = str(self.image_path)
+                self.photo.src = Paths.image_src(self.image_path, self.page.web)
                 self.photo.visible = True
                 self.loading.visible = False
                 self.update()

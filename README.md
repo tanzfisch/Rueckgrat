@@ -123,21 +123,29 @@ Manage installs with the registry manager.
 
 ### Registry manager
 
-Needs to run inside a node container:
+Launch any node container then run the following to control it's registry
 
 ```bash
-cd rueckgrat
-docker compose run --entrypoint /bin/bash --rm node
-```
-
-```bash
-python -m app.registry_manager list -v
-python -m app.registry_manager list -v -t llm    # llm | image | tts | stt
-python -m app.registry_manager install MODELNAME
-python -m app.registry_manager nodes
+docker exec -it rueckgrat_node python -m app.registry_manager list -v
+docker exec -it rueckgrat_node python -m app.registry_manager list -v -t llm    # llm | image | tts | stt
+docker exec -it rueckgrat_node python -m app.registry_manager install [model_name]
+docker exec -it rueckgrat_node python -m app.registry_manager nodes
 ```
 
 Models live under `/var/lib/Rueckgrat/models` on the host.
+
+## Handling Invites
+
+In order to handle invites run the hub container then create invites inside the hub container as follows
+
+```bash
+docker exec -it rueckgrat_hub python -m app.invites create --by [user_name]                        # 7 days, one use, no email binding
+docker exec -it rueckgrat_hub python -m app.invites create --by [user_name] --email [e-mail]       # only that email can sign up
+docker exec -it rueckgrat_hub python -m app.invites list                                           # existing invites, 'email': None means not bound
+docker exec -it rueckgrat_hub python -m app.invites help                                           # displays usage
+```
+
+**Note: The token is printed only once, copy it immediately.**
 
 ## Troubleshoot & FAQ
 

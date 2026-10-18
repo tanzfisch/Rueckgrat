@@ -84,7 +84,7 @@ class ContactHeader(ft.Row):
         self.contact_name.value = self.contact.get_name()
         name = self.contact.get_latest_profile_image_name()
         if name:
-            self.profile_label.src = str(Paths.get_image_path() / name)
+            self.profile_label.src = Paths.image_src(Paths.get_image_path() / name, self.page.web)
         if self.page:
             self.update()
 

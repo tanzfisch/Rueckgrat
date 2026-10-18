@@ -59,7 +59,7 @@ class Hub:
     @classmethod
     def download_file(cls, image_path: str, download_path: str, max_retry: int = 5):
         url = f"{cls.url}/downloads/{image_path}"
-        cls.download(url, download_path, max_retry)
+        cls.download(url, download_path, max_retry=max_retry)
 
     @classmethod
     def download(cls, url: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
@@ -93,6 +93,22 @@ class Hub:
                 await cls.ws_task
             except asyncio.CancelledError:
                 pass
+
+    @classmethod
+    async def logout(cls):
+        """
+        Forgets the session and closes the websocket. The hub keeps no sessions,
+        so there is nothing to tell it, the token is simply dropped.
+        """
+        await cls.stop_websocket()
+        if cls.websocket_client:
+            await cls.websocket_client.close()
+
+        logger.info(f"logged out {cls.user_name} id:{cls.user_id}")
+    
+        cls.access_token = ""
+        cls.user_id = -1
+        cls.user_name = ""
 
     @classmethod
     async def _start_websocket(cls, token: str):
@@ -358,30 +374,64 @@ class Hub:
         return {} 
 
     @classmethod
-    def create_user(cls, user_name, user_passwd) -> int:
+    def get_signup_mode(cls) -> str:
+        """
+        Returns "open" or "invite". Falls back to "invite" if the hub can't tell,
+        an invite hub then still rejects the signup with a clear message.
+        """
+        url = f"{cls.url}/signup-mode"
+
+        try:
+            response = requests.get(url, timeout=10, verify=cls.server_cert)
+            if response.status_code == 200:
+                return response.json().get("mode", "open")
+            logger.error(f"get signup mode - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_signup_mode {repr(e)}")
+
+        return "invite"
+
+    @classmethod
+    def create_user(cls, user_name, user_passwd, invite_token: str | None = None, email: str | None = None) -> tuple[int, str | None]:
+        """
+        Returns (user_id, None) on success or (-1, error message for the user).
+        """
         url = f"{cls.url}/users"
+
+        body = {
+            "user_name": user_name,
+            "user_passwd": user_passwd
+        }
+        if invite_token:
+            body["invite_token"] = invite_token
+        if email:
+            body["email"] = email
 
         try:
             response = requests.post(
                 url,
-                json={
-                    "user_name": user_name,
-                    "user_passwd": user_passwd
-                },                
+                json=body,
                 timeout=10,
                 verify=cls.server_cert,
             )
 
             if response.status_code == 200:
                 data = response.json()
-                return data.get("user_id", -1)
-            else:
-                logger.error(f"create user - {response.status_code} {response.reason}")
+                user_id = data.get("user_id")
+                if user_id is None:
+                    return -1, "username already exists"
+                return user_id, None
+
+            logger.error(f"create user - {response.status_code} {response.reason}")
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+            return -1, detail if isinstance(detail, str) else f"signup failed ({response.status_code})"
 
         except Exception as e:
             logger.error(f"failed to create_user {repr(e)}")
-
-        return -1
+            return -1, "could not reach the hub"
 
     @classmethod
     def create_conversation(cls, contact_id: int) -> int:
@@ -634,6 +684,42 @@ class Hub:
             logger.error(f"upload_voice - {response.status_code} {response.text}")
         except Exception as e:
             logger.error(f"failed to upload_voice {repr(e)}")
+        return None
+
+    @classmethod
+    def get_predefined_voices(cls) -> list:
+        """the voices that come with rueckgrat, each with id, name, description, gender and language"""
+        try:
+            response = requests.get(
+                f"{cls.url}/voices/predefined",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("voices", [])
+            logger.error(f"get_predefined_voices - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_predefined_voices {repr(e)}")
+        return []
+
+    @classmethod
+    def use_predefined_voice(cls, predefined_id: str) -> Optional[str]:
+        """lets the hub copy a predefined voice to the user's voices, returns the voice uuid or None"""
+        try:
+            response = requests.post(
+                f"{cls.url}/voices/predefined/{predefined_id}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=60,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                voice_id = response.json().get("voice_id")
+                logger.debug(f"using predefined voice {predefined_id}. got id {voice_id}")
+                return voice_id
+            logger.error(f"use_predefined_voice - {response.status_code} {response.text}")
+        except Exception as e:
+            logger.error(f"failed to use_predefined_voice {repr(e)}")
         return None
 
     @classmethod
