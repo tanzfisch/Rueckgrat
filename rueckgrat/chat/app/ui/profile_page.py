@@ -4,7 +4,7 @@ import flet as ft
 from app.ui.theme import STYLES
 
 from app.ui import BasePage
-from app.ui.widgets import ContactHeader
+from app.ui.widgets import ContactHeader, VoiceSelector
 from app.utils import Hub
 from app.common import get_logger, Utils
 
@@ -103,6 +103,7 @@ class ProfilePage(BasePage):
         self.role = _text_field("Role", "text")
         self.personality = _text_field("Persona", "text")
         self.age = _text_field("Age", "text")
+        self.voice_selector = VoiceSelector()
 
         # original profile dict, so fields without a form entry survive a save
         self.profile_base = {}
@@ -139,6 +140,12 @@ class ProfilePage(BasePage):
                                     ]
                                 ),
                                 self.age,
+                                ft.Row(
+                                    controls=[
+                                        ft.Text("Voice"),
+                                        ft.Container(content=self.voice_selector, expand=True),
+                                    ]
+                                ),
                                 self.role,
                                 self.personality,
                                 *profile_controls,
@@ -178,6 +185,7 @@ class ProfilePage(BasePage):
         for _, _, field in self.profile_fields:
             field.value = ""
         self.set_gender("male")
+        self.voice_selector.set_current_voice("")
         self.update()
 
     def fill_form(self, contact):
@@ -193,6 +201,7 @@ class ProfilePage(BasePage):
             if kind == "list":
                 value = "\n".join(str(v) for v in value) if isinstance(value, list) else str(value or "")
             field.value = value if isinstance(value, str) else json.dumps(value)
+        self.voice_selector.set_current_voice(Utils.get_nested_value(profile, ["tts_parameters", "voice_id"], ""))
         self.update()
 
     def load_profile(self):
@@ -221,8 +230,20 @@ class ProfilePage(BasePage):
     def _on_save(self, e=None):
         if self.contact_id == -1:
             self.contact_id = Hub.create_contact()
-        Hub.update_contact(self.contact_id, self.get_data())
+        data = self.get_data()
+        _set_nested_value(data["profile"], ["tts_parameters", "voice_id"], self._resolve_voice_id())
+        Hub.update_contact(self.contact_id, data)
         self.navigator("contacts")
+
+    def _resolve_voice_id(self) -> str:
+        # "" means the default voice. if the hub call fails keep the voice the contact had instead of wiping it
+        if self.voice_selector.get_voice() is None:
+            return ""
+        voice_id = self.voice_selector.store_on_hub(self.gender_group.value or "")
+        if not voice_id:
+            logger.error("storing the voice failed, keeping the current voice")
+            return self.voice_selector.current_voice_id
+        return voice_id
 
     def on_enter(self, **kwargs):
         self.contact_id = kwargs.get("contact_id")

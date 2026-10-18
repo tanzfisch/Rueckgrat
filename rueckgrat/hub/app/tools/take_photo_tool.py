@@ -49,9 +49,19 @@ class TakePhotoTool(Tool):
 
         self.add_sub_job(assistant_image_job)
         self.wait_for([assistant_image_job])
-        image_job_result = assistant_image_job.result()
+        image = (assistant_image_job.result() or {}).get("image")
 
-        image = image_job_result["image"]
+        if not image:
+            # generation failed, but the file name and its parameters (images table) are already stored.
+            # attach the planned file anyway, the hub's ImageStore generates it again when it gets downloaded
+            output_file = getattr(assistant_image_job, "output_file", None)
+            if output_file:
+                logger.warning(f"take_photo failed, attaching {output_file} for lazy regeneration")
+                image = {"filename": output_file, "image_path": f"images/{output_file}"}
+            else:
+                logger.error("take_photo failed before a file name was planned, no attachment")
+                return None
+
         self.response["take_photo"] = image        
 
     @classmethod

@@ -25,9 +25,17 @@ class ImageGenTool(Tool):
         image_job = RequestedImageJob(positive_prompt, self.contact_id, self.db, self.infrastructure)
         self.add_sub_job(image_job)
         self.wait_for([image_job])
-        image_job_result = image_job.result()
+        image = (image_job.result() or {}).get("image")
 
-        image = image_job_result["image"]
+        if not image:
+            output_file = getattr(image_job, "output_file", None)
+            if output_file:
+                logger.warning(f"generate_image failed, attaching {output_file} for lazy regeneration")
+                image = {"filename": output_file, "image_path": f"images/{output_file}"}
+            else:
+                logger.error("generate_image failed before a file name was planned, no attachment")
+                return None
+
         self.response["generate_image"] = image
 
     @classmethod

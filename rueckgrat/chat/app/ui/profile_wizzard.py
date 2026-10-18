@@ -1,14 +1,12 @@
-import io
 import json
 import os
-import wave
 import random
 import flet as ft
 from app.ui.theme import STYLES
 
 from app.utils import Hub
 from app.ui import BasePage
-from app.ui.widgets import ContactHeader, RowSelector, OneLineBubble, MessageBox
+from app.ui.widgets import ContactHeader, RowSelector, VoiceSelector
 from app.common import get_logger
 
 logger = get_logger()
@@ -232,11 +230,12 @@ class WizardProfilePage(ft.Column):
             content_padding=16,
         )
         self.sfw_switch = ft.Switch(value=True, active_color="#0D7377")
+        self.voice_selector = VoiceSelector()
 
         self.controls = [
             self._row("Name", self.name_input),
             self._row("Gender", self.gender),
-            self._row("Voice", self._build_voice_row()),
+            self._row("Voice", self.voice_selector),
             self._row("Backstory", self.backstory, top=True),
             self._row("SFW", self.sfw_switch),
         ]
@@ -256,81 +255,9 @@ class WizardProfilePage(ft.Column):
             spacing=12,
         )
 
-    def _build_voice_row(self):
-        # optional reference voice (wav) for tts, kept in local state only
-        self.voice_file_name = None
-        self.voice_file_path = None
-        self.voice_file_bytes = None
-        self.file_picker = None
-
-        self.voice_upload_btn = OneLineBubble("upload voice (wav)", on_clicked=lambda text, data: self.page.run_task(self.on_pick_voice), height=48, expand=True)
-        self.voice_name_text = ft.Text("", color="#C8C8C8", visible=False)
-        self.voice_clear_btn = ft.IconButton(icon=ft.Icons.CLOSE, tooltip="Remove voice", on_click=self.on_clear_voice, visible=False)
-        return ft.Row([self.voice_upload_btn, self.voice_name_text, self.voice_clear_btn], spacing=8)
-
-    @staticmethod
-    def _validate_wav(data: bytes) -> str | None:
-        # returns an error message, or None if the wav looks usable
-        try:
-            with wave.open(io.BytesIO(data), "rb") as w:
-                if w.getnchannels() < 1:
-                    return "WAV has no channels"
-                if w.getnframes() <= 0:
-                    return "WAV contains no audio"
-                if not 8000 <= w.getframerate() <= 192000:
-                    return f"unsupported sample rate {w.getframerate()} Hz"
-                if w.getsampwidth() not in (1, 2, 3, 4):
-                    return f"unsupported sample width {w.getsampwidth()} bytes"
-        except Exception as e:
-            return f"not a valid WAV file ({e})"
-        return None
-
-    async def on_pick_voice(self, e=None):
-        # FilePicker is a service in flet 1.0, create it lazily inside the event handler so a page context exists
-        if self.file_picker is None:
-            self.file_picker = ft.FilePicker()
-        files = await self.file_picker.pick_files(
-            dialog_title="Select voice sample",
-            file_type=ft.FilePickerFileType.CUSTOM,
-            allowed_extensions=["wav"],
-            allow_multiple=False,
-            with_data=True,  # on android/web path is None, so we need the bytes
-        )
-        if not files:
-            return
-        file = files[0]
-        data = file.bytes
-        if data is None and file.path:
-            with open(file.path, "rb") as f:
-                data = f.read()
-
-        error = self._validate_wav(data) if data else "could not read file"
-        if error:
-            logger.warning(f"rejected voice file {file.name}: {error}")
-            MessageBox.error(self.page, f"File \"{file.name}\" can not be used as voice. Error: {error}", title="Invalid voice file")
-            return
-
-        self.voice_file_name = file.name
-        self.voice_file_path = file.path
-        self.voice_file_bytes = data
-        self.voice_name_text.value = file.name
-        self.voice_name_text.visible = True
-        self.voice_clear_btn.visible = True
-        self.update()
-
-    def on_clear_voice(self, e=None):
-        self.voice_file_name = None
-        self.voice_file_path = None
-        self.voice_file_bytes = None
-        self.voice_name_text.visible = False
-        self.voice_clear_btn.visible = False
-        self.update()
-
     def get_voice(self):
         # kept out of get_values() because those values are json encoded and sent to the hub
-        if not self.voice_file_bytes:
-            return None
-        return {"name": self.voice_file_name, "path": self.voice_file_path, "bytes": self.voice_file_bytes}
+        return self.voice_selector.get_voice()
 
     def on_gender_changed(self, gender: str):
         if gender == "male":
@@ -449,12 +376,10 @@ class ProfileWizard(BasePage):
 
         # the hub infers role, personality and looks from the backstory
         generate_profile = {"profile": profile}
-        voice = self.profile_page.get_voice()
-        if voice:
-            # blocking upload, the hub answers with the uuid of the stored voice
-            voice_id = Hub.upload_voice(voice["bytes"], profile.get("gender", ""))
-            if voice_id:
-                generate_profile["voice_id"] = voice_id
+        # blocking call, the hub answers with the uuid of the stored voice
+        voice_id = self.profile_page.voice_selector.store_on_hub(profile.get("gender", ""))
+        if voice_id:
+            generate_profile["voice_id"] = voice_id
 
         Hub.generate({"generate_profile": generate_profile})
         self._show(ProgressPage())

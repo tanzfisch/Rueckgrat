@@ -15,11 +15,12 @@ import torch
 from fastapi.responses import StreamingResponse, Response
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer
+from fastapi.concurrency import run_in_threadpool
 
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from app.utils import ChatDB, Infrastructure, ImageType
+from app.utils import ChatDB, Infrastructure, ImageType, ImageStore
 from app.tools import ToolRegistry
 from app.jobs import JobQueue, MetaJob, AssistantImageJob, ContactGeneratorJob
 from argon2 import PasswordHasher
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
     logger.info("loading db")
     db_path = "/hub/db/chat.db"
     app.state.db = ChatDB(db_path)
+    app.state.image_store = ImageStore(app.state.db, app.state.infrastructure)
     app.state.job_queue = JobQueue()
 
     logger.info("loading tool registry")
@@ -373,19 +375,15 @@ def text_to_speech(request: HubTTSRequest, username: str = Depends(get_current_u
 ########### voice handling
 MAX_VOICE_UPLOAD_BYTES = 20 * 1024 * 1024
 
-@app.post("/voices")
-async def upload_voice(request: Request, username: str = Depends(get_current_user)):
-    """
-    raw wav bytes in the request body (content-type audio/wav), no multipart.
-    saves the file as /hub/voices/<uuid>.wav and returns the uuid. the voice is not linked to a contact yet
-    """
-    user_id = app.state.db.get_user_id(username)
-    data = await request.body()
-    if not data:
-        raise HTTPException(status_code=400, detail="empty upload")
-    if len(data) > MAX_VOICE_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="voice file too large")
+# predefined voices from characters/voices in the repo, mounted read only (see compose.yml)
+PREDEFINED_VOICES_DIR = Path("/hub/predefined_voices")
 
+def store_voice(user_id: int, data: bytes, predefined_id: str = "") -> str:
+    """
+    validates wav bytes and saves them as /hub/voices/<uuid>.wav, returns the uuid.
+    predefined_id is the voices.json id for a predefined voice, "" for an upload.
+    raises HTTPException if the data is not usable
+    """
     try:
         with wave.open(io.BytesIO(data), "rb") as w:
             frames, sample_rate = w.getnframes(), w.getframerate()
@@ -395,14 +393,14 @@ async def upload_voice(request: Request, username: str = Depends(get_current_use
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"not a valid wav file: {e}")
 
-    # same file uploaded again by this user -> reuse the stored voice
+    # same file from the same origin again for this user -> reuse the stored voice
     content_hash = hashlib.sha256(data).hexdigest()
-    existing_id = app.state.db.find_voice_by_hash(user_id, content_hash)
+    existing_id = app.state.db.find_voice_by_hash(user_id, content_hash, predefined_id)
     if existing_id and (ChatDB.VOICES_DIR / f"{existing_id}.wav").exists():
         logger.debug(f"reusing voice {existing_id} for user {user_id} (same content hash)")
-        return {"status": "ok", "voice_id": existing_id}
+        return existing_id
 
-    voice_id = app.state.db.add_voice(user_id, sample_rate, duration, content_hash=content_hash)
+    voice_id = app.state.db.add_voice(user_id, sample_rate, duration, content_hash=content_hash, predefined_id=predefined_id)
     if voice_id is None:
         raise HTTPException(status_code=500, detail="failed to store voice")
 
@@ -416,6 +414,74 @@ async def upload_voice(request: Request, username: str = Depends(get_current_use
         raise HTTPException(status_code=500, detail="failed to store voice")
 
     logger.debug(f"stored voice {voice_id} for user {user_id} ({duration:.1f}s, {sample_rate} Hz)")
+    return voice_id
+
+def load_predefined_voices() -> list:
+    """entries of voices.json, empty list if the folder is not mounted"""
+    path = PREDEFINED_VOICES_DIR / "voices.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning(f"no predefined voices ({path}): {e}")
+        return []
+
+@app.post("/voices")
+async def upload_voice(request: Request, username: str = Depends(get_current_user)):
+    """
+    raw wav bytes in the request body (content-type audio/wav), no multipart.
+    saves the file as /hub/voices/<uuid>.wav and returns the uuid. the voice is not linked to a contact yet
+    """
+    user_id = app.state.db.get_user_id(username)
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty upload")
+    if len(data) > MAX_VOICE_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="voice file too large")
+
+    voice_id = store_voice(user_id, data)
+    return {"status": "ok", "voice_id": voice_id}
+
+def find_stored_predefined_voice(user_id: int, entry: dict) -> str:
+    """uuid of the user's stored copy of a predefined voice, "" if not stored yet. uploads never match"""
+    try:
+        content_hash = hashlib.sha256((PREDEFINED_VOICES_DIR / entry["file"]).read_bytes()).hexdigest()
+    except Exception:
+        content_hash = ""
+    return app.state.db.find_predefined_voice(user_id, entry["id"], content_hash) or ""
+
+@app.get("/voices/predefined")
+def get_predefined_voices(username: str = Depends(get_current_user)):
+    # only what the client needs to show a selection, the id is the key.
+    # voice_id lets the client map a contact's stored voice back to the predefined entry it came from
+    user_id = app.state.db.get_user_id(username)
+    voices = [
+        {
+            "id": v["id"], "name": v["name"], "description": v.get("description", ""), "gender": v.get("gender", ""), "language": v.get("language", ""),
+            "voice_id": find_stored_predefined_voice(user_id, v),
+        }
+        for v in load_predefined_voices()
+    ]
+    return {"voices": voices}
+
+@app.post("/voices/predefined/{predefined_id}")
+def use_predefined_voice(predefined_id: str, username: str = Depends(get_current_user)):
+    """
+    copies a predefined voice into the user's voices, so it works like an uploaded one.
+    returns the uuid of the stored voice, the same predefined voice always maps to the same uuid per user
+    """
+    user_id = app.state.db.get_user_id(username)
+    entry = next((v for v in load_predefined_voices() if v["id"] == predefined_id), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="voice not found")
+
+    path = PREDEFINED_VOICES_DIR / entry["file"]
+    try:
+        data = path.read_bytes()
+    except Exception as e:
+        logger.error(f"failed reading predefined voice {path}: {e}")
+        raise HTTPException(status_code=500, detail="failed to read voice")
+
+    voice_id = store_voice(user_id, data, predefined_id)
     return {"status": "ok", "voice_id": voice_id}
 
 @app.delete("/voices/{voice_id}")
@@ -456,6 +522,9 @@ async def download_file(file_path: str):
     if not str(path).startswith(str(base_path)):
         logger.error(f"invalid path {path}")
         return {"error": "Invalid path"}
+
+    if not os.path.exists(path) and path.parent == base_path / "images":
+        await run_in_threadpool(app.state.image_store.ensure, path.name)
 
     if not os.path.exists(path):
         logger.error(f"file not found {path}")
