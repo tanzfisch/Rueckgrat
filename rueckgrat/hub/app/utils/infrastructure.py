@@ -166,8 +166,8 @@ class Infrastructure:
         
             if response.status_code == 200:
                 data = response.json()
-                filepath = Path(data.get("output", []))
-                if not filepath:
+                filepath = Path(data.get("output") or "")
+                if not data.get("output"):
                     logger.error("got invalid file path from image response")
                     return None
             else:

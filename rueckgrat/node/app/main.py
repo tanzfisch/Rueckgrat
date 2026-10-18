@@ -113,6 +113,13 @@ def image(request: ImageRequest):
 def tts(request: NodeTTSRequest):
     if not app.state.tts:
         raise HTTPException(status_code=503, detail="Node has no tts module loaded")
+    from app.utils.tts import TTS_MODEL
+    if not ModelRegistry().is_installed(TTS_MODEL):
+        try:
+            _install_model(TTS_MODEL)
+        except Exception as e:
+            logger.error(f"Model installation failed for {TTS_MODEL}: {e}")
+            raise HTTPException(status_code=503, detail=f"tts model {TTS_MODEL} not installed")
     try:
         wav = app.state.tts.speak(request.text, request.voice, request.exaggeration, request.cfg_weight)
     except Exception as e:

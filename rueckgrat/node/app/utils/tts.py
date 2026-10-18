@@ -11,7 +11,8 @@ from app.common import get_logger
 logger = get_logger()
 
 VOICES_DIR = Path("/node/voices")
-MODEL_DIR = Path("/node/models/voices/chatterbox")  # installed via registry.json
+TTS_MODEL = "chatterbox"  # registry name, the /tts endpoint installs it on first use
+MODEL_DIR = Path("/node/models/voices/chatterbox")  # install_path of TTS_MODEL in registry.json
 MODEL_FILES = ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]
 
 
