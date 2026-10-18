@@ -8,6 +8,7 @@ Changelog
 - #91 added invite based signup
 - #33 ports are now configureable for hub, node and llama.cpp
 - #92 adding more default voices
+- #93 auto regen missing images
 
 0.16.0
 ------
