@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.18.0
+------
+
+- #84 auto install of models on demand for stt, tts and image gen
+
 0.17.0
 ------
 
