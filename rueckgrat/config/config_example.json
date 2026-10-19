@@ -56,5 +56,18 @@
         ]
       }
     }
-  ]
+  ],
+  "cloudflare": {
+    "enabled": true,
+    "addr": "192.168.2.177",
+    "hub_addr": "192.168.2.39",
+    "hub_port": 14223,
+    "token": "123...456"
+  },
+  "users": [
+    {
+      "name": "Martin",
+      "email": null
+    }
+  ]  
 }

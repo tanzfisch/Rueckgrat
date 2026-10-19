@@ -125,22 +125,25 @@ Launch any node container then run the following to control it's registry
 
 ```bash
 docker exec -it rueckgrat_node python -m app.registry_manager list -v
-docker exec -it rueckgrat_node python -m app.registry_manager list -v -t llm    # llm | image | tts | stt
+docker exec -it rueckgrat_node python -m app.registry_manager list -v -t llm
 docker exec -it rueckgrat_node python -m app.registry_manager install [model_name]
 docker exec -it rueckgrat_node python -m app.registry_manager nodes
+docker exec -it rueckgrat_node python -m app.registry_manager --help
 ```
 
 Models live under `/var/lib/Rueckgrat/models` on the host.
 
-## Handling Invites
+## Hub Management
 
-In order to handle invites run the hub container then create invites inside the hub container as follows
+Invites (and users) are managed with the hub management tool. Run the hub container, then use it inside the hub container as follows
 
 ```bash
-docker exec -it rueckgrat_hub python -m app.invites create --by [user_name]                        # 7 days, one use, no email binding
-docker exec -it rueckgrat_hub python -m app.invites create --by [user_name] --email [e-mail]       # only that email can sign up
-docker exec -it rueckgrat_hub python -m app.invites list                                           # existing invites, 'email': None means not bound
-docker exec -it rueckgrat_hub python -m app.invites help                                           # displays usage
+docker exec -it rueckgrat_hub python -m app.hub_management invite create
+docker exec -it rueckgrat_hub python -m app.hub_management invite create --email [e-mail]
+docker exec -it rueckgrat_hub python -m app.hub_management user create [user_name]
+docker exec -it rueckgrat_hub python -m app.hub_management user list
+docker exec -it rueckgrat_hub python -m app.hub_management invite list
+docker exec -it rueckgrat_hub python -m app.hub_management --help
 ```
 
 **Note: The token is printed only once, copy it immediately.**

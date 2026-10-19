@@ -95,7 +95,7 @@ class ChatDB:
             CREATE TABLE IF NOT EXISTS invites (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 token_hash TEXT UNIQUE NOT NULL,
-                created_by TEXT NOT NULL,
+                created_by TEXT,
                 email TEXT DEFAULT NULL,
                 expires_at TEXT DEFAULT NULL,
                 max_uses INTEGER NOT NULL DEFAULT 1,
@@ -152,13 +152,13 @@ class ChatDB:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def create_user(self, username: str, passwd: str = None) -> int:
+    def create_user(self, username: str, passwd: str = None, nsfw_allowed: bool = False) -> int:
         with self.get_connection() as conn:
             try:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "INSERT INTO users (username, password) VALUES (?, ?)",
-                    (username, passwd)
+                    "INSERT INTO users (username, password, nsfw_allowed) VALUES (?, ?, ?)",
+                    (username, passwd, 1 if nsfw_allowed else 0)
                 )
                 conn.commit()
                 logger.info("created user")
@@ -970,7 +970,7 @@ class ChatDB:
     def _hash_token(token: str) -> str:
         return hashlib.sha256(token.encode()).hexdigest()
 
-    def create_invite(self, created_by: str, email: str | None = None, expires_in_days: float | None = 7, max_uses: int = 1, nsfw_allowed: bool = False) -> str:
+    def create_invite(self, created_by: str | None = None, email: str | None = None, expires_in_days: float | None = 7, max_uses: int = 1, nsfw_allowed: bool = False) -> str:
         """
         Creates an invite and returns the plain token. Only its hash is stored.
         nsfw_allowed: the invited user may use NSFW settings (default off = SFW only)
@@ -983,9 +983,10 @@ class ChatDB:
         with self.get_connection() as conn:
             conn.execute(
                 "INSERT INTO invites (token_hash, created_by, email, expires_at, max_uses, nsfw_allowed) VALUES (?, ?, ?, ?, ?, ?)",
-                (self._hash_token(token), created_by, email.lower() if email else None, expires_at, max_uses, 1 if nsfw_allowed else 0)
+                # "no name" instead of NULL: older databases still have created_by NOT NULL
+                (self._hash_token(token), created_by or "no name", email.lower() if email else None, expires_at, max_uses, 1 if nsfw_allowed else 0)
             )
-        logger.info(f"invite created by {created_by}")
+        logger.info(f"invite created by {created_by or 'no name'}")
         return token
 
     def get_invites(self) -> list:
@@ -999,6 +1000,25 @@ class ChatDB:
         with self.get_connection() as conn:
             cursor = conn.execute("DELETE FROM invites WHERE id = ?", (invite_id,))
             return cursor.rowcount > 0
+
+    # hub management: change the NSFW permission after creation
+    def set_invite_nsfw(self, invite_id: int, nsfw_allowed: bool) -> bool:
+        """only affects users who sign up with this invite from now on. False if the invite doesn't exist."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("UPDATE invites SET nsfw_allowed = ? WHERE id = ?", (1 if nsfw_allowed else 0, invite_id))
+            return cursor.rowcount > 0
+
+    def set_user_nsfw(self, username: str, nsfw_allowed: bool) -> bool:
+        """the user sees the change on their next login. False if the user doesn't exist."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("UPDATE users SET nsfw_allowed = ? WHERE username = ?", (1 if nsfw_allowed else 0, username))
+            return cursor.rowcount > 0
+
+    def get_users_admin(self) -> list:
+        """users with their NSFW permission, for the hub management tool only (not exposed over HTTP)"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("SELECT id, username, nsfw_allowed, created_at FROM users ORDER BY id")
+            return [dict(row) for row in cursor.fetchall()]
 
     def create_user_with_invite(self, username: str, passwd: str, token: str, email: str | None = None) -> tuple[int | None, str | None]:
         """

@@ -37,6 +37,19 @@ services:
     stdin_open: true
     tty: true
 
+  cloudflared:
+    container_name: rueckgrat_cloudflared
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    extra_hosts:
+      - "${HUB_HOST:-rueckgrat.hub}:${CLOUDFLARE_HUB_ADDR:-host-gateway}"
+    profiles: ["cloudflare"]
+    depends_on:
+      - caddy
+    restart: unless-stopped
+
   node:
     container_name: rueckgrat_node
     build:

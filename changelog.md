@@ -8,12 +8,15 @@ Changelog
 - #15 added conversion tool
 - #59 tool index as first step to nested tooling
       new tools: calculator, current time, date calc, wikipedia, weather, url fetcher
-- #na installer improvements
-- #na added missing image style in character edit form
-- #na diffuser dep was missing on tts only nodes
-- #na fixed issue with hw detection durign install
-- #na made better use of image_style for contacts
-- #na fixed truncated prompt issue during image generation
+- install.sh and dev.sh improvements
+- fixed issue with hw detection durign install
+- added missing image style in character edit form
+- diffuser dependency was missing on tts only nodes
+- fixed truncated prompt issue during image generation
+- #94 improved hub management
+- #95 added cloudflare tunnel option to installer
+- #96 hide users from other users in invite mode
+- #98 added default users selection during install
 
 0.17.0
 ------
