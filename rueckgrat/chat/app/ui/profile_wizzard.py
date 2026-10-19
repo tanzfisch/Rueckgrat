@@ -7,7 +7,7 @@ from app.ui.theme import STYLES
 from app.utils import Hub
 from app.ui import BasePage
 from app.ui.widgets import ContactHeader, RowSelector, VoiceSelector
-from app.common import get_logger
+from app.common import get_logger, IMAGE_STYLE_OPTIONS, DEFAULT_IMAGE_STYLE, IMAGE_STYLE_ICONS
 
 logger = get_logger()
 
@@ -232,13 +232,33 @@ class WizardProfilePage(ft.Column):
         self.sfw_switch = ft.Switch(value=True, active_color="#0D7377")
         self.voice_selector = VoiceSelector()
 
+        self.image_style = ft.Dropdown(
+            options=[
+                ft.DropdownOption(
+                    key=style,
+                    text=f"{style.replace('_', ' ')}: {description}",
+                    leading_icon=ft.Image(
+                        src=IMAGE_STYLE_ICONS[style], width=40, height=40, fit=ft.BoxFit.COVER, border_radius=4,
+                        error_content=ft.Container(width=32, height=32),  # missing file: keep the space, show nothing
+                    ),
+                )
+                for style, description in IMAGE_STYLE_OPTIONS.items()
+            ],
+            value=DEFAULT_IMAGE_STYLE,
+            expand=True,
+            filled=True,
+            fill_color="#2C2C2C",
+        )
+
         self.controls = [
             self._row("Name", self.name_input),
             self._row("Gender", self.gender),
             self._row("Voice", self.voice_selector),
             self._row("Backstory", self.backstory, top=True),
-            self._row("SFW", self.sfw_switch),
+            self._row("Style", self.image_style),
         ]
+        if Hub.nsfw_allowed:
+            self.controls.append(self._row("SFW", self.sfw_switch))
 
     def _row(self, label, control, top=False):
         return ft.Row(
@@ -280,6 +300,7 @@ class WizardProfilePage(ft.Column):
                 "gender": self.gender.get_selected(),
                 "backstory": self.backstory.value or "",
                 "sfw": "SFW" if self.sfw_switch.value else "NSFW",
+                "image_style": self.image_style.value or DEFAULT_IMAGE_STYLE,
             }
         return {
             "name": self.name_input.value or "",

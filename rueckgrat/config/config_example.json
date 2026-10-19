@@ -37,12 +37,21 @@
         "port": 7346,
         "services": [
           {
-            "type": "text_to_image",
-            "name": "image_gen"
-          },
-          {
             "type": "text_to_speech",
             "name": "tts"
+          }
+        ]
+      }
+    },
+    {
+      "addr": "192.168.2.239",
+      "models_dir": "/var/lib/Rueckgrat/models",
+      "node": {
+        "port": 7346,
+        "services": [
+          {
+            "type": "text_to_image",
+            "name": "image_gen"
           }
         ]
       }

@@ -2,6 +2,7 @@ import torch
 import gc
 import os
 from pathlib import Path
+from threading import Lock
 from diffusers import FluxPipeline, FluxTransformer2DModel, StableDiffusionXLPipeline
 from app.utils import ModelRegistry
 
@@ -17,6 +18,7 @@ class ImageGen:
         self.model = None
         self.pipe = None
         self.compel = None
+        self.lock = Lock()
 
         logger.info(f"startup image_gen interface")
 
@@ -27,16 +29,17 @@ class ImageGen:
         registry = ModelRegistry()
         model_path = registry.get_safetensors(request.model)
 
-        image = self._generate(
-            prompt = request.positive_prompt,
-            model = model_path,
-            negative_prompt = request.negative_prompt,
-            steps = request.steps,
-            guidance = request.cfg, # TODO
-            width = request.width,
-            height = request.height,
-            seed = request.seed
-        )
+        with self.lock:
+            image = self._generate(
+                prompt = request.positive_prompt,
+                model = model_path,
+                negative_prompt = request.negative_prompt,
+                steps = request.steps,
+                guidance = request.cfg, # TODO
+                width = request.width,
+                height = request.height,
+                seed = request.seed
+            )
 
         output_file = self.output_dir / request.output
         logger.debug(f"save image to {output_file}")
@@ -119,6 +122,9 @@ class ImageGen:
                 text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
                 returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
                 requires_pooled=[False, True],
+                # default True silently drops everything after 77 CLIP tokens (the character's appearance
+                # and clothing sit there). False splits long prompts into 77 token chunks instead
+                truncate_long_prompts=False,
             )
 
         self.pipe = pipe
@@ -155,21 +161,40 @@ class ImageGen:
 
         if self.compel is not None:
             embeds, pooled = self.compel(prompt)
-            kwargs["prompt_embeds"] = embeds
             kwargs["pooled_prompt_embeds"] = pooled
             if negative_prompt:
                 neg_embeds, neg_pooled = self.compel(negative_prompt)
+                embeds, neg_embeds = self._pad_to_same_length(embeds, neg_embeds)
                 kwargs["negative_prompt_embeds"] = neg_embeds
                 kwargs["negative_pooled_prompt_embeds"] = neg_pooled
-            logger.debug(f"generate image (compel) {prompt}")
+            kwargs["prompt_embeds"] = embeds
+            logger.debug(f"generate image (compel) {prompt}\nusing model {self.model}")
             return pipe(**kwargs).images[0]
 
         if not is_flux and negative_prompt:
             kwargs["negative_prompt"] = negative_prompt
 
-        logger.debug(f"generate image {prompt}")
+        logger.debug(f"generate image {prompt}\nusing model {self.model}")
 
         return pipe(prompt, **kwargs).images[0]
+
+    def _pad_to_same_length(self, embeds, neg_embeds):
+        """
+        without truncation both prompts can have a different number of 77 token chunks, the pipeline needs the
+        positive and negative embeddings to have the same length. pads the shorter one with empty chunks
+        (the embedding of an empty prompt). compel's own pad helper breaks with two text encoders
+        """
+        diff = embeds.shape[1] - neg_embeds.shape[1]
+        if diff == 0:
+            return embeds, neg_embeds
+        empty_chunk, _ = self.compel("")                      # shape (1, 77, dim)
+        chunks = abs(diff) // empty_chunk.shape[1]            # diff is always a multiple of 77
+        padding = empty_chunk.repeat(1, chunks, 1).to(embeds.dtype)
+        if diff > 0:
+            neg_embeds = torch.cat([neg_embeds, padding], dim=1)
+        else:
+            embeds = torch.cat([embeds, padding], dim=1)
+        return embeds, neg_embeds
 
     def _pick_device(self) -> str:
         if torch.cuda.is_available():

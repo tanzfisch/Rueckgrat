@@ -13,6 +13,7 @@ class Hub:
     user_id = -1
     user_name = ""
     access_token = ""
+    nsfw_allowed = False
     download_queue = DownloadQueue()
     ws_task = None
     websocket_client = None
@@ -109,6 +110,7 @@ class Hub:
         cls.access_token = ""
         cls.user_id = -1
         cls.user_name = ""
+        cls.nsfw_allowed = False
 
     @classmethod
     async def _start_websocket(cls, token: str):
@@ -611,6 +613,7 @@ class Hub:
         url = f"{cls.url}/login"
         cls.access_token = ""
         cls.user_name = ""
+        cls.nsfw_allowed = False
 
         try:
             response = requests.post(
@@ -629,6 +632,7 @@ class Hub:
                 cls._on_login_success(cls.access_token)
                 cls.user_id = data.get("user_id", -1)
                 cls.user_name = user_name
+                cls.nsfw_allowed = bool(data.get("nsfw_allowed", False))
                 return True
             else:
                 logger.error(f"login failed {response.status_code} {response.reason}")

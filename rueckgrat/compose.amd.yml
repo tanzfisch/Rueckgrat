@@ -6,6 +6,8 @@ services:
     group_add:
       - "${HOST_AMD_VIDEO}"
       - "${HOST_AMD_RENDER}"
+    environment:
+      - PYTORCH_HIP_ALLOC_CONF=expandable_segments:True
     ipc: host
     security_opt:
       - seccomp:unconfined

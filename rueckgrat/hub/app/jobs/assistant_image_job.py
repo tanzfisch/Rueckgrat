@@ -34,6 +34,10 @@ class AssistantImageJob(Job):
         else:
             context = None
 
+        # server side NSFW check: users without NSFW access always get the SFW image model,
+        # whatever the contact's profile says (the client can edit that)
+        nsfw_allowed = self.db.user_nsfw_allowed(self.user_id)
+
         compiler = ContactImagePromptCompiler(contact_data, user_data, context, self.image_type, self.show_assistant, self.show_user)
         positive_prompt, negative_prompt = compiler.build()
 
@@ -43,6 +47,8 @@ class AssistantImageJob(Job):
         }    
         model_name = image_parameters.get("model", "default")
         model = model_name if not model_name in models else models[model_name]
+        if not nsfw_allowed:
+            model = models["default"]
 
         # generate profile image
         image_request = ImageRequest(

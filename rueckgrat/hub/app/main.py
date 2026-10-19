@@ -223,7 +223,8 @@ def login(data: LoginRequest):
 
     return {
         "access_token": token,
-        "user_id": user["id"]
+        "user_id": user["id"],
+        "nsfw_allowed": bool(user["nsfw_allowed"])
     }
 
 ########### system handling

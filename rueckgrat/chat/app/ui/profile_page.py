@@ -6,7 +6,7 @@ from app.ui.theme import STYLES
 from app.ui import BasePage
 from app.ui.widgets import ContactHeader, VoiceSelector
 from app.utils import Hub
-from app.common import get_logger, Utils
+from app.common import get_logger, Utils, IMAGE_STYLE_OPTIONS, IMAGE_STYLE_ICONS
 
 logger = get_logger()
 
@@ -27,6 +27,7 @@ PROFILE_SECTIONS = [
         ("Quirks (one per line)", ["interaction_style", "quirks"], "list"),
     ]),
     ("Appearance", [
+        ("Image style", ["appearance", "image_style"], "select"),
         ("General", ["appearance", "general"], "text"),
         ("Face", ["appearance", "face"], "text"),
         ("Hair", ["appearance", "hair"], "text"),
@@ -48,6 +49,41 @@ PROFILE_SECTIONS = [
         ("Cfg", ["image_parameters", "cfg"], "float"),
     ]),    
 ]
+
+SELECT_OPTIONS = {
+    ("appearance", "image_style"): IMAGE_STYLE_OPTIONS,
+}
+
+# optional images for "select" fields, keyed by key path: {stored value: image src shown in front of the option}
+SELECT_ICONS = {
+    ("appearance", "image_style"): IMAGE_STYLE_ICONS,
+}
+
+
+def _option_image(src: str | None) -> ft.Control | None:
+    # small image in front of a dropdown option, None means no leading element.
+    # a missing file shows an empty box of the same size, so the option texts stay aligned
+    if not src:
+        return None
+    return ft.Image(src=src, width=32, height=32, fit=ft.BoxFit.COVER, border_radius=4,
+                    error_content=ft.Container(width=32, height=32))
+
+
+def _select_field(label: str, path: list[str]) -> ft.Dropdown:
+    return ft.Dropdown(
+        label=label,
+        options=[
+            ft.DropdownOption(
+                key=option,
+                text=f"{option.replace('_', ' ')}: {description}",
+                leading_icon=_option_image(SELECT_ICONS.get(tuple(path), {}).get(option)),
+            )
+            for option, description in SELECT_OPTIONS[tuple(path)].items()
+        ],
+        expand=True,
+        filled=True,
+        fill_color="#2C2C2C",
+    )
 
 
 def _text_field(label: str, kind: str) -> ft.TextField:
@@ -112,7 +148,7 @@ class ProfilePage(BasePage):
         for section, fields in PROFILE_SECTIONS:
             profile_controls.append(ft.Text(section, weight=ft.FontWeight.BOLD, size=16))
             for label, path, kind in fields:
-                field = _text_field(label, kind)
+                field = _select_field(label, path) if kind == "select" else _text_field(label, kind)
                 self.profile_fields.append((path, kind, field))
                 profile_controls.append(field)
         self.file_picker = ft.FilePicker()
@@ -182,8 +218,8 @@ class ProfilePage(BasePage):
         self.personality.value = ""
         self.age.value = ""
         self.profile_base = {}
-        for _, _, field in self.profile_fields:
-            field.value = ""
+        for _, kind, field in self.profile_fields:
+            field.value = None if kind == "select" else ""
         self.set_gender("male")
         self.voice_selector.set_current_voice("")
         self.update()
@@ -198,6 +234,10 @@ class ProfilePage(BasePage):
         self.profile_base = copy.deepcopy(profile)
         for path, kind, field in self.profile_fields:
             value = Utils.get_nested_value(profile, path, "")
+            if kind == "select":
+                # unknown or missing values show as "nothing selected" instead of an invalid option
+                field.value = value if value in SELECT_OPTIONS[tuple(path)] else None
+                continue
             if kind == "list":
                 value = "\n".join(str(v) for v in value) if isinstance(value, list) else str(value or "")
             field.value = value if isinstance(value, str) else json.dumps(value)

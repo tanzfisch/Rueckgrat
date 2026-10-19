@@ -9,6 +9,7 @@ from .common_types import (
 from .utils import Utils
 from .message_queue import MessageQueue
 from .websocket_client import WebSocketClient
+from .image_styles import IMAGE_STYLE_OPTIONS, DEFAULT_IMAGE_STYLE, IMAGE_STYLE_ICONS
 
 __all__ = [
     "get_logger",
@@ -34,5 +35,7 @@ __all__ = [
     "RegisteredModel",
     "GetRegisteredModelsResponse",
     "NodeTTSRequest",
-    "HubTTSRequest"
+    "HubTTSRequest",
+    "IMAGE_STYLE_OPTIONS", 
+    "DEFAULT_IMAGE_STYLE"
 ]

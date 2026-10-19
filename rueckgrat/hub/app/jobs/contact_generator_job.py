@@ -4,9 +4,9 @@ import re
 import random
 from typing import Dict, Any
 from .assistant_image_job import AssistantImageJob
-from ..utils.contact_image_prompt_compiler import ImageType
+from ..utils.contact_image_prompt_compiler import ImageType, IMAGE_STYLES
 
-from app.common import get_logger, Utils
+from app.common import get_logger, Utils, IMAGE_STYLE_OPTIONS, DEFAULT_IMAGE_STYLE
 logger = get_logger()
 
 class ContactGeneratorJob(Job):
@@ -64,6 +64,10 @@ class ContactGeneratorJob(Job):
             gender = profile_input.get("gender", "")
             backstory = profile_input.get("backstory", "")
             sfw_value = profile_input.get("sfw") or "SFW"
+            image_style = str(profile_input.get("image_style") or "").strip().lower()
+            if image_style not in IMAGE_STYLES:
+                logger.debug(f"unknown image style '{image_style}', using {DEFAULT_IMAGE_STYLE}")
+                image_style = DEFAULT_IMAGE_STYLE
             if sfw_value.lower() == "sfw":
                 image_gen = "default"
                 cfg = 5.0
@@ -78,6 +82,7 @@ class ContactGeneratorJob(Job):
                 user_lines.append(f"Gender: {gender}")
             if backstory:
                 user_lines.append(f"Backstory: {backstory}")
+            user_lines.append(f"Image style: {image_style.replace('_', ' ')} ({IMAGE_STYLES[image_style]['positive']})")
             user_input_text = "\n".join(user_lines)
 
             query = f"""
@@ -115,7 +120,7 @@ EXAMPLE PROFILE:
     "appearance": {{
       "general": "young adult, caucasian, athletic",
       "face": "oval face, dark green eyes, straight nose, full lips, high cheekbones",
-      "hair": "short blonde hair pulled back in a ponytail",
+      "hair": "short blonde hair",
       "skin": "glowing skin with a healthy tan, subtle freckles",
       "upper_body": "toned and muscular build",
       "body": "muscular legs"
@@ -137,7 +142,8 @@ INSTRUCTIONS:
 - Invent a new profile based on the user input
 - Fill in information as applicable
 - role, age, personality, primary_objective -> infer them from gender and backstory
-- appearance -> use what the backstory says, invent fitting details for the rest
+- appearance -> only body without clothing, use what the backstory says, invent fitting details for the rest
+- style, profile_picture_context -> make them fit the image style (its world, era and look)
 - background_hook -> invent an interessting and elaborate background story based on the given backstory (max 100 words)
 - relationship -> make up a past between this character and the user (max 200 words)
 - {sfw}
@@ -187,7 +193,7 @@ OUTPUT:
                 "sfw": sfw_value,
 
                 "appearance": {
-                    "image_style": "studio",
+                    "image_style": image_style,
                     "general": Utils.get_nested_value(reply, ["appearance", "general"], ""),
                     "face": Utils.get_nested_value(reply, ["appearance", "face"], ""),
                     "hair": Utils.get_nested_value(reply, ["appearance", "hair"], ""),

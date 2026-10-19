@@ -67,7 +67,7 @@ chmod +x install.sh
 
 The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen) Use `./install.sh --help` for more options.
 
-**Note: Requires sudo on every target host, same username.**
+**Note: Every machine needs sudo with the same username, plus `ssh` and `rsync`; target hosts must also run an SSH server:**
 
 Run chat:
 

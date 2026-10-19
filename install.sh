@@ -129,7 +129,13 @@ detect_gpu_backend() {
 
     if [ "$vendor" = "amd" ]; then
         local gfx=""
-        if command -v rocminfo >/dev/null; then
+        # read the gfx target from the kernel driver (amdgpu/kfd), works without ROCm installed.
+        # gfx_target_version is decimal major*10000 + minor*100 + stepping, e.g. 120000 = gfx1200, 100300 = gfx1030
+        local v
+        v=$(awk '/^gfx_target_version/ && $2 > 0 {print $2; exit}' /sys/class/kfd/kfd/topology/nodes/*/properties 2>/dev/null || true)
+        if [ -n "$v" ]; then
+            gfx=$(printf 'gfx%d%x%x' $((v / 10000)) $((v / 100 % 100)) $((v % 100)))
+        elif command -v rocminfo >/dev/null; then
             gfx=$(rocminfo 2>/dev/null | awk '/Name: +gfx/{print $2; exit}')
         fi
         case "$gfx" in
@@ -382,7 +388,7 @@ install_docker() {
             curl -fsSL https://get.docker.com -o get-docker.sh
             echo "$SUDO_PASSWORD" | sudo -S sh get-docker.sh
             rm -f get-docker.sh
-            echo "$SUDO_PASSWORD" | sudo -S usermod -aG docker "$SUDO_USER && newgrp docker"
+            echo "$SUDO_PASSWORD" | sudo -S usermod -aG docker "$SUDO_USER"
             echo "✅ Docker installed."
         else
             echo "⚠️ Warning: Aborted by user"
@@ -1020,10 +1026,19 @@ prep_data_dirs() {
 }
 
 check_docker_group() {
-    if ! groups | grep -q docker && [ "$(id -u)" -ne 0 ]; then
-        echo "❌ Error: User not in docker group. Run: sudo usermod -aG docker $SUDO_USER && newgrp docker" >&2
-        exit 1
+    [ "$(id -u)" -eq 0 ] && return 0                     # root needs no group
+    groups | grep -qw docker && return 0                 # current login already has it
+
+    if id -nG "$SUDO_USER" | grep -qw docker; then
+        # member in /etc/group (e.g. docker was just installed), but this login
+        # predates that. Run every docker call through sg so it works right now.
+        docker() { sg docker -c "$(printf '%q ' docker "$@")"; }
+        echo "ℹ️ docker group not active in this login yet, using sg docker for this run"
+        return 0
     fi
+
+    echo "❌ Error: User not in docker group. Run: sudo usermod -aG docker $SUDO_USER, then log out and back in" >&2
+    exit 1
 }
 
 # resolve_model_file - print container path of the GGUF llama-server should load
@@ -1185,17 +1200,17 @@ deploy_components() {
 
     write_default_env    
 
+    if $INSTALL_HUB || $INSTALL_NODE; then
+        install_dependencies curl
+        install_docker
+    fi
+
     check_docker_group
     volume_cleanup
     gen_caddy_cert
     prep_data_dirs
 
     echo "deploy..."
-
-    if $INSTALL_HUB || $INSTALL_NODE; then
-        install_dependencies curl
-        install_docker            
-    fi
 
     if $INSTALL_HUB; then
         deploy_hub
@@ -1290,10 +1305,10 @@ deploy_components_remote() {
 # Usage: deploy_on_hosts
 # No arguments
 deploy_on_hosts() {
-    while IFS= read -r host_config; do
+    while IFS= read -r -u3 host_config; do
         [[ -z "$host_config" ]] && continue
         deploy_components_remote "$host_config"
-    done < <(jq -c '.hosts[]' "$CONFIG_FILE")
+    done 3< <(jq -c '.hosts[]' "$CONFIG_FILE")
 }
 
 # usage - Display help message and exit

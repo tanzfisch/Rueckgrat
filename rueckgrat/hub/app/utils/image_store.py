@@ -4,6 +4,16 @@ from pathlib import Path
 from app.common import get_logger, ImageRequest
 logger = get_logger()
 
+# one lock per image file, shared by everything that generates images (ImageJob and ImageStore.ensure),
+# so the same file is never generated twice at the same time
+_file_locks: dict[str, threading.Lock] = {}
+_file_locks_guard = threading.Lock()
+
+
+def file_lock(file_key: str) -> threading.Lock:
+    with _file_locks_guard:
+        return _file_locks.setdefault(file_key, threading.Lock())
+
 
 class ImageStore:
     """
@@ -16,16 +26,13 @@ class ImageStore:
         self.db = db
         self.infrastructure = infrastructure
         self.image_dir = Path(image_dir)
-        self._locks: dict[str, threading.Lock] = {}
-        self._locks_guard = threading.Lock()
 
     def path(self, file_key: str) -> Path:
         return self.image_dir / file_key
 
     def _lock_for(self, file_key: str) -> threading.Lock:
-        # one lock per image, so two requests for the same missing image generate it only once
-        with self._locks_guard:
-            return self._locks.setdefault(file_key, threading.Lock())
+        # one lock per image, shared with ImageJob, so a missing image is generated only once
+        return file_lock(file_key)
 
     def ensure(self, file_key: str) -> bool:
         """True if the image is on disk afterwards. blocks while generating, call it from a worker thread"""
