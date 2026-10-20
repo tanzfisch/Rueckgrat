@@ -6,6 +6,7 @@ Changelog
 
 - #72 added option to build chat apk using the install.sh script
 - #103 fixed cert issue
+- #102 seperating user name (login) from user character name
 
 0.18.0
 ------
