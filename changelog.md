@@ -5,6 +5,7 @@ Changelog
 ------
 
 - #72 added option to build chat apk using the install.sh script
+- #103 fixed cert issue
 
 0.18.0
 ------

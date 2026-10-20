@@ -1,5 +1,6 @@
 import os
 import requests
+import certifi
 from urllib.parse import urlparse
 import asyncio
 import json
@@ -35,10 +36,12 @@ class Hub:
 
         cert = next((p for p in paths if p.exists()), None)
         if not cert:
-            cls.server_cert = False
-            logger.error(f"failed to get certificate from hub")
+            # no caddy cert: fall back to the public CAs (works through cloudflare),
+            # instead of False, which turned verification off
+            cls.server_cert = certifi.where()
+            logger.error(f"failed to get certificate from hub, using public CAs only")
         else:
-            cls.server_cert = cert
+            cls.server_cert = cls._build_ca_bundle(cert)
 
         logger.info(f"hub: {cls.url}")
         logger.info(f"hub ws: {cls.uri}")
@@ -46,8 +49,16 @@ class Hub:
 
         cls.websocket_client = WebSocketClient(cls.uri, cls.server_cert)
 
-        # keep for debugging
-        # cls.set_log_level(cls.config.log_level)
+    @classmethod
+    def _build_ca_bundle(cls, caddy_cert: Path) -> str:
+        """public CAs + our caddy root in one PEM file, so both cloudflare and direct caddy connections verify"""
+        cache_dir = Path(os.getenv("FLET_APP_STORAGE_CACHE") or Path.home() / ".cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        bundle = cache_dir / "rueckgrat-ca-bundle.pem"
+        public = Path(certifi.where()).read_text()
+        caddy = Path(caddy_cert).read_text()
+        bundle.write_text(public.rstrip() + "\n" + caddy)
+        return str(bundle)
 
     @classmethod
     def get_user_name(cls):
