@@ -29,6 +29,7 @@ class ChatPage(BasePage):
         self._stream_message_id = None
         self._finished_message_ids = set()
         self.replay_content = ""
+        self.user_role_name = ""   # set from the user's own character profile in on_enter
 
         self.contact_header = ContactHeader(navigator)
         self.contact_header.on_go_back = self.on_go_back
@@ -186,6 +187,9 @@ class ChatPage(BasePage):
         self.conversation_id = kwargs.get("conversation_id")
         self.contact = Contact(Hub.get_contact(self.contact_id))
         self.contact_header.set_contact(self.contact)
+        user_data = Hub.get_user_data() or {}
+        profile = user_data.get("profile") or {}
+        self.user_role_name = (profile.get("name") or "").strip() or Hub.user_name
         self.clear_history()
 
         for message in Hub.get_messages(self.conversation_id):
@@ -478,4 +482,4 @@ class ChatPage(BasePage):
         self.input_box.value = ""
         self.input_box.update()
         self._append_history("user", message)
-        Hub.chat(self.contact_id, self.conversation_id, "user", message, self.temperature)
+        Hub.chat(self.contact_id, self.conversation_id, "user", self.user_role_name, message, self.temperature)

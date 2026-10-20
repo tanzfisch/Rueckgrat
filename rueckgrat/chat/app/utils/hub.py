@@ -136,12 +136,12 @@ class Hub:
         cls.websocket_client.register_incomming_message(callback)
 
     @classmethod
-    def chat(cls, contact_id: int, conversation_id: int, role: str, content: str, temperature: float):
+    def chat(cls, contact_id: int, conversation_id: int, role: str, user_role_name: str, content: str, temperature: float):
         chat_request = ChatRequest(
             contact_id=contact_id,
             conversation_id=conversation_id,
             role=role,
-            name=cls.user_name,
+            name=user_role_name,
             content=content,
             temperature=temperature
         )
