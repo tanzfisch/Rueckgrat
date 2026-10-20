@@ -135,6 +135,10 @@ async def get_current_user_ws(websocket: WebSocket):
 
 @app.get("/users")
 def get_users():
+    # invite mode: the hub is public, never hand out who has an account.
+    # Clients log in with a typed name instead (chat login_page)
+    if SIGNUP_MODE == "invite":
+        raise HTTPException(status_code=403, detail="user list disabled in invite mode")
     users = app.state.db.get_users()
     return {"users": users}
 
@@ -223,7 +227,8 @@ def login(data: LoginRequest):
 
     return {
         "access_token": token,
-        "user_id": user["id"]
+        "user_id": user["id"],
+        "nsfw_allowed": bool(user["nsfw_allowed"])
     }
 
 ########### system handling

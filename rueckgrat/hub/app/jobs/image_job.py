@@ -1,4 +1,6 @@
+from contextlib import nullcontext
 from .job_queue import Job
+from ..utils.image_store import file_lock
 from typing import Dict, Any
 
 from app.common import get_logger, ImageRequest
@@ -13,6 +15,13 @@ class ImageJob(Job):
         self.response = {}
 
     def execute(self) -> None:
+        # hold the per-file lock while generating, so a /downloads request for this file waits for us
+        # instead of seeing it missing and generating it a second time (ImageStore.ensure)
+        lock = file_lock(self.request.output) if self.request.output else nullcontext()
+        with lock:
+            self._execute()
+
+    def _execute(self) -> None:
         try:
             if self.db and self.request.output:
                 self.db.save_image_generation(self.request.output, self.request.model_dump(exclude={"output"}))

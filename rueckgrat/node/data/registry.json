@@ -104,6 +104,7 @@
     "description": "",
     "type": "image",
     "compatibility": ["ImageGen"],
+    "requires": ["sdxl-base-config"],
     "comment": "NSFW Tends to go too far when unwanted don't mix with SFW applications",
     "good_value_range": "cfg 7-10, steps 20-40",
     "files": [

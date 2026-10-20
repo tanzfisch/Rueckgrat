@@ -85,6 +85,7 @@ class ChatDB:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password TEXT,
+                nsfw_allowed INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )""")
 
@@ -94,13 +95,14 @@ class ChatDB:
             CREATE TABLE IF NOT EXISTS invites (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 token_hash TEXT UNIQUE NOT NULL,
-                created_by TEXT NOT NULL,
+                created_by TEXT,
                 email TEXT DEFAULT NULL,
                 expires_at TEXT DEFAULT NULL,
                 max_uses INTEGER NOT NULL DEFAULT 1,
                 uses INTEGER NOT NULL DEFAULT 0,
                 used_at TEXT DEFAULT NULL,
                 used_by INTEGER DEFAULT NULL,
+                nsfw_allowed INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (used_by) REFERENCES users(id) ON DELETE SET NULL
         )""")
@@ -150,13 +152,13 @@ class ChatDB:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def create_user(self, username: str, passwd: str = None) -> int:
+    def create_user(self, username: str, passwd: str = None, nsfw_allowed: bool = False) -> int:
         with self.get_connection() as conn:
             try:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "INSERT INTO users (username, password) VALUES (?, ?)",
-                    (username, passwd)
+                    "INSERT INTO users (username, password, nsfw_allowed) VALUES (?, ?, ?)",
+                    (username, passwd, 1 if nsfw_allowed else 0)
                 )
                 conn.commit()
                 logger.info("created user")
@@ -180,11 +182,19 @@ class ChatDB:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, username, password, created_at FROM users WHERE username = ?",
+                "SELECT id, username, password, nsfw_allowed, created_at FROM users WHERE username = ?",
                 (user_name,)
             )
             row = cursor.fetchone()
             return dict(row) if row else None 
+
+    def user_nsfw_allowed(self, user_id: int) -> bool:
+        """
+        True only if the user's account (copied from their invite) allows NSFW. Unknown user = False (SFW).
+        """
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT nsfw_allowed FROM users WHERE id = ?", (user_id,)).fetchone()
+            return bool(row and row["nsfw_allowed"])
 
     def get_user_id(self, user_name: str):
         """
@@ -960,9 +970,10 @@ class ChatDB:
     def _hash_token(token: str) -> str:
         return hashlib.sha256(token.encode()).hexdigest()
 
-    def create_invite(self, created_by: str, email: str | None = None, expires_in_days: float | None = 7, max_uses: int = 1) -> str:
+    def create_invite(self, created_by: str | None = None, email: str | None = None, expires_in_days: float | None = 7, max_uses: int = 1, nsfw_allowed: bool = False) -> str:
         """
         Creates an invite and returns the plain token. Only its hash is stored.
+        nsfw_allowed: the invited user may use NSFW settings (default off = SFW only)
         """
         token = secrets.token_urlsafe(24)
         expires_at = None
@@ -971,16 +982,17 @@ class ChatDB:
 
         with self.get_connection() as conn:
             conn.execute(
-                "INSERT INTO invites (token_hash, created_by, email, expires_at, max_uses) VALUES (?, ?, ?, ?, ?)",
-                (self._hash_token(token), created_by, email.lower() if email else None, expires_at, max_uses)
+                "INSERT INTO invites (token_hash, created_by, email, expires_at, max_uses, nsfw_allowed) VALUES (?, ?, ?, ?, ?, ?)",
+                # "no name" instead of NULL: older databases still have created_by NOT NULL
+                (self._hash_token(token), created_by or "no name", email.lower() if email else None, expires_at, max_uses, 1 if nsfw_allowed else 0)
             )
-        logger.info(f"invite created by {created_by}")
+        logger.info(f"invite created by {created_by or 'no name'}")
         return token
 
     def get_invites(self) -> list:
         with self.get_connection() as conn:
             cursor = conn.execute(
-                "SELECT id, created_by, email, expires_at, max_uses, uses, used_at, used_by, created_at FROM invites ORDER BY id"
+                "SELECT id, created_by, email, expires_at, max_uses, uses, used_at, used_by, nsfw_allowed, created_at FROM invites ORDER BY id"
             )
             return [dict(row) for row in cursor.fetchall()]
 
@@ -988,6 +1000,25 @@ class ChatDB:
         with self.get_connection() as conn:
             cursor = conn.execute("DELETE FROM invites WHERE id = ?", (invite_id,))
             return cursor.rowcount > 0
+
+    # hub management: change the NSFW permission after creation
+    def set_invite_nsfw(self, invite_id: int, nsfw_allowed: bool) -> bool:
+        """only affects users who sign up with this invite from now on. False if the invite doesn't exist."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("UPDATE invites SET nsfw_allowed = ? WHERE id = ?", (1 if nsfw_allowed else 0, invite_id))
+            return cursor.rowcount > 0
+
+    def set_user_nsfw(self, username: str, nsfw_allowed: bool) -> bool:
+        """the user sees the change on their next login. False if the user doesn't exist."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("UPDATE users SET nsfw_allowed = ? WHERE username = ?", (1 if nsfw_allowed else 0, username))
+            return cursor.rowcount > 0
+
+    def get_users_admin(self) -> list:
+        """users with their NSFW permission, for the hub management tool only (not exposed over HTTP)"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("SELECT id, username, nsfw_allowed, created_at FROM users ORDER BY id")
+            return [dict(row) for row in cursor.fetchall()]
 
     def create_user_with_invite(self, username: str, passwd: str, token: str, email: str | None = None) -> tuple[int | None, str | None]:
         """
@@ -1001,7 +1032,7 @@ class ChatDB:
             # take the write lock up front so two signups can't redeem the last use at once
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT id, email, expires_at, max_uses, uses FROM invites WHERE token_hash = ?",
+                "SELECT id, email, expires_at, max_uses, uses, nsfw_allowed FROM invites WHERE token_hash = ?",
                 (self._hash_token(token),)
             ).fetchone()
 
@@ -1021,9 +1052,10 @@ class ChatDB:
                 return None, reason
 
             try:
+                # the user gets the invite's NSFW permission (0 = SFW only)
                 cursor = conn.execute(
-                    "INSERT INTO users (username, password) VALUES (?, ?)",
-                    (username, passwd)
+                    "INSERT INTO users (username, password, nsfw_allowed) VALUES (?, ?, ?)",
+                    (username, passwd, 1 if row["nsfw_allowed"] else 0)
                 )
             except sqlite3.IntegrityError:
                 conn.rollback()

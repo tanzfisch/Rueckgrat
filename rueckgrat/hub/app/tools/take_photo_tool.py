@@ -1,11 +1,14 @@
 from typing import Dict,  Any
-from .tool import Tool
+from .tool import Tool, ToolCategory
 from app.jobs.assistant_image_job import AssistantImageJob
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 class TakePhotoTool(Tool):
+    category = ToolCategory.MEDIA
+    description = "takes a photo of yourself, the user or both in the current situation"
+
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
 

@@ -16,7 +16,7 @@ dev_usage() {
     echo "Usage: $0 [-c FILE] [-v] [-f] [-h]"
     echo "  -c FILE   infrastructure.json (default: rueckgrat/config/infrastructure.json)"
     echo "  -v        verbose compose"
-    echo "  -f        --no-cache build"
+    echo "  -f        fresh: --no-cache build and remove all rueckgrat containers and volumes"
 }
 
 find_local_host_config() {
@@ -81,6 +81,12 @@ echo "Node     $INSTALL_NODE"
 echo "Llama    $INSTALL_LLAMA ${INSTALL_LLAMA_MODEL:+($INSTALL_LLAMA_MODEL)}"
 echo "ImageGen $INSTALL_IMAGE_GEN"
 echo ""
+
+echo "clean build ..."
+if $CLEAN_BUILD; then
+    volume_cleanup
+    docker builder prune -af >/dev/null
+fi
 
 if $INSTALL_HUB; then
     deploy_hub

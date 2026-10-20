@@ -129,7 +129,13 @@ detect_gpu_backend() {
 
     if [ "$vendor" = "amd" ]; then
         local gfx=""
-        if command -v rocminfo >/dev/null; then
+        # read the gfx target from the kernel driver (amdgpu/kfd), works without ROCm installed.
+        # gfx_target_version is decimal major*10000 + minor*100 + stepping, e.g. 120000 = gfx1200, 100300 = gfx1030
+        local v
+        v=$(awk '/^gfx_target_version/ && $2 > 0 {print $2; exit}' /sys/class/kfd/kfd/topology/nodes/*/properties 2>/dev/null || true)
+        if [ -n "$v" ]; then
+            gfx=$(printf 'gfx%d%x%x' $((v / 10000)) $((v / 100 % 100)) $((v % 100)))
+        elif command -v rocminfo >/dev/null; then
             gfx=$(rocminfo 2>/dev/null | awk '/Name: +gfx/{print $2; exit}')
         fi
         case "$gfx" in
@@ -382,7 +388,7 @@ install_docker() {
             curl -fsSL https://get.docker.com -o get-docker.sh
             echo "$SUDO_PASSWORD" | sudo -S sh get-docker.sh
             rm -f get-docker.sh
-            echo "$SUDO_PASSWORD" | sudo -S usermod -aG docker "$SUDO_USER && newgrp docker"
+            echo "$SUDO_PASSWORD" | sudo -S usermod -aG docker "$SUDO_USER"
             echo "✅ Docker installed."
         else
             echo "⚠️ Warning: Aborted by user"
@@ -526,10 +532,11 @@ validate_ip() {
     fi
 }
 
-# select_hosts_and_components - Interactively collect target hosts + per-host components
+# setup - Interactively collect target hosts + per-host components, then the
+# optional Cloudflare node (asked once, after all hosts)
 # Supports json config file loading/saving 
-# Usage: select_hosts_and_components
-select_hosts_and_components() {
+# Usage: setup
+setup() {
     print_section
 
     if [[ -n "${CONFIG_FILE:-}" ]]; then
@@ -625,9 +632,90 @@ select_hosts_and_components() {
         hosts_json=$(jq --argjson host "$host_json" '. + [$host]' <<< "$hosts_json")
     done
 
+    local cloudflare_json users_json
+    select_cloudflare "$hosts_json"
+    cloudflare_json="$CLOUDFLARE_JSON"
+
+    select_default_users
+    users_json="$USERS_JSON"
+
     CONFIG_FILE="$WORKING_DIR/rueckgrat/config/infrastructure.json"
-    jq '{hosts: .}' <<< "$hosts_json" > "$CONFIG_FILE"
+    jq --argjson cloudflare "$cloudflare_json" --argjson users "$users_json" \
+        '{hosts: ., cloudflare: $cloudflare, users: $users}' <<< "$hosts_json" > "$CONFIG_FILE"
     print_config_file_hint
+}
+
+# select_default_users - Ask once whether default users should be created on the hub.
+# They're saved in the config, so a reinstall from it recreates them without asking.
+# Usage: select_default_users
+# Sets: USERS_JSON (the "users" list for the config file), e.g. [{"name":"martin","email":null}]
+select_default_users() {
+    local name email
+    USERS_JSON='[]'
+
+    echo ""
+    read_tty "Would you like some default users? (y/N): " "n"
+    if ! [[ "$REPLY" =~ ^[Yy]$ ]]; then
+        return
+    fi
+
+    while true; do
+        read_tty "     User name (empty=done): " ""
+        name="$REPLY"
+        [[ -z "$name" ]] && break
+        read_tty "     Email for $name (optional): " ""
+        email="$REPLY"
+        # empty email -> null in the JSON
+        USERS_JSON=$(jq -c --arg name "$name" --arg email "$email" \
+            '. + [{name: $name, email: (if $email == "" then null else $email end)}]' <<< "$USERS_JSON")
+    done
+}
+
+# select_cloudflare - Ask once whether a Cloudflare node (cloudflared) is wanted,
+# where it goes and which tunnel token it uses
+# Token: asked here and saved in the config (never read from rueckgrat/.env)
+# Usage: select_cloudflare '<hosts json>'
+# Sets: CLOUDFLARE_JSON (the "cloudflare" block for the config file)
+select_cloudflare() {
+    local hosts_json="$1"
+    local hub_addr hub_port cf_addr token
+    CLOUDFLARE_JSON='{"enabled": false}'
+
+    hub_addr=$(jq -r '[.[] | select(.hub)][0].addr // empty' <<< "$hosts_json")
+    hub_port=$(jq -r '[.[] | select(.hub)][0].hub.port // empty' <<< "$hosts_json")
+    hub_port="${hub_port:-$HUB_PORT_DEFAULT}"
+
+    echo ""
+    read_tty "Would you also like a Cloudflare node (tunnel to the hub)? (y/N): " "n"
+    if ! [[ "$REPLY" =~ ^[Yy]$ ]]; then
+        echo -e "\e[1A\e[K [⚫] Cloudflare"
+        return
+    fi
+    if [[ -z "$hub_addr" ]]; then
+        echo "⚠️ Warning: no hub selected, Cloudflare node skipped"
+        return
+    fi
+    echo -e "\e[1A\e[K [✅] Cloudflare"
+
+    # no default: cloudflared is meant for its own machine, not the hub
+    while true; do
+        read_tty "Cloudflare node IP: " ""
+        [[ -n "$REPLY" ]] && break
+        echo -e "\e[1A\e[K     ⚠️ please enter the IP of the Cloudflare node"
+    done
+    cf_addr="$REPLY"
+    validate_ip "$cf_addr"
+    echo -e "\e[1A\e[K     IP: $cf_addr"
+
+    read_tty_s "     Cloudflare tunnel token (empty = no tunnel): "
+    token="$REPLY"
+    if [[ -z "$token" ]]; then
+        echo "     no token, no tunnel"
+        return
+    fi
+
+    CLOUDFLARE_JSON=$(jq -nc --arg addr "$cf_addr" --arg hub_addr "$hub_addr" --arg hub_port "$hub_port" --arg token "$token" \
+        '{enabled: true, addr: $addr, hub_addr: $hub_addr, hub_port: ($hub_port | tonumber), token: $token}')
 }
 
 # select_components - Prompt user for which components to install
@@ -754,6 +842,9 @@ confirm_install_configuration() {
     echo "Installation plan:"
 
     format_hosts
+    jq -r 'if .cloudflare.enabled == true
+           then "\nCloudflare: [✅] cloudflared on \(.cloudflare.addr) -> hub \(.cloudflare.hub_addr):\(.cloudflare.hub_port)"
+           else "\nCloudflare: [⚫]" end' "$CONFIG_FILE"
 
     echo ""
     read_tty "Execute this plan? (Y/n): " "Y" $YES
@@ -782,6 +873,38 @@ deploy_hub() {
     docker compose build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} hub caddy || { echo "❌ Error: Docker compose build of hub & cdaddy failed."; popd; exit 1; }
     docker compose up -d hub caddy || { echo "❌ Error: Docker compose up of hub & cdaddy failed."; popd; exit 1; }
     popd > /dev/null
+
+    seed_default_users
+}
+
+# seed_default_users - After a fresh (-f) hub deploy the database is empty, so create
+# the "users" from the config one by one with hub_management.
+# Usage: seed_default_users
+seed_default_users() {
+    $CLEAN_BUILD || return 0
+
+    # CONFIG_FILE is set by setup and dev.sh; a remote install (--local-config) only has
+    # the rsynced copy in the working dir
+    local config="${CONFIG_FILE:-$WORKING_DIR/rueckgrat/config/infrastructure.json}"
+    [[ -f "$config" ]] || return 0
+
+    local names name i
+    mapfile -t names < <(jq -r '.users // [] | .[].name // empty' "$config")
+    [[ ${#names[@]} -gt 0 ]] || return 0
+
+    print_section
+    echo "👤 default users..."
+
+    # give the freshly started container a moment before docker exec
+    for i in $(seq 1 30); do
+        docker exec rueckgrat_hub true 2>/dev/null && break
+        sleep 1
+    done
+
+    for name in "${names[@]}"; do
+        docker exec rueckgrat_hub python -m app.hub_management user create "$name" \
+            || echo "⚠️ Warning: could not create user $name"
+    done
 }
 
 # gen_caddy_cert - generate caddy certificate
@@ -882,6 +1005,37 @@ deploy_node() {
         || { echo "❌ Error: Docker compose build of node failed."; popd; exit 1; }
     docker compose "${COMPOSE_FILES[@]}" up -d node \
         || { echo "❌ Error: Docker compose up of node failed."; popd; exit 1; }
+    popd > /dev/null
+}
+
+# deploy_cloudflared - Start the Cloudflare tunnel container (cloudflared) on this host
+# Forwards to the hub under the hub's default hostname (HUB_HOST, rueckgrat.hub) and port
+# Usage: deploy_cloudflared
+# Uses: CLOUDFLARE_TUNNEL_TOKEN (from the host config), CLOUDFLARE_HUB_ADDR, CLOUDFLARE_HUB_PORT
+deploy_cloudflared() {
+    print_section
+    echo "🐋 cloudflared..."
+
+    local token="${CLOUDFLARE_TUNNEL_TOKEN:-}"
+    [[ -n "$token" ]] || { echo "❌ Error: no Cloudflare tunnel token in the host config"; exit 1; }
+
+    # inside the container 127.0.0.1 is the container itself, so a hub on this
+    # same machine is reached through the docker host gateway instead
+    local hub_addr="${CLOUDFLARE_HUB_ADDR:-}"
+    if [[ -z "$hub_addr" ]] || is_local_host "$hub_addr"; then
+        hub_addr="host-gateway"
+    fi
+
+    set_env_value CLOUDFLARE_TUNNEL_TOKEN "$token"
+    set_env_value CLOUDFLARE_HUB_ADDR "$hub_addr"
+
+    echo "   hub          rueckgrat.hub -> $hub_addr"
+    echo "   port         ${CLOUDFLARE_HUB_PORT:-$HUB_PORT_DEFAULT}"
+
+    pushd rueckgrat > /dev/null
+    # --no-deps: don't pull caddy/hub onto this machine just because of depends_on
+    docker compose --profile cloudflare up -d --no-deps cloudflared \
+        || { echo "❌ Error: Docker compose up of cloudflared failed."; popd; exit 1; }
     popd > /dev/null
 }
 
@@ -1020,10 +1174,19 @@ prep_data_dirs() {
 }
 
 check_docker_group() {
-    if ! groups | grep -q docker && [ "$(id -u)" -ne 0 ]; then
-        echo "❌ Error: User not in docker group. Run: sudo usermod -aG docker $SUDO_USER && newgrp docker" >&2
-        exit 1
+    [ "$(id -u)" -eq 0 ] && return 0                     # root needs no group
+    groups | grep -qw docker && return 0                 # current login already has it
+
+    if id -nG "$SUDO_USER" | grep -qw docker; then
+        # member in /etc/group (e.g. docker was just installed), but this login
+        # predates that. Run every docker call through sg so it works right now.
+        docker() { sg docker -c "$(printf '%q ' docker "$@")"; }
+        echo "ℹ️ docker group not active in this login yet, using sg docker for this run"
+        return 0
     fi
+
+    echo "❌ Error: User not in docker group. Run: sudo usermod -aG docker $SUDO_USER, then log out and back in" >&2
+    exit 1
 }
 
 # resolve_model_file - print container path of the GGUF llama-server should load
@@ -1056,6 +1219,10 @@ parse_host_config() {
     INSTALL_IMAGE_GEN=false
     INSTALL_TTS=false
     INSTALL_STT=false
+    INSTALL_CLOUDFLARED=false
+    CLOUDFLARE_TUNNEL_TOKEN=""
+    CLOUDFLARE_HUB_ADDR=""
+    CLOUDFLARE_HUB_PORT=""
     INSTALL_LLAMA_MODEL=""
     HUB_PORT=""
     SIGNUP_MODE=""
@@ -1077,6 +1244,13 @@ parse_host_config() {
 
     if echo "$host_config" | jq -e '.chat' >/dev/null; then
         INSTALL_CHAT=true
+    fi
+
+    if echo "$host_config" | jq -e '.cloudflared' >/dev/null; then
+        INSTALL_CLOUDFLARED=true
+        CLOUDFLARE_HUB_ADDR=$(echo "$host_config" | jq -r '.cloudflared.hub_addr // empty')
+        CLOUDFLARE_HUB_PORT=$(echo "$host_config" | jq -r '.cloudflared.hub_port // empty')
+        CLOUDFLARE_TUNNEL_TOKEN=$(echo "$host_config" | jq -r '.cloudflared.token // empty')
     fi
 
     if echo "$host_config" | jq -e '.node' >/dev/null; then
@@ -1169,7 +1343,7 @@ deploy_components() {
     print_section
     echo "deploy components..."
     
-    echo "reading config $host_config"
+    echo "reading config $(echo "$host_config" | jq -c 'if .cloudflared.token then .cloudflared.token = "******" else . end')"
     REGISTRY_JSON="$(pwd)/rueckgrat/node/data/registry.json"
     [[ -f "$REGISTRY_JSON" ]] || { echo "❌ Error: registry file missing at $REGISTRY_JSON"; exit 1; }
 
@@ -1183,7 +1357,20 @@ deploy_components() {
     CADDY_KEY="$CADDY_DIR/rueckgrat-caddy.key"
     CADDY_CERT="$CADDY_DIR/rueckgrat-caddy.cert"
 
+    if $INSTALL_CLOUDFLARED; then
+        install_dependencies curl
+        install_docker
+        check_docker_group
+        deploy_cloudflared
+        return
+    fi
+
     write_default_env    
+
+    if $INSTALL_HUB || $INSTALL_NODE; then
+        install_dependencies curl
+        install_docker
+    fi
 
     check_docker_group
     volume_cleanup
@@ -1191,11 +1378,6 @@ deploy_components() {
     prep_data_dirs
 
     echo "deploy..."
-
-    if $INSTALL_HUB || $INSTALL_NODE; then
-        install_dependencies curl
-        install_docker            
-    fi
 
     if $INSTALL_HUB; then
         deploy_hub
@@ -1266,6 +1448,13 @@ deploy_components_remote() {
 
     sshpass -p "$SUDO_PASSWORD" ssh "${SSH_OPTS[@]}" -o User="$SUDO_USER" -Nf "$host_addr" || { echo "❌ Error: failed to connect with $host_addr"; return 1; }
 
+    # rsync must exist on both ends of the copy, so check the target before using it
+    # (jq is installed by the target's own installer at the start of main)
+    if ! ssh "${SSH_OPTS[@]}" "$host_addr" 'command -v rsync >/dev/null'; then
+        echo "❌ Error: rsync missing on $host_addr - install it there first (e.g. sudo apt install rsync)"
+        return 1
+    fi
+
     if $CLEAN_BUILD; then
         echo "Clean destination..."
         echo "$SUDO_PASSWORD" | ssh -tt "${SSH_OPTS[@]}" "$host_addr" "sudo rm -rf $remote_dir/*"
@@ -1290,10 +1479,43 @@ deploy_components_remote() {
 # Usage: deploy_on_hosts
 # No arguments
 deploy_on_hosts() {
-    while IFS= read -r host_config; do
+    while IFS= read -r -u3 host_config; do
         [[ -z "$host_config" ]] && continue
         deploy_components_remote "$host_config"
-    done < <(jq -c '.hosts[]' "$CONFIG_FILE")
+    done 3< <(jq -c '.hosts[]' "$CONFIG_FILE")
+}
+
+# deploy_cloudflare_node - Deploy the Cloudflare node saved in the config by setup
+# (no questions here). Token comes only from the config
+# Usage: deploy_cloudflare_node
+deploy_cloudflare_node() {
+    jq -e '.cloudflare.enabled == true' "$CONFIG_FILE" >/dev/null 2>&1 || return 0
+
+    local cf_addr hub_addr hub_port token cf_config
+    cf_addr=$(jq -r '.cloudflare.addr // empty' "$CONFIG_FILE")
+    hub_addr=$(jq -r '.cloudflare.hub_addr // empty' "$CONFIG_FILE")
+    hub_port=$(jq -r '.cloudflare.hub_port // empty' "$CONFIG_FILE")
+    hub_port="${hub_port:-$HUB_PORT_DEFAULT}"
+
+    token=$(jq -r '.cloudflare.token // empty' "$CONFIG_FILE")
+
+    print_section
+    if [[ -z "$cf_addr" || -z "$token" ]]; then
+        echo "⚠️ Warning: Cloudflare node in config but no IP or token, no tunnel"
+        return 0
+    fi
+    echo "   cloudflare   $cf_addr -> hub $hub_addr:$hub_port"
+
+    # the token travels inside this one-host config, like ports do for nodes
+    cf_config=$(jq -nc --arg addr "$cf_addr" --arg hub_addr "$hub_addr" --arg hub_port "$hub_port" --arg token "$token" \
+        '{addr: $addr, cloudflared: {hub_addr: $hub_addr, hub_port: ($hub_port | tonumber), token: $token}}')
+
+    # never wipe here: the Cloudflare node may be a machine that also runs the hub or a node
+    CLEAN_BUILD=false deploy_components_remote "$cf_config"
+
+    echo ""
+    echo "💡 In Cloudflare Zero Trust, set the tunnel's public hostname service to:"
+    echo "   http://rueckgrat.hub:$hub_port"
 }
 
 # usage - Display help message and exit
@@ -1385,7 +1607,7 @@ sync_on_hosts() {
 
 readonly CONTAINER_MODELS_DIR="/models"
 readonly HUB_PORT_DEFAULT=14223
-readonly SIGNUP_MODE_DEFAULT="open"                # open: anyone can sign up, invite: signup needs an invite token
+readonly SIGNUP_MODE_DEFAULT="invite"                # open: anyone can sign up, invite: signup needs an invite token
 readonly NODE_PORT_DEFAULT=7346
 readonly HOST_MODELS_DIR_DEFAULT="/var/lib/Rueckgrat/models"
 
@@ -1493,6 +1715,11 @@ main() {
         esac
     done
 
+    if ! command -v jq &> /dev/null; then
+        get_user_passwd
+        install_dependencies jq
+    fi
+
     if $SYNC_ONLY; then
         print_header "🔄 Rückgrat Sync"
     
@@ -1533,10 +1760,12 @@ main() {
 
         gen_caddy_cert
 
-        select_hosts_and_components
+        setup
         confirm_install_configuration
 
         deploy_on_hosts
+
+        deploy_cloudflare_node
 
         echo "All done! Enjoy Rueckgrat ✨"
         echo "follow live logs of all services in this compose project: cd rueckgrat && docker compose logs -f"

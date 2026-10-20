@@ -1,5 +1,7 @@
 import os
 import json
+import fcntl
+from contextlib import contextmanager
 import requests
 from urllib.parse import urlparse
 from pathlib import Path
@@ -52,7 +54,8 @@ class ModelRegistry:
             if not os.path.exists(filepath):
                 return False
 
-        return True
+        # a model only counts as installed together with the models it needs (e.g. the sdxl base config)
+        return all(self.is_installed(dep) for dep in model.get("requires", []))
 
     def find_local(self, model_name: str) -> str:
         model = self.get_model(model_name)
@@ -185,20 +188,32 @@ class ModelRegistry:
                 print(f"Error: model \"{model_name}\" not registered")
                 return None
 
+            # dependencies first (registry "requires"), they have their own lock
+            for dep in model.get("requires", []):
+                if not self.install_model(dep, alternative_server):
+                    logger.error(f"failed to install {dep}, required by {model_name}")
+                    return None
+
             files = model["files"]
             install_path = model["install_path"]
 
-            for file in files:
-                source_url = file["source"]
-                source_path = file["path"]
-                local_path = install_path + "/" + source_path if source_path else install_path
+            # one install per model at a time, across threads and processes (node server and registry_manager).
+            # a second caller waits here and then finds the files already there
+            with self._install_lock(model_name):
+                if self.is_installed(model_name) and not force_install:
+                    return model
 
-                url = self._find_valid_url(source_url, local_path, alternative_server)
+                for file in files:
+                    source_url = file["source"]
+                    source_path = file["path"]
+                    local_path = install_path + "/" + source_path if source_path else install_path
 
-                if not url:
-                    print(f"Error: can't find download source for {model_name}")
-                else:
-                    self._download_from_url(url, local_path, force_install)
+                    url = self._find_valid_url(source_url, local_path, alternative_server)
+
+                    if not url:
+                        print(f"Error: can't find download source for {model_name}")
+                    else:
+                        self._download_from_url(url, local_path, force_install)
 
             return model if self.is_installed(model_name) else None
 
@@ -234,6 +249,17 @@ class ModelRegistry:
 
         return None
 
+    @contextmanager
+    def _install_lock(self, model_name: str):
+        """exclusive file lock per model, released when the with block ends (also if the process dies)"""
+        lock_path = MODEL_BASE_DIR / f".{model_name.replace('/', '_')}.lock"
+        with open(lock_path, "w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
+
     def _save_registry(self):
         with open(REEGISTRY_FILE_PATH, "w") as f:
             json.dump(self.registry, f, indent=2)
@@ -266,12 +292,16 @@ class ModelRegistry:
 
         total_size = int(r.headers.get("content-length", 0))
 
-        with open(filepath, "wb") as f:
+        # download next to the target and rename when complete, so an interrupted download never
+        # leaves a truncated file that is_installed() would count as installed
+        part_path = f"{filepath}.part"
+        with open(part_path, "wb") as f:
             with tqdm(total=total_size, unit="B", unit_scale=True, desc=f"Downloading {download_name}", unit_divisor=1024) as pbar:
                 for chunk in r.iter_content(chunk_size=64 * 1024):
                     if chunk:
                         f.write(chunk)
                         pbar.update(len(chunk))
+        os.replace(part_path, filepath)
 
     def _load_registry(self):
         if REEGISTRY_FILE_PATH.exists():

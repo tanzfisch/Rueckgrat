@@ -8,8 +8,6 @@
  * Author has no clue about security, auth, certs, or Caddy. Help welcome.
  * See the [changelog](https://github.com/tanzfisch/Rueckgrat/blob/master/changelog.md) for more details.
 
-AGPL-3.0. Commercial licensing: see `COMMERCIAL_LICENSE.md`.
-
 ## Features
 
 Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client. Quality depends on the models you run.
@@ -69,7 +67,7 @@ chmod +x install.sh
 
 The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen) Use `./install.sh --help` for more options.
 
-**Note: Requires sudo on every target host, same username.**
+**Note: Every machine needs sudo with the same username, plus `ssh` and `rsync`; target hosts must also run an SSH server:**
 
 Run chat:
 
@@ -127,22 +125,25 @@ Launch any node container then run the following to control it's registry
 
 ```bash
 docker exec -it rueckgrat_node python -m app.registry_manager list -v
-docker exec -it rueckgrat_node python -m app.registry_manager list -v -t llm    # llm | image | tts | stt
+docker exec -it rueckgrat_node python -m app.registry_manager list -v -t llm
 docker exec -it rueckgrat_node python -m app.registry_manager install [model_name]
 docker exec -it rueckgrat_node python -m app.registry_manager nodes
+docker exec -it rueckgrat_node python -m app.registry_manager --help
 ```
 
 Models live under `/var/lib/Rueckgrat/models` on the host.
 
-## Handling Invites
+## Hub Management
 
-In order to handle invites run the hub container then create invites inside the hub container as follows
+Invites (and users) are managed with the hub management tool. Run the hub container, then use it inside the hub container as follows
 
 ```bash
-docker exec -it rueckgrat_hub python -m app.invites create --by [user_name]                        # 7 days, one use, no email binding
-docker exec -it rueckgrat_hub python -m app.invites create --by [user_name] --email [e-mail]       # only that email can sign up
-docker exec -it rueckgrat_hub python -m app.invites list                                           # existing invites, 'email': None means not bound
-docker exec -it rueckgrat_hub python -m app.invites help                                           # displays usage
+docker exec -it rueckgrat_hub python -m app.hub_management invite create
+docker exec -it rueckgrat_hub python -m app.hub_management invite create --email [e-mail]
+docker exec -it rueckgrat_hub python -m app.hub_management user create [user_name]
+docker exec -it rueckgrat_hub python -m app.hub_management user list
+docker exec -it rueckgrat_hub python -m app.hub_management invite list
+docker exec -it rueckgrat_hub python -m app.hub_management --help
 ```
 
 **Note: The token is printed only once, copy it immediately.**
@@ -165,6 +166,7 @@ Stdout only (`./run.sh` also writes `logs/chat.log` if that path exists).
 | --- | --- |
 | The chat bot seems to fail doing anything right | Use at least a 24B LLM (e.g. `cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L`). Smaller models often fail to generate valid JSON tool calls. |
 | What does Rückgrat mean? | Rückgrat (or the alternative spelling Rueckgrat) is German for spine. Idea was to create a framework that is the base for a bunch of tools. Plus it looks cool as a logo. |
+| Can I use Rückgrat for commercial projects? | Yes. Check out for commercial licensing here `COMMERCIAL_LICENSE.md`. |
 
 ## Special thanks to
 

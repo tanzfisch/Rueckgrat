@@ -43,13 +43,23 @@ class UserSelectionPage(ft.Column):
 
 
 class PasswordPage(ft.Container):
-    def __init__(self, goto_select, check_login):
+    # ask_name: invite mode, the user types their name instead of picking it from a list
+    def __init__(self, goto_select, check_login, ask_name=False):
         self.user_bubble = OneLineBubble()
+        self.user_bubble.visible = not ask_name
+        self.name_edit = ft.TextField(
+            label="Name",
+            visible=ask_name,
+            autofocus=ask_name,
+            text_align=ft.TextAlign.CENTER,
+            **STYLES["field"],
+        )
         self.password_edit = ft.TextField(
+            label="Password" if ask_name else None,
             password=True,
             can_reveal_password=True,
             text_align=ft.TextAlign.CENTER,
-            autofocus=True,
+            autofocus=not ask_name,
             on_submit=lambda e: check_login(),
             **STYLES["field"],
         )
@@ -63,11 +73,12 @@ class PasswordPage(ft.Container):
                 controls=[
                     ft.Container(expand=True),
                     self.user_bubble,
+                    self.name_edit,
                     self.password_edit,
                     ft.Container(expand=True),
                     ft.Row(
                         controls=[
-                            ft.Button("Change User", expand=True, on_click=lambda e: goto_select(), **STYLES["button"]),
+                            ft.Button("Sign Up" if ask_name else "Change User", expand=True, on_click=lambda e: goto_select(), **STYLES["button"]),
                             ft.Button("Login", expand=True, on_click=lambda e: check_login(), **STYLES["button"]),
                         ]
                     ),
@@ -126,16 +137,24 @@ class LoginPage(BasePage):
         super().__init__(navigator)
         self.expand = True
         self.spacing = 0
-        self.users = Hub.get_users()
+        self.invite_required = Hub.get_signup_mode() == "invite"
+        # invite mode: users must not see who else has an account, so the
+        # roster is never fetched and the name is typed in on the login page
+        self.users = [] if self.invite_required else Hub.get_users()
         self.selected_user = None
         self.user_name = None
 
         self.user_page = UserSelectionPage(self.users, self.user_chosen, self.goto_create_user)
-        self.pass_page = PasswordPage(self.goto_select_user, self.check_login)
-        self.invite_required = Hub.get_signup_mode() == "invite"
+        self.pass_page = PasswordPage(
+            self.goto_create_user if self.invite_required else self.goto_select_user,
+            self.check_login,
+            ask_name=self.invite_required,
+        )
         self.add_page = AddUserPage(self.create_user, self.goto_select_user, self.invite_required)
 
-        if not self.users:
+        if self.invite_required:
+            start = self.pass_page
+        elif not self.users:
             start = self.add_page
         elif len(self.users) == 1:
             start = self.pass_page
@@ -156,7 +175,8 @@ class LoginPage(BasePage):
 
     def goto_select_user(self):
         self.pass_page.password_edit.value = ""
-        self._show(self.user_page)
+        # invite mode has no user list, go back to the name + password login
+        self._show(self.pass_page if self.invite_required else self.user_page)
 
     def user_chosen(self, name, uid):
         self.user_name = name
@@ -189,6 +209,8 @@ class LoginPage(BasePage):
             self.add_page.show_error("account created but login failed")
 
     def check_login(self):
+        if self.invite_required:
+            self.user_name = (self.pass_page.name_edit.value or "").strip()
         pwd = self.pass_page.password_edit.value or ""
         if Hub.login_user(self.user_name, pwd):
             self.on_successful_login()

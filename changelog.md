@@ -1,6 +1,23 @@
 Changelog
 =========
 
+0.18.0
+------
+
+- #84 auto install of models on demand for stt, tts and image gen
+- #15 added conversion tool
+- #59 tool index as first step to nested tooling
+      new tools: calculator, current time, date calc, wikipedia, weather, url fetcher
+- install.sh and dev.sh improvements
+- fixed issue with hw detection durign install
+- added missing image style in character edit form
+- diffuser dependency was missing on tts only nodes
+- fixed truncated prompt issue during image generation
+- #94 improved hub management
+- #95 added cloudflare tunnel option to installer
+- #96 hide users from other users in invite mode
+- #98 added default users selection during install
+
 0.17.0
 ------
 
