@@ -4,10 +4,11 @@ from app.common import get_logger, Utils
 logger = get_logger()
 
 class GenericImagePromptCompiler:
-    def __init__(self, prompt: str, infrastructure, temperature):
+    def __init__(self, prompt: str, infrastructure, temperature, seed: int):
         self.prompt = prompt
         self.infrastructure = infrastructure
-        self. temperature = temperature
+        self.temperature = temperature
+        self.seed = seed
     
     def _build_prompt(self) -> str:
         try:
@@ -31,7 +32,7 @@ Use the following json format for the output and nothing else
             new_prompt = self.infrastructure.chat(
                 messages=messages, 
                 temperature=self.temperature, 
-                seed=random.randint(0,100000)
+                seed=self.seed
             )
             
             logger.debug(new_prompt)

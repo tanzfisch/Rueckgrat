@@ -607,7 +607,8 @@ setup() {
             fi
 
             if $INSTALL_TTS; then
-                services_json=$(jq '. + [{type: "text_to_speech", name: "tts"}]' <<< "$services_json")
+                services_json=$(jq --arg model "$TTS_MODEL" \
+                    '. + [{type: "text_to_speech", name: "tts", model: $model}]' <<< "$services_json")
             fi
 
             if $INSTALL_STT; then
@@ -733,6 +734,26 @@ select_cloudflare() {
         '{enabled: true, addr: $addr, hub_addr: $hub_addr, hub_port: ($hub_port | tonumber), token: $token}')
 }
 
+# select_tts_model - Ask which Chatterbox model the TTS node of this host uses.
+# Saved in the host's tts service as "model", so a reinstall from the config (-c) uses it again.
+# Configs from before this option have no "model" there -> chatterbox (English)
+# Usage: select_tts_model
+# Sets: TTS_MODEL (registry name: chatterbox or chatterbox_multilingual)
+select_tts_model() {
+    TTS_MODEL="chatterbox_multilingual"
+
+    # same index style as the llm selection, 1 (english) is the default
+    echo "         1) ⭐ chatterbox (English only)"
+    echo "         2) chatterbox_multilingual (23 languages)"
+    while true; do
+        read_tty "         📋 Select tts model by index [2]: " "2" $YES
+        [[ "$REPLY" == "1" || "$REPLY" == "2" ]] && break
+        echo -e "\e[1A\e[K         ⚠️ please answer 1 or 2"
+    done
+    [[ "$REPLY" == "2" ]] && TTS_MODEL="chatterbox_multilingual"
+    echo -e "\e[1A\e[K         Model: $TTS_MODEL"
+}
+
 # select_components - Prompt user for which components to install
 # Usage: select_components
 # Sets: INSTALL_CHAT, INSTALL_HUB, INSTALL_NODE, INSTALL_LLAMA
@@ -744,6 +765,7 @@ select_components() {
     INSTALL_LLAMA_MODEL=""
     INSTALL_IMAGE_GEN=false
     INSTALL_TTS=false
+    TTS_MODEL="chatterbox_multilingual"
     INSTALL_STT=false
     REGISTRY_JSON="${REGISTRY_JSON:-$WORKING_DIR/rueckgrat/node/data/registry.json}"
 
@@ -821,6 +843,9 @@ select_components() {
         read_tty "Install text to speech (Chatterbox) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_TTS=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_TTS == true ]] && echo '✅' || echo '⚫' )] TTS"
+        if $INSTALL_TTS; then
+            select_tts_model
+        fi
 
         read_tty "Install speech to text (faster-whisper) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_STT=true
@@ -844,7 +869,7 @@ format_hosts() {
     "  "+(if $h.chat then "[✅]" else "[⚫]" end)+" Native Chat Client",
     "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub"+(if $h.hub.signup_mode then " (signup: \($h.hub.signup_mode))" else "" end),
     "  "+(if $h.node then "[✅]" else "[⚫]" end)+" Node",
-    "  "+($h.node.services[]? | "    [✅] \(.name)"),
+    "  "+($h.node.services[]? | "    [✅] \(.name)" + (if .name == "tts" then " (\(.model // "chatterbox"))" else "" end)),
     "  "+($h.node.modules[]? | "    [✅] \(.name)")
   ' "$CONFIG_FILE"
 }
@@ -966,6 +991,7 @@ deploy_node() {
 
     set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
     set_env_value NODE_PORT "${NODE_PORT:-$NODE_PORT_DEFAULT}"
+    set_env_value TTS_MODEL "${TTS_MODEL:-chatterbox}"
 
     BUILD_ARGS=()
     COMPOSE_FILES=(-f compose.yml)
@@ -1005,6 +1031,7 @@ deploy_node() {
     esac
 
     echo "   port        ${NODE_PORT:-$NODE_PORT_DEFAULT}"
+    [ "$INSTALL_TTS" = true ] && echo "   tts_model   ${TTS_MODEL:-chatterbox}"
     echo "   vendor      ${GPU_VENDOR:-cpu}"
     echo "   backend     ${TORCH_BACKEND:-cpu}"
     echo "   cuda_index  ${TORCH_CUDA_INDEX:-n/a}"
@@ -1186,7 +1213,9 @@ deploy_chat_native() {
 # Args:
 #   $1 - force: "true" builds without looking at the config at all (used by --apk)
 # Returns: 1 if the build failed (the normal install flow ignores that, the hosts are deployed already)
-# Output: $WORKING_DIR/dist/rueckgrat-chat.apk
+# Output: $WORKING_DIR/dist/rueckgrat-chat-<tag>.apk when HEAD is exactly on the latest tag,
+#         otherwise rueckgrat-chat-<tag>-<hash>.apk (without a tag just -<hash>,
+#         outside a git checkout plain rueckgrat-chat.apk)
 build_chat_apk() {
     local force="${1:-false}"
     if [[ "$force" != true ]]; then
@@ -1204,7 +1233,18 @@ build_chat_apk() {
 
     local chat_dir="$WORKING_DIR/rueckgrat/chat"
     local apk_src="$chat_dir/build/apk/chat.apk"
-    local apk_dest="$WORKING_DIR/dist/rueckgrat-chat.apk"
+    # version suffix for the file name: latest tag + short hash, each part only if git knows it.
+    # HEAD exactly on a tag -> tag only, the hash adds nothing then
+    local git_tag git_hash apk_version=""
+    git_tag="$(git -C "$WORKING_DIR" describe --tags --abbrev=0 2> /dev/null || true)"
+    if git -C "$WORKING_DIR" describe --tags --exact-match HEAD &> /dev/null; then
+        git_hash=""
+    else
+        git_hash="$(git -C "$WORKING_DIR" rev-parse --short HEAD 2> /dev/null || true)"
+    fi
+    [[ -n "$git_tag" ]] && apk_version+="-$git_tag"
+    [[ -n "$git_hash" ]] && apk_version+="-$git_hash"
+    local apk_dest="$WORKING_DIR/dist/rueckgrat-chat${apk_version}.apk"
     local cert="$WORKING_DIR/rueckgrat/caddy/rueckgrat-caddy.cert"
 
     pushd "$chat_dir" > /dev/null
@@ -1308,6 +1348,7 @@ parse_host_config() {
     INSTALL_LLAMA=false
     INSTALL_IMAGE_GEN=false
     INSTALL_TTS=false
+    TTS_MODEL="chatterbox_multilingual"
     INSTALL_STT=false
     INSTALL_CLOUDFLARED=false
     CLOUDFLARE_TUNNEL_TOKEN=""
@@ -1384,6 +1425,12 @@ parse_host_config() {
             fi
             if [[ "$type" == "text_to_speech" || "$name" == "tts" ]]; then
                 INSTALL_TTS=true
+                # configs from before this option have no "model" -> chatterbox (English)
+                TTS_MODEL=$(echo "$item" | jq -r '.model // "chatterbox"')
+                if [[ "$TTS_MODEL" != "chatterbox" && "$TTS_MODEL" != "chatterbox_multilingual" ]]; then
+                    echo "⚠️ Warning: unknown tts model $TTS_MODEL, using chatterbox" >&2
+                    TTS_MODEL="chatterbox_multilingual"
+                fi
             fi
             if [[ "$type" == "speech_to_text" || "$name" == "stt" ]]; then
                 INSTALL_STT=true

@@ -475,7 +475,8 @@ class Hub:
         return -1     
 
     @classmethod
-    def delete_conversation(cls, conversation_id: int):
+    def delete_conversation(cls, conversation_id: int) -> list[str]:
+        """returns the images the hub released with the conversation (nobody else uses them), [] on failure"""
         url = f"{cls.url}/conversations/{conversation_id}"
 
         try:
@@ -488,14 +489,19 @@ class Hub:
                 verify=cls.server_cert,
             )
 
-            if response.status_code != 200:                
+            if response.status_code == 200:
+                return response.json().get("released_images", [])
+            else:
                 logger.error(f"delete_conversation - {response.status_code} {response.reason}")
 
         except Exception as e:
             logger.error(f"failed to delete_conversation {repr(e)}")
 
+        return []
+
     @classmethod
-    def delete_contact(cls, contact_id: int):
+    def delete_contact(cls, contact_id: int) -> list[str]:
+        """returns the images the hub released with the contact (nobody else uses them), [] on failure"""
         url = f"{cls.url}/contacts/{contact_id}"
 
         try:
@@ -508,11 +514,15 @@ class Hub:
                 verify=cls.server_cert,
             )
 
-            if response.status_code != 200:                
+            if response.status_code == 200:
+                return response.json().get("released_images", [])
+            else:
                 logger.error(f"delete_contact - {response.status_code} {response.reason}")
 
         except Exception as e:
             logger.error(f"failed to delete_contact {repr(e)}")
+
+        return []
 
     @classmethod
     def get_conversations(cls, contact_id):

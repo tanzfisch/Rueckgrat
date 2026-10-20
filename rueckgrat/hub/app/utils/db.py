@@ -35,7 +35,7 @@ class ChatDB:
             CREATE TABLE IF NOT EXISTS contact_images (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             contact_id INTEGER NOT NULL,
-            type TEXT CHECK(type IN ('profile', 'gallery')) DEFAULT 'profile',
+            type TEXT CHECK(type IN ('profile', 'conversation_images')) DEFAULT 'profile',
             file_key TEXT NOT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
@@ -673,6 +673,70 @@ class ChatDB:
                 logger.error(f"failed deleting conversation: {e}")
 
         return False
+
+    def get_conversation_image_keys(self, conversation_id: int) -> list[str]:
+        """file keys of the hub images attached to messages of this conversation (images/<file_key>)"""
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute("""
+                    SELECT DISTINCT a.file_name
+                    FROM attachments a
+                    JOIN messages m ON m.id = a.message_id
+                    WHERE m.conversation_id = ? AND a.file_url = 'images/' || a.file_name
+                """, (conversation_id,)).fetchall()
+                return [row[0] for row in rows if row[0]]
+            except Exception as e:
+                logger.error(f"failed fetching images of conversation {conversation_id}: {e}")
+        return []
+
+    def get_contact_image_keys(self, contact_id: int) -> list[str]:
+        """file keys of all hub images of this contact: its contact_images (profile, conversation_images)
+        and the images attached to messages in any of its conversations"""
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute("""
+                    SELECT file_key FROM contact_images WHERE contact_id = ?
+                    UNION
+                    SELECT a.file_name
+                    FROM attachments a
+                    JOIN messages m ON m.id = a.message_id
+                    JOIN conversations c ON c.id = m.conversation_id
+                    WHERE c.contact_id = ? AND a.file_url = 'images/' || a.file_name
+                """, (contact_id, contact_id)).fetchall()
+                return [row[0] for row in rows if row[0]]
+            except Exception as e:
+                logger.error(f"failed fetching images of contact {contact_id}: {e}")
+        return []
+
+    def release_images(self, file_keys: list[str], drop_conversation_images: bool = True) -> list[str]:
+        """forgets every image in file_keys no message attachment refers to anymore: drops its conversation_images rows,
+        and its stored generation if it is no profile image either. returns the file keys whose files can be deleted.
+        after delete_contact the contact's own contact_images rows are already gone (cascade), pass
+        drop_conversation_images=False so the rows of other contacts are kept and keep their images"""
+        unused = []
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                for file_key in set(file_keys):
+                    # still attached in another conversation, keep everything
+                    if cursor.execute("SELECT 1 FROM attachments WHERE file_name = ? AND file_url = 'images/' || file_name LIMIT 1", (file_key,)).fetchone():
+                        continue
+
+                    # conversation_images rows are created by the conversation tools (take_photo, generate_image)
+                    if drop_conversation_images:
+                        cursor.execute("DELETE FROM contact_images WHERE file_key = ? AND type = 'conversation_images'", (file_key,))
+
+                    # a profile image keeps its file and generation
+                    if cursor.execute("SELECT 1 FROM contact_images WHERE file_key = ? LIMIT 1", (file_key,)).fetchone():
+                        continue
+
+                    cursor.execute("DELETE FROM images WHERE file_key = ?", (file_key,))
+                    unused.append(file_key)
+                conn.commit()
+            except Exception as e:
+                logger.error(f"failed releasing images: {e}")
+                return []
+        return unused
 
     def owns_contact(self, user_id: int, contact_id: int) -> bool:
         """False for foreign and unknown contacts alike"""

@@ -7,6 +7,11 @@ Changelog
 - #72 added option to build chat apk using the install.sh script
 - #103 fixed cert issue
 - #102 seperating user name (login) from user character name
+- #104 using multilingual chatterbox now by default
+- #106 hardenig image generation. trying to prevent double generation
+- #105 async image gen
+- #38 deleting a conversation removes its images from the hub and the client cache
+- #38 deleting a contact removes all its images (profile and conversations) from the hub and the client cache
 
 0.18.0
 ------

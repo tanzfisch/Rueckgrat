@@ -44,13 +44,17 @@ async def lifespan(app: FastAPI):
 
     if os.getenv("USE_TTS") == "true":
         from app.utils.tts import TextToSpeech
-        app.state.tts = TextToSpeech()  # model loads lazily on first request
+        app.state.tts = TextToSpeech()
+        logger.debug(f"pre loading text to speech")
+        app.state.tts.preload()
     else:
         app.state.tts = None
 
     if os.getenv("USE_STT") == "true":
         from app.utils.stt import SpeechToText
-        app.state.stt = SpeechToText()  # models load lazily on first request
+        app.state.stt = SpeechToText()
+        logger.debug(f"pre loading speech to text")
+        app.state.stt.preload()
     else:
         app.state.stt = None
 
@@ -114,12 +118,12 @@ def tts(request: NodeTTSRequest):
     if not app.state.tts:
         raise HTTPException(status_code=503, detail="Node has no tts module loaded")
     from app.utils.tts import TTS_MODEL
-    if not ModelRegistry().is_installed(TTS_MODEL):
-        try:
-            _install_model(TTS_MODEL)
-        except Exception as e:
-            logger.error(f"Model installation failed for {TTS_MODEL}: {e}")
-            raise HTTPException(status_code=503, detail=f"tts model {TTS_MODEL} not installed")
+    try:
+        # the tts class installs its own model through the registry if it is missing
+        app.state.tts.install()
+    except Exception as e:
+        logger.error(f"Model installation failed for {TTS_MODEL}: {e}")
+        raise HTTPException(status_code=503, detail=f"tts model {TTS_MODEL} not installed")
     try:
         wav = app.state.tts.speak(request.text, request.voice, request.exaggeration, request.cfg_weight)
     except Exception as e:
@@ -136,17 +140,16 @@ async def stt(request: Request, kind: str = "final"):
     if kind not in STT_MODELS:
         raise HTTPException(status_code=400, detail=f"unknown kind {kind}")
     model_name = STT_MODELS[kind]
-    registry = ModelRegistry()
-    if not registry.is_installed(model_name):
-        try:
-            await asyncio.to_thread(_install_model, model_name)
-        except Exception as e:
-            logger.error(f"Model installation failed for {model_name}: {e}")
-            raise HTTPException(status_code=503, detail=f"stt model {model_name} not installed")
+    try:
+        # the stt class installs its own models through the registry if they are missing
+        install_path = await asyncio.to_thread(app.state.stt.install, kind)
+    except Exception as e:
+        logger.error(f"Model installation failed for {model_name}: {e}")
+        raise HTTPException(status_code=503, detail=f"stt model {model_name} not installed")
 
     pcm16 = await request.body()
     try:
-        text = await asyncio.to_thread(app.state.stt.transcribe, pcm16, kind, registry.get_install_path(model_name))
+        text = await asyncio.to_thread(app.state.stt.transcribe, pcm16, kind, install_path)
     except Exception as e:
         logger.error(f"stt failed: {e!r}")
         raise HTTPException(status_code=500, detail="stt failed")
@@ -192,7 +195,7 @@ async def download_file(file_path: str):
     base_path = Path("/node").resolve()
     path = (base_path / file_path).resolve()
 
-    if not str(path).startswith(str(base_path)):
+    if not path.is_relative_to(base_path):    # compares whole path parts, so /node_secret is not inside /node
         raise HTTPException(status_code=400, detail="Invalid path")
 
     if not os.path.exists(path):
@@ -214,6 +217,16 @@ async def download_file(file_path: str):
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
+# fixed paths before /models/{model_name}: fastapi matches routes in declaration order
+@app.get("/models/registered", response_model=GetRegisteredModelsResponse)
+def get_registered_models():
+    registry = ModelRegistry()
+    models = []
+    for model_name in registry.get_models():
+        model = registry.get_model(model_name) or {}
+        models.append(RegisteredModel(name=model_name, type=model.get("type")))
+    return GetRegisteredModelsResponse(models=models)
+
 @app.get("/models/{model_name}", response_model=GetModelResponse)
 def get_model(model_name: str):
     registry = ModelRegistry()
@@ -233,19 +246,12 @@ def get_model(model_name: str):
         size_bytes=registry.get_size(model_name) if installed else 0,
     )
 
-@app.get("/models/registered", response_model=GetRegisteredModelsResponse)
-def get_registered_models():
-    registry = ModelRegistry()
-    models = []
-    for model_name in registry.get_models():
-        model = registry.get_model(model_name) or {}
-        models.append(RegisteredModel(name=model_name, type=model.get("type")))
-    return GetRegisteredModelsResponse(models=models)
-
 @app.get("/models/{model_name}/url")
 def get_model_url(model_name: str):
     registry = ModelRegistry()
-    sources = registry.get_urls(model_name)
+    if not registry.has_model(model_name):
+        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not registered")
+    sources = registry.get_urls(model_name) or []
     return GetModelURLResponse(
         model_urls=sources
     )
@@ -258,13 +264,13 @@ def get_models(type_filter: Optional[str] = None, verbose: bool = False):
     
     for model_name in registry.get_models(type_filter):
         installed = registry.is_installed(model_name)
-        size_gb = registry.get_size(model_name)
+        size_gb = registry.get_size(model_name) / 1024**3     # get_size is in bytes
         description = registry.get_description(model_name)
         
         models_list.append(ModelInfo(
             name=model_name,
-            type=type_filter,
-            installed=installed,
+            type=(registry.get_model(model_name) or {}).get("type") or "",
+            installed=bool(installed),
             size_gb=size_gb,
             description=description
         ))
@@ -289,7 +295,7 @@ def _install_model(name: str, alternative_server: str=None, force_install: bool=
         logger.error(f"Failed to install model {name}")
         raise HTTPException(
             status_code=500, 
-            detail="Failed to install model '{name}'"
+            detail=f"Failed to install model '{name}'"
         )
 
 @app.post("/models/install", response_model=InstallModelResponse)
@@ -301,6 +307,8 @@ def install_model(request: InstallModelRequest):
            size_gb=0 # TODO
         )
          
+    except HTTPException:
+        raise   # already has the right status (404 unknown model, 500 install failed)
     except Exception as e:
         logger.error(f"Model installation failed for {request.name}: {e}")
         raise HTTPException(
