@@ -639,9 +639,11 @@ setup() {
     select_default_users
     users_json="$USERS_JSON"
 
+    select_chat_apk
+
     CONFIG_FILE="$WORKING_DIR/rueckgrat/config/infrastructure.json"
-    jq --argjson cloudflare "$cloudflare_json" --argjson users "$users_json" \
-        '{hosts: ., cloudflare: $cloudflare, users: $users}' <<< "$hosts_json" > "$CONFIG_FILE"
+    jq --argjson cloudflare "$cloudflare_json" --argjson users "$users_json" --argjson chat_apk "$CHAT_APK" \
+        '{hosts: ., cloudflare: $cloudflare, users: $users, chat_apk: $chat_apk}' <<< "$hosts_json" > "$CONFIG_FILE"
     print_config_file_hint
 }
 
@@ -669,6 +671,19 @@ select_default_users() {
         USERS_JSON=$(jq -c --arg name "$name" --arg email "$email" \
             '. + [{name: $name, email: (if $email == "" then null else $email end)}]' <<< "$USERS_JSON")
     done
+}
+
+# select_chat_apk - Ask once whether an Android APK of the chat client should be built.
+# Saved in the config as "chat_apk", so a reinstall from it (-c) builds it again without asking.
+# Usage: select_chat_apk
+# Sets: CHAT_APK (true or false)
+select_chat_apk() {
+    CHAT_APK=false
+
+    echo ""
+    read_tty "Would you like to build an Android APK for the chat client? (y/N): " "n"
+    [[ "$REPLY" =~ ^[Yy]$ ]] && CHAT_APK=true
+    echo -e "\e[1A\e[K [$( [[ $CHAT_APK == true ]] && echo '✅' || echo '⚫' )] Android APK (chat client)"
 }
 
 # select_cloudflare - Ask once whether a Cloudflare node (cloudflared) is wanted,
@@ -845,6 +860,10 @@ confirm_install_configuration() {
     jq -r 'if .cloudflare.enabled == true
            then "\nCloudflare: [✅] cloudflared on \(.cloudflare.addr) -> hub \(.cloudflare.hub_addr):\(.cloudflare.hub_port)"
            else "\nCloudflare: [⚫]" end' "$CONFIG_FILE"
+    # configs from before this option have no "chat_apk" key -> false
+    jq -r 'if (.chat_apk // false) == true
+           then "Android APK: [✅] chat client, built on this machine"
+           else "Android APK: [⚫]" end' "$CONFIG_FILE"
 
     echo ""
     read_tty "Execute this plan? (Y/n): " "Y" $YES
@@ -1158,6 +1177,77 @@ deploy_chat_native() {
     .venv/bin/python -m pip install -r requirements_desktop.txt
 
     popd > /dev/null
+}
+
+# build_chat_apk - Build the Android APK of the chat client on this machine, if the
+# config says so ("chat_apk": true). Old configs without the key count as false.
+# flet build downloads Flutter, a JDK and the Android SDK itself the first time (several GB).
+# Usage: build_chat_apk [force]
+# Args:
+#   $1 - force: "true" builds without looking at the config at all (used by --apk)
+# Returns: 1 if the build failed (the normal install flow ignores that, the hosts are deployed already)
+# Output: $WORKING_DIR/dist/rueckgrat-chat.apk
+build_chat_apk() {
+    local force="${1:-false}"
+    if [[ "$force" != true ]]; then
+        [[ "$(jq -r '.chat_apk // false' "$CONFIG_FILE")" == "true" ]] || return 0
+    fi
+
+    # only ask for the sudo password if something has to be installed
+    if ! command -v python3 &> /dev/null || ! eval "${pkg_check[python3.13-venv]}"; then
+        get_user_passwd
+    fi
+    install_dependencies python3 python3.13-venv
+
+    print_section
+    echo "📱 chat apk..."
+
+    local chat_dir="$WORKING_DIR/rueckgrat/chat"
+    local apk_src="$chat_dir/build/apk/chat.apk"
+    local apk_dest="$WORKING_DIR/dist/rueckgrat-chat.apk"
+    local cert="$WORKING_DIR/rueckgrat/caddy/rueckgrat-caddy.cert"
+
+    pushd "$chat_dir" > /dev/null
+
+    # the app trusts the hub through the caddy cert bundled in assets/
+    mkdir -p assets
+    if [[ -f "$cert" ]]; then
+        cp -f "$cert" assets/rueckgrat-caddy.cert
+    elif [[ -f assets/rueckgrat-caddy.cert ]]; then
+        echo "⚠️ Warning: $cert not found, using the older copy in assets/ (it may not match the hub)"
+    else
+        echo "⚠️ Warning: no caddy certificate yet ($cert is missing)."
+        echo "   The normal install generates it. Without it the APK will not trust the hub."
+    fi
+
+    # same venv as the native chat client; requirements_desktop.txt brings the flet CLI
+    [ -x .venv/bin/python ] || { rm -rf .venv; python3 -m venv .venv; }
+    if ! .venv/bin/python -m pip install -r requirements_desktop.txt; then
+        echo "❌ Error: could not install the flet build tools for the APK"
+        popd > /dev/null
+        return 1
+    fi
+
+    # -y: let flet install Flutter/JDK/Android SDK without asking, otherwise flet asks itself
+    local flet_args=(build apk)
+    if $YES; then flet_args+=(--yes); fi
+
+    if ! { .venv/bin/flet clean && .venv/bin/flet "${flet_args[@]}"; }; then
+        echo "❌ Error: flet build apk failed (see output above)"
+        popd > /dev/null
+        return 1
+    fi
+    popd > /dev/null
+
+    if [[ ! -f "$apk_src" ]]; then
+        echo "❌ Error: build finished but $apk_src is missing"
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$apk_dest")"
+    cp -f "$apk_src" "$apk_dest"
+    echo "✅ APK: $apk_dest"
+    echo "💡 install it on a phone with USB debugging: adb install -r $apk_dest"
 }
 
 # prep_data_dirs - creates essential directories
@@ -1536,6 +1626,7 @@ usage() {
     echo "  --host-config | -hc    STRING       partial config for just one host"    
     echo "  --sync | -s                         Dev mode: rsync local tree to remote hosts only"
     echo "  --in-place                          Install in the current directory when the target is this host"
+    echo "  --apk | -a                          Only build the Android APK of the chat client, then exit"
     echo "  --user | -u            USER         Sudo username"
     echo "  --password | -p        PASSWORD     Sudo password"
     echo "  --info | -i                         Print system info"
@@ -1639,6 +1730,7 @@ main() {
     NO_CACHE=""
     SYNC_ONLY=false
     IN_PLACE=false
+    APK_ONLY=false
     HOST_MODELS_DIR=HOST_MODELS_DIR_DEFAULT
     NODE_PORT=NODE_PORT_DEFAULT
     HUB_PORT=HUB_PORT_DEFAULT
@@ -1708,12 +1800,23 @@ main() {
             -f|--fresh) CLEAN_BUILD=true; NO_CACHE="--no-cache"; shift ;;
             -s|--sync) SYNC_ONLY=true; shift ;;
             --in-place) IN_PLACE=true; shift ;;
+            -a|--apk) APK_ONLY=true; shift ;;
             -y|--yes) YES=true; shift ;;
             -h|--help) usage; exit 0 ;;
             -i|--info) info; exit 0 ;;
             *) echo "Unknown option: $1"; exit 1 ;;
         esac
     done
+
+    # APK only: needs no config and no jq, so it runs before the jq install
+    if $APK_ONLY; then
+        print_header "📱 Rückgrat Chat APK"
+        WORKING_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        [[ -d "$WORKING_DIR/rueckgrat/chat" ]] || { echo "❌ Error: no rueckgrat/chat in $WORKING_DIR"; exit 1; }
+        build_chat_apk true || exit 1
+        print_section
+        exit 0
+    fi
 
     if ! command -v jq &> /dev/null; then
         get_user_passwd
@@ -1766,6 +1869,8 @@ main() {
         deploy_on_hosts
 
         deploy_cloudflare_node
+
+        build_chat_apk || true
 
         echo "All done! Enjoy Rueckgrat ✨"
         echo "follow live logs of all services in this compose project: cd rueckgrat && docker compose logs -f"
