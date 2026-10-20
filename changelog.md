@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.19.0
+------
+
+- #72 added option to build chat apk using the install.sh script
+
 0.18.0
 ------
 
