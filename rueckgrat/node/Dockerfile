@@ -23,6 +23,11 @@ ENV USE_TTS=$INSTALL_TTS
 ENV USE_STT=$INSTALL_STT
 ENV TORCH_BACKEND=$TORCH_BACKEND
 
+# insightface (face reference, requirements_image_gen.txt) ships as source only and compiles a c++ extension
+RUN if [ "$INSTALL_IMAGE_GEN" = "true" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 ARG TORCH_CUDA_INDEX=cu128
 ARG TORCH_ROCM_INDEX=rocm6.3
 
@@ -37,7 +42,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       pip install --index-url "$IDX" torch torchvision torchaudio; \
     fi && \
     if [ "$INSTALL_IMAGE_GEN" = "true" ]; then \
-      pip install -r requirements_image_gen.txt; \
+      pip install Cython numpy && \
+      pip install --no-build-isolation -r requirements_image_gen.txt; \
     fi && \
     if [ "$INSTALL_TTS" = "true" ]; then \
       pip install -r requirements_tts.txt && \

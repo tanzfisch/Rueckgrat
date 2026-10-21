@@ -85,6 +85,7 @@ class ChatDB:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password TEXT,
+                email TEXT NOT NULL DEFAULT '',
                 nsfw_allowed INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )""")
@@ -187,6 +188,23 @@ class ChatDB:
             )
             row = cursor.fetchone()
             return dict(row) if row else None 
+
+    def update_password(self, user_id: int, passwd: str) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute("UPDATE users SET password = ? WHERE id = ?", (passwd, user_id))
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def get_email(self, user_id: int) -> str:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+            return row["email"] if row else ""
+
+    def set_email(self, user_id: int, email: str) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute("UPDATE users SET email = ? WHERE id = ?", (email, user_id))
+            conn.commit()
+            return cursor.rowcount == 1
 
     def user_nsfw_allowed(self, user_id: int) -> bool:
         """
@@ -383,6 +401,26 @@ class ChatDB:
                 logger.error(f"Failed fetching images for contact {contact_id}: {e}")
 
         return []
+
+    def get_current_profile_image_key(self, contact_id: int, image_dir: str = "/hub/images") -> str:
+        """file key of the contact's current profile image: the newest 'profile' row whose file exists.
+        rows are added before their image is generated, so a profile still rendering is skipped and the
+        previous one is used. "" if the contact has no finished profile image"""
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute("""
+                    SELECT file_key FROM contact_images
+                    WHERE contact_id = ? AND type = 'profile'
+                    ORDER BY created_at DESC, id DESC
+                """, (contact_id,)).fetchall()
+            except Exception as e:
+                logger.error(f"Failed fetching profile image of contact {contact_id}: {e}")
+                return ""
+
+        for (file_key,) in rows:
+            if file_key and "/" not in file_key and (Path(image_dir) / file_key).is_file():
+                return file_key
+        return ""
 
     def remove_contact_image(self, image_id: int) -> bool:
         with self.get_connection() as conn:

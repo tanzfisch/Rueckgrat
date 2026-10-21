@@ -139,6 +139,7 @@
     "requires": ["sdxl-base-config"],
     "comment": "NSFW Tends to go too far when unwanted don't mix with SFW applications",
     "good_value_range": "cfg 7-10, steps 20-40",
+    "faceid": { "max_cfg": 6.0, "max_steps": 30 },
     "files": [
       {
         "source": "https://huggingface.co/boopyfloopy/lustifyXL_v7/resolve/main/lustifySDXLNSFW_ggwpV7.safetensors",
@@ -291,6 +292,7 @@
     "type": "image",
     "compatibility": ["ImageGen"],
     "comment": "SFW, default",
+    "faceid": { "max_cfg": 6.0, "max_steps": 25 },
     "files": [
       {
         "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_V2-SFW.safetensors",
@@ -1164,7 +1166,23 @@
       { "source": "https://huggingface.co/Systran/faster-whisper-base/resolve/main/vocabulary.txt", "path": "" }
     ],
     "install_path": "stt/faster-whisper-base"
-  }  
+  },
+
+  "faceid-plusv2-sdxl": {
+    "description": "IP-Adapter FaceID PlusV2 for SDXL: adapter, its LoRA, CLIP ViT-H image encoder, insightface buffalo_l (detection + recognition only)",
+    "type": "adapter",
+    "compatibility": ["ImageGen"],
+    "comment": "face reference for sdxl image models, loaded on the first request with a reference_image_key. insightface models: non-commercial research use only",
+    "files": [
+      { "source": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sdxl.bin", "path": "" },
+      { "source": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sdxl_lora.safetensors", "path": "" },
+      { "source": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/config.json", "path": "image_encoder" },
+      { "source": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors", "path": "image_encoder" },
+      { "source": "https://huggingface.co/public-data/insightface/resolve/main/models/buffalo_l/det_10g.onnx", "path": "insightface/models/buffalo_l" },
+      { "source": "https://huggingface.co/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx", "path": "insightface/models/buffalo_l" }
+    ],
+    "install_path": "image_gen/faceid-plusv2-sdxl"
+  }
 }
 
 

@@ -1,6 +1,13 @@
 Changelog
 =========
 
+0.20.0
+------
+
+- #53 contact images use the contact's current profile image as face reference (IP-Adapter FaceID PlusV2, sdxl)
+- #108 added voice samples
+- #100 allow user to change email and password
+
 0.19.0
 ------
 
@@ -10,8 +17,7 @@ Changelog
 - #104 using multilingual chatterbox now by default
 - #106 hardenig image generation. trying to prevent double generation
 - #105 async image gen
-- #38 deleting a conversation removes its images from the hub and the client cache
-- #38 deleting a contact removes all its images (profile and conversations) from the hub and the client cache
+- #38 deleting a conversation or contact removes related images from the hub and the client cache
 
 0.18.0
 ------

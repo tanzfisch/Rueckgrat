@@ -9,11 +9,11 @@
 - Author has no clue about security, auth, certs, or Caddy. Help welcome.
 - See the [changelog](https://github.com/tanzfisch/Rueckgrat/blob/master/changelog.md) for more details.
 
-## Features
+# Features
 
 Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client. Quality of the experience depends on the models you run which is limited by the hardware you have available.
 
-### Backend
+## Backend
 
 - runs on Linux only
     - Debian ✅
@@ -34,7 +34,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **generate_image** — generate an image on request or on its own
     - **take_photo** — generate a photo of self, user, or both from current context
 
-### Chat client
+## Chat client
 
 - running on Linux, Android (iOS and Windows not tested)
 - chat with a locally installed LLM
@@ -43,13 +43,13 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
 - code highlighting
 - contacts, character templates, character-creation wizard, settings
 
-## Screenshots
+### Screenshots
 
 Some screenhots of the chat app because people like to see images even if crap.
 
 <img src="docs/screenshots/contact_list.png" width="200" alt="contact list"> <img src="docs/screenshots/chat_code.png" width="200" alt="code in chat"> <img src="docs/screenshots/chat_image.png" width="200" alt="image gen in chat"> <img src="docs/screenshots/chat_foto.png" width="200" alt="self image in chat">
 
-## Hardware requirements
+# Hardware requirements
 
 About 40 GB of VRAM in total is a comfortable target for running the stack with useful models. It can sit in one machine or be spread over several cards or machines.
 
@@ -64,9 +64,9 @@ Some models also run with less VRAM if they can offload into system RAM, but exp
 
 For reference, the dev setup runs on three machines: hub and LLM on an AMD RX 7900 XTX (24 GB, ROCm), TTS on an NVIDIA RTX 3080 (10 GB, CUDA) and image generation on an AMD RX 9060 XT (16 GB, ROCm).
 
-## Getting started
+# Getting started
 
-### Linux
+## Linux
 
 ```bash
 wget https://raw.githubusercontent.com/tanzfisch/Rueckgrat/master/install.sh
@@ -78,7 +78,7 @@ The installer supports multi-host deploy, component selection (native chat, hub,
 
 **Note: Every machine needs sudo with the same username, plus `ssh` and `rsync`; target hosts must also run an SSH server:**
 
-#### What the installer does
+### What the installer does
 
 1. Asks the setup questions and saves them to `rueckgrat/config/infrastructure.json`.
 2. Deploys the chosen components to each host.
@@ -91,7 +91,7 @@ cd rueckgrat/chat
 ./run.sh
 ```
 
-#### Alternatives
+### Alternatives
 
 Clone, then install:
 
@@ -107,31 +107,19 @@ Reinstall from a saved config, without the setup questions:
 ./install.sh -c rueckgrat/config/config_example.json -y
 ```
 
-#### Android APK
+## Android
 
-The setup question "Would you like to build an Android APK for the chat client? (y/N)" is saved as `chat_apk` in the config (default `false`; configs without the key count as `false`):
-
-```json
-{
-  "hosts": [ ... ],
-  "cloudflare": { "enabled": false },
-  "users": [],
-  "chat_apk": true
-}
-```
-
-To only build the APK, without installing anything or asking questions, use `-a` / `--apk` (it ignores `chat_apk`):
+Make sure to run the installer at least once so it can generate the caddy certificate.
+Either select build apk in the installer or alternatively you can manually build the apk with:
 
 ```bash
-./install.sh -a
+./install.sh --apk
 adb install -r dist/rueckgrat-chat[version].apk
 ```
 
-The APK lands in `dist/rueckgrat-chat.apk` and is unsigned. On first use `flet` downloads Flutter, a JDK and the Android SDK (several GB). The app trusts the hub through the Caddy certificate, so run a normal install first, which creates it.
+## Windows
 
-For all options run `./install.sh -h`.
-
-### Windows
+(currently not actively tested)
 
 Native client only:
 
@@ -142,84 +130,44 @@ cd Rueckgrat\rueckgrat\chat
 .\run.ps1
 ```
 
-## Development
+# Development
 
-1. install once manually with your settings
-2. change code
-3. optional: `./install.sh -s` to rsync this tree to remote hosts from that config
-4. run `./dev.sh` on each machine to restart that host's containers and follow logs
-   run `cd rueckgrat/chat && ./run.sh` to start the native chat
-5. run `./stop.sh` to stop all docker services
+If you like to contribute please check out [CONTRIBUTING.md](CONTRIBUTING.md) on how to contribute.
 
-### Chat on Android
+# Models
 
-Build the APK by hand instead of with the installer ([Android APK](#android-apk)):
-
-```bash
-cd rueckgrat/chat
-source .venv/bin/activate
-flet clean && flutter pub get && flet build apk
-```
-
-This may install flutter SDK, android SDK if not there already
-
-On your phone enable Developer options → USB debugging
-Check if it is available with `adb devices`
-
-Install on android phone, open the app on the phone and follow its logs
-
-```bash
-adb uninstall com.flet.chat && adb install build/apk/*.apk && adb logcat -s flet.python
-```
-
-## Models
-
-Edit `rueckgrat/node/data/registry.json` to add models. Copy an existing entry for reference.
+Edit `rueckgrat/node/data/registry.json` to add models to the registry
 
 Manage installs with the registry manager.
-
-### Registry manager
 
 Launch any node container then run the following to control it's registry
 
 ```bash
+docker exec -it rueckgrat_node python -m app.registry_manager --help
 docker exec -it rueckgrat_node python -m app.registry_manager list -v
 docker exec -it rueckgrat_node python -m app.registry_manager list -v -t llm
 docker exec -it rueckgrat_node python -m app.registry_manager install [model_name]
 docker exec -it rueckgrat_node python -m app.registry_manager nodes
-docker exec -it rueckgrat_node python -m app.registry_manager --help
 ```
 
-Models live under `/var/lib/Rueckgrat/models` on the host.
+Models default location is `/var/lib/Rueckgrat/models` on the host.
 
 ## Hub management
 
-Invites (and users) are managed with the hub management tool. Run the hub container, then use it inside the hub container as follows
+Invites and users are managed with the hub management tool. Run the hub container, then use it inside the hub container as follows
 
 ```bash
+docker exec -it rueckgrat_hub python -m app.hub_management --help
 docker exec -it rueckgrat_hub python -m app.hub_management invite create
 docker exec -it rueckgrat_hub python -m app.hub_management invite create --email [e-mail]
 docker exec -it rueckgrat_hub python -m app.hub_management user create [user_name]
 docker exec -it rueckgrat_hub python -m app.hub_management user list
 docker exec -it rueckgrat_hub python -m app.hub_management invite list
-docker exec -it rueckgrat_hub python -m app.hub_management --help
 ```
 
-**Note: The token is printed only once, copy it immediately.**
+**Note: The invite token is printed only once, copy it immediately.**
 
-## Troubleshoot & FAQ
-
-### Logs for hub, node, caddy, llama-server
-
-`docker logs -f CONTAINER`
-
-Container names: `rueckgrat_hub`, `rueckgrat_node`, `rueckgrat_caddy`, `rueckgrat_llama_server`.
-
-### Native chat logs
-
-Stdout only (`./run.sh` also writes `logs/chat.log` if that path exists).
-
-### FAQ
+# FAQ
 
 | Issue/Question | Answer |
 | --- | --- |
@@ -228,7 +176,7 @@ Stdout only (`./run.sh` also writes `logs/chat.log` if that path exists).
 | Can I use Rückgrat for commercial projects? | Yes. Check out for commercial licensing here `COMMERCIAL_LICENSE.md`. |
 | A model is missing | Install it with the [registry manager](#registry-manager), e.g. `docker exec -it rueckgrat_node python -m app.registry_manager install [model_name]`. |
 
-## Special thanks to
+# Special thanks to
 
 ✨ **Gebrielle** 🎉
 

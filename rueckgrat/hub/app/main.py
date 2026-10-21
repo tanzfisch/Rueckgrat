@@ -1,6 +1,7 @@
 from silero_vad import load_silero_vad
 import json
 import random
+import re
 import asyncio
 import threading
 import os
@@ -230,6 +231,48 @@ def login(data: LoginRequest):
         "user_id": user["id"],
         "nsfw_allowed": bool(user["nsfw_allowed"])
     }
+
+class ChangePasswordRequest(BaseModel):
+    current_passwd: str
+    new_passwd: str
+
+@app.post("/users/me/password")
+def change_password(request: ChangePasswordRequest, username: str = Depends(get_current_user)):
+    # signup has no password rules, so the new password is only hashed the same way.
+    # tokens are not revoked, they run out after ACCESS_TOKEN_EXPIRE_MINUTES anyway
+    user = app.state.db.get_user(username) if username else None
+    if not user:
+        raise HTTPException(status_code=401)
+    if not verify_password(request.current_passwd, user["password"]):
+        raise HTTPException(status_code=403, detail="current password is wrong")
+    if not app.state.db.update_password(user["id"], hash_password(request.new_passwd)):
+        raise HTTPException(status_code=500, detail="failed to change password")
+    return {"status": "ok"}
+
+# the email is optional and only informational, so just a format check: no verification, not unique
+EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+class EmailRequest(BaseModel):
+    email: str
+
+@app.get("/users/me/email")
+def get_email(username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if user_id is None:
+        raise HTTPException(status_code=401)
+    return {"email": app.state.db.get_email(user_id)}
+
+@app.put("/users/me/email")
+def set_email(request: EmailRequest, username: str = Depends(get_current_user)):
+    # empty means no email, anything else is stored as typed
+    user_id = app.state.db.get_user_id(username)
+    if user_id is None:
+        raise HTTPException(status_code=401)
+    if request.email and not EMAIL_PATTERN.fullmatch(request.email):
+        raise HTTPException(status_code=400, detail="not a valid email address")
+    if not app.state.db.set_email(user_id, request.email):
+        raise HTTPException(status_code=500, detail="failed to save email")
+    return {"status": "ok"}
 
 ########### system handling
 @app.get("/health")
@@ -472,6 +515,24 @@ def get_predefined_voices(username: str = Depends(get_current_user)):
     ]
     return {"voices": voices}
 
+def read_predefined_voice(predefined_id: str) -> bytes:
+    """wav bytes of a predefined voice, raises 404 for an unknown id"""
+    entry = next((v for v in load_predefined_voices() if v["id"] == predefined_id), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="voice not found")
+
+    path = PREDEFINED_VOICES_DIR / entry["file"]
+    try:
+        return path.read_bytes()
+    except Exception as e:
+        logger.error(f"failed reading predefined voice {path}: {e}")
+        raise HTTPException(status_code=500, detail="failed to read voice")
+
+@app.get("/voices/predefined/{predefined_id}")
+def get_predefined_voice_sample(predefined_id: str, username: str = Depends(get_current_user)):
+    # the sample wav itself, so the client can play it before choosing the voice
+    return Response(content=read_predefined_voice(predefined_id), media_type="audio/wav")
+
 @app.post("/voices/predefined/{predefined_id}")
 def use_predefined_voice(predefined_id: str, username: str = Depends(get_current_user)):
     """
@@ -479,17 +540,7 @@ def use_predefined_voice(predefined_id: str, username: str = Depends(get_current
     returns the uuid of the stored voice, the same predefined voice always maps to the same uuid per user
     """
     user_id = app.state.db.get_user_id(username)
-    entry = next((v for v in load_predefined_voices() if v["id"] == predefined_id), None)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="voice not found")
-
-    path = PREDEFINED_VOICES_DIR / entry["file"]
-    try:
-        data = path.read_bytes()
-    except Exception as e:
-        logger.error(f"failed reading predefined voice {path}: {e}")
-        raise HTTPException(status_code=500, detail="failed to read voice")
-
+    data = read_predefined_voice(predefined_id)
     voice_id = store_voice(user_id, data, predefined_id)
     return {"status": "ok", "voice_id": voice_id}
 

@@ -1,30 +1,34 @@
 import flet as ft
-from app.ui.theme import STYLES
+from app.ui.theme import STYLES, SURFACE_3, TEXT_DIM
 
 from app.ui import BasePage
-from app.ui.widgets import RowSelector, ContactHeader
+from app.ui.widgets import RowSelector, ContactHeader, MessageBox
 from app.utils import RueckgratConfig, Hub
+
+
+def _section(title: str, *controls) -> ft.Column:
+    # same heading style as the sections of the contact profile page
+    heading = ft.Text(title, weight=ft.FontWeight.BOLD, size=16)
+    return ft.Column([heading, *controls], spacing=10, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
 
 
 class NetworkSettingsPage(ft.Column):
     def __init__(self):
-        super().__init__(expand=True)
+        # same layout as the profile tab: scrolls, fields and buttons share the width
+        super().__init__(expand=True, spacing=28, scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
         self.on_ok = None
-        self.on_cancel = None
         self.config = RueckgratConfig()
 
-        self.host_input = ft.TextField(label="Host", width=float("inf"), value=self.config.host, **STYLES["field"])
-        self.port_input = ft.TextField(label="Port", width=float("inf"), value=self.config.port, **STYLES["field"])
+        self.host_input = ft.TextField(label="Host", value=self.config.host, **STYLES["field"])
+        self.port_input = ft.TextField(label="Port", value=self.config.port, **STYLES["field"])
 
         self.controls = [
-            self.host_input,
-            self.port_input,
-            ft.Container(expand=True),
-            ft.Row(
-                controls=[
-                    ft.Button("Save", expand=True, on_click=self._ok, style=STYLES["button"]["style"]),
-                    ft.Button("Cancel", expand=True, on_click=self._cancel, style=STYLES["button"]["style"]),
-                ]
+            _section(
+                "Hub connection",
+                ft.Text("host name or IP address and port of your Rueckgrat hub", color=TEXT_DIM, size=12),
+                self.host_input,
+                self.port_input,
+                ft.Button("Save", on_click=self._ok, style=STYLES["button"]["style"]),
             ),
         ]
 
@@ -34,27 +38,84 @@ class NetworkSettingsPage(ft.Column):
         if self.on_ok:
             self.on_ok()
 
-    def _cancel(self, e=None):
-        self.host_input.value = self.config.host
-        self.port_input.value = self.config.port
-        self.host_input.update()
-        self.port_input.update()
-        if self.on_cancel:
-            self.on_cancel()
-
 
 class UserProfileSettingsPage(ft.Column):
     def __init__(self, navigator):
-        super().__init__(expand=True)
+        # scrolls, so small screens can reach every section. STRETCH gives fields and buttons the same width
+        super().__init__(expand=True, spacing=28, scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
         self.navigator = navigator
+        # optional, the hub only checks the format
+        self.email_edit = ft.TextField(label="Email (optional)", value=Hub.get_email(), **STYLES["field"])
+        self.current_pass_edit = ft.TextField(label="Current password", password=True, can_reveal_password=True, **STYLES["field"])
+        self.new_pass_edit = ft.TextField(label="New password", password=True, can_reveal_password=True, **STYLES["field"])
+        self.confirm_pass_edit = ft.TextField(label="Confirm new password", password=True, can_reveal_password=True, **STYLES["field"])
         self.controls = [
-            ft.Button("edit", on_click=self.on_click_user_profile, style=STYLES["button"]["style"]),
-            ft.Button("logout", on_click=self.on_click_logout, style=STYLES["button"]["style"]),
-            ft.Container(expand=True),
+            _section(
+                "Profile",
+                *self._profile_summary(),
+                ft.Button("edit profile", on_click=self.on_click_user_profile, style=STYLES["button"]["style"]),
+            ),
+            _section(
+                "Email",
+                self.email_edit,
+                ft.Button("save email", on_click=self.on_click_save_email, style=STYLES["button"]["style"]),
+            ),
+            _section(
+                "Password",
+                self.current_pass_edit,
+                self.new_pass_edit,
+                self.confirm_pass_edit,
+                ft.Button("change password", on_click=self.on_click_change_password, style=STYLES["button"]["style"]),
+            ),
+            # the session action, kept apart from the account settings
+            ft.Column([
+                ft.Divider(color=SURFACE_3),
+                ft.Button("logout", on_click=self.on_click_logout, style=STYLES["button"]["style"]),
+            ], spacing=20, horizontal_alignment=ft.CrossAxisAlignment.STRETCH),
         ]
+
+    @staticmethod
+    def _profile_summary() -> list:
+        # text only. the page is built on every visit, so this is always the stored profile
+        profile = (Hub.get_user_data() or {}).get("profile") or {}
+        name = (profile.get("name") or "").strip()
+        hair, eyes = profile.get("hair_color"), profile.get("eye_color")
+        attributes = [profile.get("gender"), profile.get("age"), hair and f"{hair} hair", eyes and f"{eyes} eyes", profile.get("ethnicity"), profile.get("body_type")]
+        attributes = ", ".join(str(a) for a in attributes if a)
+        backstory = (profile.get("backstory") or "").strip()
+
+        texts = []
+        if name:
+            texts.append(ft.Text(name, weight=ft.FontWeight.BOLD))
+        if attributes:
+            texts.append(ft.Text(attributes))
+        if backstory:
+            texts.append(ft.Text(backstory, color=TEXT_DIM, size=12, max_lines=3, overflow=ft.TextOverflow.ELLIPSIS))
+        return texts or [ft.Text("no profile yet", color=TEXT_DIM, size=12)]
+
 
     def on_click_user_profile(self, e=None):
         self.navigator("profile_wizz", user_profile_mode=True)
+
+    def on_click_save_email(self, e=None):
+        error = Hub.set_email(self.email_edit.value or "")
+        if error:
+            MessageBox.error(self.page, error, title="Email not saved")
+            return
+        MessageBox.show(self.page, "your email has been saved", title="Email saved")
+
+    def on_click_change_password(self, e=None):
+        if self.new_pass_edit.value != self.confirm_pass_edit.value:
+            MessageBox.error(self.page, "the new passwords do not match", title="Password not changed")
+            return
+        error = Hub.change_password(self.current_pass_edit.value or "", self.new_pass_edit.value or "")
+        if error:
+            MessageBox.error(self.page, error, title="Password not changed")
+            return
+        for edit in (self.current_pass_edit, self.new_pass_edit, self.confirm_pass_edit):
+            edit.value = ""
+        self.update()
+        MessageBox.show(self.page, "your password has been changed", title="Password changed")
 
     def on_click_logout(self, e=None):
         self.page.run_task(self._logout)

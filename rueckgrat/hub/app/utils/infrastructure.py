@@ -1,5 +1,6 @@
 
 import asyncio
+import base64
 import json
 import os
 import requests
@@ -16,6 +17,7 @@ from app.common import get_logger, ChatRequestLlama, DownloadQueue, Utils, WebSo
 logger = get_logger()
 
 INFRASTRUCTURE_CONFIG_PATH = Path("/hub/config/infrastructure.json")
+HUB_IMAGE_DIR = Path("/hub/images")
 
 @dataclass
 class ServerResult:
@@ -149,6 +151,30 @@ class Infrastructure:
 
         return self._download_file(url, target_filepath)
 
+    def _image_payload(self, image_request: ImageRequest) -> dict:
+        """the json the node gets. a request with a face reference (reference_image_key) also gets the bytes of that
+        hub image, the node can't read /hub/images. without a reference this is exactly model_dump() as before"""
+        payload = image_request.model_dump()
+        key = image_request.reference_image_key
+        if not key:
+            return payload
+
+        b64 = image_request.reference_image_b64
+        if not b64:
+            path = (HUB_IMAGE_DIR / key).resolve()
+            if "/" in key or "\\" in key or key.startswith(".") or path.parent != HUB_IMAGE_DIR.resolve():
+                logger.warning(f"invalid reference image key {key!r}, generating without face reference")
+                return payload
+            try:
+                b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+            except OSError as e:
+                # the node falls back to plain generation when it gets a key without bytes
+                logger.warning(f"reference image {key} not readable ({e!r}), generating without face reference")
+                return payload
+
+        payload["reference_image_b64"] = b64
+        return payload
+
     def image(self, image_request: ImageRequest) -> str:
         if not "text_to_image" in self.node_by_type:
             logger.error("no text to image generator available")
@@ -160,7 +186,7 @@ class Infrastructure:
         try:
             response = requests.post(
                 url_image_request,
-                json=image_request.model_dump(),
+                json=self._image_payload(image_request),
                 timeout=240,
             )
         
