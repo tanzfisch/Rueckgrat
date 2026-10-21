@@ -3,7 +3,7 @@ from app.ui.theme import STYLES
 
 from app.ui import BasePage
 from app.ui.widgets import OneLineBubble, ContactHeader
-from app.utils import Hub, Contact
+from app.utils import Hub, Contact, Paths
 from app.common import get_logger
 
 logger = get_logger()
@@ -51,7 +51,7 @@ class ConversationsPage(BasePage):
     def delete_conversation(self, conversation_id):
         def confirm(e):
             self.page.pop_dialog()
-            Hub.delete_conversation(conversation_id)
+            Paths.remove_cached_images(Hub.delete_conversation(conversation_id))
             self.load_conversations()
 
         self.page.show_dialog(

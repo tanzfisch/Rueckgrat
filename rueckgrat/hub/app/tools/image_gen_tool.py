@@ -2,7 +2,7 @@ from typing import Dict,  Any
 from .tool import Tool, ToolCategory
 from app.jobs.requested_image_job import RequestedImageJob
 
-from app.common import get_logger, MessageQueue
+from app.common import get_logger, MessageQueue, Utils
 logger = get_logger()
 
 class ImageGenTool(Tool):
@@ -16,16 +16,45 @@ class ImageGenTool(Tool):
     def name(cls) -> str: 
         return "generate_image"
 
-    def execute(self) -> None:
+    def create_image_job(self):
+        """the RequestedImageJob for this tool call (not started), None if the call is invalid.
+        execute() attaches its planned file name before the image is generated"""
         if not "positive_prompt" in self.tool_call:
             logger.error("invalid generate_image")
             return None
-        
-        positive_prompt = self.tool_call["positive_prompt"]
+        return RequestedImageJob(self.tool_call["positive_prompt"], self.contact_id, self.db, self.infrastructure,
+                                 conversation_id=self.conversation_id)
+
+    def attach_planned_image(self, image_job) -> None:
+        """attaches the image file of image_job (not started yet) to the message in tool_call["message_id"].
+        the file name is the hash of the request the job will build (output ""), so it is known before
+        the image exists. the image job itself knows nothing about messages"""
+        message_id = self.tool_call.get("message_id")
+        if not message_id or message_id < 0:
+            logger.warning(f"{self.name()}: no message id, image not attached")
+            return
+        try:
+            image_filename = f"{Utils.hash_image_request(image_job.build_request())}.png"
+            self.db.add_attachment(message_id, image_filename, f"images/{image_filename}", "image/png", 0)
+            logger.debug(f"{self.name()}: attached planned file {image_filename} to message {message_id}")
+            # tell the client now, the image itself takes minutes. it shows the placeholder and starts the download
+            MessageQueue().send_data({
+                "attachment": {
+                    "conversation_id": self.conversation_id,
+                    "message_id": message_id,
+                    "filename": image_filename
+                }
+            })
+        except Exception as e:
+            logger.error(f"{self.name()}: failed to attach the planned image {repr(e)}")
+
+    def execute(self) -> None:
+        image_job = self.create_image_job()
+        if not image_job:
+            return None
+        self.attach_planned_image(image_job)
 
         logger.debug("generating image ...")
-        MessageQueue().send_status_message(f"generating image")
-        image_job = RequestedImageJob(positive_prompt, self.contact_id, self.db, self.infrastructure)
         self.add_sub_job(image_job)
         self.wait_for([image_job])
         image = (image_job.result() or {}).get("image")

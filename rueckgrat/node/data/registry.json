@@ -100,6 +100,38 @@
     "install_path": "voices/chatterbox"
   },
 
+  "chatterbox_multilingual": {
+    "description": "Resemble AI Chatterbox multilingual, zero-shot voice cloning in 23 languages (ar da de el en es fi fr he hi it ja ko ms nl no pl pt ru sv sw tr zh)",
+    "type": "tts",
+    "compatibility": [
+      "chatterbox-tts"
+    ],
+    "comment": "load with ChatterboxMultilingualTTS.from_local (chatterbox.mtl_tts, chatterbox-tts 0.1.7), generate() needs language_id, conds.pt is the built-in default voice",
+    "files": [
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/ve.pt",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/t3_mtl23ls_v2.safetensors",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/s3gen.pt",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/grapheme_mtl_merged_expanded_v1.json",
+        "path": ""
+      },
+      {
+        "source": "https://huggingface.co/ResembleAI/chatterbox/resolve/main/conds.pt",
+        "path": ""
+      }
+    ],
+    "install_path": "voices/chatterbox_multilingual"
+  },
+
  "lustifySDXLNSFW_ggwpV7": {
     "description": "",
     "type": "image",

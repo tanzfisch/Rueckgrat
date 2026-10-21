@@ -25,9 +25,10 @@ class ToolRegistry:
         self.job_queue = job_queue
 
         self.tools: Dict[str, type[Tool]] = {}
-        self._register_tool(WebsearchTool)  
-        self._register_tool(ImageGenTool)
-        self._register_tool(TakePhotoTool)
+        self.parallel: Dict[str, bool] = {}  # tool name -> runs in parallel (True) or synchronous (False)
+        self._register_tool(WebsearchTool)
+        self._register_tool(ImageGenTool, parallel=True)
+        self._register_tool(TakePhotoTool, parallel=True)
         self._register_tool(ConversionTool)
         self._register_tool(CalculatorTool)
         self._register_tool(CurrentTimeTool)
@@ -39,8 +40,10 @@ class ToolRegistry:
         temp = ", ".join(self.tools)
         logger.debug(f"registered tools: {temp}")
 
-    def _register_tool(self, cls: type[Tool]):
+    def _register_tool(self, cls: type[Tool], parallel: bool = False):
+        """parallel: the tool may run in parallel, default is synchronous execution"""
         self.tools[cls.name()] = cls
+        self.parallel[cls.name()] = parallel
 
     def tools_by_category(self) -> Dict[str, List[str]]:
         """read only: {category: [tool names]} in registration order"""
@@ -49,25 +52,34 @@ class ToolRegistry:
             result.setdefault(cls.category, []).append(name)
         return result
 
-    def execute(self, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]) -> None:
-        tool_name = tool_call["tool"]
-        if not tool_name in self.tools:
-            logger.warning(f"unknown tool: {tool_name}")
-            return None
-                
-        logger.debug(f"executing:\n{Utils.pretty_print(tool_call)}")
+    def execute(self, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_calls: List[Dict[str, Any]], parallel: bool = False) -> None:
+        """runs the tool calls in list order. synchronous tools (parallel=False) run one after another
+        on this thread (job_queue.run), parallel tools are queued (job_queue.add) and run concurrently.
+        parallel selects which tools run: None = all (default), False = only synchronous, True = only parallel"""
+        for tool_call in tool_calls:
+            tool_name = tool_call["tool"]
+            if not tool_name in self.tools:
+                logger.warning(f"unknown tool: {tool_name}")
+                continue
+            if parallel is not None and self.parallel[tool_name] != parallel:
+                continue  # not selected in this call, the other execute() call runs it
 
-        ToolCls = self.tools[tool_name]        
-        tool_job = ToolCls(
-            db=self.db,
-            infrastructure=self.infrastructure,
-            user_id=user_id,
-            contact_id=contact_id,
-            conversation_id=conversation_id,
-            response=response,
-            tool_call=tool_call
-        )
-        self.job_queue.run(tool_job)
+            logger.debug(f"executing:\n{Utils.pretty_print(tool_call)}")
+
+            ToolCls = self.tools[tool_name]
+            tool_job = ToolCls(
+                db=self.db,
+                infrastructure=self.infrastructure,
+                user_id=user_id,
+                contact_id=contact_id,
+                conversation_id=conversation_id,
+                response=response,
+                tool_call=tool_call
+            )
+            if self.parallel[tool_name]:
+                self.job_queue.add(tool_job)
+            else:
+                self.job_queue.run(tool_job)
 
     def get_tools_prompt(self, skill_names: Optional[List[str]] = None) -> str:
         if not skill_names:

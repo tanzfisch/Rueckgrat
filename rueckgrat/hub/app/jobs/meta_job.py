@@ -149,14 +149,14 @@ class MetaJob(Job):
                 logger.debug(f"thinking response (2):\n{Utils.pretty_print(thinking_response)}")
             tool_calls = thinking_response["tool_calls"]
 
-            for tool_call in tool_calls:                
-                self.tool_registry.execute(
-                    user_id=self.user_id,
-                    contact_id=self.request.contact_id,
-                    conversation_id=self.request.conversation_id,
-                    response=self.response,
-                    tool_call=tool_call
-                )
+            self.tool_registry.execute(
+                user_id=self.user_id,
+                contact_id=self.request.contact_id,
+                conversation_id=self.request.conversation_id,
+                response=self.response,
+                tool_calls=tool_calls,
+                parallel=False
+            )
 
             MessageQueue().send_status_message("compile response")
 
@@ -178,6 +178,17 @@ class MetaJob(Job):
             contact_name = Utils.get_nested_value(contact, ["identity", "name"])
             self.message_id = self.db.add_message(self.request.conversation_id, "assistant", "", contact_name)
 
+            # the parallel tools (take_photo, generate_image) attach their images to the new message themselves
+            parallel_tool_calls = [{**tool_call, "message_id": self.message_id} for tool_call in tool_calls]
+            self.tool_registry.execute(
+                user_id=self.user_id,
+                contact_id=self.request.contact_id,
+                conversation_id=self.request.conversation_id,
+                response=self.response,
+                tool_calls=parallel_tool_calls,
+                parallel=True
+            )
+
             MessageQueue().send_status_message("finalize answer")
 
             chat_job = ChatJob(
@@ -191,17 +202,6 @@ class MetaJob(Job):
             self.add_sub_job(chat_job)
             self.wait_for([chat_job])
 
-            if self.message_id:
-                if "take_photo" in self.response:
-                    image_filename = self.response["take_photo"]["filename"]
-                    image_url = self.response["take_photo"]["image_path"]
-                    self.db.add_attachment(self.message_id, image_filename, image_url, "image/png", 0)        
-
-                if "generate_image" in self.response:
-                    image_filename = self.response["generate_image"]["filename"]
-                    image_url = self.response["generate_image"]["image_path"]
-                    self.db.add_attachment(self.message_id, image_filename, image_url, "image/png", 0)
-            
             logger.debug("assistant response generated")
 
             start = time.time()

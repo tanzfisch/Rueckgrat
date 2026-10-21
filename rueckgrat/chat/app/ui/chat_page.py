@@ -28,6 +28,8 @@ class ChatPage(BasePage):
         self._stream_gen = 0
         self._stream_message_id = None
         self._finished_message_ids = set()
+        self._bubbles: dict[int, ChatBubble] = {}       # message id -> its bubble in the history
+        self._pending_images: dict[int, str] = {}       # message id -> image file name that came before its bubble
         self.replay_content = ""
         self.user_role_name = ""   # set from the user's own character profile in on_enter
 
@@ -176,6 +178,8 @@ class ChatPage(BasePage):
         self.stream_bubble.visible = False
         self._stream_message_id = None
         self._finished_message_ids.clear()
+        self._bubbles.clear()
+        self._pending_images.clear()
         self.history.controls = [
             ft.Row(controls=[self.status_widget]),
             ft.Row(controls=[self.stream_bubble]),
@@ -196,9 +200,9 @@ class ChatPage(BasePage):
             attachments = Hub.get_attachments(message["id"])
             if attachments:
                 image_path = self._get_image(attachments[0]["file_name"])
-                self._append_history(message["role"], message["content"], image_path)
+                self._append_history(message["role"], message["content"], image_path, message_id=message["id"])
             else:
-                self._append_history(message["role"], message["content"])
+                self._append_history(message["role"], message["content"], message_id=message["id"])
 
         self.temperature = float(self.contact.get_llm_temperature())
         Hub.register_incomming_message(self.on_incomming_message)
@@ -289,9 +293,11 @@ class ChatPage(BasePage):
             await self.audio_streamer.stop()
             self.audio_streamer = None
 
-    def _append_history(self, role: str, content: str, image_filepath: str = None):
+    def _append_history(self, role: str, content: str, image_filepath: str = None, message_id: int = None) -> ChatBubble | None:
         try:
             bubble = ChatBubble(role, content, image_filepath)
+            if message_id is not None:
+                self._bubbles[message_id] = bubble
             if role in ("assistant", "error"):
                 self.replay_content = content
 
@@ -308,8 +314,10 @@ class ChatPage(BasePage):
             )
             self.history.controls.insert(len(self.history.controls) - 2, row)
             self.history.update()
+            return bubble
         except Exception as e:
-            logger.error(f"failed to append to history: {repr(e)}")            
+            logger.error(f"failed to append to history: {repr(e)}")
+            return None            
 
     def replay(self):
         if self.mute_btn.selected:
@@ -427,7 +435,8 @@ class ChatPage(BasePage):
         self._flush_delta()
 
     def on_incomming_message(self, message: dict):
-        #logger.debug(f"incomming message:\n{Utils.pretty_print(message)}")
+        if not "delta" in message:
+            logger.debug(f"incomming message:\n{Utils.pretty_print(message)}")
 
         try:
             if "status" in message:
@@ -442,9 +451,13 @@ class ChatPage(BasePage):
                 if self.page:
                     self.page.run_task(self._schedule_flush, self._stream_gen)
 
+            if "attachment" in message:
+                self._on_attachment(message["attachment"])
+
             if "chat" in message:
                 chat = message["chat"]
                 if chat["conversation_id"] == self.conversation_id:
+                    message_id = chat.get("message_id", self._stream_message_id)   # read before the stream id is reset
                     if self._stream_message_id is not None:
                         self._finished_message_ids.add(self._stream_message_id)
                         self._stream_message_id = None
@@ -455,19 +468,34 @@ class ChatPage(BasePage):
                     self.stream_bubble.update()
                     content = self._cleanup_content(chat["content"])
                     role = chat["role"]
-                    if "take_photo" in message:
-                        image_path = Paths.get_image_path() / message["take_photo"]["filename"]
-                        self._append_history(role, content, str(image_path))
-                    elif "generate_image" in message:
-                        image_path = Paths.get_image_path() / message["generate_image"]["filename"]
-                        self._append_history(role, content, str(image_path))
-                    else:
-                        self._append_history(role, content)
+                    image_filename = self._pending_images.pop(message_id, None)
+                    if image_filename is None:
+                        if "take_photo" in message:
+                            image_filename = message["take_photo"]["filename"]
+                        elif "generate_image" in message:
+                            image_filename = message["generate_image"]["filename"]
+                    image_path = self._get_image(image_filename) if image_filename else None
+                    self._append_history(role, content, image_path, message_id=message_id)
 
                     if self.mute_btn.selected:
                         self._speak(content)
         except Exception as e:
             logger.error(f"failed to handle incomming message: {e}")
+
+    def _on_attachment(self, attachment: dict):
+        """the hub attached an image to a message (the image may not exist yet): show the placeholder
+        on its bubble and start the download. if the bubble is not there yet, the "chat" message picks it up"""
+        if attachment.get("conversation_id") != self.conversation_id:
+            return
+        message_id = attachment.get("message_id")
+        filename = attachment.get("filename")
+        if message_id is None or not filename:
+            return
+        bubble = self._bubbles.get(message_id)
+        if bubble:
+            bubble.set_image(self._get_image(filename))
+        else:
+            self._pending_images[message_id] = filename
 
     def send_message(self):
         self.status_widget.clear_status()

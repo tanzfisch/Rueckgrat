@@ -55,9 +55,9 @@ About 40 GB of VRAM in total is a comfortable target for running the stack with 
 
 | Component | VRAM |
 | --- | --- |
-| LLM (default model: Dolphin Venice Edition) | ~22 GB |
-| Image generation | ~12 GB |
-| Text to speech | ~3-4 GB |
+| LLM (default model: Dolphin Venice Edition) | ~23 GB |
+| Image generation | ~12-13 GB |
+| Text to speech | ~4-5 GB |
 | **Total** | **~37-38 GB, rounded up to 40 GB** |
 
 Some models also run with less VRAM if they can offload into system RAM, but expect them to be slower.
@@ -124,7 +124,7 @@ To only build the APK, without installing anything or asking questions, use `-a`
 
 ```bash
 ./install.sh -a
-adb install -r dist/rueckgrat-chat.apk
+adb install -r dist/rueckgrat-chat[version].apk
 ```
 
 The APK lands in `dist/rueckgrat-chat.apk` and is unsigned. On first use `flet` downloads Flutter, a JDK and the Android SDK (several GB). The app trusts the hub through the Caddy certificate, so run a normal install first, which creates it.

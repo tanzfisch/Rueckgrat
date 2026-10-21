@@ -18,32 +18,53 @@ class ImageGen:
         self.model = None
         self.pipe = None
         self.compel = None
-        self.lock = Lock()
+        # one lock per image file (key = request.output, the hash file name the existence check uses):
+        # requests for the same image serialize and the second one reuses the file of the first
+        self.file_locks: dict[str, Lock] = {}
+        self.file_locks_guard = Lock()
+        # the gpu pipeline is shared (one loaded model, _load/_unload swap it), so the render itself
+        # still runs one at a time
+        self.pipeline_lock = Lock()
 
         logger.info(f"startup image_gen interface")
 
         self.output_dir = Path("/node/images")
         os.makedirs(self.output_dir, exist_ok=True)
 
+    def _file_lock(self, file_key: str) -> Lock:
+        with self.file_locks_guard:
+            return self.file_locks.setdefault(file_key, Lock())
+
     def image(self, request: ImageRequest) -> ImageResponse:
         registry = ModelRegistry()
         model_path = registry.get_safetensors(request.model)
 
-        with self.lock:
-            image = self._generate(
-                prompt = request.positive_prompt,
-                model = model_path,
-                negative_prompt = request.negative_prompt,
-                steps = request.steps,
-                guidance = request.cfg, # TODO
-                width = request.width,
-                height = request.height,
-                seed = request.seed
-            )
-
         output_file = self.output_dir / request.output
-        logger.debug(f"save image to {output_file}")
-        image.save(output_file)
+
+        # check, generate and save all inside the per file lock: a second request for the same file (e.g. the
+        # hub timed out and asks again) waits here for the first one and then reuses its file
+        with self._file_lock(request.output):
+            if request.output and output_file.exists():
+                logger.debug(f"image {output_file} already exists, not generating it again")
+                return ImageResponse(output=str(request.output))
+
+            with self.pipeline_lock:
+                image = self._generate(
+                    prompt = request.positive_prompt,
+                    model = model_path,
+                    negative_prompt = request.negative_prompt,
+                    steps = request.steps,
+                    guidance = request.cfg, # TODO
+                    width = request.width,
+                    height = request.height,
+                    seed = request.seed
+                )
+
+            # write to a temp file and rename, so nobody ever sees a half written png
+            logger.debug(f"save image to {output_file}")
+            tmp_file = output_file.with_name(output_file.name + ".tmp")
+            image.save(tmp_file, format="PNG")
+            os.replace(tmp_file, output_file)
 
         return ImageResponse(output=str(request.output))
 
