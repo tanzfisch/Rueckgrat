@@ -308,12 +308,14 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
     return {"status": "ok"}
 
 @app.delete("/contacts/{contact_id}")
-def delete_conversation(contact_id: int, username: str = Depends(get_current_user)):
+def delete_contact(contact_id: int, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
     if not app.state.db.owns_contact(user_id, contact_id):
         raise HTTPException(status_code=404, detail="contact not found")
+    image_keys = app.state.db.get_contact_image_keys(contact_id)
     if app.state.db.delete_contact(contact_id):
-        return {"status": "ok"}
+        released_images = app.state.image_store.release(image_keys, drop_conversation_images=False)
+        return {"status": "ok", "released_images": released_images}
     else:
         return {"status": "failed to delete contact"}
 
@@ -348,8 +350,10 @@ def delete_conversation(conversation_id: int, username: str = Depends(get_curren
     user_id = app.state.db.get_user_id(username)
     if not app.state.db.owns_conversation(user_id, conversation_id):
         raise HTTPException(status_code=404, detail="conversation not found")
+    image_keys = app.state.db.get_conversation_image_keys(conversation_id)
     if app.state.db.delete_conversation(conversation_id):
-        return {"status": "ok"}
+        released_images = app.state.image_store.release(image_keys)
+        return {"status": "ok", "released_images": released_images}
     else:
         return {"status": "failed to delete conversation"}
 
@@ -702,7 +706,6 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
             text = await asyncio.to_thread(app.state.infrastructure.stt, pcm16, kind)
             if text:
                 await websocket.send_json({"type": kind, "text": text})
-                logger.debug(text)
         finally:
             busy = False
 

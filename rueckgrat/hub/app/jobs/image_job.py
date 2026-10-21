@@ -1,6 +1,7 @@
 from contextlib import nullcontext
+from pathlib import Path
 from .job_queue import Job
-from ..utils.image_store import file_lock
+from ..utils.image_store import file_lock, discard_if_released
 from typing import Dict, Any
 
 from app.common import get_logger, ImageRequest
@@ -20,8 +21,14 @@ class ImageJob(Job):
         lock = file_lock(self.request.output) if self.request.output else nullcontext()
         with lock:
             self._execute()
+            # the conversation of this image may have been deleted while we were generating it
+            if self.db and self.request.output and discard_if_released(self.request.output, self.db):
+                self.response = {}
 
     def _execute(self) -> None:
+        if self.request.output and Path(f"/hub/images/{self.request.output}").exists():
+            self.response = {"image": {"filename": self.request.output, "image_path": f"images/{self.request.output}"}}
+            return
         try:
             if self.db and self.request.output:
                 self.db.save_image_generation(self.request.output, self.request.model_dump(exclude={"output"}))

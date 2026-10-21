@@ -73,6 +73,7 @@ services:
     environment:
       NODE_PORT: ${NODE_PORT}
       LLAMA_SERVER_PORT: ${LLAMA_SERVER_PORT}
+      TTS_MODEL: ${TTS_MODEL:-chatterbox}
     stdin_open: true
     tty: true
     restart: unless-stopped

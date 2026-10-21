@@ -38,7 +38,8 @@
         "services": [
           {
             "type": "text_to_speech",
-            "name": "tts"
+            "name": "tts",
+            "model": "chatterbox_multilingual"
           }
         ]
       }

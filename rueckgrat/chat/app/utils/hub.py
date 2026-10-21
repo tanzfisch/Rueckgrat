@@ -1,5 +1,6 @@
 import os
 import requests
+import certifi
 from urllib.parse import urlparse
 import asyncio
 import json
@@ -35,10 +36,12 @@ class Hub:
 
         cert = next((p for p in paths if p.exists()), None)
         if not cert:
-            cls.server_cert = False
-            logger.error(f"failed to get certificate from hub")
+            # no caddy cert: fall back to the public CAs (works through cloudflare),
+            # instead of False, which turned verification off
+            cls.server_cert = certifi.where()
+            logger.error(f"failed to get certificate from hub, using public CAs only")
         else:
-            cls.server_cert = cert
+            cls.server_cert = cls._build_ca_bundle(cert)
 
         logger.info(f"hub: {cls.url}")
         logger.info(f"hub ws: {cls.uri}")
@@ -46,8 +49,16 @@ class Hub:
 
         cls.websocket_client = WebSocketClient(cls.uri, cls.server_cert)
 
-        # keep for debugging
-        # cls.set_log_level(cls.config.log_level)
+    @classmethod
+    def _build_ca_bundle(cls, caddy_cert: Path) -> str:
+        """public CAs + our caddy root in one PEM file, so both cloudflare and direct caddy connections verify"""
+        cache_dir = Path(os.getenv("FLET_APP_STORAGE_CACHE") or Path.home() / ".cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        bundle = cache_dir / "rueckgrat-ca-bundle.pem"
+        public = Path(certifi.where()).read_text()
+        caddy = Path(caddy_cert).read_text()
+        bundle.write_text(public.rstrip() + "\n" + caddy)
+        return str(bundle)
 
     @classmethod
     def get_user_name(cls):
@@ -125,12 +136,12 @@ class Hub:
         cls.websocket_client.register_incomming_message(callback)
 
     @classmethod
-    def chat(cls, contact_id: int, conversation_id: int, role: str, content: str, temperature: float):
+    def chat(cls, contact_id: int, conversation_id: int, role: str, user_role_name: str, content: str, temperature: float):
         chat_request = ChatRequest(
             contact_id=contact_id,
             conversation_id=conversation_id,
             role=role,
-            name=cls.user_name,
+            name=user_role_name,
             content=content,
             temperature=temperature
         )
@@ -464,7 +475,8 @@ class Hub:
         return -1     
 
     @classmethod
-    def delete_conversation(cls, conversation_id: int):
+    def delete_conversation(cls, conversation_id: int) -> list[str]:
+        """returns the images the hub released with the conversation (nobody else uses them), [] on failure"""
         url = f"{cls.url}/conversations/{conversation_id}"
 
         try:
@@ -477,14 +489,19 @@ class Hub:
                 verify=cls.server_cert,
             )
 
-            if response.status_code != 200:                
+            if response.status_code == 200:
+                return response.json().get("released_images", [])
+            else:
                 logger.error(f"delete_conversation - {response.status_code} {response.reason}")
 
         except Exception as e:
             logger.error(f"failed to delete_conversation {repr(e)}")
 
+        return []
+
     @classmethod
-    def delete_contact(cls, contact_id: int):
+    def delete_contact(cls, contact_id: int) -> list[str]:
+        """returns the images the hub released with the contact (nobody else uses them), [] on failure"""
         url = f"{cls.url}/contacts/{contact_id}"
 
         try:
@@ -497,11 +514,15 @@ class Hub:
                 verify=cls.server_cert,
             )
 
-            if response.status_code != 200:                
+            if response.status_code == 200:
+                return response.json().get("released_images", [])
+            else:
                 logger.error(f"delete_contact - {response.status_code} {response.reason}")
 
         except Exception as e:
             logger.error(f"failed to delete_contact {repr(e)}")
+
+        return []
 
     @classmethod
     def get_conversations(cls, contact_id):

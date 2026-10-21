@@ -54,6 +54,15 @@ class ChatBubble(ft.Container):
         except Exception as e:
             logger.error(f"failed to append content: {repr(e)}")
 
+    def set_image(self, image_filepath: str):
+        """adds the image (placeholder until the file exists) to a bubble that is already shown"""
+        if self.image_filepath == image_filepath:
+            return
+        self.image_filepath = image_filepath
+        self.append_content("")     # rebuilds the controls, with the image first
+        if self.page:
+            self.update()
+
     def set_fixed_width(self, width: int):
         self.width = width
         if self.page:

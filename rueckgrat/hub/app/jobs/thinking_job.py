@@ -42,7 +42,7 @@ class ThinkingJob(Job):
             compiler = PromptCompiler(
                 contact=contact, 
                 conversation=conversation, 
-                user_name=request.name, 
+                user_role_name=request.name, 
                 thinking=True,
                 tool_registry=self.tool_registry,
                 tool_names=self.tool_names

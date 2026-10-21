@@ -41,7 +41,7 @@ class ModelRegistry:
     def is_installed(self, model_name: str):
         model = self.get_model(model_name)
         if not model:
-            return ""
+            return False
 
         files = model["files"]
         install_path = model["install_path"]
@@ -132,7 +132,8 @@ class ModelRegistry:
             source_path = file["path"]
             local_path = install_path + "/" + source_path if source_path else install_path
             filepath = MODEL_BASE_DIR / local_path / os.path.basename(source_url)
-            result += os.path.getsize(filepath)
+            if os.path.exists(filepath):     # not (fully) installed: missing files count as 0 bytes
+                result += os.path.getsize(filepath)
 
         return result
 

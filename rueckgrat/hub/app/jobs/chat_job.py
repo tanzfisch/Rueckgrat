@@ -24,7 +24,7 @@ class ChatJob(Job):
             compiler = PromptCompiler(
                 contact=contact,
                 conversation=conversation,
-                user_name=self.request.name,
+                user_role_name=self.request.name,
                 thinking=False,
                 tool_registry=None
             )

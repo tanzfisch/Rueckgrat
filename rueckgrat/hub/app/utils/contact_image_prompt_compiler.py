@@ -146,7 +146,7 @@ class ContactImagePromptCompiler:
                 user_eye_color = Utils.get_nested_value(user_profile, ["eye_color"], "")
                 user_ethnicity = Utils.get_nested_value(user_profile, ["ethnicity"], "")
                 user_body_type = Utils.get_nested_value(user_profile, ["body_type"], "")
-                user_def = f"{user_gender}, {user_age} year old, {user_body_type}, {user_ethnicity}, {user_hair_color} hair, {user_eye_color} eyes, "
+                user_def = f"{user_gender}, {user_age}, {user_body_type}, {user_ethnicity}, {user_hair_color} hair, {user_eye_color} eyes, "
                 user_stack.append(user_def)
 
                 if self.context:

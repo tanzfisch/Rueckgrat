@@ -138,21 +138,23 @@ class WizardProfilePage(ft.Column):
         "obese": f"{ASSETS_DIR}/icons/body_morbidly_obese_light.png",
     }
 
-    def __init__(self, profile: dict = None, name: str = None, simple: bool = False):
+    def __init__(self, profile: dict = None, simple: bool = False, user_profile: bool = False):
         super().__init__(expand=True, spacing=14, scroll=ft.ScrollMode.AUTO)
         self.profile = profile
         self.simple = simple
+        self.user_profile = user_profile
 
-        if name:
-            name_value, name_enabled = name, False
+        if user_profile:
+            name_value = ((profile or {}).get("name") or "").strip()
         elif profile:
-            name_value, name_enabled = profile["name"], True
+            name_value = profile.get("name") or ""
         else:
-            name_value, name_enabled = random.choice(self.male_names), True
+            name_value = random.choice(self.male_names)
 
         self.name_input = ft.TextField(
             value=name_value,
-            disabled=not name_enabled,
+            hint_text="Name of your character" if user_profile else None,
+            on_change=self.on_name_changed,
             filled=True,
             bgcolor="#2C2C2C",
             border_radius=22,
@@ -279,15 +281,32 @@ class WizardProfilePage(ft.Column):
         # kept out of get_values() because those values are json encoded and sent to the hub
         return self.voice_selector.get_voice()
 
+    def on_name_changed(self, e=None):
+        # clear the validation message once the user starts typing
+        if self.name_input.error:
+            self.name_input.error = None
+            self.name_input.update()
+
+    def validate_name(self) -> bool:
+        if (self.name_input.value or "").strip():
+            return True
+        self.name_input.error = "Please enter a name for your character"
+        self.name_input.update()
+        return False
+
+    def _randomize_name(self) -> bool:
+        # random names only for a brand new character, never for the user's own one
+        return not self.profile and not self.user_profile
+
     def on_gender_changed(self, gender: str):
         if gender == "male":
-            if not self.profile:
+            if self._randomize_name():
                 self.name_input.value = random.choice(self.male_names)
                 self.name_input.update()
             if not self.simple:
                 self.age.update_images(self.male_ages)
         else:
-            if not self.profile:
+            if self._randomize_name():
                 self.name_input.value = random.choice(self.female_names)
                 self.name_input.update()
             if not self.simple:
@@ -303,7 +322,7 @@ class WizardProfilePage(ft.Column):
                 "image_style": self.image_style.value or DEFAULT_IMAGE_STYLE,
             }
         return {
-            "name": self.name_input.value or "",
+            "name": (self.name_input.value or "").strip(),
             "gender": self.gender.get_selected(),
             "age": int(self.age.get_selected()),
             "hair_color": self.hair.get_selected(),
@@ -389,8 +408,11 @@ class ProfileWizard(BasePage):
         self.update()
 
     def on_submit(self, e=None):
+        if self.user_profile_mode and not self.profile_page.validate_name():
+            return
         profile = self.profile_page.get_values()
         if self.user_profile_mode:
+            # the entered name is stored in the "name" key of the profile json in user_data
             Hub.update_user_data({"profile": json.dumps(profile)})
             self.navigator("contacts")
             return
@@ -410,9 +432,8 @@ class ProfileWizard(BasePage):
 
         if self.user_profile_mode:
             data = Hub.get_user_data()
-            name = Hub.get_user_name()
             profile = data["profile"] if data and "profile" in data else None
-            self.profile_page = WizardProfilePage(profile=profile, name=name)
+            self.profile_page = WizardProfilePage(profile=profile, user_profile=True)
             self._show(self.profile_page, "Save")
         else:
             self.profile_page = WizardProfilePage(simple=True)

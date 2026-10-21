@@ -48,7 +48,7 @@ class UpdateContextJob(Job):
             compiler = PromptCompiler(
                 contact=contact, 
                 conversation=conversation, 
-                user_name=self.request.name
+                user_role_name=self.request.name
             )
             system_prompt, context_prompt = compiler.build_prompt()
 

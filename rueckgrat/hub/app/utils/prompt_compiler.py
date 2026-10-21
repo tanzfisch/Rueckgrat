@@ -7,11 +7,11 @@ from app.common import get_logger, Utils
 logger = get_logger()
 
 class PromptCompiler:
-    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_name: str = None, thinking: bool = False, tool_registry: ToolRegistry = None, tool_names: Optional[List[str]] = None):
+    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_role_name: str = None, thinking: bool = False, tool_registry: ToolRegistry = None, tool_names: Optional[List[str]] = None):
         self.contact = contact
         self.tool_names = tool_names  # None: compact tool index only. list: full prompt() of exactly these tools
         self.conversation = conversation
-        self.user_name = user_name
+        self.user_role_name = user_role_name
         self.profile = contact.get("profile", {})
         self.tool_registry = tool_registry
         self.thinking = thinking
@@ -47,7 +47,7 @@ Your role is {role}.
 Your traits are {personality}
 Your background story is {background_hook}
 Your body language is {body_language} {style}
-You are talking to {self.user_name}. {relationship}
+You are talking to {self.user_role_name}. {relationship}
 """.strip()
 
     def _build_behavior(self) -> str:
@@ -121,7 +121,7 @@ OBJECTIVES:
 SITUATION_CONTEXT:
 Location: {location}
 Topic: {topic}
-{self.user_name}: {user_action}, {user_head}, {user_upper_body}, {user_body}
+{self.user_role_name}: {user_action}, {user_head}, {user_upper_body}, {user_body}
 You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_body}
 """.strip()
 

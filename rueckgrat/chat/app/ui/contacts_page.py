@@ -135,7 +135,7 @@ class ContactsPage(BasePage):
 
     def delete_contact(self, contact_id):
         def delete():
-            Hub.delete_contact(contact_id)
+            Paths.remove_cached_images(Hub.delete_contact(contact_id))
             self.load_contacts()
 
         MessageBox.confirm(
