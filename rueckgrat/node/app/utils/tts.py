@@ -122,8 +122,8 @@ class TextToSpeech:
     def speak(self, text: str, voice: str = "", exaggeration: float = 0.5, cfg_weight: float = 0.5,
               language: str | None = None) -> bytes:
         """returns the speech as wav file bytes. language is only used by the multilingual model,
-        None = detect it from the text"""
-        if MULTILINGUAL and not language:
+        None or a language it does not support = detect it from the text"""
+        if MULTILINGUAL and language not in MULTILINGUAL_LANGUAGES:
             language = self._detect_language(text)
         with self.lock:  # one generation at a time on the gpu
             model = self._load()

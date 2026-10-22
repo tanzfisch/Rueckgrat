@@ -1,0 +1,19 @@
+# Local Flet extension: an Android foreground service (type "microphone") that keeps the
+# microphone and the network alive while the app is in the background / the screen is locked.
+# Picked up by `flet build apk` through [tool.flet.dev_packages] in ../../pyproject.toml.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flet-foreground-service"
+version = "0.1.0"
+description = "Flet extension: Android microphone foreground service"
+requires-python = ">=3.10"
+dependencies = ["flet>=1.0.4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"flutter.flet_foreground_service" = ["**/*"]

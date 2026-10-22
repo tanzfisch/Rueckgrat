@@ -7,6 +7,8 @@ from .profile_page import ProfilePage
 from .initial_settings_page import InitialSettingsPage
 from .settings_page import SettingsPage
 from .profile_wizzard import ProfileWizard
+from .translate_page import TranslatePage
+from .image_page import ImagePage
 
 
 __all__ = [
@@ -19,4 +21,6 @@ __all__ = [
     "InitialSettingsPage"
     "SettingsPage",
     "ProfileWizard",
+    "TranslatePage",
+    "ImagePage",
 ]

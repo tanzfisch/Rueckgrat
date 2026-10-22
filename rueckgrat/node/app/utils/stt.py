@@ -64,10 +64,11 @@ class SpeechToText:
         for kind in STT_MODELS:
             self._load(kind, self.install(kind), source="preload")
 
-    def transcribe(self, pcm16: bytes, kind: str, install_path: str) -> str:
-        """pcm16: 16 kHz mono signed 16 bit little endian samples, returns the recognized text"""
+    def transcribe(self, pcm16: bytes, kind: str, install_path: str, language: str = "") -> str:
+        """pcm16: 16 kHz mono signed 16 bit little endian samples, returns the recognized text.
+        language: whisper language code, "" = detect it"""
         audio = np.frombuffer(pcm16, dtype=np.int16).astype(np.float32) / 32768.0
         model = self._load(kind, install_path)
-        segments, _ = model.transcribe(audio, vad_filter=False)
+        segments, _ = model.transcribe(audio, vad_filter=False, language=language or None)
         # segments is a lazy generator, the actual work happens while joining
         return "".join(s.text for s in segments).strip()

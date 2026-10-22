@@ -37,32 +37,22 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
 ## Chat client
 
 - running on Linux, Android (iOS and Windows not tested)
+
+### Chat
 - chat with a locally installed LLM
 - in-chat image generation based on use prompt
 - self image generation. Like taking a picture of self based on current context.
 - code highlighting
 - contacts, character templates, character-creation wizard, settings
 
+### Translate
+- assiting a conversation with someone in an other language (using your own llm for translation)
+
 ### Screenshots
 
-Some screenhots of the chat app because people like to see images even if crap.
+Some screenhots of the app ...
 
-<img src="docs/screenshots/contact_list.png" width="200" alt="contact list"> <img src="docs/screenshots/chat_code.png" width="200" alt="code in chat"> <img src="docs/screenshots/chat_image.png" width="200" alt="image gen in chat"> <img src="docs/screenshots/chat_foto.png" width="200" alt="self image in chat">
-
-# Hardware requirements
-
-About 40 GB of VRAM in total is a comfortable target for running the stack with useful models. It can sit in one machine or be spread over several cards or machines.
-
-| Component | VRAM |
-| --- | --- |
-| LLM (default model: Dolphin Venice Edition) | ~23 GB |
-| Image generation | ~12-13 GB |
-| Text to speech | ~4-5 GB |
-| **Total** | **~37-38 GB, rounded up to 40 GB** |
-
-Some models also run with less VRAM if they can offload into system RAM, but expect them to be slower.
-
-For reference, the dev setup runs on three machines: hub and LLM on an AMD RX 7900 XTX (24 GB, ROCm), TTS on an NVIDIA RTX 3080 (10 GB, CUDA) and image generation on an AMD RX 9060 XT (16 GB, ROCm).
+<img src="docs/screenshots/contact_list.png" width="200" alt="contact list"> <img src="docs/screenshots/chat_image.png" width="200" alt="image gen in chat"> <img src="docs/screenshots/chat_foto.png" width="200" alt="self image in chat"> <img src="docs/screenshots/translate.png" width="200" alt="code in chat">
 
 # Getting started
 
@@ -166,6 +156,21 @@ docker exec -it rueckgrat_hub python -m app.hub_management invite list
 ```
 
 **Note: The invite token is printed only once, copy it immediately.**
+
+# Hardware requirements
+
+There is no minimum requirements but for a good experience about 40 GB of VRAM in total is a comfortable minimum.
+To be able to run the stack with useful models. It can sit in one machine or be spread over several cards or machines.
+
+Following an example setup that worked fine for the dev
+
+| Component | HW specs | VRAM usage |
+| --- | --- | --- |
+| LLM (Dolphin Venice Edition Q4) | AMD RX 7900 XTX 24GB | ~22 GB |
+| Image generation (DreamShaperXL_Turbo_V2-SFW) | AMD RX 9060 XT 16GB | ~12-13 GB |
+| TTS (Chatterbox) | NVIDIA RTX 3080 10GB | ~4-5 GB |
+
+See [config_example.json](rueckgrat/config/config_example.json) for the dev setup.
 
 # FAQ
 

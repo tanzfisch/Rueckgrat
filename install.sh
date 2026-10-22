@@ -1233,17 +1233,17 @@ build_chat_apk() {
 
     local chat_dir="$WORKING_DIR/rueckgrat/chat"
     local apk_src="$chat_dir/build/apk/chat.apk"
-    # version suffix for the file name: latest tag + short hash, each part only if git knows it.
-    # HEAD exactly on a tag -> tag only, the hash adds nothing then
-    local git_tag git_hash apk_version=""
-    git_tag="$(git -C "$WORKING_DIR" describe --tags --abbrev=0 2> /dev/null || true)"
-    if git -C "$WORKING_DIR" describe --tags --exact-match HEAD &> /dev/null; then
-        git_hash=""
+    local apk_version=""
+    if git -C "$WORKING_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null | grep -qx master && \
+    git -C "$WORKING_DIR" describe --tags --exact-match HEAD &>/dev/null; then
+        local git_tag
+        git_tag="$(git -C "$WORKING_DIR" describe --tags --abbrev=0 2>/dev/null || true)"
+        [[ -n "$git_tag" ]] && apk_version+="-$git_tag"
     else
-        git_hash="$(git -C "$WORKING_DIR" rev-parse --short HEAD 2> /dev/null || true)"
+        local git_hash
+        git_hash="$(git -C "$WORKING_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+        [[ -n "$git_hash" ]] && apk_version+="-$git_hash"
     fi
-    [[ -n "$git_tag" ]] && apk_version+="-$git_tag"
-    [[ -n "$git_hash" ]] && apk_version+="-$git_hash"
     local apk_dest="$WORKING_DIR/dist/rueckgrat-chat${apk_version}.apk"
     local cert="$WORKING_DIR/rueckgrat/caddy/rueckgrat-caddy.cert"
 
