@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_serializer
 from typing import List, Optional
 
 class ChatRequest(BaseModel):
@@ -34,6 +34,19 @@ class ImageRequest(BaseModel):
     cfg: float = 7.5
     model: str
     output: str
+    # face reference (FaceID): file key of the contact's current profile image on the hub, "" = none.
+    # only dumped/hashed when set, so requests without a reference keep their old dump and hash
+    reference_image_key: str = ""
+    # the image bytes of reference_image_key (base64), attached by the hub right before it posts the request
+    # to the node. never part of model_dump(), so never hashed or stored with the generation
+    reference_image_b64: str = Field(default="", exclude=True)
+
+    @model_serializer(mode="wrap")
+    def _drop_empty_reference(self, handler):
+        data = handler(self)
+        if isinstance(data, dict) and not self.reference_image_key:
+            data.pop("reference_image_key", None)
+        return data
 
 class ImageResponse(BaseModel):
     output: str

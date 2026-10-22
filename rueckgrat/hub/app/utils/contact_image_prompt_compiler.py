@@ -65,7 +65,9 @@ DEFAULT_IMAGE_STYLE = {
 }
 
 class ContactImagePromptCompiler:
-    def __init__(self, contact: Dict[str, Any], user_data: Dict[str, Any], context: Dict[str, Any] = None, image_type: ImageType = ImageType.FullBody, show_assistant: bool = True, show_user: bool = False, prompt: str = None):
+    def __init__(self, contact: Dict[str, Any], user_data: Dict[str, Any], context: Dict[str, Any] = None, 
+                 image_type: ImageType = ImageType.FullBody, show_assistant: bool = True, show_user: bool = False, 
+                 use_facial_features: bool = True, prompt: str = None):
         self.contact = contact
         self.user_data = user_data
         self.profile = contact.get("profile", {})
@@ -74,6 +76,7 @@ class ContactImagePromptCompiler:
         self.show_user = show_user        
         self.prompt = prompt
         self.context = context        
+        self.use_facial_features = use_facial_features
 
         if not self.context:
             logger.warning("got no context yet")
@@ -133,11 +136,13 @@ class ContactImagePromptCompiler:
 
             # portrait
             if self.image_type == ImageType.Portrait or self.image_type == ImageType.UpperBody or self.image_type == ImageType.FullBody:            
-                assistant_stack.append(Utils.get_nested_value(self.contact, ["identity", "gender"], ""))
-                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "general"], ""))
-                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "hair"], ""))
-                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "face"], ""))
-                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "skin"], ""))
+                # skip everything that could be derived from a reference image
+                if self.use_facial_features:
+                    assistant_stack.append(Utils.get_nested_value(self.contact, ["identity", "gender"], ""))
+                    assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "general"], ""))
+                    assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "hair"], ""))
+                    assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "face"], ""))
+                    assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "skin"], ""))
 
                 user_profile = json.loads(self.user_data["profile"])
                 user_gender = Utils.get_nested_value(user_profile, ["gender"], "")

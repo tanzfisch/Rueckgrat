@@ -25,6 +25,7 @@ class Text_To_Speech:
     _page = None          # flet page, needed for in-app playback on mobile
     _current_audio = None # running flet Audio service on mobile, if any
     _audio_done = None    # set when in-app playback ends
+    _sample_id = None     # predefined voice whose sample is playing, None for speech
     state = "idle"        # "idle" / "generating" / "playing", written by the speech thread, polled by the chat page
 
     @classmethod
@@ -41,6 +42,7 @@ class Text_To_Speech:
         with cls._proc_lock:
             cls._generation += 1
             cls.state = "idle"
+            cls._sample_id = None
             proc = cls._current_proc
             cls._current_proc = None
             audio, done = cls._current_audio, cls._audio_done
@@ -61,20 +63,33 @@ class Text_To_Speech:
             return
 
         logger.info(f"prep speech \"{Utils.shorten(text)}\" with voice \"{voice or 'default'}\"")
+        text = cls._cleanup_for_speech(text)
+        cls._start(lambda: Hub.tts(text, voice))
 
+    @classmethod
+    def play_voice_sample(cls, predefined_id: str):
+        """plays the sample of a predefined voice, calling it again for the same voice while it plays stops it"""
+        if cls.state != "idle" and cls._sample_id == predefined_id:
+            cls.kill_current_speech()
+            return
+        cls._start(lambda: Hub.get_predefined_voice_sample(predefined_id), sample_id=predefined_id)
+
+    @classmethod
+    def _start(cls, fetch_wav, sample_id: str | None = None):
+        """stops what is playing and plays the wav bytes fetch_wav() returns, in a background thread"""
         try:
             cls.kill_current_speech()
             with cls._proc_lock:
                 generation = cls._generation
                 cls.state = "generating"
-            args = (cls._cleanup_for_speech(text), voice, generation)
+                cls._sample_id = sample_id
             if cls._page and cls._is_mobile():
                 # run_thread sets flet's page context, so services like flet_audio.Audio register themselves.
                 # mobile only: run_thread workers are not daemon threads, on desktop they would block
                 # interpreter exit until aplay finished, so the atexit kill_current_speech came too late
-                cls._page.run_thread(cls._run_speech, *args)
+                cls._page.run_thread(cls._run_speech, fetch_wav, generation)
             else:
-                threading.Thread(target=cls._run_speech, args=args, daemon=True).start()
+                threading.Thread(target=cls._run_speech, args=(fetch_wav, generation), daemon=True).start()
         except Exception as e:
             cls.state = "idle"
             logger.error(f"failed to run speech generation {e}")
@@ -99,8 +114,8 @@ class Text_To_Speech:
                 cls.state = state
 
     @classmethod
-    def _run_speech(cls, text: str, voice: str, generation: int):
-        wav = Hub.tts(text, voice)
+    def _run_speech(cls, fetch_wav, generation: int):
+        wav = fetch_wav()
         if not wav:
             logger.error("failed to get speech from hub")
             cls._set_state(generation, "idle")

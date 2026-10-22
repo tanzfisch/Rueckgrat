@@ -630,6 +630,69 @@ class Hub:
         return []
 
     @classmethod
+    def get_email(cls) -> str:
+        """the user's optional email, "" if none is set or the hub can't be reached"""
+        try:
+            response = requests.get(
+                f"{cls.url}/users/me/email",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("email", "")
+            logger.error(f"get email - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_email {repr(e)}")
+        return ""
+
+    @classmethod
+    def set_email(cls, email: str) -> str | None:
+        """returns None on success, else an error message for the user"""
+        try:
+            response = requests.put(
+                f"{cls.url}/users/me/email",
+                json={"email": email},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return None
+            logger.error(f"set email - {response.status_code} {response.reason}")
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+            return detail if isinstance(detail, str) else f"saving the email failed ({response.status_code})"
+        except Exception as e:
+            logger.error(f"failed to set_email {repr(e)}")
+            return "could not reach the hub"
+
+    @classmethod
+    def change_password(cls, current_passwd: str, new_passwd: str) -> str | None:
+        """returns None on success, else an error message for the user"""
+        try:
+            response = requests.post(
+                f"{cls.url}/users/me/password",
+                json={"current_passwd": current_passwd, "new_passwd": new_passwd},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return None
+            logger.error(f"change password - {response.status_code} {response.reason}")
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+            return detail if isinstance(detail, str) else f"changing the password failed ({response.status_code})"
+        except Exception as e:
+            logger.error(f"failed to change_password {repr(e)}")
+            return "could not reach the hub"
+
+    @classmethod
     def login_user(cls, user_name, user_passwd) -> bool:
         url = f"{cls.url}/login"
         cls.access_token = ""
@@ -727,6 +790,23 @@ class Hub:
         except Exception as e:
             logger.error(f"failed to get_predefined_voices {repr(e)}")
         return []
+
+    @classmethod
+    def get_predefined_voice_sample(cls, predefined_id: str) -> Optional[bytes]:
+        """wav bytes of a predefined voice, to listen to it before choosing it"""
+        try:
+            response = requests.get(
+                f"{cls.url}/voices/predefined/{predefined_id}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=30,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.content
+            logger.error(f"get_predefined_voice_sample - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_predefined_voice_sample {repr(e)}")
+        return None
 
     @classmethod
     def use_predefined_voice(cls, predefined_id: str) -> Optional[str]:

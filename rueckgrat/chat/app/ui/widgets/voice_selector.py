@@ -3,6 +3,7 @@ import wave
 import flet as ft
 
 from app.utils import Hub
+from app.audio import Text_To_Speech
 from app.ui.widgets.bubbles import OneLineBubble
 from app.ui.widgets.message_box import MessageBox
 from app.common import get_logger
@@ -58,9 +59,18 @@ class VoiceSelector(ft.Column):
             # a contact voice that could not be matched to a predefined one, so there are no details to show
             options.append(ft.DropdownOption(key=self.CURRENT_VOICE_KEY, text=current_text))
         for voice in self.predefined_voices:
-            options.append(ft.DropdownOption(key=voice["id"], text=self._voice_text(voice)))
+            options.append(ft.DropdownOption(key=voice["id"], text=self._voice_text(voice), trailing_icon=self._sample_button(voice["id"])))
         options.append(ft.DropdownOption(key=self.UPLOAD_VOICE_KEY, text="upload own voice (wav)…"))
         return options
+
+    @staticmethod
+    def _sample_button(predefined_id: str) -> ft.IconButton:
+        # the button takes the tap, so the option is not selected and the menu stays open
+        return ft.IconButton(
+            icon=ft.Icons.PLAY_ARROW,
+            tooltip="Play sample",
+            on_click=lambda e: Text_To_Speech.play_voice_sample(predefined_id),
+        )
 
     def set_current_voice(self, voice_id: str):
         """pre-selects the voice a contact already has, an empty id resets the select to "default voice" """
