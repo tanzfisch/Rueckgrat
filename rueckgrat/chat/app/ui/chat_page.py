@@ -507,7 +507,8 @@ class ChatPage(BasePage):
         message = (self.input_box.value or "").strip()
         if not message:
             return
+        if not Hub.chat(self.contact_id, self.conversation_id, "user", self.user_role_name, message, self.temperature):
+            return
         self.input_box.value = ""
         self.input_box.update()
         self._append_history("user", message)
-        Hub.chat(self.contact_id, self.conversation_id, "user", self.user_role_name, message, self.temperature)

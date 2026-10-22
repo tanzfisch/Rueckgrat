@@ -7,6 +7,7 @@ Changelog
 - #53 contact images use the contact's current profile image as face reference (IP-Adapter FaceID PlusV2, sdxl)
 - #108 added voice samples
 - #100 allow user to change email and password
+- #110 cleanup chat ui
 
 0.19.0
 ------

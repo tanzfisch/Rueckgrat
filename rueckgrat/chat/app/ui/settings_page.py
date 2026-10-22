@@ -132,13 +132,17 @@ class SettingsPage(BasePage):
         self.contact_header = ContactHeader(navigator, False, True)
         self.contact_header.on_go_back = self.on_go_back
 
-        self.profile_page = UserProfileSettingsPage(self.navigator)
+        logged_in = bool(Hub.access_token)
+        self.profile_page = UserProfileSettingsPage(self.navigator) if logged_in else None
         self.network_page = NetworkSettingsPage()
-        self.content_slot = ft.Container(content=self.profile_page, expand=True)
+        if not logged_in:
+            self.network_page.on_ok = self.on_go_back
+        self.content_slot = ft.Container(content=self.profile_page or self.network_page, expand=True)
 
-        self.page_selector = RowSelector(["Profile", "Network"], True, 1)
+        tabs = ["Profile", "Network"] if logged_in else ["Network"]
+        self.page_selector = RowSelector(tabs, True, 1)
         self.page_selector.on_selection_changed = self.on_page_changed
-        self.page_selector.select("Profile")
+        self.page_selector.select(tabs[0])
 
         self.controls = [
             ft.Container(
@@ -170,7 +174,7 @@ class SettingsPage(BasePage):
         ]
 
     def on_go_back(self, e=None):
-        self.navigator("contacts")
+        self.navigator("contacts" if Hub.access_token else "login")
 
     def on_page_changed(self, page_name: str):
         pages = {"Profile": self.profile_page, "Network": self.network_page}

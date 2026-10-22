@@ -109,14 +109,10 @@ def create_access_token(username: str):
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_current_user(credentials=Depends(security)):
+    # a missing or expired token is a 401, not a request for nobody's (empty) data
     if credentials is None:
-        return None 
-
-    try:
-        token = credentials.credentials
-        return decode_token(token)
-    except Exception:
-        return None
+        raise HTTPException(status_code=401)
+    return decode_token(credentials.credentials)
 
 async def get_current_user_ws(websocket: WebSocket):
     auth_header = websocket.headers.get("authorization")

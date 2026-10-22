@@ -424,7 +424,8 @@ class ProfileWizard(BasePage):
         if voice_id:
             generate_profile["voice_id"] = voice_id
 
-        Hub.generate({"generate_profile": generate_profile})
+        if not Hub.generate({"generate_profile": generate_profile}):
+            return
         self._show(ProgressPage())
 
     def on_enter(self, **kwargs):

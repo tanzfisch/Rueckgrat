@@ -75,6 +75,11 @@ class ContactsPage(BasePage):
 
     def load_contacts(self):
         contacts = Hub.get_contacts()
+        if contacts is None:
+            if not Hub.access_token:
+                self.page.run_task(self._session_expired)
+                return
+            contacts = []  # hub unreachable: the connection banner shows it
         items = [
             ft.Row(
                 controls=[
@@ -129,6 +134,11 @@ class ContactsPage(BasePage):
 
         if self.page:
             self.page.update()
+
+    async def _session_expired(self):
+        await Hub.logout()
+        self.navigator("login")
+        MessageBox.error(self.page, "your session has expired, please log in again", title="Logged out")
 
     def on_contact_clicked(self, contact_id):
         self.navigator("conversations", contact_id=contact_id)

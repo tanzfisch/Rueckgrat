@@ -9,6 +9,7 @@ from .row_selector import RowSelector
 from .text_edit import PlainTextEdit
 from .status_widget import StatusWidget
 from .voice_selector import VoiceSelector
+from .connection_banner import ConnectionBanner
 
 __all__ = [
     "MessageBox", 
@@ -23,4 +24,5 @@ __all__ = [
     "PlainTextEdit",
     "StatusWidget",
     "VoiceSelector",
+    "ConnectionBanner",
 ]

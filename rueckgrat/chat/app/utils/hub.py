@@ -47,7 +47,8 @@ class Hub:
         logger.info(f"hub ws: {cls.uri}")
         logger.info(f"hub cert: {cls.server_cert}")
 
-        cls.websocket_client = WebSocketClient(cls.uri, cls.server_cert)
+        # retry often, so the app is connected (and the banner green) right when the hub is back
+        cls.websocket_client = WebSocketClient(cls.uri, cls.server_cert, max_retry_delay=2)
 
     @classmethod
     def _build_ca_bundle(cls, caddy_cert: Path) -> str:
@@ -125,7 +126,14 @@ class Hub:
 
     @classmethod
     async def _start_websocket(cls, token: str):
-        await cls.websocket_client.connect(token)
+        # supervised: reconnects after drops. a second login replaces the old token's supervisor
+        await cls.websocket_client.close()
+        cls.websocket_client.start(token)
+
+    @classmethod
+    def register_connection_state(cls, callback: Callable[[str], None]):
+        """see WebSocketClient.register_state_change"""
+        cls.websocket_client.register_state_change(callback)
 
     @classmethod
     def unregister_incomming_message(cls, callback: Callable[[dict], None]):
@@ -136,7 +144,7 @@ class Hub:
         cls.websocket_client.register_incomming_message(callback)
 
     @classmethod
-    def chat(cls, contact_id: int, conversation_id: int, role: str, user_role_name: str, content: str, temperature: float):
+    def chat(cls, contact_id: int, conversation_id: int, role: str, user_role_name: str, content: str, temperature: float) -> bool:
         chat_request = ChatRequest(
             contact_id=contact_id,
             conversation_id=conversation_id,
@@ -146,12 +154,12 @@ class Hub:
             temperature=temperature
         )
         payload = {"chat": chat_request.model_dump()}
-        cls.websocket_client.send_message(json.dumps(payload))
+        return cls.websocket_client.send_message(json.dumps(payload))
 
     @classmethod
-    def generate(cls, prompt: dict):
+    def generate(cls, prompt: dict) -> bool:
         payload = {"generate": prompt}
-        cls.websocket_client.send_message(json.dumps(payload))    
+        return cls.websocket_client.send_message(json.dumps(payload))    
 
     @classmethod
     def check_health(cls):
@@ -284,7 +292,8 @@ class Hub:
             return False    
 
     @classmethod
-    def get_contacts(cls):
+    def get_contacts(cls) -> list | None:
+        """None if the hub could not be asked, Hub.access_token is cleared when the session expired"""
         url = f"{cls.url}/contacts"
 
         try:
@@ -300,13 +309,14 @@ class Hub:
             if response.status_code == 200:
                 data = response.json()
                 return data.get("contacts", [])
-            else:
-                logger.error(f"get contacts - {response.status_code} {response.reason}")
+            logger.error(f"get contacts - {response.status_code} {response.reason}")
+            if response.status_code == 401:
+                cls.access_token = ""
 
         except Exception as e:
             logger.error(f"failed to get_contacts {repr(e)}")
 
-        return []
+        return None
 
     @classmethod
     def create_contact(cls) -> int:
@@ -693,7 +703,8 @@ class Hub:
             return "could not reach the hub"
 
     @classmethod
-    def login_user(cls, user_name, user_passwd) -> bool:
+    def login_user(cls, user_name, user_passwd) -> str | None:
+        """returns None on success, otherwise a message for the user"""
         url = f"{cls.url}/login"
         cls.access_token = ""
         cls.user_name = ""
@@ -717,14 +728,16 @@ class Hub:
                 cls.user_id = data.get("user_id", -1)
                 cls.user_name = user_name
                 cls.nsfw_allowed = bool(data.get("nsfw_allowed", False))
-                return True
-            else:
-                logger.error(f"login failed {response.status_code} {response.reason}")
+                return None
+
+            logger.error(f"login failed {response.status_code} {response.reason}")
+            if response.status_code == 401:
+                return "wrong name or password"
+            return f"login failed ({response.status_code})"
 
         except Exception as e:
             logger.error(f"login failed {repr(e)}")
-
-        return False
+            return "could not reach the hub"
 
     @classmethod
     def tts(cls, text: str, voice: str = "") -> Optional[bytes]:
