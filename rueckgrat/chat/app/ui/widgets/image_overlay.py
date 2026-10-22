@@ -16,11 +16,15 @@ class ImageOverlay(ft.Container):
             bgcolor=ft.Colors.with_opacity(0.85, ft.Colors.BLACK),
             alignment=ft.Alignment.CENTER,
             on_click=self._close,
-            content=ft.Image(
-                src=Paths.image_src(image_path, page.web),
-                fit=ft.BoxFit.CONTAIN,
-                width=page.width,
-                height=page.height,
+            content=ft.InteractiveViewer(
+                min_scale=1,
+                max_scale=5,
+                content=ft.Image(
+                    src=Paths.image_src(image_path, page.web),
+                    fit=ft.BoxFit.CONTAIN,
+                    width=page.width,
+                    height=page.height,
+                ),
             ),
         )
 
@@ -43,11 +47,20 @@ class ImageOverlay(ft.Container):
         self.width = self.height = None
         self.width = self.page.width
         self.height = self.page.height
-        self.content.width = self.page.width
-        self.content.height = self.page.height
+        self.content.content.width = self.page.width
+        self.content.content.height = self.page.height
         self.update()
         if self._prev_resize:
             self._prev_resize(e)
+
+    @classmethod
+    def close_open(cls, page: ft.Page) -> bool:
+        """closes the full screen image if one is shown, returns True if it did"""
+        for control in reversed(page.overlay):
+            if isinstance(control, cls):
+                control._close()
+                return True
+        return False
 
     @classmethod
     async def open(cls, page: ft.Page, image_path: Path | str):

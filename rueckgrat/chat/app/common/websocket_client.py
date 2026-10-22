@@ -3,6 +3,7 @@ import json
 import websockets
 from typing import Callable, Optional, List
 from websockets.connection import State
+from websockets.exceptions import InvalidStatus
 import ssl
 import inspect
 from typing import Awaitable, Callable, Union
@@ -12,10 +13,13 @@ from .logger import get_logger
 logger = get_logger()
 
 class WebSocketClient:
-    def __init__(self, uri: str, server_cert: Optional[str] = None):
+    def __init__(self, uri: str, server_cert: Optional[str] = None, max_retry_delay: float = 30):
+        self.max_retry_delay = max_retry_delay  # s, upper bound of the reconnect backoff
         # per instance, so several clients (e.g. one per node) don't share handlers
         self.incoming_message_handlers: List[Callable[[dict], Union[Awaitable[None], None]]] = []
         self.disconnect_handlers: List[Callable[[], None]] = []
+        self.state_handlers: List[Callable[[str], None]] = []
+        self._lost = False  # an established connection dropped and is not back yet
         self._supervisor_task: Optional[asyncio.Task] = None
         self._stopped = False
         self.server_cert = server_cert
@@ -46,6 +50,18 @@ class WebSocketClient:
     def register_disconnect(self, callback: Callable[[], None]):
         """called whenever an established connection is lost (start() mode)"""
         self.disconnect_handlers.append(callback)
+
+    def register_state_change(self, callback: Callable[[str], None]):
+        """start() mode: "lost" when an established connection drops, "reconnected" when it is back,
+        "rejected" when the peer refuses the token (401/403, no more retries), "stopped" on close()"""
+        self.state_handlers.append(callback)
+
+    def _notify_state(self, state: str):
+        for cb in list(self.state_handlers):
+            try:
+                cb(state)
+            except Exception as e:
+                logger.error(f"state handler {cb!r} failed: {e!r}")
 
     def _notify_disconnect(self):
         for cb in list(self.disconnect_handlers):
@@ -84,11 +100,14 @@ class WebSocketClient:
                 return
             except Exception as e:
                 self._running = False
+                if isinstance(e, InvalidStatus) and e.response.status_code in (401, 403):
+                    raise  # wrong or expired token, retrying won't help
                 if timeout is not None and asyncio.get_running_loop().time() - start > timeout:
                     logger.error(f"timeout while trying to connect with {self.uri} after {timeout/60}min")
                     raise TimeoutError(f"WS connect timeout ({timeout/60}min)") from e
+                logger.info(f"connecting to {self.uri} failed ({e!r}), retrying in {delay:.0f}s")
                 await asyncio.sleep(delay)
-                delay = min(delay * 2, 30)
+                delay = min(delay * 2, self.max_retry_delay)
 
     async def _receive_loop(self):
         try:
@@ -128,11 +147,13 @@ class WebSocketClient:
 
         await asyncio.gather(*(_run(f) for f in list(self.incoming_message_handlers)))
 
-    def send_message(self, msg: str):
+    def send_message(self, msg: str) -> bool:
+        """False if not connected, the message is not queued then"""
         if not self.is_connected():
             logger.error(f"Websocket not connected")
-            return
+            return False
         self._send_queue.put_nowait(msg)
+        return True
 
     def start(self, token: Optional[str] = None):
         """keep the connection alive in the background: connect whenever the peer
@@ -146,15 +167,27 @@ class WebSocketClient:
         while not self._stopped:
             try:
                 await self.connect(token, timeout=None)
+                if self._lost:
+                    self._lost = False
+                    logger.info(f"reconnected to {self.uri}")
+                    self._notify_state("reconnected")
                 tasks = [t for t in (self._receive_task, self._send_task) if t]
                 await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 if self._stopped:
                     break
                 logger.info(f"{self.uri} not reachable anymore, waiting for it to come back")
                 self._running = False
+                self._lost = True
                 self._notify_disconnect()
+                self._notify_state("lost")
             except asyncio.CancelledError:
                 raise
+            except InvalidStatus as e:
+                # connect() only raises it for 401/403
+                logger.error(f"{self.uri} rejected the token ({e.response.status_code}), not reconnecting")
+                self._stopped = True
+                self._lost = False
+                self._notify_state("rejected")
             except Exception as e:
                 logger.error(f"connection supervisor error for {self.uri}: {e!r}")
             self._running = False
@@ -172,6 +205,15 @@ class WebSocketClient:
         self._stopped = True
         if self._supervisor_task and not self._supervisor_task.done():
             self._supervisor_task.cancel()
+            try:
+                await self._supervisor_task
+            except asyncio.CancelledError:
+                pass
         self._running = False
-        if self.is_connected():
-            await self.ws.close()
+        self._lost = False
+        if self.ws is not None:
+            try:
+                await self.ws.close()
+            except Exception:
+                pass
+        self._notify_state("stopped")

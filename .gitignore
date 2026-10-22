@@ -217,3 +217,5 @@ rueckgrat/caddy/*.cert
 rueckgrat/caddy/*.key
 rueckgrat/chat/app/*.cert
 .dart_tool
+
+notes.txt
