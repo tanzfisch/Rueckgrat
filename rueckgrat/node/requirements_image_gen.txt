@@ -2,3 +2,8 @@ diffusers
 transformers
 accelerate
 compel
+# face reference (FaceID PlusV2): diffusers LoRA backend, insightface (built from source: needs g++ and Cython, see Dockerfile)
+peft
+insightface==0.7.3
+onnxruntime
+opencv-python-headless

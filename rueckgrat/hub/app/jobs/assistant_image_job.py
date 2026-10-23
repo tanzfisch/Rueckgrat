@@ -40,12 +40,14 @@ class AssistantImageJob(Job):
         # whatever the contact's profile says (the client can edit that)
         nsfw_allowed = self.db.user_nsfw_allowed(self.user_id)
 
-        compiler = ContactImagePromptCompiler(contact_data, user_data, context, self.image_type, self.show_assistant, self.show_user)
+        use_profile_image_reference = self.store_image_as != "profile" and self.show_assistant and not self.show_user
+
+        compiler = ContactImagePromptCompiler(contact_data, user_data, context, self.image_type, self.show_assistant, self.show_user, not use_profile_image_reference)
         positive_prompt, negative_prompt = compiler.build()
 
         models = {
             "default": "DreamShaperXL_Turbo_V2-SFW",
-            "nsfw-default": "lustifySDXLNSFW_ggwpV7"
+            "nsfw-default": "lustifyNSFWCheckpoint_zenithV9"
         }    
         model_name = image_parameters.get("model", "default")
         model = model_name if not model_name in models else models[model_name]
@@ -59,11 +61,15 @@ class AssistantImageJob(Job):
             seed = image_parameters.get("seed", 1337),
             width = self.width,
             height = self.height,
-            steps = image_parameters.get("steps", 40.0),
-            cfg = image_parameters.get("cfg", 9.0),
+            steps = image_parameters.get("steps", 30.0),
+            cfg = image_parameters.get("cfg", 4.0),
             model = model,
             output = ""
         )
+
+        if use_profile_image_reference:
+            image_request.reference_image_key = self.db.get_current_profile_image_key(self.contact_id)
+
         return image_request
 
     def execute(self) -> None:

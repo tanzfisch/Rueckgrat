@@ -1,0 +1,22 @@
+name: flet_foreground_service
+description: Flet extension - Android microphone foreground service
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.2.3 <4.0.0'
+  flutter: ">=3.44.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flet: ^1.0.0
+  flutter_foreground_task: 11.0.3
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        # No Kotlin/Java code: the android/ folder only contributes the <service> manifest entry.
+        package: com.rueckgrat.flet_foreground_service
+        ffiPlugin: true

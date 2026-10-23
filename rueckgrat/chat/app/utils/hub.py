@@ -47,7 +47,8 @@ class Hub:
         logger.info(f"hub ws: {cls.uri}")
         logger.info(f"hub cert: {cls.server_cert}")
 
-        cls.websocket_client = WebSocketClient(cls.uri, cls.server_cert)
+        # retry often, so the app is connected (and the banner green) right when the hub is back
+        cls.websocket_client = WebSocketClient(cls.uri, cls.server_cert, max_retry_delay=2)
 
     @classmethod
     def _build_ca_bundle(cls, caddy_cert: Path) -> str:
@@ -125,7 +126,14 @@ class Hub:
 
     @classmethod
     async def _start_websocket(cls, token: str):
-        await cls.websocket_client.connect(token)
+        # supervised: reconnects after drops. a second login replaces the old token's supervisor
+        await cls.websocket_client.close()
+        cls.websocket_client.start(token)
+
+    @classmethod
+    def register_connection_state(cls, callback: Callable[[str], None]):
+        """see WebSocketClient.register_state_change"""
+        cls.websocket_client.register_state_change(callback)
 
     @classmethod
     def unregister_incomming_message(cls, callback: Callable[[dict], None]):
@@ -136,7 +144,7 @@ class Hub:
         cls.websocket_client.register_incomming_message(callback)
 
     @classmethod
-    def chat(cls, contact_id: int, conversation_id: int, role: str, user_role_name: str, content: str, temperature: float):
+    def chat(cls, contact_id: int, conversation_id: int, role: str, user_role_name: str, content: str, temperature: float) -> bool:
         chat_request = ChatRequest(
             contact_id=contact_id,
             conversation_id=conversation_id,
@@ -146,12 +154,24 @@ class Hub:
             temperature=temperature
         )
         payload = {"chat": chat_request.model_dump()}
-        cls.websocket_client.send_message(json.dumps(payload))
+        return cls.websocket_client.send_message(json.dumps(payload))
 
     @classmethod
-    def generate(cls, prompt: dict):
+    def translate(cls, from_language: str, to_language: str, text: str, request_id: str) -> bool:
+        """translator mode: the hub answers with {"translate": {request_id, ..., translation or error}}"""
+        payload = {"translate": {"from_language": from_language, "to_language": to_language, "text": text, "request_id": request_id}}
+        return cls.websocket_client.send_message(json.dumps(payload))
+
+    @classmethod
+    def generate_image(cls, prompt: str, request_id: str) -> bool:
+        """image tool: the hub answers with {"generated_image": {request_id, prompt, filename, image_path or error}}"""
+        payload = {"generate_image": {"prompt": prompt, "request_id": request_id}}
+        return cls.websocket_client.send_message(json.dumps(payload))
+
+    @classmethod
+    def generate(cls, prompt: dict) -> bool:
         payload = {"generate": prompt}
-        cls.websocket_client.send_message(json.dumps(payload))    
+        return cls.websocket_client.send_message(json.dumps(payload))    
 
     @classmethod
     def check_health(cls):
@@ -284,7 +304,8 @@ class Hub:
             return False    
 
     @classmethod
-    def get_contacts(cls):
+    def get_contacts(cls) -> list | None:
+        """None if the hub could not be asked, Hub.access_token is cleared when the session expired"""
         url = f"{cls.url}/contacts"
 
         try:
@@ -300,13 +321,14 @@ class Hub:
             if response.status_code == 200:
                 data = response.json()
                 return data.get("contacts", [])
-            else:
-                logger.error(f"get contacts - {response.status_code} {response.reason}")
+            logger.error(f"get contacts - {response.status_code} {response.reason}")
+            if response.status_code == 401:
+                cls.access_token = ""
 
         except Exception as e:
             logger.error(f"failed to get_contacts {repr(e)}")
 
-        return []
+        return None
 
     @classmethod
     def create_contact(cls) -> int:
@@ -360,6 +382,25 @@ class Hub:
         except Exception as e:
             logger.error(f"failed to update_contact {repr(e)}")
             return False
+
+    @classmethod
+    def get_generated_images(cls) -> list | None:
+        """the latest prompts of the image tool of this user, oldest first, [{id, prompt, request_id, status, file_name, created_at}]
+        with status pending (file_name None), done or failed.
+        None if the hub could not be asked"""
+        try:
+            response = requests.get(
+                f"{cls.url}/generated-images",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("images", [])
+            logger.error(f"get generated images - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_generated_images {repr(e)}")
+        return None
 
     @classmethod
     def get_contact(cls, contact_id: int):
@@ -630,7 +671,71 @@ class Hub:
         return []
 
     @classmethod
-    def login_user(cls, user_name, user_passwd) -> bool:
+    def get_email(cls) -> str:
+        """the user's optional email, "" if none is set or the hub can't be reached"""
+        try:
+            response = requests.get(
+                f"{cls.url}/users/me/email",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("email", "")
+            logger.error(f"get email - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_email {repr(e)}")
+        return ""
+
+    @classmethod
+    def set_email(cls, email: str) -> str | None:
+        """returns None on success, else an error message for the user"""
+        try:
+            response = requests.put(
+                f"{cls.url}/users/me/email",
+                json={"email": email},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return None
+            logger.error(f"set email - {response.status_code} {response.reason}")
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+            return detail if isinstance(detail, str) else f"saving the email failed ({response.status_code})"
+        except Exception as e:
+            logger.error(f"failed to set_email {repr(e)}")
+            return "could not reach the hub"
+
+    @classmethod
+    def change_password(cls, current_passwd: str, new_passwd: str) -> str | None:
+        """returns None on success, else an error message for the user"""
+        try:
+            response = requests.post(
+                f"{cls.url}/users/me/password",
+                json={"current_passwd": current_passwd, "new_passwd": new_passwd},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return None
+            logger.error(f"change password - {response.status_code} {response.reason}")
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+            return detail if isinstance(detail, str) else f"changing the password failed ({response.status_code})"
+        except Exception as e:
+            logger.error(f"failed to change_password {repr(e)}")
+            return "could not reach the hub"
+
+    @classmethod
+    def login_user(cls, user_name, user_passwd) -> str | None:
+        """returns None on success, otherwise a message for the user"""
         url = f"{cls.url}/login"
         cls.access_token = ""
         cls.user_name = ""
@@ -654,14 +759,16 @@ class Hub:
                 cls.user_id = data.get("user_id", -1)
                 cls.user_name = user_name
                 cls.nsfw_allowed = bool(data.get("nsfw_allowed", False))
-                return True
-            else:
-                logger.error(f"login failed {response.status_code} {response.reason}")
+                return None
+
+            logger.error(f"login failed {response.status_code} {response.reason}")
+            if response.status_code == 401:
+                return "wrong name or password"
+            return f"login failed ({response.status_code})"
 
         except Exception as e:
             logger.error(f"login failed {repr(e)}")
-
-        return False
+            return "could not reach the hub"
 
     @classmethod
     def tts(cls, text: str, voice: str = "") -> Optional[bytes]:
@@ -727,6 +834,23 @@ class Hub:
         except Exception as e:
             logger.error(f"failed to get_predefined_voices {repr(e)}")
         return []
+
+    @classmethod
+    def get_predefined_voice_sample(cls, predefined_id: str) -> Optional[bytes]:
+        """wav bytes of a predefined voice, to listen to it before choosing it"""
+        try:
+            response = requests.get(
+                f"{cls.url}/voices/predefined/{predefined_id}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=30,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.content
+            logger.error(f"get_predefined_voice_sample - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_predefined_voice_sample {repr(e)}")
+        return None
 
     @classmethod
     def use_predefined_voice(cls, predefined_id: str) -> Optional[str]:

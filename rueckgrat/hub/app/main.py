@@ -1,6 +1,7 @@
 from silero_vad import load_silero_vad
 import json
 import random
+import re
 import asyncio
 import threading
 import os
@@ -22,7 +23,9 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from app.utils import ChatDB, Infrastructure, ImageType, ImageStore
 from app.tools import ToolRegistry
-from app.jobs import JobQueue, MetaJob, AssistantImageJob, ContactGeneratorJob
+from app.jobs import JobQueue, MetaJob, AssistantImageJob, ContactGeneratorJob, TranslateJob, GenerateImageJob
+from app.jobs.meta_job import Turns
+from app.utils.tts_stream import TtsStreams
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
@@ -42,6 +45,7 @@ async def lifespan(app: FastAPI):
     app.state.db = ChatDB(db_path)
     app.state.image_store = ImageStore(app.state.db, app.state.infrastructure)
     app.state.job_queue = JobQueue()
+    app.state.turns = Turns(app.state.db)
 
     logger.info("loading tool registry")
     app.state.tool_registry = ToolRegistry(
@@ -108,14 +112,10 @@ def create_access_token(username: str):
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_current_user(credentials=Depends(security)):
+    # a missing or expired token is a 401, not a request for nobody's (empty) data
     if credentials is None:
-        return None 
-
-    try:
-        token = credentials.credentials
-        return decode_token(token)
-    except Exception:
-        return None
+        raise HTTPException(status_code=401)
+    return decode_token(credentials.credentials)
 
 async def get_current_user_ws(websocket: WebSocket):
     auth_header = websocket.headers.get("authorization")
@@ -231,6 +231,48 @@ def login(data: LoginRequest):
         "nsfw_allowed": bool(user["nsfw_allowed"])
     }
 
+class ChangePasswordRequest(BaseModel):
+    current_passwd: str
+    new_passwd: str
+
+@app.post("/users/me/password")
+def change_password(request: ChangePasswordRequest, username: str = Depends(get_current_user)):
+    # signup has no password rules, so the new password is only hashed the same way.
+    # tokens are not revoked, they run out after ACCESS_TOKEN_EXPIRE_MINUTES anyway
+    user = app.state.db.get_user(username) if username else None
+    if not user:
+        raise HTTPException(status_code=401)
+    if not verify_password(request.current_passwd, user["password"]):
+        raise HTTPException(status_code=403, detail="current password is wrong")
+    if not app.state.db.update_password(user["id"], hash_password(request.new_passwd)):
+        raise HTTPException(status_code=500, detail="failed to change password")
+    return {"status": "ok"}
+
+# the email is optional and only informational, so just a format check: no verification, not unique
+EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+class EmailRequest(BaseModel):
+    email: str
+
+@app.get("/users/me/email")
+def get_email(username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    if user_id is None:
+        raise HTTPException(status_code=401)
+    return {"email": app.state.db.get_email(user_id)}
+
+@app.put("/users/me/email")
+def set_email(request: EmailRequest, username: str = Depends(get_current_user)):
+    # empty means no email, anything else is stored as typed
+    user_id = app.state.db.get_user_id(username)
+    if user_id is None:
+        raise HTTPException(status_code=401)
+    if request.email and not EMAIL_PATTERN.fullmatch(request.email):
+        raise HTTPException(status_code=400, detail="not a valid email address")
+    if not app.state.db.set_email(user_id, request.email):
+        raise HTTPException(status_code=500, detail="failed to save email")
+    return {"status": "ok"}
+
 ########### system handling
 @app.get("/health")
 def health():
@@ -300,8 +342,8 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
         infrastructure = app.state.infrastructure, 
         image_type = ImageType.UpperBody,
         store_image_as = "profile",
-        width = 720,
-        height = 720,                
+        width = 1024,
+        height = 1024,
     )        
     app.state.job_queue.add(job)
 
@@ -380,6 +422,63 @@ def text_to_speech(request: HubTTSRequest, username: str = Depends(get_current_u
     if wav is None:
         raise HTTPException(status_code=503, detail="text to speech not available")
     return Response(content=wav, media_type="audio/wav")
+
+@app.websocket("/ws/tts")
+async def tts_endpoint(websocket: WebSocket, username: str = Depends(get_current_user_ws)):
+    """speech of a reply in 1 s pieces. client: {"speak": {reply_id, text, voice, message_id, language}} starts a reply,
+    {"resume": {reply_id, last_seq}} continues one after a reconnect, {"ack": seq} confirms a piece
+    (only then the hub forgets it), {"stop": reply_id} drops it. hub: {"reply_id", "piece"}, or {"gone": reply_id}"""
+    await websocket.accept()
+    user_id = app.state.db.get_user_id(username)
+    reply, sent = None, -1  # sent: the last seq sent on this connection
+    inbox = asyncio.Queue()
+
+    async def read():
+        try:
+            while (msg := await websocket.receive())["type"] != "websocket.disconnect":
+                inbox.put_nowait(msg)
+        finally:
+            inbox.put_nowait({"type": "websocket.disconnect"})
+
+    reader = asyncio.create_task(read())
+    try:
+        while True:
+            try:
+                msg = await asyncio.wait_for(inbox.get(), 0.02)
+            except asyncio.TimeoutError:
+                msg = None
+            if msg and msg["type"] == "websocket.disconnect":
+                break  # the reply stays queued for a resume
+            data = json.loads(msg["text"]) if msg and msg.get("text") else {}
+            if "speak" in data:
+                speak = data["speak"]
+                reply, sent = TtsStreams.start(app.state.infrastructure, user_id, speak["reply_id"], speak.get("text", ""),
+                                               speak.get("voice", ""), speak.get("message_id"), speak.get("language", "")), -1
+            elif "resume" in data:
+                reply_id, sent = data["resume"]["reply_id"], data["resume"]["last_seq"]
+                reply = TtsStreams.get(user_id, reply_id)
+                if reply is None:
+                    await websocket.send_json({"gone": reply_id})
+                elif reply.ack(sent):
+                    TtsStreams.stop(user_id, reply_id)
+                    reply = None
+            elif "ack" in data and reply and reply.ack(data["ack"]):
+                TtsStreams.stop(user_id, reply.reply_id)  # the client has the whole reply
+                reply = None
+            elif "stop" in data:
+                TtsStreams.stop(user_id, data["stop"])
+                reply = None
+
+            if reply and reply.dropped.is_set():
+                await websocket.send_json({"gone": reply.reply_id})
+                reply = None
+            for piece in reply.after(sent) if reply else []:
+                await websocket.send_json({"reply_id": reply.reply_id, "piece": piece})
+                sent = piece["seq"]
+    except WebSocketDisconnect:
+        pass
+    finally:
+        reader.cancel()
 
 ########### voice handling
 MAX_VOICE_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -472,6 +571,24 @@ def get_predefined_voices(username: str = Depends(get_current_user)):
     ]
     return {"voices": voices}
 
+def read_predefined_voice(predefined_id: str) -> bytes:
+    """wav bytes of a predefined voice, raises 404 for an unknown id"""
+    entry = next((v for v in load_predefined_voices() if v["id"] == predefined_id), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="voice not found")
+
+    path = PREDEFINED_VOICES_DIR / entry["file"]
+    try:
+        return path.read_bytes()
+    except Exception as e:
+        logger.error(f"failed reading predefined voice {path}: {e}")
+        raise HTTPException(status_code=500, detail="failed to read voice")
+
+@app.get("/voices/predefined/{predefined_id}")
+def get_predefined_voice_sample(predefined_id: str, username: str = Depends(get_current_user)):
+    # the sample wav itself, so the client can play it before choosing the voice
+    return Response(content=read_predefined_voice(predefined_id), media_type="audio/wav")
+
 @app.post("/voices/predefined/{predefined_id}")
 def use_predefined_voice(predefined_id: str, username: str = Depends(get_current_user)):
     """
@@ -479,17 +596,7 @@ def use_predefined_voice(predefined_id: str, username: str = Depends(get_current
     returns the uuid of the stored voice, the same predefined voice always maps to the same uuid per user
     """
     user_id = app.state.db.get_user_id(username)
-    entry = next((v for v in load_predefined_voices() if v["id"] == predefined_id), None)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="voice not found")
-
-    path = PREDEFINED_VOICES_DIR / entry["file"]
-    try:
-        data = path.read_bytes()
-    except Exception as e:
-        logger.error(f"failed reading predefined voice {path}: {e}")
-        raise HTTPException(status_code=500, detail="failed to read voice")
-
+    data = read_predefined_voice(predefined_id)
     voice_id = store_voice(user_id, data, predefined_id)
     return {"status": "ok", "voice_id": voice_id}
 
@@ -514,6 +621,14 @@ def get_image_generation(file_key: str, username: str = Depends(get_current_user
         raise HTTPException(status_code=404, detail="no generation info for this image")
     return {"file_key": file_key, "generation": generation}
 
+########### image generation tool
+@app.get("/generated-images")
+def get_generated_images(username: str = Depends(get_current_user)):
+    """the latest prompts of the image tool (pending, done or failed, file_name only when done), oldest first.
+    only their own, the user comes from the token"""
+    user_id = app.state.db.get_user_id(username)
+    return {"images": app.state.db.get_generated_images(user_id)}
+
 ########### model handling
 @app.get("/models/{model_name}/url", response_model=GetModelURLResponse)
 def get_model_url(model_name: str, username: str = Depends(get_current_user)):
@@ -524,15 +639,17 @@ def get_model_url(model_name: str, username: str = Depends(get_current_user)):
 
 ########### downloads
 @app.get("/downloads/{file_path:path}")
-async def download_file(file_path: str):
+async def download_file(file_path: str, username: str = Depends(get_current_user)):
+    # needs a valid token (401 without). only the image directory is served: files in it have hash names,
+    # /hub also holds the database, the voices and the config, which no client asks for
     base_path = Path("/hub").resolve()
     path = (base_path / file_path).resolve()
 
-    if not str(path).startswith(str(base_path)):
+    if path.parent != base_path / "images":
         logger.error(f"invalid path {path}")
         return {"error": "Invalid path"}
 
-    if not os.path.exists(path) and path.parent == base_path / "images":
+    if not os.path.exists(path):
         await run_in_threadpool(app.state.image_store.ensure, path.name)
 
     if not os.path.exists(path):
@@ -575,11 +692,11 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                 pass
 
     def pump_done_jobs():
-        while True:
-            job = app.state.job_queue.get_done()
-            if closed.is_set():
-                break
-            loop.call_soon_threadsafe(done_queue.put_nowait, job)
+        # wakes up to notice the close: a thread still waiting after it would take the next done job and drop it
+        while not closed.is_set():
+            job = app.state.job_queue.get_done(timeout=0.5)
+            if job:
+                loop.call_soon_threadsafe(done_queue.put_nowait, job)
 
     threading.Thread(target=pump_done_jobs, daemon=True).start()
 
@@ -603,7 +720,8 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                             }
                         })
                     else:
-                        job = MetaJob(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry)
+                        job = MetaJob(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.turns)
+                        app.state.turns.start(job)  # stores the user message, or merges it into the reply still being made
                         app.state.job_queue.add(job)
                 elif "generate" in data:
                     generate = data["generate"]
@@ -615,6 +733,15 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                         await websocket.send_text(
                             json.dumps({"status": "unknown generation request"})
                         )
+                elif "translate" in data:
+                    translate = data["translate"]   # translator mode, the result goes back as {"translate": ...}
+                    job = TranslateJob(app.state.infrastructure, translate["from_language"], translate["to_language"],
+                                       translate["text"], translate.get("request_id", ""))
+                    app.state.job_queue.add(job)
+                elif "generate_image" in data:
+                    generate_image = data["generate_image"]   # image tool, the result goes back as {"generated_image": ...}
+                    job = GenerateImageJob(user_id, generate_image["prompt"], app.state.db, app.state.infrastructure, generate_image.get("request_id", ""))
+                    app.state.job_queue.add(job)
                 else:                    
                     logger.error(f"unknown request {data}")
                     await websocket.send_text(
@@ -693,32 +820,51 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
     spoken_ms = 0
     busy = False
     buf = bytearray()
-    meta = {"sample_rate": 16000, "channels": 1, "encoding": "pcm_s16le"}
+    meta = {"sample_rate": 16000, "channels": 1, "encoding": "pcm_s16le", "language": ""}  # language "" = whisper detects it
     frame = 512
 
     async def transcribe(wav, kind: str):
         nonlocal busy
         if kind == "partial" and busy:
             return
+        node = app.state.infrastructure.node_by_type.get("speech_to_text")
+        if node and not node.is_connected():
+            if kind == "partial":
+                return
+            while not node.is_connected():
+                await asyncio.sleep(0.5)
         busy = True
         try:
             pcm16 = (np.clip(wav, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
-            text = await asyncio.to_thread(app.state.infrastructure.stt, pcm16, kind)
-            if text:
+            text = await asyncio.to_thread(app.state.infrastructure.stt, pcm16, kind, meta["language"])
+            if text or (kind == "final" and text is not None):
                 await websocket.send_json({"type": kind, "text": text})
         finally:
             busy = False
 
+    inbox = asyncio.Queue()
+
+    async def read():
+        # always reading: uvicorn stops reading at 32 queued messages, then the client's pings
+        # go unanswered while stt runs and it drops the connection
+        try:
+            while (msg := await websocket.receive())["type"] != "websocket.disconnect":
+                inbox.put_nowait(msg)
+        finally:
+            inbox.put_nowait({"type": "websocket.disconnect"})
+
+    reader = asyncio.create_task(read())
     try:
         while True:
-            msg = await websocket.receive()
+            await asyncio.sleep(0)  # lets the reader run between messages
+            msg = await inbox.get()
             if msg.get("type") == "websocket.disconnect":
                 break
 
             if "text" in msg and msg["text"]:
                 data = json.loads(msg["text"])
                 if data.get("type") == "audio.start":
-                    meta.update({k: data[k] for k in ("sample_rate", "channels", "encoding") if k in data})
+                    meta.update({k: data[k] for k in ("sample_rate", "channels", "encoding", "language") if k in data})
                     await websocket.send_json({"type": "audio.ready"})
                 elif data.get("type") == "audio.stop":
                     break
@@ -740,7 +886,7 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
                     silence = 0
                     utterance.append(piece)
                     spoken_ms += frame / 16
-                    if spoken_ms >= PARTIAL_MS:
+                    if spoken_ms >= PARTIAL_MS and inbox.empty():
                         spoken_ms = 0
                         wav = np.concatenate(utterance)
                         await transcribe(wav, "partial")
@@ -757,3 +903,5 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
 
     except WebSocketDisconnect:
         pass
+    finally:
+        reader.cancel()

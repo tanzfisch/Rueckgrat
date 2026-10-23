@@ -15,57 +15,57 @@ class ImageType(Enum):
 # compel cuts off long prompts, so style words at the end of the prompt used to be dropped
 IMAGE_STYLES = {
     "studio": {
-        "positive": "studio portrait photograph, professional softbox lighting, seamless plain backdrop, clean even light, crisp focus, polished commercial look",
-        "negative": "outdoors, real-world environment, cluttered background, harsh sunlight, candid snapshot, film grain, motion blur, plastic skin, airbrushed, text, mirror, artifacts in eyes",
+        "positive": "studio portrait photo, softbox lighting, seamless backdrop, even light, crisp focus, commercial look",
+        "negative": "outdoors, cluttered background, harsh sunlight, candid snapshot, film grain, motion blur, plastic skin, text, mirror, eye artifacts",
     },
     "natural": {
-        "positive": "candid photograph, available natural daylight, real-world surroundings, environmental background, unposed, 35mm film look, natural skin texture",
-        "negative": "studio backdrop, softbox lighting, seamless background, posed, glossy retouched skin, HDR, oversaturated, dramatic lighting, digital art, text, mirror, artifacts in eyes",
+        "positive": "candid photo, natural daylight, real-world surroundings, unposed, 35mm film look, natural skin texture",
+        "negative": "studio backdrop, softbox lighting, posed, glossy retouched skin, HDR, oversaturated, dramatic lighting, text, mirror, eye artifacts",
     },
     "cinematic": {
-        "positive": "cinematic film still, dramatic low-key lighting, strong rim light, anamorphic lens, shallow depth of field, moody teal and orange color grade, atmospheric haze",
-        "negative": "flat lighting, plain backdrop, bright even light, snapshot, overexposed, washed out colors, cartoon, 3D render, text, mirror, artifacts in eyes",
+        "positive": "cinematic film still, low-key lighting, rim light, anamorphic lens, shallow DOF, teal-orange grade, haze",
+        "negative": "flat lighting, plain backdrop, bright even light, snapshot, overexposed, washed out, cartoon, text, mirror, eye artifacts",
     },
     "golden_hour": {
-        "positive": "golden hour photograph, warm low sun, backlit glowing rim light, lens flare, soft warm haze, outdoor setting, gentle highlights, dreamy warm tones",
-        "negative": "midday sun, overcast, cold blue tones, studio backdrop, flash photography, harsh shadows, indoor lighting, desaturated, text, mirror, artifacts in eyes",
+        "positive": "golden hour photo, warm low sun, backlit rim light, lens flare, soft haze, outdoor, dreamy warm tones",
+        "negative": "midday sun, overcast, cold tones, studio backdrop, flash, harsh shadows, indoor light, text, mirror, eye artifacts",
     },
     "noir": {
-        "positive": "black and white film noir photograph, hard single key light, deep shadows, venetian blind shadow pattern, high contrast monochrome, smoky atmosphere, 1940s mood",
-        "negative": "color, colorful, saturated, soft even lighting, bright cheerful, flat lighting, modern digital look, pastel, text, mirror, artifacts in eyes",
+        "positive": "B&W film noir photo, hard key light, deep shadows, venetian blind patterns, high contrast, smoky, 1940s mood",
+        "negative": "color, soft even lighting, bright cheerful, flat lighting, modern digital, pastel, text, mirror, eye artifacts",
     },
     "vintage_film": {
-        "positive": "1970s analog film photograph, faded warm colors, heavy film grain, light leaks, soft focus, slightly washed out, Kodak Portra look, retro snapshot",
-        "negative": "digital look, ultra sharp, HDR, crisp modern colors, studio backdrop, clean polished, high contrast, oversaturated, text, mirror, artifacts in eyes",
+        "positive": "1970s analog film photo, faded warm colors, heavy grain, light leaks, soft focus, Kodak Portra look",
+        "negative": "digital look, ultra sharp, HDR, crisp modern colors, studio backdrop, clean polished, text, mirror, eye artifacts",
     },
     "editorial": {
-        "positive": "high fashion editorial photograph, bold solid color backdrop, hard directional flash, strong confident pose, graphic composition, vivid styling, magazine cover look",
-        "negative": "candid snapshot, cluttered background, natural environment, soft flat lighting, muted colors, amateur photo, film grain, text, mirror, artifacts in eyes",
+        "positive": "high fashion editorial photo, solid color backdrop, hard flash, strong pose, graphic composition, magazine look",
+        "negative": "candid snapshot, cluttered background, natural environment, soft flat lighting, muted colors, film grain, text, mirror, eye artifacts",
     },
     "fantasy": {
-        "positive": "epic high fantasy painting, medieval fantasy world, sweeping misty mountains and ancient forests, golden god rays through clouds, painterly brushwork, rich earthy tones, heroic atmosphere",
-        "negative": "modern clothing, modern city, cars, electronics, sci-fi, neon, photograph, snapshot, studio backdrop, flat lighting, cartoon, anime, text, mirror, artifacts in eyes",
+        "positive": "epic high fantasy painting, misty mountains, ancient forests, golden god rays, painterly brushwork, heroic atmosphere",
+        "negative": "modern clothing, city, cars, electronics, sci-fi, neon, photograph, studio backdrop, flat lighting, text, mirror, eye artifacts",
     },
     "sci_fi": {
-        "positive": "futuristic sci-fi concept art, neon city lights, glowing holographic displays, sleek high-tech armor and gadgets, cyan and magenta lighting, rain-slick reflections, cyberpunk atmosphere",
-        "negative": "medieval, fantasy, rustic, nature only, vintage, sepia, daylight snapshot, plain studio backdrop, muted colors, painterly, cartoon, text, mirror, artifacts in eyes",
+        "positive": "futuristic sci-fi art, neon city lights, holographic displays, high-tech armor, cyan-magenta lighting, cyberpunk",
+        "negative": "medieval, fantasy, rustic, nature only, vintage, sepia, daylight snapshot, plain backdrop, muted colors, text, mirror, eye artifacts",
     },
     "comics": {
-        "positive": "comic book illustration, bold black ink outlines, cel shading, flat vibrant colors, halftone dot texture, dynamic panel composition, graphic novel style",
-        "negative": "photograph, photorealistic, realistic skin texture, soft gradients, blurry lines, 3D render, muted colors, film grain, speech bubbles, text, artifacts in eyes",
+        "positive": "comic book illustration, bold black outlines, cel shading, flat vibrant colors, halftone texture, graphic novel style",
+        "negative": "photograph, photorealistic, soft gradients, blurry lines, 3D render, muted colors, film grain, text, eye artifacts",
     },
     "hentai": {
-        "positive": "anime illustration, adult character, mature proportions, clean lineart, cel shading, soft pastel color palette, large expressive eyes, glossy hair highlights, detailed anime background",
-        "negative": "photograph, photorealistic, 3D render, western comic style, rough sketch, child, childlike, underage, loli, chibi, deformed anatomy, text, watermark, artifacts in eyes",
+        "positive": "anime illustration, adult character, mature proportions, clean lineart, cel shading, pastel palette, large eyes",
+        "negative": "photograph, photorealistic, 3D render, western comic, rough sketch, child, loli, chibi, deformed anatomy, text, eye artifacts",
     },
 }
-DEFAULT_IMAGE_STYLE = {
-    "positive": "high quality, high detail, correct anatomy",
-    "negative": "low quality, wrong anatomy, text, mirror, artifacts in eyes",
-}
+
+DEFAULT_IMAGE_STYLE = IMAGE_STYLES["studio"]
 
 class ContactImagePromptCompiler:
-    def __init__(self, contact: Dict[str, Any], user_data: Dict[str, Any], context: Dict[str, Any] = None, image_type: ImageType = ImageType.FullBody, show_assistant: bool = True, show_user: bool = False, prompt: str = None):
+    def __init__(self, contact: Dict[str, Any], user_data: Dict[str, Any], context: Dict[str, Any] = None, 
+                 image_type: ImageType = ImageType.FullBody, show_assistant: bool = True, show_user: bool = False, 
+                 use_facial_features: bool = True, prompt: str = None):
         self.contact = contact
         self.user_data = user_data
         self.profile = contact.get("profile", {})
@@ -74,6 +74,7 @@ class ContactImagePromptCompiler:
         self.show_user = show_user        
         self.prompt = prompt
         self.context = context        
+        self.use_facial_features = use_facial_features
 
         if not self.context:
             logger.warning("got no context yet")
@@ -133,11 +134,13 @@ class ContactImagePromptCompiler:
 
             # portrait
             if self.image_type == ImageType.Portrait or self.image_type == ImageType.UpperBody or self.image_type == ImageType.FullBody:            
-                assistant_stack.append(Utils.get_nested_value(self.contact, ["identity", "gender"], ""))
-                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "general"], ""))
-                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "hair"], ""))
-                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "face"], ""))
-                assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "skin"], ""))
+                # skip everything that could be derived from a reference image
+                if self.use_facial_features:
+                    assistant_stack.append(Utils.get_nested_value(self.contact, ["identity", "gender"], ""))
+                    assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "general"], ""))
+                    assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "hair"], ""))
+                    assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "face"], ""))
+                    assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "skin"], ""))
 
                 user_profile = json.loads(self.user_data["profile"])
                 user_gender = Utils.get_nested_value(user_profile, ["gender"], "")
@@ -199,12 +202,11 @@ class ContactImagePromptCompiler:
 
     def _build_positive_focus(self) -> str:
         if self.image_type == ImageType.Portrait:
-            return "tight facial crop, face centered, full frame occupied by face, no body parts below the chin or above the forehead cut off unnaturally, detailed eyes"
+            return "tight face crop, face fills frame, centered, detailed eyes"
         elif self.image_type == ImageType.UpperBody:
-            return "medium shot, waist-up portrait, subject framed from mid-torso to top of head, face and upper body fully visible, centered composition, balanced framing, chest and shoulders prominent, no full body, no cropped head, camera at chest level, portrait orientation, detailed eyes"
+            return "waist-up, mid-torso to head, face and upper body fully visible, centered, chest and shoulders prominent, detailed eyes"
         elif self.image_type == ImageType.FullBody:
-            return "full body shot, head-to-toe visible, entire figure in frame, subject fully visible from top of head to feet, head clearly visible and not cropped, centered composition, balanced framing, full height portrait, camera pulled back, portrait orientation"
-        
+            return "full body, head to toe, entire figure in frame, head not cropped, centered, camera pulled back"
         return ""
 
     def _image_style(self) -> Dict[str, str]:
@@ -217,14 +219,13 @@ class ContactImagePromptCompiler:
     def _build_negative_general(self) -> str:
         return self._image_style()["negative"]
 
-    def _build_negative_focus(self) -> str:        
+    def _build_negative_focus(self) -> str:
         if self.image_type == ImageType.Portrait:
-            return "full body, long shot, wide shot, medium shot, upper body only, torso dominant, subject too far away, small subject, zoomed out, cropped head, cut off top of head, out of frame face, partial face, face out of frame, extreme close-up, face too zoomed in, blurry face, distorted face, off-center composition, tilted framing, artifacts in eyes"
+            return "full body, long shot, medium shot, upper body, small subject, cropped head, extreme close-up, blurry or distorted face, off-center, artifacts in eyes"
         elif self.image_type == ImageType.UpperBody:
-            return "full body, long shot, wide shot, extreme wide shot, head to toe, feet visible, cropped head, cut off head, out of frame head, extreme close-up, close-up face only, zoomed in face, partial face, off-center framing, tilted composition, subject too small, subject too far away, body out of frame, lower body dominant, artifacts in eyes"
+            return "full body, long shot, head to toe, feet visible, cropped head, extreme close-up, face only, off-center, subject too small, lower body dominant, artifacts in eyes"
         elif self.image_type == ImageType.FullBody:
-            return "cropped head, cut off head, out of frame head, missing head, partial body, upper body only, medium shot, close-up, extreme close-up, zoomed in, torso only, legs cut off, feet cut off, subject out of frame, poorly framed, off-center, tilted composition, subject too close, camera too close"
-        
+            return "cropped head, partial body, upper body only, medium shot, close-up, legs or feet cut off, subject out of frame, off-center, camera too close"
         return ""
 
     def _build_additional_prompt(self) -> str:

@@ -125,15 +125,16 @@ def tts(request: NodeTTSRequest):
         logger.error(f"Model installation failed for {TTS_MODEL}: {e}")
         raise HTTPException(status_code=503, detail=f"tts model {TTS_MODEL} not installed")
     try:
-        wav = app.state.tts.speak(request.text, request.voice, request.exaggeration, request.cfg_weight)
+        wav = app.state.tts.speak(request.text, request.voice, request.exaggeration, request.cfg_weight, request.language)
     except Exception as e:
         logger.error(f"tts failed: {e!r}")
         raise HTTPException(status_code=500, detail="tts failed")
     return Response(content=wav, media_type="audio/wav")
 
 @app.post("/stt")
-async def stt(request: Request, kind: str = "final"):
-    """body: raw 16 kHz mono pcm_s16le audio. kind: final (accurate model) or partial (fast model)"""
+async def stt(request: Request, kind: str = "final", language: str = ""):
+    """body: raw 16 kHz mono pcm_s16le audio. kind: final (accurate model) or partial (fast model).
+    language: whisper language code, "" = detect it"""
     if not app.state.stt:
         raise HTTPException(status_code=503, detail="Node has no stt module loaded")
     from app.utils.stt import STT_MODELS
@@ -149,7 +150,7 @@ async def stt(request: Request, kind: str = "final"):
 
     pcm16 = await request.body()
     try:
-        text = await asyncio.to_thread(app.state.stt.transcribe, pcm16, kind, install_path)
+        text = await asyncio.to_thread(app.state.stt.transcribe, pcm16, kind, install_path, language)
     except Exception as e:
         logger.error(f"stt failed: {e!r}")
         raise HTTPException(status_code=500, detail="stt failed")
@@ -321,6 +322,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
 
     closed = asyncio.Event()
+    chats = set()  # running chat threads, referenced so they aren't garbage collected
 
     async def safe_close(code: int = 1000):
         if not closed.is_set():
@@ -339,8 +341,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 data = json.loads(text)
 
                 if "chat" in data:
+                    # in a thread, so this keeps reading (cancels, a second chat for llama-server's other slot).
+                    # MessageQueue is locked, safe to fill from the thread
                     chat_request = ChatRequestLlama(**data["chat"])
-                    app.state.llamacpp.chat(chat_request, lambda message: MessageQueue().send_data(message))
+                    chat = asyncio.create_task(asyncio.to_thread(app.state.llamacpp.chat, chat_request, lambda message: MessageQueue().send_data(message)))
+                    chats.add(chat)
+                    chat.add_done_callback(chats.discard)
+
+                elif "cancel" in data:
+                    app.state.llamacpp.cancel(data["cancel"])
                 
                 else:                    
                     logger.error(f"unknown request")

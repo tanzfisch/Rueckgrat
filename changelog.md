@@ -1,6 +1,23 @@
 Changelog
 =========
 
+0.20.0
+------
+
+- #53 contact images use the contact's current profile image as face reference (IP-Adapter FaceID PlusV2, sdxl)
+- #108 added voice samples
+- #100 allow user to change email and password
+- #110 cleanup chat ui
+- #113 ability to talk over ai and interrupt it's processing
+- tts now in chunks to improve latency
+- #112 buffer stt in chat client to manage disconnects mid speach
+- #115 added translator tool
+- #116 added save and share buttons to image widget
+- #117 added image tool
+- #119 fixed apk build version
+- #126 fixed mic not recording during locked screen on android
+- #128 improved integration of nsfw image gen
+
 0.19.0
 ------
 
@@ -10,8 +27,7 @@ Changelog
 - #104 using multilingual chatterbox now by default
 - #106 hardenig image generation. trying to prevent double generation
 - #105 async image gen
-- #38 deleting a conversation removes its images from the hub and the client cache
-- #38 deleting a contact removes all its images (profile and conversations) from the hub and the client cache
+- #38 deleting a conversation or contact removes related images from the hub and the client cache
 
 0.18.0
 ------

@@ -4,7 +4,7 @@ import flet as ft
 from app.ui.theme import STYLES
 
 from app.ui import BasePage
-from app.ui.widgets import ContactHeader, VoiceSelector
+from app.ui.widgets import Header, VoiceSelector
 from app.utils import Hub
 from app.common import get_logger, Utils, IMAGE_STYLE_OPTIONS, IMAGE_STYLE_ICONS
 
@@ -126,8 +126,8 @@ class ProfilePage(BasePage):
         super().__init__(navigator)
         self.contact_id = None
 
-        self.contact_header = ContactHeader(navigator, False, True)
-        self.contact_header.on_go_back = self.on_go_back
+        self.header = Header(navigator, False, True)
+        self.header.on_go_back = self.on_go_back
 
         self.name = _text_field("Name", "text")
         self.male_radio = ft.Radio(value="male", label="Male")
@@ -161,7 +161,7 @@ class ProfilePage(BasePage):
                 content=ft.Column(
                     expand=True,
                     controls=[
-                        self.contact_header,
+                        self.header,
                         ft.ListView(
                             expand=True,
                             spacing=12,

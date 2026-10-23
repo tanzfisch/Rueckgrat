@@ -16,8 +16,11 @@ from app.ui import (
     InitialSettingsPage,
     ProfileWizard,
     SettingsPage,
+    TranslatePage,
+    ImagePage,
 )
 from app.ui.theme import apply_theme
+from app.ui.widgets import ImageOverlay, MessageBox, ConnectionBanner
 
 from app.utils import Paths
 from app.utils.config import RueckgratConfig
@@ -35,6 +38,8 @@ PAGES = {
     "profile_wizz": ProfileWizard,
     "settings": SettingsPage,
     "initial_settings": InitialSettingsPage,
+    "translate": TranslatePage,
+    "image": ImagePage,
 }
 
 
@@ -52,6 +57,11 @@ class App:
 
         page.on_route_change = self._on_route_change
         page.on_disconnect = self._on_disconnect
+
+        # hub connection lost / back, shown above every page
+        self.connection_banner = ConnectionBanner()
+        page.overlay.append(self.connection_banner)
+        Hub.register_connection_state(self._on_connection_state)
 
         start = "login" if has_config else "initial_settings"
         page.navigate(f"/{start}")
@@ -93,9 +103,8 @@ class App:
             )
 
         # android system back button handler
-        if self._header_go_back() is not None:
-            view.can_pop = False
-            view.on_confirm_pop = self._on_system_back
+        view.can_pop = False
+        view.on_confirm_pop = self._on_system_back
 
         self.page.views.clear()
         self.page.views.append(view)
@@ -104,17 +113,41 @@ class App:
         self._kwargs = {}
 
     def _header_go_back(self):
-        """the back handler of the current page's contact header, None if it has no visible back button"""
-        header = getattr(self.current_page, "contact_header", None)
+        """the back handler of the current page's header, None if it has no visible back button"""
+        header = getattr(self.current_page, "header", None)
         if header is None or header.back_btn not in header.controls or not header.back_btn.visible:
             return None
         return header.on_go_back
 
     async def _on_system_back(self, e):
-        await e.control.confirm_pop(False)
+        view = e.control
+        # back closes the full screen image first, then goes back a page
+        if ImageOverlay.close_open(self.page):
+            await view.confirm_pop(False)
+            return
         go_back = self._header_go_back()
         if go_back:
+            await view.confirm_pop(False)
             go_back()
+            return
+        # nowhere to go back to: the pop stays pending until the user answers, ok exits the app
+        MessageBox.show(
+            self.page,
+            "Do you want to close Rueckgrat?",
+            kind="question",
+            ok_text="Exit",
+            on_result=lambda ok: self.page.run_task(view.confirm_pop, ok),
+        )
+
+    def _on_connection_state(self, state: str):
+        self.connection_banner.on_state(self.page, state)
+        if state == "rejected":
+            self.page.run_task(self._session_expired)
+
+    async def _session_expired(self):
+        await Hub.logout()
+        self.navigate("login")
+        MessageBox.error(self.page, "your session has expired, please log in again", title="Logged out")
 
     async def _heartbeat_loop(self):
         while True:

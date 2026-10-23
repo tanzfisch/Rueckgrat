@@ -1,7 +1,7 @@
 #!/bin/bash
 # ===============================================
 # Rueckgrat dev up
-# Reads infrastructure.json, starts this host's containers.
+# Reads infrastructure.json, stops and starts this host's containers.
 # Usage: ./dev.sh [-c FILE] [-v] [-f]
 # ===============================================
 
@@ -9,7 +9,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-# shellcheck source=install.sh
 source "$SCRIPT_DIR/install.sh"
 
 dev_usage() {
@@ -32,6 +31,11 @@ find_local_host_config() {
     return 1
 }
 
+stop() {
+    echo "🛑 Stopping all Rückgrat containers..."
+    docker ps -q --filter "name=rueckgrat_" | xargs -r docker stop
+}
+
 CONFIG_FILE=""
 VERBOSE=false
 DOCKER_PROGRESS_MODE="quiet"
@@ -41,6 +45,8 @@ YES=true
 KEY_FILE=""
 CERT_FILE=""
 WORKING_DIR="$SCRIPT_DIR"
+
+stop
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -103,13 +109,8 @@ fi
 print_section
 echo "Dev up done."
 
-pushd "$WORKING_DIR/rueckgrat" >/dev/null
-COMPOSE_FILES=(-f compose.yml)
-case "${GPU_VENDOR:-cpu}" in
-    amd)    COMPOSE_FILES+=(-f compose.amd.yml) ;;
-    nvidia) COMPOSE_FILES+=(-f compose.nvidia.yml) ;;
-esac
 print_section
 echo "Following logs (Ctrl-C leaves containers running)..."
-docker compose "${COMPOSE_FILES[@]}" logs -f --tail=100
+pushd "$WORKING_DIR/rueckgrat" >/dev/null
+docker compose logs -f --tail=0
 popd >/dev/null

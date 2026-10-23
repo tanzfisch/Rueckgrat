@@ -138,7 +138,9 @@
     "compatibility": ["ImageGen"],
     "requires": ["sdxl-base-config"],
     "comment": "NSFW Tends to go too far when unwanted don't mix with SFW applications",
-    "good_value_range": "cfg 7-10, steps 20-40",
+    "good_value_range": "cfg 2.5-4.5, steps 30",
+    "faceid": { "max_cfg": 6.0, "max_steps": 30 },
+    "scheduler": { "algorithm_type": "sde-dpmsolver++", "use_karras_sigmas": true },
     "files": [
       {
         "source": "https://huggingface.co/boopyfloopy/lustifyXL_v7/resolve/main/lustifySDXLNSFW_ggwpV7.safetensors",
@@ -146,6 +148,24 @@
       }
     ],
     "install_path": "image_gen/lustifySDXLNSFW_ggwpV7"
+  },
+
+ "lustifyNSFWCheckpoint_zenithV9": {
+    "description": "",
+    "type": "image",
+    "compatibility": ["ImageGen"],
+    "requires": ["sdxl-base-config"],
+    "comment": "LUSTIFY ZENITH V9 (last SDXL version of Lustify). NSFW tends to go too far when unwanted, don't mix with SFW applications. Source is an unofficial Hugging Face re-upload, sha256 1a3abf0bf48113eb5e17d2f8ae012c5b60cb97d81d79c4d9e47cd5af56c162f1 (same as the Civitai file). Not tested in Rueckgrat yet. Recommended sampler: DPM++ 2M SDE Karras, native up to 1536 px, 1024x1024 or 832x1216 work",
+    "good_value_range": "cfg 2.5-4.5, steps 28-35",
+    "faceid": { "max_cfg": 4.5, "max_steps": 30 },
+    "scheduler": { "algorithm_type": "sde-dpmsolver++", "use_karras_sigmas": true },
+    "files": [
+      {
+        "source": "https://huggingface.co/kkkkk26/lustify_v9/resolve/main/lustifyNSFWCheckpoint_zenithV9.safetensors",
+        "path": ""
+      }
+    ],
+    "install_path": "image_gen/lustifyNSFWCheckpoint_zenithV9"
   },
   
   "DreamShaperXL_Turbo_v2": {
@@ -291,6 +311,7 @@
     "type": "image",
     "compatibility": ["ImageGen"],
     "comment": "SFW, default",
+    "faceid": { "max_cfg": 6.0, "max_steps": 25 },
     "files": [
       {
         "source": "https://huggingface.co/Lykon/dreamshaper-xl-v2-turbo/resolve/main/DreamShaperXL_Turbo_V2-SFW.safetensors",
@@ -1164,7 +1185,23 @@
       { "source": "https://huggingface.co/Systran/faster-whisper-base/resolve/main/vocabulary.txt", "path": "" }
     ],
     "install_path": "stt/faster-whisper-base"
-  }  
+  },
+
+  "faceid-plusv2-sdxl": {
+    "description": "IP-Adapter FaceID PlusV2 for SDXL: adapter, its LoRA, CLIP ViT-H image encoder, insightface buffalo_l (detection + recognition only)",
+    "type": "adapter",
+    "compatibility": ["ImageGen"],
+    "comment": "face reference for sdxl image models, loaded on the first request with a reference_image_key. insightface models: non-commercial research use only",
+    "files": [
+      { "source": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sdxl.bin", "path": "" },
+      { "source": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sdxl_lora.safetensors", "path": "" },
+      { "source": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/config.json", "path": "image_encoder" },
+      { "source": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors", "path": "image_encoder" },
+      { "source": "https://huggingface.co/public-data/insightface/resolve/main/models/buffalo_l/det_10g.onnx", "path": "insightface/models/buffalo_l" },
+      { "source": "https://huggingface.co/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx", "path": "insightface/models/buffalo_l" }
+    ],
+    "install_path": "image_gen/faceid-plusv2-sdxl"
+  }
 }
 
 

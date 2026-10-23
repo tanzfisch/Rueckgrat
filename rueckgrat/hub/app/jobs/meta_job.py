@@ -1,5 +1,7 @@
+import re
 import json
 import time
+import threading
 from .job_queue import Job
 from .chat_job import ChatJob
 from .thinking_job import ThinkingJob
@@ -7,16 +9,76 @@ from .update_context_job import UpdateContextJob
 from typing import Dict, Any, List, Optional
 
 from app.common import get_logger, ChatRequest, Utils, MessageQueue
+from app.utils.tts_stream import TtsStreams
 logger = get_logger()
 
+FILLERS = {
+    "uh", "uhm", "um", "umm", "hm", "hmm", "mhm", "mm", "mmm", "ah", "oh", "eh", "er", "erm", "huh", "uh-huh", "aha",
+    "ok", "okay", "yeah", "yea", "yep", "yup", "nope", "nah", "right", "sure", "cool", "nice", "wow", "alright",
+    "thanks", "thank", "you", "thx",  # "you" only for "thank you"
+    "cough", "coughs", "coughing", "sniff", "sniffs", "laughs", "laughing", "sigh", "sighs",
+}
+
+def is_trivial(text: str) -> bool:
+    """a single word or only fillers (a cough, "hmm"): not worth interrupting the reply for"""
+    words = re.findall(r"\w+", text.lower())
+    return len(words) < 2 or all(word in FILLERS for word in words)
+
+class Turns:
+    """the MetaJob answering each conversation. a new user message either merges into it
+    (that job gets cancelled, the new one answers both) or is stored as a message of its own"""
+
+    def __init__(self, db):
+        self.db = db
+        self._lock = threading.Lock()
+        self._running = {}  # conversation_id -> MetaJob
+
+    def start(self, job):
+        """stores the job's user message, merged into the running turn's message while that can still be interrupted"""
+        request = job.request
+        with self._lock:
+            previous = self._running.get(request.conversation_id)
+            mergeable = previous is not None and previous.state == "running"
+            merge = mergeable and not is_trivial(request.content)
+            if merge:
+                previous.cancelled.set()
+                request.content = f"{previous.request.content} … {request.content}"
+                job.user_message_id = previous.user_message_id
+                self.db.update_message(job.user_message_id, request.role, request.content, request.name)
+                MessageQueue().send_data({"merged": {
+                    "conversation_id": request.conversation_id,
+                    "user_message_id": job.user_message_id,
+                    "content": request.content
+                }})
+                logger.info(f"follow-up merged into message {job.user_message_id}, conversation {request.conversation_id}")
+            else:
+                job.user_message_id = self.db.add_message(request.conversation_id, request.role, request.content, request.name)
+            if merge or not mergeable:
+                self._running[request.conversation_id] = job
+
+    def set_state(self, job, state: str) -> bool:
+        """"images" (an image tool is queued) or "done" (the final goes out): from then on nothing merges into the job.
+        False if the job was cancelled already"""
+        with self._lock:
+            if job.cancelled.is_set():
+                return False
+            job.state = state
+            if state == "done" and self._running.get(job.request.conversation_id) is job:
+                del self._running[job.request.conversation_id]
+            return True
+
 class MetaJob(Job):
-    def __init__(self, user_id: int, request: ChatRequest, db, infrastructure, tool_registry):
+    def __init__(self, user_id: int, request: ChatRequest, db, infrastructure, tool_registry, turns):
         super().__init__()
         self.user_id = user_id
         self.request = request
         self.db = db
         self.infrastructure = infrastructure     
         self.tool_registry = tool_registry
+        self.turns = turns
+        self.user_message_id = None  # stored by Turns.start, merged follow-ups update it
+        self.cancelled = threading.Event()  # set when a follow-up merged into this turn
+        self.state = "running"  # "images" / "done", see Turns.set_state
         self.message_id = -1
         self.done = False
 
@@ -31,6 +93,8 @@ class MetaJob(Job):
         self.db.update_conversation(self.request.conversation_id, conversation["title"], json.dumps(new_context))        
 
     def _on_incomming_message(self, message: str):
+        if self.cancelled.is_set():
+            return  # late deltas of an interrupted reply
         data = json.loads(message)
 
         if "delta" in data:
@@ -51,7 +115,8 @@ class MetaJob(Job):
                 "conversation_id": self.request.conversation_id,
                 "role": "assistant",
                 "content": data["response"],
-                "tool_calls": []
+                "tool_calls": [],
+                "message_id": self.message_id
             }
             self.done = True
             
@@ -120,18 +185,36 @@ class MetaJob(Job):
         self.wait_for([thinking_job])
         return thinking_job.result()
 
+    def _interrupted(self) -> bool:
+        """True once a follow-up was merged into this turn: drops the partial reply, the merged job answers instead"""
+        if not self.cancelled.is_set():
+            return False
+        if self.message_id != -1:
+            self.db.delete_message(self.message_id)
+            TtsStreams.drop_message(self.message_id)
+        MessageQueue().send_data({"cancelled": {
+            "conversation_id": self.request.conversation_id,
+            "message_id": self.message_id if self.message_id != -1 else None
+        }})
+        logger.info(f"reply interrupted by a follow-up, conversation {self.request.conversation_id}")
+        return True
+
     def execute(self) -> None:
         self.response = {}
+        try:
+            self._execute()
+        finally:
+            self.turns.set_state(self, "done")  # also after a failure, nothing merges into a dead turn
 
-        if self.db.get_message_count_by_conversation(self.request.conversation_id) == 0:
+    def _execute(self) -> None:
+        if self.db.get_message_count_by_conversation(self.request.conversation_id) <= 1:  # only the user message stored by Turns.start
             MessageQueue().send_status_message("creating scenario")
         else:
             MessageQueue().send_status_message("update context")
 
         self._update_conversation_context()
-
-        logger.debug("store incomming message")
-        self.db.add_message(self.request.conversation_id, self.request.role, self.request.content, self.request.name)
+        if self._interrupted():
+            return
 
         try:
             MessageQueue().send_status_message("thinking")
@@ -148,6 +231,8 @@ class MetaJob(Job):
                 thinking_response = self._run_thinking(tool_request["names"])
                 logger.debug(f"thinking response (2):\n{Utils.pretty_print(thinking_response)}")
             tool_calls = thinking_response["tool_calls"]
+            if self._interrupted():
+                return
 
             self.tool_registry.execute(
                 user_id=self.user_id,
@@ -174,9 +259,16 @@ class MetaJob(Job):
                 compiled_response += tool_block
             
             logger.debug(f"compiled response:\n{compiled_response}")
+            if self._interrupted():
+                return
 
             contact_name = Utils.get_nested_value(contact, ["identity", "name"])
             self.message_id = self.db.add_message(self.request.conversation_id, "assistant", "", contact_name)
+
+            # once an image is queued the reply can't be interrupted anymore, a follow-up is a new message then
+            if any(self.tool_registry.parallel.get(call["tool"]) for call in tool_calls) and not self.turns.set_state(self, "images"):
+                self._interrupted()
+                return
 
             # the parallel tools (take_photo, generate_image) attach their images to the new message themselves
             parallel_tool_calls = [{**tool_call, "message_id": self.message_id} for tool_call in tool_calls]
@@ -206,9 +298,16 @@ class MetaJob(Job):
 
             start = time.time()
             while not self.done:
+                if self.cancelled.is_set():
+                    self.infrastructure.cancel(chat_job.stream_id)
+                    break
                 if time.time() - start > 300:
                     raise TimeoutError("5 min timeout")
                 time.sleep(0.01)
+
+            if not self.turns.set_state(self, "done"):
+                self._interrupted()
+                return
 
             MessageQueue().set_status("done")
 
@@ -219,4 +318,4 @@ class MetaJob(Job):
         return self.response
     
     def has_response(self) -> bool:
-        return True
+        return not self.cancelled.is_set()

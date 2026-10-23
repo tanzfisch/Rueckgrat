@@ -1,7 +1,7 @@
 import flet as ft
 
 from app.ui import BasePage
-from app.ui.widgets import OneLineBubble
+from app.ui.widgets import OneLineBubble, Header
 from app.utils import Hub
 from app.common import get_logger
 from app.ui.theme import STYLES, ERROR
@@ -63,6 +63,7 @@ class PasswordPage(ft.Container):
             on_submit=lambda e: check_login(),
             **STYLES["field"],
         )
+        self.error_text = ft.Text("", color=ERROR, visible=False, text_align=ft.TextAlign.CENTER)
         super().__init__(
             expand=True,
             margin=20,
@@ -75,6 +76,7 @@ class PasswordPage(ft.Container):
                     self.user_bubble,
                     self.name_edit,
                     self.password_edit,
+                    self.error_text,
                     ft.Container(expand=True),
                     ft.Row(
                         controls=[
@@ -85,6 +87,11 @@ class PasswordPage(ft.Container):
                 ],
             ),
         )
+
+    def show_error(self, message: str | None):
+        self.error_text.value = message or ""
+        self.error_text.visible = bool(message)
+        self.update()
 
 class AddUserPage(ft.Column):
     def __init__(self, create_user, goto_select, invite_required=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH):
@@ -164,17 +171,24 @@ class LoginPage(BasePage):
         else:
             start = self.user_page
 
-        self.controls = [start]
+        # only the menu button, so the network settings can be changed before logging in
+        self.header = Header(navigator, False, False)
+        self.slot = ft.Container(expand=True, content=start)
+        self.controls = [
+            ft.Container(padding=ft.Padding.only(left=20, top=20, right=20), content=self.header),
+            self.slot,
+        ]
 
     def _show(self, widget):
-        self.controls = [widget]
-        self.update()
+        self.slot.content = widget
+        self.slot.update()
 
     def goto_create_user(self):
         self._show(self.add_page)
 
     def goto_select_user(self):
         self.pass_page.password_edit.value = ""
+        self.pass_page.error_text.visible = False
         # invite mode has no user list, go back to the name + password login
         self._show(self.pass_page if self.invite_required else self.user_page)
 
@@ -202,20 +216,21 @@ class LoginPage(BasePage):
             return
 
         self.add_page.show_error(None)
-        if Hub.login_user(name, pwd):
-            self.on_successful_login()
+        error = Hub.login_user(name, pwd)
+        if error:
+            self.add_page.show_error(f"account created but login failed: {error}")
         else:
-            logger.error("login failed")
-            self.add_page.show_error("account created but login failed")
+            self.on_successful_login()
 
     def check_login(self):
         if self.invite_required:
             self.user_name = (self.pass_page.name_edit.value or "").strip()
         pwd = self.pass_page.password_edit.value or ""
-        if Hub.login_user(self.user_name, pwd):
-            self.on_successful_login()
+        error = Hub.login_user(self.user_name, pwd)
+        if error:
+            self.pass_page.show_error(error)
         else:
-            logger.error("login failed")
+            self.on_successful_login()
 
     def on_successful_login(self):
         if not Hub.get_user_data():

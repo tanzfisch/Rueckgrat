@@ -15,6 +15,7 @@ class ChatJob(Job):
         self.infrastructure = infrastructure
         self.thinking_response = thinking_response
         self.callback = callback
+        self.stream_id = None
 
     def execute(self) -> None:
         try:            
@@ -44,7 +45,7 @@ class ChatJob(Job):
                 logger.debug("adding tool outputs to chat query")
                 messages.append({"role": "developer", "content": self.thinking_response})
             
-            self.infrastructure.chat(
+            self.stream_id = self.infrastructure.chat(
                 messages=messages,
                 temperature=self.request.temperature,
                 seed=self.request.conversation_id,

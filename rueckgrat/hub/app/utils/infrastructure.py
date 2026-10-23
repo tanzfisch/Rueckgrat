@@ -1,5 +1,6 @@
 
 import asyncio
+import base64
 import json
 import os
 import requests
@@ -16,6 +17,7 @@ from app.common import get_logger, ChatRequestLlama, DownloadQueue, Utils, WebSo
 logger = get_logger()
 
 INFRASTRUCTURE_CONFIG_PATH = Path("/hub/config/infrastructure.json")
+HUB_IMAGE_DIR = Path("/hub/images")
 
 @dataclass
 class ServerResult:
@@ -149,6 +151,30 @@ class Infrastructure:
 
         return self._download_file(url, target_filepath)
 
+    def _image_payload(self, image_request: ImageRequest) -> dict:
+        """the json the node gets. a request with a face reference (reference_image_key) also gets the bytes of that
+        hub image, the node can't read /hub/images. without a reference this is exactly model_dump() as before"""
+        payload = image_request.model_dump()
+        key = image_request.reference_image_key
+        if not key:
+            return payload
+
+        b64 = image_request.reference_image_b64
+        if not b64:
+            path = (HUB_IMAGE_DIR / key).resolve()
+            if "/" in key or "\\" in key or key.startswith(".") or path.parent != HUB_IMAGE_DIR.resolve():
+                logger.warning(f"invalid reference image key {key!r}, generating without face reference")
+                return payload
+            try:
+                b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+            except OSError as e:
+                # the node falls back to plain generation when it gets a key without bytes
+                logger.warning(f"reference image {key} not readable ({e!r}), generating without face reference")
+                return payload
+
+        payload["reference_image_b64"] = b64
+        return payload
+
     def image(self, image_request: ImageRequest) -> str:
         if not "text_to_image" in self.node_by_type:
             logger.error("no text to image generator available")
@@ -160,7 +186,7 @@ class Infrastructure:
         try:
             response = requests.post(
                 url_image_request,
-                json=image_request.model_dump(),
+                json=self._image_payload(image_request),
                 timeout=240,
             )
         
@@ -180,8 +206,8 @@ class Infrastructure:
 
         return str(filepath)
 
-    def tts(self, text: str, voice: str = "") -> Optional[bytes]:
-        """forward a speech request to the tts node, returns wav bytes or None"""
+    def tts(self, text: str, voice: str = "", language: str = "") -> Optional[bytes]:
+        """forward a speech request to the tts node, returns wav bytes or None. language "" = the node detects it"""
         if not "text_to_speech" in self.node_by_type:
             logger.error("no text to speech generator available")
             return None
@@ -192,7 +218,7 @@ class Infrastructure:
             logger.warning(f"voice {voice} not available on the tts node, using default voice")
         url = f"{base}/tts"
         try:
-            response = requests.post(url, json={"text": text, "voice": voice}, timeout=240)
+            response = requests.post(url, json={"text": text, "voice": voice, "language": language}, timeout=240)
             if response.status_code != 200:
                 logger.error(f"failed tts request: {response.status_code} {response.reason}")
                 return None
@@ -201,9 +227,9 @@ class Infrastructure:
             logger.error(f"failed to get a tts response {repr(e)}")
             return None
 
-    def stt(self, pcm16: bytes, kind: str) -> Optional[str]:
+    def stt(self, pcm16: bytes, kind: str, language: str = "") -> Optional[str]:
         """forward 16 kHz mono pcm_s16le audio to the stt node, returns the text or None.
-        kind: final (accurate model) or partial (fast model)"""
+        kind: final (accurate model) or partial (fast model). language "" = whisper detects it"""
         if not "speech_to_text" in self.node_by_type:
             logger.error("no speech to text recognizer available")
             return None
@@ -213,7 +239,7 @@ class Infrastructure:
         try:
             response = requests.post(
                 url,
-                params={"kind": kind},
+                params={"kind": kind, "language": language},
                 data=pcm16,
                 headers={"Content-Type": "application/octet-stream"},
                 timeout=120,
@@ -285,15 +311,25 @@ class Infrastructure:
             data = json.loads(message)
             stream_id = data.get("stream_id")
 
-            if stream_id in self.callback_handlers:
-                self.callback_handlers[stream_id][1](message)
+            handler = self.callback_handlers.get(stream_id)  # gone once cancelled
+            if handler:
+                handler[1](message)
                 if "response" in data:
-                    del self.callback_handlers[stream_id]
+                    self.callback_handlers.pop(stream_id, None)
 
         except Exception as e:
             logger.error(f"failed to handle incomming message from node {repr(e)}")
 
+    def cancel(self, stream_id: str):
+        """stops a stream: its late deltas are dropped here and the node stops generating"""
+        if not stream_id or self.callback_handlers.pop(stream_id, None) is None:
+            return
+        node = self.node_by_type.get("text_to_text")
+        if node and node.is_connected():
+            node.send_message(json.dumps({"cancel": stream_id}))
+
     def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 1024, context_size: int=8192) -> str:
+        """stream: returns the stream id at once, the reply goes to callback. otherwise returns the reply"""
         try:
             chat_request = ChatRequestLlama(
                 messages=messages,
@@ -323,6 +359,7 @@ class Infrastructure:
                 self.callback_handlers[chat_request.stream_id] = (conversation_id, callback)
                 payload = {"chat": chat_request.model_dump()}
                 node.send_message(json.dumps(payload))
+                return chat_request.stream_id
             else:
                 url = f"http://{node.addr}:{node.port}/chat"
                 response = requests.post(
