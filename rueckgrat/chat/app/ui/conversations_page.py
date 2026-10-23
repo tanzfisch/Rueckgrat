@@ -2,7 +2,7 @@ import flet as ft
 from app.ui.theme import STYLES
 
 from app.ui import BasePage
-from app.ui.widgets import OneLineBubble, ContactHeader
+from app.ui.widgets import OneLineBubble, Header
 from app.utils import Hub, Contact, Paths
 from app.common import get_logger
 
@@ -13,10 +13,10 @@ class ConversationsPage(BasePage):
     def __init__(self, navigator):
         super().__init__(navigator)
         self.contact_id = None
-        self.contact_header = ContactHeader(navigator)
-        self.contact_header.on_go_back = self.on_go_back
+        self.header = Header(navigator)
+        self.header.on_go_back = self.on_go_back
         self.list_view = ft.ListView(expand=True, spacing=8, padding=8)
-        self.controls = [self.contact_header, self.list_view]
+        self.controls = [self.header, self.list_view]
 
         self.controls = [
             ft.Container(
@@ -24,7 +24,7 @@ class ConversationsPage(BasePage):
                 expand=True,
                 content=ft.Column(
                     expand=True,
-                    controls=[self.contact_header, self.list_view],
+                    controls=[self.header, self.list_view],
                 ),
             )
         ]    
@@ -35,7 +35,7 @@ class ConversationsPage(BasePage):
     def on_enter(self, **kwargs):
         self.contact_id = kwargs.get("contact_id")
         contact = Contact(Hub.get_contact(self.contact_id))
-        self.contact_header.set_contact(contact)
+        self.header.set_contact(contact)
         self.load_conversations()
 
     def on_leave(self):

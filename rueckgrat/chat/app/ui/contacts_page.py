@@ -4,7 +4,7 @@ from pathlib import Path
 from app.ui.theme import STYLES
 
 from app.ui import BasePage
-from app.ui.widgets import OneLineBubble, ContactCard, ContactHeader, MessageBox
+from app.ui.widgets import OneLineBubble, ContactCard, Header, MessageBox
 from app.utils import Hub, Contact, Paths
 from app.common import get_logger, Utils
 
@@ -13,10 +13,10 @@ logger = get_logger()
 class ContactsPage(BasePage):
     def __init__(self, navigator):
         super().__init__(navigator)
-        self.contact_header = ContactHeader(navigator, False, False)
+        self.header = Header(navigator, False, False)
         self.list_view = ft.ListView(expand=True, spacing=8, padding=8)
         self.import_contact_picker = ft.FilePicker()
-        self.controls = [self.contact_header, self.list_view]
+        self.controls = [self.header, self.list_view]
 
         self.controls = [
             ft.Container(
@@ -24,7 +24,7 @@ class ContactsPage(BasePage):
                 expand=True,
                 content=ft.Column(
                     expand=True,
-                    controls=[self.contact_header, self.list_view],
+                    controls=[self.header, self.list_view],
                 ),
             )
         ]

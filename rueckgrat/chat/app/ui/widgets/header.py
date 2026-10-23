@@ -1,12 +1,18 @@
 import os
 import flet as ft
 from app.ui.theme import STYLES
-from app.utils import Contact, Paths
+from app.utils import Contact, Hub, Paths
 
 ASSETS_DIR = os.getenv("FLET_ASSETS_DIR") or "assets"
 
+def _tool_icon(icon, tooltip: str) -> ft.Control:
+    """icon only menu entry, the tooltip names it"""
+    if isinstance(icon, str):
+        return ft.Image(src=icon, width=24, height=24, fit=ft.BoxFit.CONTAIN, tooltip=tooltip)
+    return ft.Icon(icon, tooltip=tooltip)
 
-class ContactHeader(ft.Row):
+
+class Header(ft.Row):
     def __init__(
         self,
         navigator,
@@ -71,12 +77,27 @@ class ContactHeader(ft.Row):
                 )
             )
         controls.append(ft.Container(expand=True))
+        # app level tools, only with a logged in session (not on the login page)
+        if Hub.access_token:
+            controls.append(self._tools_menu())
         controls.append(self.menu_btn)
 
         super().__init__(
             controls=controls,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             **kwargs,
+        )
+
+    def _tools_menu(self) -> ft.PopupMenuButton:
+        return ft.PopupMenuButton(
+            icon=ft.Icons.APPS,
+            tooltip="tools",
+            style=STYLES["icon_button"]["style"],
+            items=[
+                ft.PopupMenuItem(content=_tool_icon(ft.Icons.TRANSLATE, "translate"), on_click=lambda e: self.navigator("translate")),
+                ft.PopupMenuItem(content=_tool_icon(ft.Icons.CHAT, "chat"), on_click=lambda e: self.navigator("contacts")),
+                ft.PopupMenuItem(content=_tool_icon(ft.Icons.IMAGE, "image generation"), on_click=lambda e: self.navigator("image")),
+            ],
         )
 
     def set_contact(self, contact: Contact):

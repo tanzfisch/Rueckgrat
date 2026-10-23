@@ -6,7 +6,7 @@ from app.ui.theme import STYLES
 
 from app.utils import Hub
 from app.ui import BasePage
-from app.ui.widgets import ContactHeader, RowSelector, VoiceSelector
+from app.ui.widgets import Header, RowSelector, VoiceSelector
 from app.common import get_logger, IMAGE_STYLE_OPTIONS, DEFAULT_IMAGE_STYLE, IMAGE_STYLE_ICONS
 
 logger = get_logger()
@@ -347,7 +347,7 @@ class ProgressPage(ft.Column):
                     ft.Container(
                         content=ft.Column(
                             [
-                                ft.ProgressRing(width=56, height=56, stroke_width=3),
+                                ft.Image(src=f"{ASSETS_DIR}/icons/loading.gif", width=56, height=56, fit=ft.BoxFit.CONTAIN),
                                 ft.Text("Creating character", size=20, weight=ft.FontWeight.W_500),
                                 ft.Text(
                                     "This may take a moment",
@@ -374,8 +374,8 @@ class ProfileWizard(BasePage):
         super().__init__(navigator)
         self.user_profile_mode = False
 
-        self.contact_header = ContactHeader(navigator, False)
-        self.contact_header.on_go_back = self.on_go_back
+        self.header = Header(navigator, False)
+        self.header.on_go_back = self.on_go_back
         self.content_slot = ft.Container(expand=True)
         self.submit_btn = ft.Button("...", on_click=self.on_submit, expand=True, **STYLES["button"])
         # only shown when the user edits their own profile, discards the changes
@@ -388,7 +388,7 @@ class ProfileWizard(BasePage):
                 content=ft.Column(
                     expand=True,
                     controls=[
-                        self.contact_header,
+                        self.header,
                         self.content_slot,
                         ft.Row(controls=[self.cancel_btn, self.submit_btn]),
                     ],

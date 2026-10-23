@@ -8,6 +8,14 @@ Changelog
 - #108 added voice samples
 - #100 allow user to change email and password
 - #110 cleanup chat ui
+- #113 ability to talk over ai and interrupt it's processing
+- tts now in chunks to improve latency
+- #112 buffer stt in chat client to manage disconnects mid speach
+- #115 added translator tool
+- #116 added save and share buttons to image widget
+- #117 added image tool
+- #119 fixed apk build version
+. #126 fixed mic not recording during locked screen on android
 
 0.19.0
 ------

@@ -8,6 +8,7 @@ logger = get_logger()
 class LLamaCppInterface:
     def __init__(self, host: str, port: int):
         self.url = f"http://{host}:{port}/v1/chat/completions"
+        self._cancelled = set()  # stream ids the hub cancelled, checked per streamed line
 
         logger.info(f"startup llama interface")
         logger.info(f"llama.cpp url: {self.url}")
@@ -48,6 +49,11 @@ class LLamaCppInterface:
         if finish_reason == "length":
             logger.warning("llama.cpp stopped because max_tokens was reached; response may be truncated")
 
+    def cancel(self, stream_id: str):
+        """the running stream stops at its next line, leaving the with block closes the http response,
+        so llama-server stops generating"""
+        self._cancelled.add(stream_id)
+
     def chat(self, request: ChatRequestLlama, callback=None) -> ChatResponse:
         payload = self._build_payload(request)
         headers = {
@@ -65,6 +71,10 @@ class LLamaCppInterface:
                 with requests.post(self.url, json=payload, headers=headers, stream=True, timeout=240) as http_response:
                     http_response.raise_for_status()
                     for line in http_response.iter_lines():
+                        if request.stream_id in self._cancelled:
+                            logger.info(f"stream {request.stream_id} cancelled")
+                            self._cancelled.discard(request.stream_id)
+                            return ChatResponse(role="assistant", content="")
                         if not line:
                             continue
                         line = line.decode('utf-8')

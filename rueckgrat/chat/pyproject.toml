@@ -1,4 +1,38 @@
 [tool.flet.app]
 path = "."
 module = "main"
-exclude = [".venv", "build", ".vscode", "app/build"]
+exclude = [".venv", "build", ".vscode", "app/build", "extensions"]
+
+# Foreground service (type microphone): keeps the mic and the network alive while the app is
+# in the background / the screen is locked. Android 14+ needs the type permission, 13+ the notifications.
+[tool.flet.android.permission]
+"android.permission.FOREGROUND_SERVICE" = true
+"android.permission.FOREGROUND_SERVICE_MICROPHONE" = true
+"android.permission.POST_NOTIFICATIONS" = true
+"android.permission.WAKE_LOCK" = true
+
+# The local extension is pip installed from ./extensions. flet ignores requirements.txt as soon as
+# a dependency list exists in pyproject.toml, so the Android build lists them all here:
+# keep this in sync with requirements.txt.
+[tool.flet.android]
+dependencies = [
+    "flet==1.0.4",
+    "pathvalidate",
+    "websockets",
+    "markdown",
+    "pygments",
+    "bleach",
+    "requests==2.32.3",
+    "urllib3==2.2.3",
+    "charset-normalizer==3.3.2",
+    "json-repair",
+    "click",
+    "tqdm",
+    "pydantic",
+    "flet-audio-recorder",
+    "flet-audio==1.0.4",
+    "flet-foreground-service",
+]
+
+[tool.flet.dev_packages]
+flet-foreground-service = "extensions/flet_foreground_service"

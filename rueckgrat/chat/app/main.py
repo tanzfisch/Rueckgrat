@@ -16,6 +16,8 @@ from app.ui import (
     InitialSettingsPage,
     ProfileWizard,
     SettingsPage,
+    TranslatePage,
+    ImagePage,
 )
 from app.ui.theme import apply_theme
 from app.ui.widgets import ImageOverlay, MessageBox, ConnectionBanner
@@ -36,6 +38,8 @@ PAGES = {
     "profile_wizz": ProfileWizard,
     "settings": SettingsPage,
     "initial_settings": InitialSettingsPage,
+    "translate": TranslatePage,
+    "image": ImagePage,
 }
 
 
@@ -109,8 +113,8 @@ class App:
         self._kwargs = {}
 
     def _header_go_back(self):
-        """the back handler of the current page's contact header, None if it has no visible back button"""
-        header = getattr(self.current_page, "contact_header", None)
+        """the back handler of the current page's header, None if it has no visible back button"""
+        header = getattr(self.current_page, "header", None)
         if header is None or header.back_btn not in header.controls or not header.back_btn.visible:
             return None
         return header.on_go_back

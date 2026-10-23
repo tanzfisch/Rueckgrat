@@ -157,6 +157,18 @@ class Hub:
         return cls.websocket_client.send_message(json.dumps(payload))
 
     @classmethod
+    def translate(cls, from_language: str, to_language: str, text: str, request_id: str) -> bool:
+        """translator mode: the hub answers with {"translate": {request_id, ..., translation or error}}"""
+        payload = {"translate": {"from_language": from_language, "to_language": to_language, "text": text, "request_id": request_id}}
+        return cls.websocket_client.send_message(json.dumps(payload))
+
+    @classmethod
+    def generate_image(cls, prompt: str, request_id: str) -> bool:
+        """image tool: the hub answers with {"generated_image": {request_id, prompt, filename, image_path or error}}"""
+        payload = {"generate_image": {"prompt": prompt, "request_id": request_id}}
+        return cls.websocket_client.send_message(json.dumps(payload))
+
+    @classmethod
     def generate(cls, prompt: dict) -> bool:
         payload = {"generate": prompt}
         return cls.websocket_client.send_message(json.dumps(payload))    
@@ -370,6 +382,25 @@ class Hub:
         except Exception as e:
             logger.error(f"failed to update_contact {repr(e)}")
             return False
+
+    @classmethod
+    def get_generated_images(cls) -> list | None:
+        """the latest prompts of the image tool of this user, oldest first, [{id, prompt, request_id, status, file_name, created_at}]
+        with status pending (file_name None), done or failed.
+        None if the hub could not be asked"""
+        try:
+            response = requests.get(
+                f"{cls.url}/generated-images",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("images", [])
+            logger.error(f"get generated images - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_generated_images {repr(e)}")
+        return None
 
     @classmethod
     def get_contact(cls, contact_id: int):

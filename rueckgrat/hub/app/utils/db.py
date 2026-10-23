@@ -137,6 +137,27 @@ class ChatDB:
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )""")
 
+        # images of the image generation tool, per user. the row is written when the prompt is submitted (status pending,
+        # no file yet) and finished later: done + file_name (the png is in /hub/images) or failed. the client's request_id
+        # matches the live result to the row. UNIQUE allows many NULL file names
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS generated_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            prompt TEXT NOT NULL,
+            request_id TEXT NOT NULL DEFAULT '',
+            file_name TEXT,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'done', 'failed')),
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, file_name),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+
+        # the db is opened once at hub start: no job survives a restart, so a row still pending was interrupted
+        cursor.execute("UPDATE generated_images SET status = 'failed' WHERE status = 'pending'")
+        if cursor.rowcount:
+            logger.warning(f"{cursor.rowcount} image generation(s) interrupted by the restart marked as failed")
+
         cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_voices_contact
             ON voices(contact_id) WHERE contact_id IS NOT NULL
@@ -349,6 +370,50 @@ class ChatDB:
             except Exception as e:
                 logger.error(f"Failed reading generation for image {file_key}: {e}")
         return None
+
+    def add_generated_image_pending(self, user_id: int, prompt: str, request_id: str) -> int:
+        """a prompt of the image tool was submitted. returns the row id (0 if it could not be saved)"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute(
+                    "INSERT INTO generated_images (user_id, prompt, request_id) VALUES (?, ?, ?)",
+                    (user_id, prompt, request_id))
+                conn.commit()
+                return cursor.lastrowid
+            except Exception as e:
+                logger.error(f"failed saving pending generated image: {e}")
+        return 0
+
+    def complete_generated_image(self, row_id: int, file_name: str) -> bool:
+        return self._set_generated_image(row_id, "done", file_name)
+
+    def fail_generated_image(self, row_id: int) -> bool:
+        return self._set_generated_image(row_id, "failed", None)
+
+    def _set_generated_image(self, row_id: int, status: str, file_name: str | None) -> bool:
+        with self.get_connection() as conn:
+            try:
+                conn.execute("UPDATE generated_images SET status = ?, file_name = ? WHERE id = ?", (status, file_name, row_id))
+                conn.commit()
+                return True
+            except Exception as e:
+                logger.error(f"failed setting generated image {row_id} to {status}: {e}")
+        return False
+
+    def get_generated_images(self, user_id: int, limit: int = 50) -> list[dict]:
+        """the latest rows (pending, done and failed) of this user only, oldest first"""
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute("""
+                    SELECT id, prompt, request_id, file_name, status, created_at FROM (
+                        SELECT id, prompt, request_id, file_name, status, created_at FROM generated_images
+                        WHERE user_id = ? ORDER BY id DESC LIMIT ?
+                    ) ORDER BY id
+                """, (user_id, limit)).fetchall()
+                return [dict(row) for row in rows]
+            except Exception as e:
+                logger.error(f"failed reading generated images of user {user_id}: {e}")
+        return []
 
     def add_contact_image(self, contact_id: int, file_name: str, image_type: str) -> int:
         with self.get_connection() as conn:
@@ -925,6 +990,17 @@ class ChatDB:
                 return cursor.rowcount > 0
             except Exception as e:
                 logger.error(f"appending to message: {e}")
+        return False
+
+    def delete_message(self, message_id: int) -> bool:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"deleting message: {e}")
         return False
 
     def add_attachment(self, message_id: int, file_name: str, file_url: str, file_type: str, file_size: int) -> int:

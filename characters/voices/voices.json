@@ -299,19 +299,6 @@
     "duration_s": 11.42
   },
   {
-    "id": "librivox_male_mark_f_smith",
-    "name": "Mark F. Smith (LibriVox)",
-    "description": "middle aged, nasal",
-    "gender": "male",
-    "language": "en",
-    "license": "public domain (CC Public Domain Dedication)",
-    "attribution": "none required (LibriVox: Great Expectations by Charles Dickens, read by Mark F. Smith)",
-    "source_url": "https://archive.org/download/great_expectations_mfs_0812_librivox/greatexpectations_01_dickens.mp3 (76.6s-86.9s)",
-    "file": "LibriVox/librivox_male_mark_f_smith.wav",
-    "sample_rate": 24000,
-    "duration_s": 10.32
-  },
-  {
     "id": "librivox_male_tux",
     "name": "Tux (LibriVox)",
     "description": "middle aged, brassy",

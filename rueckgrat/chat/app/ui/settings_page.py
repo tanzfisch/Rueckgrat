@@ -2,7 +2,7 @@ import flet as ft
 from app.ui.theme import STYLES, SURFACE_3, TEXT_DIM
 
 from app.ui import BasePage
-from app.ui.widgets import RowSelector, ContactHeader, MessageBox
+from app.ui.widgets import RowSelector, Header, MessageBox
 from app.utils import RueckgratConfig, Hub
 
 
@@ -129,8 +129,8 @@ class SettingsPage(BasePage):
     def __init__(self, navigator):
         super().__init__(navigator)
 
-        self.contact_header = ContactHeader(navigator, False, True)
-        self.contact_header.on_go_back = self.on_go_back
+        self.header = Header(navigator, False, True)
+        self.header.on_go_back = self.on_go_back
 
         logged_in = bool(Hub.access_token)
         self.profile_page = UserProfileSettingsPage(self.navigator) if logged_in else None
@@ -151,7 +151,7 @@ class SettingsPage(BasePage):
                 content=ft.Column(
                     expand=True,
                     controls=[
-                        self.contact_header,
+                        self.header,
                         ft.Row(
                             expand=True,
                             vertical_alignment=ft.CrossAxisAlignment.STRETCH,

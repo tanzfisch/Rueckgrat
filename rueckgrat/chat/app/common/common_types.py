@@ -99,6 +99,7 @@ class NodeTTSRequest(BaseModel):
     voice: str = ""
     exaggeration: float = 0.5
     cfg_weight: float = 0.5
+    language: str = ""  # multilingual model only, "" or unsupported = detected from the text
 
 class HubTTSRequest(BaseModel):
     text: str

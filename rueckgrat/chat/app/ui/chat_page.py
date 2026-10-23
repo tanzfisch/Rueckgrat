@@ -6,7 +6,7 @@ from app.ui.theme import STYLES, TEXT
 from pathlib import Path
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, ContactHeader, EmojiPicker, StatusWidget
+from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget
 from app.audio import Text_To_Speech
 from app.utils import Hub, Contact, Paths, AudioStreamer
 from app.common import get_logger, Utils
@@ -33,8 +33,8 @@ class ChatPage(BasePage):
         self.replay_content = ""
         self.user_role_name = ""   # set from the user's own character profile in on_enter
 
-        self.contact_header = ContactHeader(navigator)
-        self.contact_header.on_go_back = self.on_go_back
+        self.header = Header(navigator)
+        self.header.on_go_back = self.on_go_back
 
         self.history = ft.ListView(expand=True, spacing=10, padding=0, auto_scroll=True)
         self.status_widget = StatusWidget()
@@ -148,7 +148,7 @@ class ChatPage(BasePage):
                 content=ft.Column(
                     expand=True,
                     controls=[
-                        self.contact_header,
+                        self.header,
                         self.history,
                         self.bubble,
                     ],
@@ -190,7 +190,7 @@ class ChatPage(BasePage):
         self.contact_id = kwargs.get("contact_id")
         self.conversation_id = kwargs.get("conversation_id")
         self.contact = Contact(Hub.get_contact(self.contact_id))
-        self.contact_header.set_contact(self.contact)
+        self.header.set_contact(self.contact)
         user_data = Hub.get_user_data() or {}
         profile = user_data.get("profile") or {}
         self.user_role_name = (profile.get("name") or "").strip() or Hub.user_name
@@ -273,6 +273,10 @@ class ChatPage(BasePage):
     async def _handle_audio_payload(self, payload: dict):
         # logger.debug(Utils.pretty_print(payload))
         kind = payload.get("type")
+        if kind == "mic.off":
+            if self.mic_btn.selected:
+                self.on_mic_toggle()
+            return
         text = (payload.get("text") or "").strip()
         if not text:
             return       
@@ -323,9 +327,9 @@ class ChatPage(BasePage):
         if self.mute_btn.selected:
             self._speak(self.replay_content)
 
-    def _speak(self, content: str):
+    def _speak(self, content: str, message_id: int | None = None):
         """speaks a message and animates the bars on the mute button while it is generated and played"""
-        Text_To_Speech.speak(text=self._cleanup_for_speech(content), voice=self.contact.get_voice_id())
+        Text_To_Speech.speak(text=self._cleanup_for_speech(content), voice=self.contact.get_voice_id(), message_id=message_id)
         if not self._tts_running and self.page:
             self._tts_running = True
             self.page.run_task(self._tts_loop)
@@ -434,6 +438,31 @@ class ChatPage(BasePage):
             return
         self._flush_delta()
 
+    def _drop_stream(self, message_id: int | None = None):
+        """hides the reply that is streaming, its late deltas are ignored"""
+        for finished in (message_id, self._stream_message_id):
+            if finished is not None:
+                self._finished_message_ids.add(finished)
+        self._stream_message_id = None
+        self._stream_gen += 1
+        self.delta_buffer = ""
+        self.stream_bubble.clear_content()
+        self.stream_bubble.visible = False
+        self.stream_bubble.update()
+
+    def _merge_user_message(self, content: str):
+        """the hub merged the follow-up into the previous user message: drop the follow-up's bubble, update the previous one"""
+        rows = [row for row in self.history.controls
+                if isinstance(row, ft.Row) and row.controls and isinstance(getattr(row.controls[-1], "content", None), ChatBubble)
+                and row.controls[-1].content.role == "user"]
+        if len(rows) < 2:
+            return
+        self.history.controls.remove(rows[-1])
+        previous = rows[-2].controls[-1].content
+        previous.clear_content()
+        previous.append_content(content)
+        self.history.update()
+
     def on_incomming_message(self, message: dict):
         if not "delta" in message:
             logger.debug(f"incomming message:\n{Utils.pretty_print(message)}")
@@ -453,6 +482,12 @@ class ChatPage(BasePage):
 
             if "attachment" in message:
                 self._on_attachment(message["attachment"])
+
+            if "cancelled" in message and message["cancelled"]["conversation_id"] == self.conversation_id:
+                self._drop_stream(message["cancelled"].get("message_id"))
+
+            if "merged" in message and message["merged"]["conversation_id"] == self.conversation_id:
+                self._merge_user_message(message["merged"]["content"])
 
             if "chat" in message:
                 chat = message["chat"]
@@ -478,7 +513,7 @@ class ChatPage(BasePage):
                     self._append_history(role, content, image_path, message_id=message_id)
 
                     if self.mute_btn.selected:
-                        self._speak(content)
+                        self._speak(content, message_id)
         except Exception as e:
             logger.error(f"failed to handle incomming message: {e}")
 
@@ -499,16 +534,13 @@ class ChatPage(BasePage):
 
     def send_message(self):
         self.status_widget.clear_status()
-        self.stream_bubble.clear_content()
-        self.stream_bubble.visible = False
-        self.stream_bubble.update()
-        self.delta_buffer = ""
 
         message = (self.input_box.value or "").strip()
         if not message:
             return
         if not Hub.chat(self.contact_id, self.conversation_id, "user", self.user_role_name, message, self.temperature):
             return
+        self._drop_stream()
         self.input_box.value = ""
         self.input_box.update()
         self._append_history("user", message)

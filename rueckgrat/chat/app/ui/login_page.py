@@ -1,7 +1,7 @@
 import flet as ft
 
 from app.ui import BasePage
-from app.ui.widgets import OneLineBubble, ContactHeader
+from app.ui.widgets import OneLineBubble, Header
 from app.utils import Hub
 from app.common import get_logger
 from app.ui.theme import STYLES, ERROR
@@ -172,10 +172,10 @@ class LoginPage(BasePage):
             start = self.user_page
 
         # only the menu button, so the network settings can be changed before logging in
-        self.contact_header = ContactHeader(navigator, False, False)
+        self.header = Header(navigator, False, False)
         self.slot = ft.Container(expand=True, content=start)
         self.controls = [
-            ft.Container(padding=ft.Padding.only(left=20, top=20, right=20), content=self.contact_header),
+            ft.Container(padding=ft.Padding.only(left=20, top=20, right=20), content=self.header),
             self.slot,
         ]
 
