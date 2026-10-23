@@ -15,7 +15,8 @@ Changelog
 - #116 added save and share buttons to image widget
 - #117 added image tool
 - #119 fixed apk build version
-. #126 fixed mic not recording during locked screen on android
+- #126 fixed mic not recording during locked screen on android
+- #128 improved integration of nsfw image gen
 
 0.19.0
 ------

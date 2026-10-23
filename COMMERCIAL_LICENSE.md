@@ -26,3 +26,18 @@ setting.
 
 The license, attribution and source of each individual voice file are
 listed in [characters/voices/voices.json](characters/voices/voices.json).
+
+## Models
+
+The models used by this project are only referenced, not included. The
+registry only points to where each model can be downloaded. This project
+does not ship, host or distribute any model weights, and this commercial
+license covers only the source code of this project.
+
+Each model is obtained by you directly from its original source and is
+subject to the license and terms of that source. Nothing in this license
+grants any rights to any model, and you are responsible for complying
+with the terms of each model you use.
+
+The referenced models are listed in
+[rueckgrat/node/data/registry.json](rueckgrat/node/data/registry.json).

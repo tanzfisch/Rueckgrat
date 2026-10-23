@@ -3,7 +3,7 @@ import gc
 import os
 from pathlib import Path
 from threading import Lock
-from diffusers import FluxPipeline, FluxTransformer2DModel, StableDiffusionXLPipeline
+from diffusers import DPMSolverMultistepScheduler, FluxPipeline, FluxTransformer2DModel, StableDiffusionXLPipeline
 from app.utils import ModelRegistry
 
 from app.common import get_logger, ImageRequest, ImageResponse
@@ -109,7 +109,7 @@ class ImageGen:
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
 
-    def _load(self, model: Path):
+    def _load(self, model: Path, model_name: str = ""):
         if self.model == model and self.pipe is not None:
             return self.pipe
 
@@ -134,6 +134,7 @@ class ImageGen:
                 config_dir = SDXL_BASE_CONFIG_DIR
             logger.debug(f"sdxl pipeline config from {config_dir}")
             pipe = cls.from_single_file(str(model), torch_dtype=dtype, config=str(config_dir), local_files_only=True)
+            self._apply_scheduler(pipe, model_name)
         pipe.to(self.device)
 
         if self.device == "cuda":
@@ -159,6 +160,15 @@ class ImageGen:
         self.pipe = pipe
         return pipe
 
+    @staticmethod
+    def _apply_scheduler(pipe, model_name: str):
+        """registry "scheduler" of the image model = options for DPMSolverMultistepScheduler (e.g. DPM++ 2M SDE Karras).
+        without it the pipeline keeps the scheduler of its config (turbo models need theirs)"""
+        options = (ModelRegistry().get_model(model_name) or {}).get("scheduler")
+        if options:
+            logger.info(f"scheduler for {model_name}: DPMSolverMultistepScheduler {options}")
+            pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, **options)
+
     def _generate(
         self,
         prompt: str,
@@ -175,7 +185,7 @@ class ImageGen:
         **kwargs,
     ):
         
-        pipe = self._load(model)
+        pipe = self._load(model, model_name)
 
         is_flux = "flux" in str(model)
 

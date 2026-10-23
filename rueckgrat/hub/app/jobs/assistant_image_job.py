@@ -47,7 +47,7 @@ class AssistantImageJob(Job):
 
         models = {
             "default": "DreamShaperXL_Turbo_V2-SFW",
-            "nsfw-default": "lustifySDXLNSFW_ggwpV7"
+            "nsfw-default": "lustifyNSFWCheckpoint_zenithV9"
         }    
         model_name = image_parameters.get("model", "default")
         model = model_name if not model_name in models else models[model_name]
@@ -61,8 +61,8 @@ class AssistantImageJob(Job):
             seed = image_parameters.get("seed", 1337),
             width = self.width,
             height = self.height,
-            steps = image_parameters.get("steps", 40.0),
-            cfg = image_parameters.get("cfg", 9.0),
+            steps = image_parameters.get("steps", 30.0),
+            cfg = image_parameters.get("cfg", 4.0),
             model = model,
             output = ""
         )
