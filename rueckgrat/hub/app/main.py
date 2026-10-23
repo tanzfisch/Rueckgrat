@@ -342,8 +342,8 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
         infrastructure = app.state.infrastructure, 
         image_type = ImageType.UpperBody,
         store_image_as = "profile",
-        width = 720,
-        height = 720,                
+        width = 1024,
+        height = 1024,
     )        
     app.state.job_queue.add(job)
 
