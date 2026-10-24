@@ -4,6 +4,7 @@ from app.ui.theme import STYLES, SURFACE_3, TEXT_DIM
 from app.ui import BasePage
 from app.ui.widgets import RowSelector, Header, MessageBox
 from app.utils import RueckgratConfig, Hub
+from app.ui.profile_wizzard import ProfileWizzardMode
 
 
 def _section(title: str, *controls) -> ft.Column:
@@ -95,7 +96,7 @@ class UserProfileSettingsPage(ft.Column):
 
 
     def on_click_user_profile(self, e=None):
-        self.navigator("profile_wizz", user_profile_mode=True)
+        self.navigator("profile_wizz", user_profile_mode=ProfileWizzardMode.UserChange)
 
     def on_click_save_email(self, e=None):
         error = Hub.set_email(self.email_edit.value or "")

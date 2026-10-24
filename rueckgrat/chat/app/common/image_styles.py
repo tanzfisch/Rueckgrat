@@ -12,7 +12,11 @@ IMAGE_STYLE_OPTIONS = {
     "fantasy": "epic painterly medieval fantasy",
     "sci_fi": "futuristic neon, high-tech, cyberpunk",
     "comics": "bold inks, cel shading, flat colors",
-    "hentai": "adult anime illustration",
+    "anime": "anime illustration, clean lines, cel shading",
+    "origami": "folded paper figure, crisp creases",
+    "charcoal_sketch": "monochrome hand-drawn charcoal",
+    "watercolor": "soft washes, bleeding pigments",
+    "classic_oil_portrait": "classic old master oil painting",
 }
 
 DEFAULT_IMAGE_STYLE = "studio"
