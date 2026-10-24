@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.21.0
+------
+
+- #129 adding default assistant and more image styles
+
 0.20.0
 ------
 

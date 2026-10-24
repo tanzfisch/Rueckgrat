@@ -1,4 +1,5 @@
 import json
+from enum import Enum
 import os
 import random
 import flet as ft
@@ -367,18 +368,24 @@ class ProgressPage(ft.Column):
         ]
 
 
+
+
+class ProfileWizzardMode(Enum):
+    UserSetup = 1
+    UserChange = 2
+    AIContact = 3
+
 class ProfileWizard(BasePage):
     """one form: the simple new character form, or the full form for the user's own profile"""
 
     def __init__(self, navigator):
         super().__init__(navigator)
-        self.user_profile_mode = False
+        self.user_profile_mode = ProfileWizzardMode.AIContact
 
         self.header = Header(navigator, False)
         self.header.on_go_back = self.on_go_back
         self.content_slot = ft.Container(expand=True)
         self.submit_btn = ft.Button("...", on_click=self.on_submit, expand=True, **STYLES["button"])
-        # only shown when the user edits their own profile, discards the changes
         self.cancel_btn = ft.Button("Cancel", on_click=self.on_go_back, expand=True, visible=False, **STYLES["button"])
 
         self.controls = [
@@ -404,14 +411,14 @@ class ProfileWizard(BasePage):
         self.content_slot.content = content
         self.submit_btn.visible = button_text is not None
         self.submit_btn.content = button_text or ""
-        self.cancel_btn.visible = self.user_profile_mode and button_text is not None
+        self.cancel_btn.visible = self.user_profile_mode != ProfileWizzardMode.AIContact and button_text is not None
         self.update()
 
     def on_submit(self, e=None):
-        if self.user_profile_mode and not self.profile_page.validate_name():
+        if self.user_profile_mode != ProfileWizzardMode.AIContact and not self.profile_page.validate_name():
             return
         profile = self.profile_page.get_values()
-        if self.user_profile_mode:
+        if self.user_profile_mode != ProfileWizzardMode.AIContact:
             # the entered name is stored in the "name" key of the profile json in user_data
             Hub.update_user_data({"profile": json.dumps(profile)})
             self.navigator("contacts")
@@ -429,12 +436,16 @@ class ProfileWizard(BasePage):
         self._show(ProgressPage())
 
     def on_enter(self, **kwargs):
-        self.user_profile_mode = kwargs.get("user_profile_mode", False)
+        self.user_profile_mode = kwargs.get("user_profile_mode", ProfileWizzardMode.AIContact)
 
-        if self.user_profile_mode:
+        if self.user_profile_mode != ProfileWizzardMode.AIContact:
             data = Hub.get_user_data()
             profile = data["profile"] if data and "profile" in data else None
             self.profile_page = WizardProfilePage(profile=profile, user_profile=True)
+
+            if self.user_profile_mode == ProfileWizzardMode.UserSetup:
+                self.cancel_btn.content = "Skip"
+
             self._show(self.profile_page, "Save")
         else:
             self.profile_page = WizardProfilePage(simple=True)
@@ -442,7 +453,7 @@ class ProfileWizard(BasePage):
             self._show(self.profile_page, "Create")
 
     def on_leave(self):
-        if not self.user_profile_mode:
+        if self.user_profile_mode == ProfileWizzardMode.AIContact:
             Hub.unregister_incomming_message(self.on_incomming_message)
 
     def on_incomming_message(self, msg: dict):

@@ -26,7 +26,7 @@ services:
       - hub_db:/hub/db
       - hub_images:/hub/images
       - hub_voices:/hub/voices
-      - ../characters/voices:/hub/predefined_voices:ro
+      - ../characters:/hub/characters:ro
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
       - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/hub/models

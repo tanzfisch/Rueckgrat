@@ -54,9 +54,25 @@ IMAGE_STYLES = {
         "positive": "comic book illustration, bold black outlines, cel shading, flat vibrant colors, halftone texture, graphic novel style",
         "negative": "photograph, photorealistic, soft gradients, blurry lines, 3D render, muted colors, film grain, text, eye artifacts",
     },
-    "hentai": {
-        "positive": "anime illustration, adult character, mature proportions, clean lineart, cel shading, pastel palette, large eyes",
-        "negative": "photograph, photorealistic, 3D render, western comic, rough sketch, child, loli, chibi, deformed anatomy, text, eye artifacts",
+    "anime": {
+        "positive": "anime illustration, clean lineart, cel shading, vibrant colors, expressive eyes, detailed anime background",
+        "negative": "photograph, photorealistic, 3D render, western comic, rough sketch, nsfw, nudity, sexual, child, loli, chibi, deformed anatomy, text, eye artifacts",
+    },
+    "origami": {
+        "positive": "origami paper craft figure, folded paper, crisp creases, paper texture, soft studio light, papercraft diorama",
+        "negative": "photograph of a real person, skin texture, painting, cartoon, 3D render, plastic, glossy, text, eye artifacts",
+    },
+    "charcoal_sketch": {
+        "positive": "charcoal sketch portrait, expressive strokes, grainy shading, monochrome, textured paper, fine art drawing",
+        "negative": "color, photograph, photorealistic, digital art, clean lineart, cel shading, 3D render, glossy, text, eye artifacts",
+    },
+    "watercolor": {
+        "positive": "watercolor painting portrait, soft washes, bleeding pigments, visible paper grain, loose brushwork, light airy palette",
+        "negative": "photograph, photorealistic, hard outlines, cel shading, 3D render, digital art, oversaturated, glossy, text, eye artifacts",
+    },
+    "classic_oil_portrait": {
+        "positive": "classic oil painting portrait, old master style, rich chiaroscuro, visible brushstrokes, canvas texture, dark warm background",
+        "negative": "photograph, photorealistic, modern clothing, cartoon, anime, flat colors, 3D render, neon, text, eye artifacts",
     },
 }
 
@@ -142,15 +158,17 @@ class ContactImagePromptCompiler:
                     assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "face"], ""))
                     assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "skin"], ""))
 
-                user_profile = json.loads(self.user_data["profile"])
-                user_gender = Utils.get_nested_value(user_profile, ["gender"], "")
-                user_age = self.age_to_text(int(Utils.get_nested_value(user_profile, ["age"], "")))
-                user_hair_color = Utils.get_nested_value(user_profile, ["hair_color"], "")
-                user_eye_color = Utils.get_nested_value(user_profile, ["eye_color"], "")
-                user_ethnicity = Utils.get_nested_value(user_profile, ["ethnicity"], "")
-                user_body_type = Utils.get_nested_value(user_profile, ["body_type"], "")
-                user_def = f"{user_gender}, {user_age}, {user_body_type}, {user_ethnicity}, {user_hair_color} hair, {user_eye_color} eyes, "
-                user_stack.append(user_def)
+                # only needed when the user is in the picture. a new user has no user data yet
+                if self.show_user and self.user_data:
+                    user_profile = json.loads(self.user_data["profile"])
+                    user_gender = Utils.get_nested_value(user_profile, ["gender"], "")
+                    user_age = self.age_to_text(int(Utils.get_nested_value(user_profile, ["age"], "")))
+                    user_hair_color = Utils.get_nested_value(user_profile, ["hair_color"], "")
+                    user_eye_color = Utils.get_nested_value(user_profile, ["eye_color"], "")
+                    user_ethnicity = Utils.get_nested_value(user_profile, ["ethnicity"], "")
+                    user_body_type = Utils.get_nested_value(user_profile, ["body_type"], "")
+                    user_def = f"{user_gender}, {user_age}, {user_body_type}, {user_ethnicity}, {user_hair_color} hair, {user_eye_color} eyes, "
+                    user_stack.append(user_def)
 
                 if self.context:
                     assistant_stack.append(Utils.get_nested_value(self.context, ["assistant", "head"], ""))

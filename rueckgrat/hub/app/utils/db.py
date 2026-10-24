@@ -1090,6 +1090,21 @@ class ChatDB:
                 logger.error(f"failed looking up voice hash for user {user_id}: {e}")
         return None
 
+    def find_user_voice(self, user_id: int, value: str) -> str | None:
+        """id of this user's voice whose id or sha256 content hash is value, or None. an exact id wins"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id FROM voices WHERE user_id = ? AND (id = ? OR content_hash = ?) ORDER BY id = ? DESC LIMIT 1",
+                    (user_id, value, value, value),
+                )
+                row = cursor.fetchone()
+                return row["id"] if row else None
+            except Exception as e:
+                logger.error(f"failed looking up voice {value} for user {user_id}: {e}")
+        return None
+
     def find_predefined_voice(self, user_id: int, predefined_id: str, content_hash: str) -> str | None:
         """id of the user's stored copy of a predefined voice, or None.
         old rows without origin (NULL) still match by hash, a row with the exact predefined id wins"""
