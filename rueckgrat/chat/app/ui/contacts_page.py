@@ -4,7 +4,7 @@ from pathlib import Path
 from app.ui.theme import STYLES
 
 from app.ui import BasePage
-from app.ui.widgets import OneLineBubble, ContactCard, Header, MessageBox
+from app.ui.widgets import OneLineBubble, ContactCard, ContactInfo, Header, MessageBox
 from app.utils import Hub, Contact, Paths
 from app.common import get_logger, Utils
 
@@ -109,6 +109,13 @@ class ContactsPage(BasePage):
                         ft.Column(
                             spacing=0,
                             controls=[
+                                ft.IconButton(
+                                    icon=ft.Icons.INFO_OUTLINE,
+                                    width=40,
+                                    height=40,
+                                    on_click=lambda e, c=contact: ContactInfo.show(self.page, c),
+                                    style=STYLES["icon_button"]["style"],
+                                ),
                                 ft.IconButton(
                                     icon=ft.Icons.EDIT,
                                     width=40,

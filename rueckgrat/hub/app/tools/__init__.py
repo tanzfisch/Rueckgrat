@@ -10,6 +10,8 @@ from .date_calc_tool import DateCalcTool
 from .wikipedia_tool import WikipediaTool
 from .weather_tool import WeatherTool
 from .fetch_url_tool import FetchUrlTool
+from .remember_tool import RememberTool
+from .search_memory_tool import SearchMemoryTool
 
 __all__ = [
     "ToolRegistry",
@@ -24,5 +26,7 @@ __all__ = [
     "DateCalcTool",
     "WikipediaTool",
     "WeatherTool",
-    "FetchUrlTool"
+    "FetchUrlTool",
+    "RememberTool",
+    "SearchMemoryTool"
 ]

@@ -392,6 +392,14 @@ def delete_contact(contact_id: int, username: str = Depends(get_current_user)):
     else:
         return {"status": "failed to delete contact"}
 
+@app.get("/contacts/{contact_id}/memories")
+def get_contact_memories(contact_id: int, username: str = Depends(get_current_user)):
+    """what the contact remembered of the logged in user (remember tool), texts only"""
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
+    return {"memories": app.state.db.get_contact_memories(user_id, contact_id)}
+
 ########### conversations handling
 @app.get("/contacts/{contact_id}/conversations")
 def get_conversations(contact_id: int, username: str = Depends(get_current_user)):

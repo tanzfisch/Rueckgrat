@@ -11,6 +11,8 @@ from .date_calc_tool import DateCalcTool
 from .wikipedia_tool import WikipediaTool
 from .weather_tool import WeatherTool
 from .fetch_url_tool import FetchUrlTool
+from .remember_tool import RememberTool
+from .search_memory_tool import SearchMemoryTool
 
 from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
@@ -36,6 +38,8 @@ class ToolRegistry:
         self._register_tool(WikipediaTool)
         self._register_tool(WeatherTool)
         self._register_tool(FetchUrlTool)
+        self._register_tool(RememberTool)
+        self._register_tool(SearchMemoryTool)
 
         temp = ", ".join(self.tools)
         logger.debug(f"registered tools: {temp}")

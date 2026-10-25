@@ -5,9 +5,14 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import sqlite_vec
 
 from app.common import get_logger
 logger = get_logger()
+
+# no embedding model yet: 384 fits the common small sentence embedders (all-MiniLM-L6-v2, bge-small, e5-small).
+# a different model with another size needs this changed and contact_memory_vectors dropped (CREATE ... IF NOT EXISTS keeps the old one)
+MEMORY_EMBEDDING_DIM = 384
 
 class ChatDB:
     def __init__(self, db_path):
@@ -153,6 +158,35 @@ class ChatDB:
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
 
+        # what a contact remembers (remember tool), per user and contact. embedding stays NULL until there is search
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS contact_memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            contact_id INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            embedding BLOB DEFAULT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+        )""")
+
+        # nearest neighbour index of the memory embeddings (sqlite-vec), one partition per contact. memory_id is contact_memories.id.
+        # a virtual table can't have foreign keys: the trigger removes the vector with its memory, also in the contact/user cascade
+        cursor.execute(f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS contact_memory_vectors USING vec0(
+            memory_id INTEGER PRIMARY KEY,
+            contact_id INTEGER PARTITION KEY,
+            user_id INTEGER,
+            embedding FLOAT[{MEMORY_EMBEDDING_DIM}] distance_metric=cosine
+        )""")
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS contact_memory_vectors_delete AFTER DELETE ON contact_memories
+            BEGIN
+                DELETE FROM contact_memory_vectors WHERE memory_id = OLD.id;
+            END
+        """)
+
         # the db is opened once at hub start: no job survives a restart, so a row still pending was interrupted
         cursor.execute("UPDATE generated_images SET status = 'failed' WHERE status = 'pending'")
         if cursor.rowcount:
@@ -171,6 +205,13 @@ class ChatDB:
     def get_connection(self):
         conn = sqlite3.connect(self.db_path)
         conn.execute("PRAGMA foreign_keys = ON")
+        # on every connection: the delete trigger needs vec0 wherever contacts, users or memories are deleted
+        try:
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+        except Exception as e:
+            logger.error(f"failed loading sqlite-vec, no memory vector index: {e}")
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -899,6 +940,81 @@ class ChatDB:
                 logger.error(f"failed deleting contact: {e}")
 
         return False
+
+    def add_contact_memory(self, user_id: int, contact_id: int, text: str) -> int | None:
+        """stores one memory of a contact, returns its id. None if the contact is not the user's:
+        the ownership check is part of the insert, a foreign contact_id inserts nothing"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute("""
+                    INSERT INTO contact_memories (user_id, contact_id, text)
+                    SELECT user_id, id, ? FROM contacts WHERE id = ? AND user_id = ?
+                """, (text, contact_id, user_id))
+                conn.commit()
+                return cursor.lastrowid if cursor.rowcount else None
+            except Exception as e:
+                logger.error(f"failed adding contact memory: {e}")
+        return None
+
+    def set_memory_embedding(self, user_id: int, memory_id: int, embedding: list[float]) -> bool:
+        """stores or replaces the vector of one of the user's memories in the index.
+        False for foreign and unknown memories, a wrong dimension or without sqlite-vec"""
+        if len(embedding) != MEMORY_EMBEDDING_DIM:
+            logger.error(f"memory embedding not stored (dimension {len(embedding)} of {MEMORY_EMBEDDING_DIM})")
+            return False
+        with self.get_connection() as conn:
+            try:
+                # vec0 has no upsert: delete the old vector, insert the new one in the same transaction
+                conn.execute("DELETE FROM contact_memory_vectors WHERE memory_id = ? AND user_id = ?", (memory_id, user_id))
+                cursor = conn.execute("""
+                    INSERT INTO contact_memory_vectors (memory_id, contact_id, user_id, embedding)
+                    SELECT m.id, m.contact_id, m.user_id, ? FROM contact_memories m
+                    JOIN contacts c ON c.id = m.contact_id
+                    WHERE m.id = ? AND m.user_id = ? AND c.user_id = ?
+                """, (sqlite_vec.serialize_float32(embedding), memory_id, user_id, user_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"failed storing memory embedding: {e}")
+        return False
+
+    def nearest_contact_memories(self, user_id: int, contact_id: int, embedding: list[float], k: int = 5) -> list[dict]:
+        """the k memories of this contact closest to embedding, closest first (cosine distance).
+        only searches the contact's partition, empty for foreign and unknown contacts alike"""
+        if len(embedding) != MEMORY_EMBEDDING_DIM:
+            return []
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute("""
+                    WITH knn AS (
+                        SELECT memory_id, distance FROM contact_memory_vectors
+                        WHERE embedding MATCH ? AND k = ? AND contact_id = ? AND user_id = ?
+                    )
+                    SELECT m.id, m.text, m.created_at, knn.distance FROM knn
+                    JOIN contact_memories m ON m.id = knn.memory_id
+                    JOIN contacts c ON c.id = m.contact_id
+                    WHERE m.user_id = ? AND c.user_id = ?
+                    ORDER BY knn.distance
+                """, (sqlite_vec.serialize_float32(embedding), int(k), contact_id, user_id, user_id, user_id)).fetchall()
+                return [dict(row) for row in rows]
+            except Exception as e:
+                logger.error(f"failed searching memory embeddings: {e}")
+        return []
+
+    def get_contact_memories(self, user_id: int, contact_id: int) -> list[dict]:
+        """all memories of this contact, newest first, without vectors. empty for foreign and unknown contacts alike"""
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute("""
+                    SELECT m.id, m.text, m.created_at FROM contact_memories m
+                    JOIN contacts c ON c.id = m.contact_id
+                    WHERE m.contact_id = ? AND m.user_id = ? AND c.user_id = ?
+                    ORDER BY m.created_at DESC, m.id DESC
+                """, (contact_id, user_id, user_id)).fetchall()
+                return [dict(row) for row in rows]
+            except Exception as e:
+                logger.error(f"failed reading contact memories: {e}")
+        return []
 
     def get_message_count_by_conversation(self, conversation_id: int):
         with self.get_connection() as conn:

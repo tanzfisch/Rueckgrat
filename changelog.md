@@ -5,6 +5,7 @@ Changelog
 ------
 
 - #129 adding default assistant and more image styles
+- #12 save and search memories per contact using fastembed
 
 0.20.0
 ------

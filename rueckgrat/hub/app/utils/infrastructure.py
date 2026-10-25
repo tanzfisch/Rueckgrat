@@ -95,6 +95,9 @@ class Infrastructure:
         if not "speech_to_text" in self.node_by_type:
             logger.warning("couldn't find speech_to_text recognizer")
 
+        if not "text_to_embedding" in self.node_by_type:
+            logger.warning("couldn't find text_to_embedding service, no memory vectors and no memory search")
+
     def get_status(self) -> StatusResult:
         # the websocket supervisor already tracks every node, no need to poll them over http
         return StatusResult([
@@ -250,6 +253,24 @@ class Infrastructure:
             return response.json().get("text", "")
         except Exception as e:
             logger.error(f"failed to get a stt response {repr(e)}")
+            return None
+
+    def embed(self, texts: list[str], query: bool = False) -> Optional[list[list[float]]]:
+        """text embeddings from the embedding node, one vector per text, or None.
+        query: True for search queries, False for texts that are stored"""
+        if not "text_to_embedding" in self.node_by_type:
+            return None    # warned once at startup
+
+        node = self.node_by_type["text_to_embedding"]
+        url = f"http://{node.addr}:{node.port}/embed"
+        try:
+            response = requests.post(url, json={"texts": texts, "query": query}, timeout=30)
+            if response.status_code != 200:
+                logger.error(f"failed embed request: {response.status_code} {response.reason}")
+                return None
+            return response.json().get("vectors")
+        except Exception as e:
+            logger.error(f"failed to get an embed response {repr(e)}")
             return None
 
     def drop_voice(self, voice: str) -> bool:

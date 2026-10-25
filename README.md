@@ -28,11 +28,21 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - image generation via Diffusers / SDXL
     - STT using Silero VAD + faster-whisper
     - TTS using Chatterbox
+    - text embeddings using fastembed
 - GPU: NVIDIA and AMD. Intel GPUs are not supported/tested.
 - AI tools
     - **websearch** — search the web when requested or needed
+    - **wikipedia** — search wikipedia when requested or needed
     - **generate_image** — generate an image on request or on its own
     - **take_photo** — generate a photo of self, user, or both from current context
+    - **remember** — keep a short fact about the user, per contact
+    - **search_memory** — find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub)
+    - **calculate** — calculate given expression
+    - **convert** — conversion between numerous units
+    - **current_time** — current time for given location
+    - **date_calc** — date calculations
+    - **fetch_url** — fetch content for given URL
+    - **weather** — weather forcast for given location
 
 ## Chat client
 
@@ -64,7 +74,8 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen, TTS, STT), an optional Cloudflare tunnel and an optional Android APK of the chat client.
+The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen, TTS, STT, text embeddings), an optional Cloudflare tunnel and an optional Android APK of the chat client.
+The Cloudflare tunnel token input is hidden; after pasting it the installer shows `********` and the number of characters received.
 
 **Note: Every machine needs sudo with the same username, plus `ssh` and `rsync`; target hosts must also run an SSH server:**
 
@@ -169,6 +180,7 @@ Following an example setup that worked fine for the dev
 | LLM (Dolphin Venice Edition Q4) | AMD RX 7900 XTX 24GB | ~22 GB |
 | Image generation (DreamShaperXL_Turbo_V2-SFW) | AMD RX 9060 XT 16GB | ~12-13 GB |
 | TTS (Chatterbox) | NVIDIA RTX 3080 10GB | ~4-5 GB |
+| Text embeddings (bge-small-en-v1.5) | CPU | 0 GB |
 
 See [config_example.json](rueckgrat/config/config_example.json) for the dev setup.
 

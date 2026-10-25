@@ -1187,6 +1187,24 @@
     "install_path": "stt/faster-whisper-base"
   },
 
+  "bge-small-en-v1.5": {
+    "description": "BAAI bge-small-en-v1.5 text embeddings (quantized onnx by Qdrant), 384 dimensions, English",
+    "type": "embedding",
+    "compatibility": ["fastembed"],
+    "comment": "memory search of the hub. loaded offline from install_path, sources pinned to the repo revision",
+    "files": [
+      { "source": "https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/aa8f8b060edb00e03bfdd08813a2949946c8ba55/model_optimized.onnx", "path": "" },
+      { "source": "https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/aa8f8b060edb00e03bfdd08813a2949946c8ba55/tokenizer.json", "path": "" },
+      { "source": "https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/aa8f8b060edb00e03bfdd08813a2949946c8ba55/config.json", "path": "" },
+      { "source": "https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/aa8f8b060edb00e03bfdd08813a2949946c8ba55/special_tokens_map.json", "path": "" },
+      { "source": "https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/aa8f8b060edb00e03bfdd08813a2949946c8ba55/tokenizer_config.json", "path": "" }
+    ],
+    "embedding": {
+      "fastembed_model": "BAAI/bge-small-en-v1.5",
+      "dims": 384
+    },
+    "install_path": "embeddings/bge-small-en-v1.5"
+  },
   "faceid-plusv2-sdxl": {
     "description": "IP-Adapter FaceID PlusV2 for SDXL: adapter, its LoRA, CLIP ViT-H image encoder, insightface buffalo_l (detection + recognition only)",
     "type": "adapter",
