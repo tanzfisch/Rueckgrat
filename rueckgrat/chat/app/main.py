@@ -22,7 +22,7 @@ from app.ui import (
 from app.ui.theme import apply_theme
 from app.ui.widgets import ImageOverlay, MessageBox, ConnectionBanner
 
-from app.utils import Paths
+from app.utils import Paths, Notifier
 from app.utils.config import RueckgratConfig
 from app.utils.hub import Hub
 
@@ -165,7 +165,8 @@ def get_image(image_filename: str) -> str:
     try:
         image_path = Paths.get_image_path() / image_filename
         if not image_path.exists():
-            Hub.download_file(f"images/{image_filename}", Paths.get_image_path())
+            Hub.download_file(f"images/{image_filename}", Paths.get_image_path(),
+                              callback=lambda: Notifier.notify("Image ready", "A new image was generated"))
     except Exception as e:
         logger.error(f"failed to handle incomming image: {repr(e)}")
 
@@ -176,6 +177,12 @@ def on_incomming_message(msg: dict):
             filename = msg["image"].get("filename")
             if filename:
                 get_image(filename)
+        if "generated_image" in msg:   # result of the image page
+            filename = msg["generated_image"].get("filename")
+            if filename:
+                get_image(filename)
+        if "chat" in msg and msg["chat"].get("role") == "assistant":
+            Notifier.notify("Reply ready", msg["chat"].get("content", ""))
         if "error" in msg:
             error = msg["error"]
             logger.error(f"[{error['src']}] {error['msg']}")
@@ -205,6 +212,7 @@ def main():
     def flet_main(page: ft.Page):
         apply_theme(page)
         Text_To_Speech.attach(page)
+        Notifier.attach(page)
         page.padding = 0
         App(page, config.has_config())
 

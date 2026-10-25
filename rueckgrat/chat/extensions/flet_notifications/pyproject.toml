@@ -1,0 +1,18 @@
+# Local Flet extension: plain Android notifications ("reply ready", "image ready").
+# Picked up by `flet build apk` through [tool.flet.dev_packages] in ../../pyproject.toml.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flet-notifications"
+version = "0.1.0"
+description = "Flet extension: Android notifications"
+requires-python = ">=3.10"
+dependencies = ["flet>=1.0.4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"flutter.flet_notifications" = ["**/*"]
