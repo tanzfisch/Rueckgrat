@@ -74,11 +74,11 @@ class ImageGenTool(Tool):
     def prompt(cls) -> str: 
         return """
 IMAGE GENERATION:
+Use when the user asks you to generate, create, or visualize a picture.
 
-When the user asks you to generate/create/visualize/etc a picture, portrait, or image you can generate one by including the following json recipe in your response
+Parameters:
+- positive_prompt (string, required): the image description
 
-{
-  "tool": "generate_image",
-  "positive_prompt": "the image generation prompt"
-}
+Example:
+{"tool": "generate_image", "positive_prompt": "a red bicycle in a sunny park"}
 """

@@ -103,11 +103,11 @@ class TakePhotoTool(Tool):
     def prompt(cls) -> str: 
         return """
 TAKE PHOTO:
+Use when the user wants a photo of you, themselves, or both in the current situation.
 
-You can take a picture (photograph, selfie, snap shot) of yourself, the user or both together in the current situation by including following json recipe in your response
+Parameters:
+- subject (string, required): "self", "user", or "both"
 
-{
-  "tool": "take_photo",
-  "subject": "self" | "user" | "both"
-}
+Example:
+{"tool": "take_photo", "subject": "both"}
 """

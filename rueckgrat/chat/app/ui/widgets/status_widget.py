@@ -77,7 +77,7 @@ class StatusWidget(ft.Row):
                 width=20,
                 height=20,
                 data={"id": "flatButton"},
-                on_click=lambda e, u=href: e.page.launch_url(u),
+                on_click=lambda e, u=href: e.page.run_task(ft.UrlLauncher().launch_url, u),
             )
             self.btn_row.controls.append(btn)
             logger.debug(f"Added button for {domain}")

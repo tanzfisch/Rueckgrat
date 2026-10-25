@@ -79,11 +79,12 @@ class FetchUrlTool(WebsearchTool):
     def prompt(cls) -> str:
         return """
 FETCH_URL:
+Use when the user gives a URL and wants to know what is on the page.
 
-Use the fetch_url tool when the user gives a link (URL) and wants to know what is on that page, e.g. "summarize this", "what does this article say". url is the full link from the message, focus is optional (what to pay attention to, leave it out for a general summary):
-{
-  "tool": "fetch_url",
-  "url": "https://example.com/article",
-  "focus": "release date"
-}
+Parameters:
+- url (string, required): the full URL
+- focus (string, optional): what to focus on (omit for general summary)
+
+Example:
+{"tool": "fetch_url", "url": "https://example.com/article", "focus": "release date"}
 """

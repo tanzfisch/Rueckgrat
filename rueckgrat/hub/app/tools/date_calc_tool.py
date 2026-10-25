@@ -96,19 +96,17 @@ class DateCalcTool(Tool):
     def prompt(cls) -> str:
         return """
 DATE CALCULATION:
+Use for days between two dates or a date plus/minus a number of days. Dates are YYYY-MM-DD or "today".
 
-Use the date_calc tool for days between two dates ("how many days until Christmas") or a date plus/minus a number of days ("what date is 90 days from now"). Dates are YYYY-MM-DD or "today", timezone decides what "today" is. Either
-{
-  "tool": "date_calc",
-  "start": "today",
-  "end": "2026-12-25",
-  "timezone": "Pacific/Auckland"
-}
-or
-{
-  "tool": "date_calc",
-  "start": "today",
-  "days": 90,
-  "timezone": "Pacific/Auckland"
-}
+Parameters:
+- start (string, required): start date
+- end (string, optional): end date (for difference)
+- days (number, optional): number of days to add/subtract
+- timezone (string, required): IANA name or city
+
+Example (difference):
+{"tool": "date_calc", "start": "today", "end": "2026-12-25", "timezone": "Pacific/Auckland"}
+
+Example (offset):
+{"tool": "date_calc", "start": "today", "days": 90, "timezone": "Pacific/Auckland"}
 """
