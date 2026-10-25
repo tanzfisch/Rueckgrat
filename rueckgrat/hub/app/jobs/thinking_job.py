@@ -59,8 +59,7 @@ THE QUERY
 {request.content}
 """            
             messages.append({"role": "user", "content": query})
-
-            logger.debug(f"thinking prompt:\n{Utils.pretty_print(messages)}")
+            # logger.debug(f"thinking prompt:\n{Utils.pretty_print(messages)}")
 
             response_content = self.infrastructure.chat(
                 messages=messages,

@@ -50,10 +50,11 @@ class SearchMemoryTool(Tool):
     def prompt(cls) -> str:
         return """
 SEARCH MEMORY:
+Use before answering any question about the user (name, location, family, work, preferences, past facts). Do not guess.
 
-Use the search_memory tool before you answer any question about the user themselves, even when it doesn't mention memory: their name, where they live, age, family and friends, work, plans, preferences, or something they asked you to remember ("do you know where I live?", "what's my sister called?", "what do I like to eat?"). Don't guess or say you don't know before you searched. The query is a short description of what you look for (max 200 characters). You get up to 5 matching memories with their dates, closest first:
-{
-  "tool": "search_memory",
-  "query": "where the user lives"
-}
+Parameters:
+- query (string, required): what to look for (max 200 characters)
+
+Example:
+{"tool": "search_memory", "query": "where the user lives"}
 """

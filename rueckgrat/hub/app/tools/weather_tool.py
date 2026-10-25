@@ -96,10 +96,11 @@ class WeatherTool(Tool):
     def prompt(cls) -> str:
         return """
 WEATHER:
+Use for current weather and 3-day forecast. Prefer this over websearch for weather.
 
-Use the weather tool for current weather and the 3 day forecast of a place (prefer it over websearch for weather). location is a city or place name:
-{
-  "tool": "weather",
-  "location": "Auckland"
-}
+Parameters:
+- location (string, required): city or place name
+
+Example:
+{"tool": "weather", "location": "Auckland"}
 """

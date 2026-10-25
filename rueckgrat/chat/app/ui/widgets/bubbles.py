@@ -7,10 +7,10 @@ from app.common import get_logger
 logger = get_logger()
 
 
-def _open_link(e):
+async def _open_link(e):
     url = e.data
     if url:
-        e.page.launch_url(url)
+        await ft.UrlLauncher().launch_url(url)
 
 
 class ChatBubble(ft.Container):

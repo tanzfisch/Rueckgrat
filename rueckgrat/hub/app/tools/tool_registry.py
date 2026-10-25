@@ -133,9 +133,9 @@ EXAMPLES:
 
 You requested these tools. Their full instructions:
 {tools}
+
 HOW TO CALL:
-Your answer MUST be the tool call as ONE line of JSON per call, exactly in this format, with the values for the query filled in:
-{examples}
+Your answer MUST be the tool call as ONE line of JSON per call, exactly in the format shown above, with the values for the query filled in.
 Writing about a call does nothing, only a JSON line runs the tool. Do not describe the call in words, no headings like "TOOL CALL:", no analysis.
 """
 

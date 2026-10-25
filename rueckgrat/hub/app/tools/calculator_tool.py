@@ -109,10 +109,14 @@ class CalculatorTool(Tool):
     def prompt(cls) -> str:
         return """
 CALCULATE:
+Use for any arithmetic or math (sums, percentages, tips, powers, roots, trigonometry).
+Operators: + - * / // % ** ( )
+Functions: sqrt, abs, round, min, max, floor, ceil, exp, ln, log10, log2, sin, cos, tan (radians), factorial
+Constants: pi, e
 
-Use the calculate tool for any arithmetic or math you would otherwise do in your head (sums, percentages, tips, splitting a bill, powers, roots, trigonometry). Operators + - * / // % ** ( ), functions sqrt, abs, round, min, max, floor, ceil, exp, ln, log10, log2, sin, cos, tan (radians), factorial, constants pi and e:
-{
-  "tool": "calculate",
-  "expression": "0.15 * 84.50"
-}
+Parameters:
+- expression (string, required): the math expression to evaluate
+
+Example:
+{"tool": "calculate", "expression": "0.15 * 84.50"}
 """

@@ -88,11 +88,12 @@ class WikipediaTool(Tool):
     def prompt(cls) -> str:
         return """
 WIKIPEDIA:
+Use for a quick encyclopedic summary of a well-known person, place, thing, or event. Not for news or current values.
 
-Use the wikipedia tool for a quick encyclopedic summary of a well known person, place, thing, concept or historic event (not for news or current values, use websearch for those). lang is the Wikipedia language code, default "en":
-{
-  "tool": "wikipedia",
-  "query": "Eiffel Tower",
-  "lang": "en"
-}
+Parameters:
+- query (string, required): the topic
+- lang (string, optional): Wikipedia language code, default "en"
+
+Example:
+{"tool": "wikipedia", "query": "Eiffel Tower", "lang": "en"}
 """

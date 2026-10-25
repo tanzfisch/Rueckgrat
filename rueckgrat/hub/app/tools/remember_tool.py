@@ -54,10 +54,11 @@ class RememberTool(Tool):
     def prompt(cls) -> str:
         return """
 REMEMBER:
+Use to store one short fact for later conversations. One fact per call, third person, max 200 characters.
 
-Use the remember tool to keep one short fact for later conversations: something the user told you about themselves, their life, plans or preferences, or something important between you two. One fact per call, short and in third person (max 200 characters):
-{
-  "tool": "remember",
-  "text": "The user's sister is called Anna and lives in Hamburg"
-}
+Parameters:
+- text (string, required): the fact to remember
+
+Example:
+{"tool": "remember", "text": "The user's sister is called Anna and lives in Hamburg"}
 """

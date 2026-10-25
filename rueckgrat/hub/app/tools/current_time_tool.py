@@ -140,10 +140,11 @@ class CurrentTimeTool(Tool):
     def prompt(cls) -> str:
         return """
 CURRENT TIME:
+Use when you need the current date, time, or weekday in a location.
 
-Use the current_time tool when you need the current date, time or weekday somewhere, e.g. "what time is it in Tokyo". timezone is an IANA name ("Europe/Berlin") or a city ("Auckland", "Munich", "San Francisco"):
-{
-  "tool": "current_time",
-  "timezone": "Pacific/Auckland"
-}
+Parameters:
+- timezone (string, required): IANA name ("Pacific/Auckland") or city ("Auckland", "Munich")
+
+Example:
+{"tool": "current_time", "timezone": "Pacific/Auckland"}
 """
