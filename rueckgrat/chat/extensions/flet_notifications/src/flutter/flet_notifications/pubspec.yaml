@@ -1,0 +1,22 @@
+name: flet_notifications
+description: Flet extension - Android notifications
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.2.3 <4.0.0'
+  flutter: ">=3.44.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flet: ^1.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        # a few lines of Java instead of flutter_local_notifications, which needs core library
+        # desugaring in the app's build.gradle (the flet build template does not enable it)
+        package: com.rueckgrat.flet_notifications
+        pluginClass: FletNotificationsPlugin

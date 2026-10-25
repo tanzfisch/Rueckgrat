@@ -1,0 +1,30 @@
+group 'com.rueckgrat.flet_notifications'
+version '1.0'
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.6.0'
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'com.rueckgrat.flet_notifications'
+    compileSdk 35
+
+    defaultConfig {
+        minSdkVersion 21
+    }
+}

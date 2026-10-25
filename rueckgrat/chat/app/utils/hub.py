@@ -70,9 +70,9 @@ class Hub:
         cls.download_queue.stop()
 
     @classmethod
-    def download_file(cls, image_path: str, download_path: str, max_retry: int = 5):
+    def download_file(cls, image_path: str, download_path: str, max_retry: int = 5, callback=None):
         url = f"{cls.url}/downloads/{image_path}"
-        cls.download(url, download_path, max_retry=max_retry)
+        cls.download(url, download_path, max_retry=max_retry, callback=callback)
 
     @classmethod
     def download(cls, url: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
