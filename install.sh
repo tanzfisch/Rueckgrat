@@ -615,6 +615,10 @@ setup() {
                 services_json=$(jq '. + [{type: "speech_to_text", name: "stt"}]' <<< "$services_json")
             fi
 
+            if $INSTALL_EMBEDDING; then
+                services_json=$(jq '. + [{type: "text_to_embedding", name: "embedding"}]' <<< "$services_json")
+            fi
+
             host_json=$(jq \
                 --arg port "$NODE_PORT" \
                 --argjson services "$services_json" \
@@ -729,6 +733,8 @@ select_cloudflare() {
         echo "     no token, no tunnel"
         return
     fi
+    # the input is hidden, so confirm that something arrived without showing it
+    echo -e "\e[1A\e[K     Cloudflare tunnel token: ******** (${#token} characters)"
 
     CLOUDFLARE_JSON=$(jq -nc --arg addr "$cf_addr" --arg hub_addr "$hub_addr" --arg hub_port "$hub_port" --arg token "$token" \
         '{enabled: true, addr: $addr, hub_addr: $hub_addr, hub_port: ($hub_port | tonumber), token: $token}')
@@ -743,8 +749,8 @@ select_tts_model() {
     TTS_MODEL="chatterbox_multilingual"
 
     # same index style as the llm selection, 1 (english) is the default
-    echo "         1) ⭐ chatterbox (English only)"
-    echo "         2) chatterbox_multilingual (23 languages)"
+    echo "         1) chatterbox (English only)"
+    echo "         2) ⭐ chatterbox_multilingual (23 languages)"
     while true; do
         read_tty "         📋 Select tts model by index [2]: " "2" $YES
         [[ "$REPLY" == "1" || "$REPLY" == "2" ]] && break
@@ -767,6 +773,7 @@ select_components() {
     INSTALL_TTS=false
     TTS_MODEL="chatterbox_multilingual"
     INSTALL_STT=false
+    INSTALL_EMBEDDING=false
     REGISTRY_JSON="${REGISTRY_JSON:-$WORKING_DIR/rueckgrat/node/data/registry.json}"
 
     echo "Select components:"
@@ -850,6 +857,10 @@ select_components() {
         read_tty "Install speech to text (faster-whisper) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_STT=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_STT == true ]] && echo '✅' || echo '⚫' )] STT"
+
+        read_tty "Install text embeddings (memory search) on Node? (Y/n): " "Y"
+        [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_EMBEDDING=true
+        echo -e "\e[1A\e[K     [$( [[ $INSTALL_EMBEDDING == true ]] && echo '✅' || echo '⚫' )] Embedding"
     fi
 
     read_tty "Models folder? [$HOST_MODELS_DIR_DEFAULT]: " "$HOST_MODELS_DIR_DEFAULT" $YES
@@ -1006,6 +1017,10 @@ deploy_node() {
 
     if [ "$INSTALL_STT" = true ]; then
         BUILD_ARGS+=(--build-arg INSTALL_STT=true)
+    fi
+
+    if [ "$INSTALL_EMBEDDING" = true ]; then
+        BUILD_ARGS+=(--build-arg INSTALL_EMBEDDING=true)
     fi
 
     if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_TTS" == true ]]; then
@@ -1350,6 +1365,7 @@ parse_host_config() {
     INSTALL_TTS=false
     TTS_MODEL="chatterbox_multilingual"
     INSTALL_STT=false
+    INSTALL_EMBEDDING=false
     INSTALL_CLOUDFLARED=false
     CLOUDFLARE_TUNNEL_TOKEN=""
     CLOUDFLARE_HUB_ADDR=""
@@ -1435,6 +1451,9 @@ parse_host_config() {
             if [[ "$type" == "speech_to_text" || "$name" == "stt" ]]; then
                 INSTALL_STT=true
             fi
+            if [[ "$type" == "text_to_embedding" ]]; then
+                INSTALL_EMBEDDING=true
+            fi
         done < <(echo "$host_config" | jq -c '.node.services // [] | .[]')
 
         while IFS= read -r item; do
@@ -1449,6 +1468,9 @@ parse_host_config() {
             fi
             if [[ "$type" == "speech_to_text" || "$name" == "stt" ]]; then
                 INSTALL_STT=true
+            fi
+            if [[ "$type" == "text_to_embedding" ]]; then
+                INSTALL_EMBEDDING=true
             fi
         done < <(echo "$host_config" | jq -c '.node.modules // [] | .[]')
     fi

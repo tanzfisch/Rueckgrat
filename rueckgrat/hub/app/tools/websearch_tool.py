@@ -378,10 +378,11 @@ class WebsearchTool(Tool):
     def prompt(cls) -> str:
         return """
 WEBSEARCH:
+Use for current, factual, real-time, or location-specific information, or when you need fresh ideas.
 
-Use the websearch tool for any precise, factual, current, latest, real-time, location-specific, or dynamic information (e.g. weather, prices, currencies, crypto, stocks, events, stats, news), or when needing inspiration or direction change to bring fresh ideas in to the conversation. If so, include:
-{
-  "tool": "websearch",
-  "query": "exact search query"
-}
+Parameters:
+- query (string, required): the search query
+
+Example:
+{"tool": "websearch", "query": "current NZD to USD exchange rate"}
 """

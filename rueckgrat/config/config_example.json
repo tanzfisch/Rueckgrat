@@ -21,6 +21,10 @@
           {
             "type": "speech_to_text",
             "name": "stt"
+          },
+          {
+            "type": "text_to_embedding",
+            "name": "embedding"
           }
         ]
       },

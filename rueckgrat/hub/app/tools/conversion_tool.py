@@ -396,13 +396,13 @@ class ConversionTool(Tool):
     def prompt(cls) -> str:
         return """
 CONVERT:
+Use for converting an amount between units: currencies and crypto (live rates), precious metals (gold, silver, platinum, palladium) in any currency, and physical units (length, mass, volume, area, temperature, speed, time, data, energy, power, pressure). Prefer this over websearch for exchange rates and metal prices. One call per conversion.
 
-Use the convert tool for any conversion of an amount from one unit into another: currencies and crypto (live daily exchange rates), prices of gold, silver, platinum and palladium in any currency (per troy ounce, gram, kg, ...), and physical units (length, mass, volume, area, temperature, speed, time, data sizes, energy, power, pressure). Prefer it over websearch for exchange rates and metal prices. One call per conversion:
-{
-  "tool": "convert",
-  "amount": 100,
-  "from": "USD",
-  "to": "EUR"
-}
-Examples for "from"/"to": "USD", "euro", "NZD", "BTC", "oz gold", "g gold", "kg silver", "km", "miles", "lb", "°C", "°F", "l", "gal", "GB", "MB", "kWh", "psi"
+Parameters:
+- amount (number, required): the value to convert
+- from (string, required): source unit (e.g. "USD", "BTC", "oz gold", "km", "°C", "GB")
+- to (string, required): target unit
+
+Example:
+{"tool": "convert", "amount": 100, "from": "USD", "to": "EUR"}
 """

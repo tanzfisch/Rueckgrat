@@ -5,6 +5,7 @@ from typing import Callable, Optional, List
 from websockets.connection import State
 from websockets.exceptions import InvalidStatus
 import ssl
+from datetime import datetime
 import inspect
 from typing import Awaitable, Callable, Union
 
@@ -79,6 +80,9 @@ class WebSocketClient:
         while True:
             try:
                 headers = [("Authorization", f"Bearer {token}")] if token else []
+                if token:
+                    # the user's local clock, so the hub's current_time knows the user's time without a place
+                    headers.append(("X-UTC-Offset", str(int(datetime.now().astimezone().utcoffset().total_seconds() // 60))))
                 if self.uri.startswith("wss://"):
                     ssl_context = ssl.create_default_context()
                     if self.server_cert:

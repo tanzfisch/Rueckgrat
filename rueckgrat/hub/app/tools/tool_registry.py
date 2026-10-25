@@ -11,6 +11,8 @@ from .date_calc_tool import DateCalcTool
 from .wikipedia_tool import WikipediaTool
 from .weather_tool import WeatherTool
 from .fetch_url_tool import FetchUrlTool
+from .remember_tool import RememberTool
+from .search_memory_tool import SearchMemoryTool
 
 from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
@@ -36,6 +38,8 @@ class ToolRegistry:
         self._register_tool(WikipediaTool)
         self._register_tool(WeatherTool)
         self._register_tool(FetchUrlTool)
+        self._register_tool(RememberTool)
+        self._register_tool(SearchMemoryTool)
 
         temp = ", ".join(self.tools)
         logger.debug(f"registered tools: {temp}")
@@ -129,9 +133,9 @@ EXAMPLES:
 
 You requested these tools. Their full instructions:
 {tools}
+
 HOW TO CALL:
-Your answer MUST be the tool call as ONE line of JSON per call, exactly in this format, with the values for the query filled in:
-{examples}
+Your answer MUST be the tool call as ONE line of JSON per call, exactly in the format shown above, with the values for the query filled in.
 Writing about a call does nothing, only a JSON line runs the tool. Do not describe the call in words, no headings like "TOOL CALL:", no analysis.
 """
 

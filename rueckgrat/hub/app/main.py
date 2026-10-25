@@ -185,10 +185,39 @@ class UserCreate(BaseModel):
     invite_token: str | None = None
     email: str | None = None
 
+# every new user starts with this character from the characters folder (mounted read-only, see compose.yml)
+CHARACTERS_DIR = Path("/hub/characters")
+DEFAULT_CHARACTER = "assistant.json"
+
+def add_default_contact(user_id: int):
+    """imports DEFAULT_CHARACTER the way the client's import does and queues its profile image. the image file is
+    named after the hash of its generation request, which only depends on the character, so all users share one file"""
+    try:
+        character = json.loads((CHARACTERS_DIR / DEFAULT_CHARACTER).read_text())
+    except Exception as e:
+        logger.error(f"failed loading default character {DEFAULT_CHARACTER}: {repr(e)}")
+        return
+
+    resolve_contact_voice(user_id, character)
+    contact_id = app.state.db.create_contact(user_id, character["identity"]["name"])
+    if contact_id > 0 and app.state.db.update_contact(user_id, contact_id, character):
+        app.state.job_queue.add(AssistantImageJob(
+            user_id = user_id,
+            contact_id = contact_id,
+            db = app.state.db,
+            infrastructure = app.state.infrastructure,
+            image_type = ImageType.UpperBody,
+            store_image_as = "profile",
+            width = 1024,
+            height = 1024,
+        ))
+
 @app.post("/users")
 def create_user(user: UserCreate):
     if SIGNUP_MODE == "open":
         user_id = app.state.db.create_user(user.user_name, hash_password(user.user_passwd))
+        if user_id:
+            add_default_contact(user_id)
         return {"user_id": user_id}
 
     if not user.invite_token:
@@ -203,6 +232,7 @@ def create_user(user: UserCreate):
         logger.warning(f"signup rejected for {user.user_name}: invite {reason}")
         raise HTTPException(status_code=403, detail=INVITE_ERRORS.get(reason, "invite not accepted"))
 
+    add_default_contact(user_id)
     return {"user_id": user_id}
 
 @app.get("/signup-mode")
@@ -333,6 +363,7 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
     user_id = app.state.db.get_user_id(username)
     if not app.state.db.owns_contact(user_id, contact_id):
         raise HTTPException(status_code=404, detail="contact not found")
+    resolve_contact_voice(user_id, request.contact_data)
     app.state.db.update_contact(user_id, contact_id, request.contact_data)
     
     job = AssistantImageJob(
@@ -360,6 +391,14 @@ def delete_contact(contact_id: int, username: str = Depends(get_current_user)):
         return {"status": "ok", "released_images": released_images}
     else:
         return {"status": "failed to delete contact"}
+
+@app.get("/contacts/{contact_id}/memories")
+def get_contact_memories(contact_id: int, username: str = Depends(get_current_user)):
+    """what the contact remembered of the logged in user (remember tool), texts only"""
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
+    return {"memories": app.state.db.get_contact_memories(user_id, contact_id)}
 
 ########### conversations handling
 @app.get("/contacts/{contact_id}/conversations")
@@ -484,7 +523,7 @@ async def tts_endpoint(websocket: WebSocket, username: str = Depends(get_current
 MAX_VOICE_UPLOAD_BYTES = 20 * 1024 * 1024
 
 # predefined voices from characters/voices in the repo, mounted read only (see compose.yml)
-PREDEFINED_VOICES_DIR = Path("/hub/predefined_voices")
+PREDEFINED_VOICES_DIR = Path("/hub/characters/voices")
 
 def store_voice(user_id: int, data: bytes, predefined_id: str = "") -> str:
     """
@@ -556,6 +595,32 @@ def find_stored_predefined_voice(user_id: int, entry: dict) -> str:
     except Exception:
         content_hash = ""
     return app.state.db.find_predefined_voice(user_id, entry["id"], content_hash) or ""
+
+def resolve_voice_id(user_id: int, value: str) -> str:
+    """
+    turns a voice_id from a contact (e.g. a character file) into the uuid of one of the user's voices, "" if none.
+    order: voices.json id (stored for the user on first use, reused after), then the user's own voice uuid,
+    then the sha256 content hash of one of the user's voices. a voice of another user never matches
+    """
+    if not value:
+        return ""
+    if any(v["id"] == value for v in load_predefined_voices()):
+        try:
+            return store_voice(user_id, read_predefined_voice(value), value)
+        except HTTPException as e:
+            logger.warning(f"failed storing predefined voice {value} for user {user_id}: {e.detail}")
+            return ""
+    voice_id = app.state.db.find_user_voice(user_id, value)
+    if voice_id:
+        return voice_id
+    logger.warning(f"unknown voice {value} for user {user_id}, using no voice")
+    return ""
+
+def resolve_contact_voice(user_id: int, contact_data: dict):
+    """resolves profile.tts_parameters.voice_id in place, so the db always holds the user's uuid"""
+    tts = contact_data.get("profile", {}).get("tts_parameters")
+    if isinstance(tts, dict) and "voice_id" in tts:
+        tts["voice_id"] = resolve_voice_id(user_id, tts["voice_id"])
 
 @app.get("/voices/predefined")
 def get_predefined_voices(username: str = Depends(get_current_user)):
@@ -726,7 +791,10 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                 elif "generate" in data:
                     generate = data["generate"]
                     if "generate_profile" in generate:
-                        job = ContactGeneratorJob(generate["generate_profile"], user_id, app.state.db, app.state.infrastructure)
+                        user_input = generate["generate_profile"]
+                        if "voice_id" in user_input:
+                            user_input["voice_id"] = resolve_voice_id(user_id, user_input["voice_id"])
+                        job = ContactGeneratorJob(user_input, user_id, app.state.db, app.state.infrastructure)
                         app.state.job_queue.add(job)
                     else:
                         logger.error(f"unknown generation request")

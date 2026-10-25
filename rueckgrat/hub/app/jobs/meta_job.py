@@ -221,15 +221,14 @@ class MetaJob(Job):
             contact = self.db.get_contact_by_id(self.request.contact_id)
 
             thinking_response = self._run_thinking()
-            logger.debug(f"thinking response (1):\n{Utils.pretty_print(thinking_response)}")
+            # logger.debug(f"thinking response (1):\n{Utils.pretty_print(thinking_response)}")
 
             tool_request = thinking_response.get("tool_request")
             if tool_request and tool_request["names"]:
-                # the model asked for tools: second thinking call with their full prompts, its tool calls get executed
                 logger.debug(f"tools requested: {tool_request['names']}")
                 MessageQueue().send_status_message("thinking some more")
                 thinking_response = self._run_thinking(tool_request["names"])
-                logger.debug(f"thinking response (2):\n{Utils.pretty_print(thinking_response)}")
+                # logger.debug(f"thinking response (2):\n{Utils.pretty_print(thinking_response)}")
             tool_calls = thinking_response["tool_calls"]
             if self._interrupted():
                 return

@@ -26,7 +26,7 @@ services:
       - hub_db:/hub/db
       - hub_images:/hub/images
       - hub_voices:/hub/voices
-      - ../characters/voices:/hub/predefined_voices:ro
+      - ../characters:/hub/characters:ro
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
       - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/hub/models
@@ -59,6 +59,7 @@ services:
         INSTALL_IMAGE_GEN: ${INSTALL_IMAGE_GEN:-false}
         INSTALL_TTS: ${INSTALL_TTS:-false}
         INSTALL_STT: ${INSTALL_STT:-false}
+        INSTALL_EMBEDDING: ${INSTALL_EMBEDDING:-false}
         INSTALL_LLAMA: ${INSTALL_LLAMA:-false}
         TORCH_BACKEND: ${TORCH_BACKEND:-cpu}
         TORCH_CUDA_INDEX: ${TORCH_CUDA_INDEX:-cu121}

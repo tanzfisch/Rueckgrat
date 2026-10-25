@@ -21,7 +21,7 @@ class DownloadJob:
     server_cert: str = ""
     max_retry: int = 4
     force_download: bool = False
-    callbacks: list = field(default_factory=list)
+    callbacks: list = field(default_factory=list, compare=False)   # not compared: jobs for the same file merge and keep all callbacks
 
     def __post_init__(self):
         if self.callbacks is None:
@@ -128,7 +128,9 @@ class DownloadQueue:
 
             if not self._download_file(url, target_filepath, access_token, server_cert):
                 logger.error(f"failed to download {url}")
-        
+                return False
+            return True
+
         except Exception as e:
             logger.error(f"failed to download {url} {repr(e)}")
             return False
@@ -166,7 +168,9 @@ class DownloadQueue:
         
         total_size = int(response.headers.get("content-length", 0))
 
-        with open(filepath, "wb") as file:
+        # write to a .part file and rename when complete, so nobody sees a half written file under the final name
+        part_filepath = filepath.with_name(filepath.name + ".part")
+        with open(part_filepath, "wb") as file:
             with tqdm(total=total_size, unit="B", unit_scale=True, desc=f"Downloading {url}", unit_divisor=1024) as pbar:
                 for chunk in response.iter_content(chunk_size=64*1024):
                     if chunk:
@@ -176,4 +180,9 @@ class DownloadQueue:
                     if self._stop.is_set():
                         break
 
+        if self._stop.is_set():
+            part_filepath.unlink(missing_ok=True)
+            return False
+
+        part_filepath.replace(filepath)
         return True

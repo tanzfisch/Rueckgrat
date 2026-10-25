@@ -13,14 +13,16 @@ COPY requirements_base.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements_base.txt
 
-COPY requirements_image_gen.txt requirements_tts.txt requirements_stt.txt ./
+COPY requirements_image_gen.txt requirements_tts.txt requirements_stt.txt requirements_embedding.txt ./
 ARG INSTALL_IMAGE_GEN=false
 ARG INSTALL_TTS=false
 ARG INSTALL_STT=false
+ARG INSTALL_EMBEDDING=false
 ARG TORCH_BACKEND=cpu
 ENV USE_IMAGE_GEN=$INSTALL_IMAGE_GEN
 ENV USE_TTS=$INSTALL_TTS
 ENV USE_STT=$INSTALL_STT
+ENV USE_EMBEDDING=$INSTALL_EMBEDDING
 ENV TORCH_BACKEND=$TORCH_BACKEND
 
 # insightface (face reference, requirements_image_gen.txt) ships as source only and compiles a c++ extension
@@ -51,6 +53,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     fi && \
     if [ "$INSTALL_STT" = "true" ]; then \
       pip install -r requirements_stt.txt; \
+    fi && \
+    if [ "$INSTALL_EMBEDDING" = "true" ]; then \
+      pip install -r requirements_embedding.txt; \
     fi
 
 ARG INSTALL_LLAMA=false

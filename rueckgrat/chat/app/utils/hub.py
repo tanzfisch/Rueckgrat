@@ -70,9 +70,9 @@ class Hub:
         cls.download_queue.stop()
 
     @classmethod
-    def download_file(cls, image_path: str, download_path: str, max_retry: int = 5):
+    def download_file(cls, image_path: str, download_path: str, max_retry: int = 5, callback=None):
         url = f"{cls.url}/downloads/{image_path}"
-        cls.download(url, download_path, max_retry=max_retry)
+        cls.download(url, download_path, max_retry=max_retry, callback=callback)
 
     @classmethod
     def download(cls, url: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
@@ -426,6 +426,23 @@ class Hub:
             logger.error(f"failed to get_contact {repr(e)}")
 
         return {} 
+
+    @classmethod
+    def get_contact_memories(cls, contact_id: int) -> list | None:
+        """what the contact remembered of this user, newest first, [{id, text, created_at}]. None if the hub could not be asked"""
+        try:
+            response = requests.get(
+                f"{cls.url}/contacts/{contact_id}/memories",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("memories", [])
+            logger.error(f"get contact memories - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_contact_memories {repr(e)}")
+        return None
 
     @classmethod
     def get_signup_mode(cls) -> str:

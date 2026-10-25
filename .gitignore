@@ -219,3 +219,5 @@ rueckgrat/chat/app/*.cert
 .dart_tool
 
 notes.txt
+# dart sources of a local flet extension (the lib/ rule above is meant for python builds)
+!rueckgrat/chat/extensions/flet_notifications/src/flutter/flet_notifications/lib/
