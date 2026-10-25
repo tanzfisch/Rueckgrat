@@ -13,6 +13,7 @@ class ToolCategory:
     MEDIA = "media"        # creates images (and later audio/video)
     MATH = "math"          # numbers: conversions, calculations
     TIME = "time"          # clock, time zones, dates
+    MEMORY = "memory"      # what a contact keeps from the conversations
     GENERAL = "general"    # default for tools that don't set a category
 
 class Tool(Job):

@@ -1,0 +1,2 @@
+# onnx on the cpu, no torch
+fastembed==0.9.1

@@ -58,6 +58,16 @@ async def lifespan(app: FastAPI):
     else:
         app.state.stt = None
 
+    if os.getenv("USE_EMBEDDING") == "true":
+        from app.utils.embedding import TextEmbedder
+        app.state.embedder = TextEmbedder()
+        try:
+            app.state.embedder.preload()
+        except Exception as e:
+            logger.error(f"embedding model not loaded: {e}")   # the node runs on, /embed answers 503
+    else:
+        app.state.embedder = None
+
     # keep image cache clean
     app.state.cleanup_worker = CleanupWorker(folder="/node/images")
     app.state.cleanup_worker.start()
@@ -155,6 +165,29 @@ async def stt(request: Request, kind: str = "final", language: str = ""):
         logger.error(f"stt failed: {e!r}")
         raise HTTPException(status_code=500, detail="stt failed")
     return {"text": text}
+
+MAX_EMBED_TEXTS = 64
+MAX_EMBED_CHARS = 2000
+
+class EmbedRequest(BaseModel):
+    texts: List[str]
+    query: bool = False    # True: search queries, False: passages that are stored
+
+@app.post("/embed")
+async def embed(request: EmbedRequest):
+    """text embeddings, one vector per text in order: {"vectors": [[floats], ...]}"""
+    if not app.state.embedder:
+        raise HTTPException(status_code=503, detail="Node has no embedding module loaded")
+    if not request.texts or len(request.texts) > MAX_EMBED_TEXTS or any(len(t) > MAX_EMBED_CHARS for t in request.texts):
+        raise HTTPException(status_code=400, detail=f"1 to {MAX_EMBED_TEXTS} texts of max {MAX_EMBED_CHARS} characters")
+    try:
+        vectors = await asyncio.to_thread(app.state.embedder.embed, request.texts, request.query)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error(f"embedding failed: {e!r}")
+        raise HTTPException(status_code=500, detail="embedding failed")
+    return {"vectors": vectors}
 
 VOICE_ID_PATTERN = r"[\w.-]+"
 MAX_VOICE_BYTES = 20 * 1024 * 1024

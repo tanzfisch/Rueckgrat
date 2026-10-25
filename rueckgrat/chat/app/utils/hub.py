@@ -428,6 +428,23 @@ class Hub:
         return {} 
 
     @classmethod
+    def get_contact_memories(cls, contact_id: int) -> list | None:
+        """what the contact remembered of this user, newest first, [{id, text, created_at}]. None if the hub could not be asked"""
+        try:
+            response = requests.get(
+                f"{cls.url}/contacts/{contact_id}/memories",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("memories", [])
+            logger.error(f"get contact memories - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_contact_memories {repr(e)}")
+        return None
+
+    @classmethod
     def get_signup_mode(cls) -> str:
         """
         Returns "open" or "invite". Falls back to "invite" if the hub can't tell,

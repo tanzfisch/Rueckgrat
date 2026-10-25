@@ -4,6 +4,7 @@ from .bubbles import ChatBubble, OneLineBubble
 from .emoji_picker import EmojiPicker
 from .image import Image
 from .contact_card import ContactCard
+from .contact_info import ContactInfo
 from .image_overlay import ImageOverlay
 from .row_selector import RowSelector
 from .text_edit import PlainTextEdit
@@ -20,6 +21,7 @@ __all__ = [
     "EmojiPicker", 
     "Image", 
     "ContactCard", 
+    "ContactInfo",
     "ImageOverlay",
     "RowSelector",
     "PlainTextEdit",
