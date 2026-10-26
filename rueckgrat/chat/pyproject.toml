@@ -11,6 +11,8 @@ exclude = [".venv", "build", ".vscode", "app/build", "extensions"]
 "android.permission.FOREGROUND_SERVICE_MICROPHONE" = true
 "android.permission.POST_NOTIFICATIONS" = true
 "android.permission.WAKE_LOCK" = true
+# call audio mode + speakerphone for the echo canceller (recorder and speech playback)
+"android.permission.MODIFY_AUDIO_SETTINGS" = true
 
 # The local extension is pip installed from ./extensions. flet ignores requirements.txt as soon as
 # a dependency list exists in pyproject.toml, so the Android build lists them all here:
@@ -39,3 +41,5 @@ dependencies = [
 [tool.flet.dev_packages]
 flet-foreground-service = "extensions/flet_foreground_service"
 flet-notifications = "extensions/flet_notifications"
+flet-audio-recorder = "extensions/flet_audio_recorder"
+flet-audio = "extensions/flet_audio"
