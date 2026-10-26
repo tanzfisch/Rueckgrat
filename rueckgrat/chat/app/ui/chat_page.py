@@ -279,7 +279,9 @@ class ChatPage(BasePage):
             return
         text = (payload.get("text") or "").strip()
         if not text:
-            return       
+            return
+        if Text_To_Speech.state != "idle":  # the user talks over the reply: stop speaking it
+            Text_To_Speech.kill_current_speech()
         self.input_box.value = text
         self.input_box.update()
         if kind == "final":
