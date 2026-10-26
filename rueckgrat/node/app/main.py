@@ -12,7 +12,7 @@ from pathlib import Path
 TTS_VOICES_DIR = Path("/node/voices")  # same folder as VOICES_DIR in utils/tts.py
 import os
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from app.utils import ModelRegistry, LLamaCppInterface, CleanupWorker
 
 from app.common import (
@@ -64,15 +64,30 @@ async def lifespan(app: FastAPI):
         try:
             app.state.embedder.preload()
         except Exception as e:
-            logger.error(f"embedding model not loaded: {e}")   # the node runs on, /embed answers 503
+            logger.error(f"embedding model not loaded: {e}")
     else:
         app.state.embedder = None
+
+    if os.getenv("USE_DECISION") == "true":
+        from app.utils.decision import DecisionModel
+        app.state.decision = DecisionModel()
+        try:
+            app.state.decision.preload()
+        except Exception as e:
+            logger.error(f"decision model not loaded: {e}")
+    else:
+        app.state.decision = None
 
     # keep image cache clean
     app.state.cleanup_worker = CleanupWorker(folder="/node/images")
     app.state.cleanup_worker.start()
 
-    logger.info("node initialized")
+    logger.info("\n"
+    "          ╭───────────────────────────╮\n"
+    "          │     🚀   Rückgrat   🚀    │\n"
+    "          │                           │\n"
+    "          │      Node initialized     │\n"
+    "          ╰───────────────────────────╯")
 
     yield
 
@@ -188,6 +203,31 @@ async def embed(request: EmbedRequest):
         logger.error(f"embedding failed: {e!r}")
         raise HTTPException(status_code=500, detail="embedding failed")
     return {"vectors": vectors}
+
+MAX_DECIDE_QUESTIONS = 64
+MAX_DECIDE_CHARS = 4000
+
+class DecideRequest(BaseModel):
+    state: str                              # the text the questions are about
+    questions: Dict[str, Dict[str, Any]]    # laya questions by id: {"type": "choice"|"score"|"noul", "instructions": ..., "criteria": ...}
+
+@app.post("/decide")
+async def decide(request: DecideRequest):
+    """laya typed decisions, all questions in one forward pass: {"answers": {id: {"type": "noul", "noul": P(true), ...}}}"""
+    if not app.state.decision:
+        raise HTTPException(status_code=503, detail="Node has no decision module loaded")
+    if not request.state or len(request.state) > MAX_DECIDE_CHARS or not request.questions or len(request.questions) > MAX_DECIDE_QUESTIONS:
+        raise HTTPException(status_code=400, detail=f"a state of max {MAX_DECIDE_CHARS} characters and 1 to {MAX_DECIDE_QUESTIONS} questions")
+    try:
+        answers = await asyncio.to_thread(app.state.decision.decide, request.state, request.questions)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))    # laya refuses malformed questions with ValueError
+    except Exception as e:
+        logger.error(f"decision failed: {e!r}")
+        raise HTTPException(status_code=500, detail="decision failed")
+    return {"answers": answers}
 
 VOICE_ID_PATTERN = r"[\w.-]+"
 MAX_VOICE_BYTES = 20 * 1024 * 1024

@@ -8,12 +8,13 @@ logger = get_logger()
 class TakePhotoTool(Tool):
     category = ToolCategory.MEDIA
     description = "takes a photo of yourself, the user or both in the current situation"
+    question = ""
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
 
     @classmethod
-    def name(cls) -> str: 
+    def name(cls) -> str:
         return "take_photo"
 
     def create_image_job(self) -> Optional[AssistantImageJob]:
@@ -31,11 +32,13 @@ class TakePhotoTool(Tool):
             logger.error("invalid take_photo")
             return None
 
-        width = 720
-        height = 1280
+        width = 768
+        height = 1024
+        
         if img_ai and img_usr:
-            width = 1280
-            height = 720
+            temp = width
+            width = height
+            height = temp
 
         assistant_image_job = AssistantImageJob(
             user_id = self.user_id,
@@ -103,7 +106,7 @@ class TakePhotoTool(Tool):
     def prompt(cls) -> str: 
         return """
 TAKE PHOTO:
-Use when the user wants a photo of you, themselves, or both in the current situation.
+Use sparingly, only when you genuinely want to take a photo of yourself, the user, or both in the current situation. Do not use for every request. Also use when the user explicitly asks for one.
 
 Parameters:
 - subject (string, required): "self", "user", or "both"

@@ -18,7 +18,6 @@ class ChatBubble(ft.Container):
         self.body = ft.Column(spacing=8, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
         super().__init__(
             content=self.body,
-            data={"role": role, "id": "chatBubble"},
             **kwargs,
         )
         self.role = role
@@ -101,7 +100,17 @@ class ChatBubble(ft.Container):
 
     def _add_image(self, image_filepath: str):
         image = Image(image_path=image_filepath)
-        self.body.controls.append(image)
+
+        self.body.controls.append(
+            ft.Row(
+                [
+                    ft.Container(expand=1),
+                    ft.Container(content=image, expand=4),
+                    ft.Container(expand=1),
+                ],
+                expand=True,
+            )
+        )
 
     def _parse_content(self, content: str) -> list[dict]:
         parts = []

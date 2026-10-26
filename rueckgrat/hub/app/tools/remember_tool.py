@@ -12,6 +12,7 @@ DUPLICATE_DISTANCE = 0.05
 class RememberTool(Tool):
     category = ToolCategory.MEMORY
     description = "save one short fact to remember in later conversations (about the user, their life, plans, preferences or your relationship)"
+    question = ""
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
@@ -54,10 +55,13 @@ class RememberTool(Tool):
     def prompt(cls) -> str:
         return """
 REMEMBER:
-Use to store one short fact for later conversations. One fact per call, third person, max 200 characters.
+
+Store one durable fact about the user that will still be true later (identity, relationships, long-term history, location, job, lasting preferences). Skip temporary wants, current plans, or comments about media/videos.
+
+Write in third person. Max 200 characters. One fact only.
 
 Parameters:
-- text (string, required): the fact to remember
+- text (string, required): the fact
 
 Example:
 {"tool": "remember", "text": "The user's sister is called Anna and lives in Hamburg"}

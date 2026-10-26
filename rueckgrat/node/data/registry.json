@@ -1205,6 +1205,20 @@
     },
     "install_path": "embeddings/bge-small-en-v1.5"
   },
+  "laya": {
+    "description": "Convai Innovations Laya decision model (ModernBERT-large + decision head, 421M, English, 512 tokens): typed choice / score / yes-no answers over a text in one forward pass, no text generation",
+    "type": "decision",
+    "compatibility": ["laya"],
+    "comment": "not tested. loaded offline from install_path with the laya pip package (requirements_decision.txt), sources pinned to the repo revision. the base checkpoint is weak zero-shot and over-confident, fine-tune and fit thresholds on own data",
+    "files": [
+      { "source": "https://huggingface.co/convaiinnovations/laya/resolve/7b928d828b7b0e022f929d9bd2e44165aa270148/rl_agent_config.json", "path": "" },
+      { "source": "https://huggingface.co/convaiinnovations/laya/resolve/7b928d828b7b0e022f929d9bd2e44165aa270148/model.safetensors", "path": "" },
+      { "source": "https://huggingface.co/convaiinnovations/laya/resolve/7b928d828b7b0e022f929d9bd2e44165aa270148/encoder/config.json", "path": "encoder" },
+      { "source": "https://huggingface.co/convaiinnovations/laya/resolve/7b928d828b7b0e022f929d9bd2e44165aa270148/tokenizer/tokenizer.json", "path": "tokenizer" },
+      { "source": "https://huggingface.co/convaiinnovations/laya/resolve/7b928d828b7b0e022f929d9bd2e44165aa270148/tokenizer/tokenizer_config.json", "path": "tokenizer" }
+    ],
+    "install_path": "decision/laya"
+  },
   "faceid-plusv2-sdxl": {
     "description": "IP-Adapter FaceID PlusV2 for SDXL: adapter, its LoRA, CLIP ViT-H image encoder, insightface buffalo_l (detection + recognition only)",
     "type": "adapter",

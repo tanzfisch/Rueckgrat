@@ -1,0 +1,2 @@
+# laya decision model (ModernBERT encoder + decision head). torch comes from the torch index in the Dockerfile
+laya==0.4.15

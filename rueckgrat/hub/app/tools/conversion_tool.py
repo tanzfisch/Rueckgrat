@@ -361,6 +361,7 @@ def convert(amount: Any, from_unit: str, to_unit: str) -> Dict[str, Any]:
 class ConversionTool(Tool):
     category = ToolCategory.MATH
     description = "converts amounts between currencies, crypto and physical units, prices gold/silver/platinum in any currency"
+    question = "Does the user want to convert something?"
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)

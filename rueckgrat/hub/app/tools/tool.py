@@ -19,6 +19,7 @@ class ToolCategory:
 class Tool(Job):
     category = ToolCategory.GENERAL
     description = ""    # one line for the tool index, every tool sets its own
+    question = ""       # yes/no decision question: does the request involve this tool's purpose
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__()

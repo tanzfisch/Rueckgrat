@@ -20,6 +20,8 @@ services:
     build:
       context: ./hub
       dockerfile: Dockerfile
+      args:
+        INSTALL_BROWSER: ${INSTALL_BROWSER:-true}
     ports:
       - "${HUB_PORT}:${HUB_PORT}"
     volumes:
@@ -60,6 +62,7 @@ services:
         INSTALL_TTS: ${INSTALL_TTS:-false}
         INSTALL_STT: ${INSTALL_STT:-false}
         INSTALL_EMBEDDING: ${INSTALL_EMBEDDING:-false}
+        INSTALL_DECISION: ${INSTALL_DECISION:-false}
         INSTALL_LLAMA: ${INSTALL_LLAMA:-false}
         TORCH_BACKEND: ${TORCH_BACKEND:-cpu}
         TORCH_CUDA_INDEX: ${TORCH_CUDA_INDEX:-cu121}
