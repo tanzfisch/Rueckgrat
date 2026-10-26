@@ -1,0 +1,19 @@
+# Local copy of flet-audio 1.0.4 (Apache-2.0, see LICENSE), patched so speech plays on Android's
+# call audio path, where the recorder's echo canceller can use it (src/flutter/flet_audio/lib/src/audio.dart).
+# Picked up by `flet build apk` through [tool.flet.dev_packages] in ../../pyproject.toml.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flet-audio"
+version = "1.0.4"
+description = "Flet extension: Audio (local copy, plays on the voice call path)"
+requires-python = ">=3.10"
+dependencies = ["flet>=1.0.4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"flutter.flet_audio" = ["**/*"]

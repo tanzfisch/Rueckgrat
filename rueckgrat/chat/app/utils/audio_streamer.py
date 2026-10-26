@@ -54,13 +54,22 @@ class AudioStreamer:
         self._skip_partials = False
         self._resample_pos = 0.0
         self.recorder = far.AudioRecorder(
-            configuration=far.AudioRecorderConfiguration(
-                encoder=far.AudioEncoder.PCM16BITS,
-                sample_rate=SAMPLE_RATE,
-                channels=CHANNELS,
-            ),
+            configuration=self._recorder_config(SAMPLE_RATE),
             on_stream=self._on_flet_stream,
             on_state_change=lambda e: logger.info("recorder state: %s", getattr(e, "data", e)),
+        )
+
+    @staticmethod
+    def _recorder_config(rate: int):
+        """ echo canceller on the voice call source, so the mic does not hear the AI's speech (Android) """
+        return far.AudioRecorderConfiguration(
+            encoder=far.AudioEncoder.PCM16BITS,
+            sample_rate=rate,
+            channels=CHANNELS,
+            cancel_echo=True,
+            android_configuration=far.AndroidRecorderConfiguration(
+                audio_source=far.AndroidAudioSource.VOICE_COMMUNICATION,
+            ),
         )
 
     def attach(self, page: ft.Page):
@@ -183,11 +192,7 @@ class AudioStreamer:
         await self._start_foreground()
         for rate in (16000, 44100):
             started = await self.recorder.start_recording(
-                configuration=far.AudioRecorderConfiguration(
-                    encoder=far.AudioEncoder.PCM16BITS,
-                    sample_rate=rate,
-                    channels=CHANNELS,
-                ),
+                configuration=self._recorder_config(rate),
             )
             logger.info("start_recording rate=%s -> %s", rate, started)
             if started:

@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.21.1
+------
+
+- #137 audio recording unpause after speech playback
+
 0.21.0
 ------
 

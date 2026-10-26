@@ -1,0 +1,19 @@
+# Local copy of flet-audio-recorder 1.0.4 (Apache-2.0, see LICENSE), patched so the recorder ignores
+# Android audio focus (src/flutter/flet_audio_recorder/lib/src/utils/audio_recorder.dart).
+# Picked up by `flet build apk` through [tool.flet.dev_packages] in ../../pyproject.toml.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flet-audio-recorder"
+version = "1.0.4"
+description = "Flet extension: AudioRecorder (local copy, ignores audio focus)"
+requires-python = ">=3.10"
+dependencies = ["flet>=1.0.4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"flutter.flet_audio_recorder" = ["**/*"]
