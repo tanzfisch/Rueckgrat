@@ -1,11 +1,10 @@
-# <img src="logo.png" width="50" alt="Logo">ückgrat
+# <img src="rueckgrat/chat/assets/icons/logo.png" width="50" alt="Logo">ückgrat
 
 **AI tools running private and local.**
 
 **Status**: Early stage. Do not use in production.
 
-- many features still missing
-- instability expected
+- many features still missing and instability is expected
 - Author has no clue about security, auth, certs, or Caddy. Help welcome.
 - See the [changelog](https://github.com/tanzfisch/Rueckgrat/blob/master/changelog.md) for more details.
 
@@ -29,6 +28,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - STT using Silero VAD + faster-whisper
     - TTS using Chatterbox
     - text embeddings using fastembed
+    - tool detection using Laya where possible
 - GPU: NVIDIA and AMD. Intel GPUs are not supported/tested.
 - AI tools
     - **websearch** — search the web when requested or needed
@@ -44,21 +44,16 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **fetch_url** — fetch content for given URL
     - **weather** — weather forcast for given location
 
-## Chat client
-
-- running on Linux, Android (iOS and Windows not tested)
+## Frontend Tools
 
 ### Chat
+- running on Linux and Android
 - chat with a locally installed LLM
 - in-chat image generation based on use prompt
 - self image generation. Like taking a picture of self based on current context.
 - code highlighting
 - contacts, character templates, character-creation wizard, settings
-
-### Translate
 - assiting a conversation with someone in an other language (using your own llm for translation)
-
-### Screenshots
 
 Some screenhots of the app ...
 
@@ -75,26 +70,17 @@ chmod +x install.sh
 ```
 
 The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen, TTS, STT, text embeddings), an optional Cloudflare tunnel and an optional Android APK of the chat client.
-The Cloudflare tunnel token input is hidden; after pasting it the installer shows `********` and the number of characters received.
 
-**Note: Every machine needs sudo with the same username, plus `ssh` and `rsync`; target hosts must also run an SSH server:**
+**Note: Every machine needs sudo with the same username, plus `ssh` and `rsync` for the installer to work**
 
-### What the installer does
-
-1. Asks the setup questions and saves them to `rueckgrat/config/infrastructure.json`.
-2. Deploys the chosen components to each host.
-3. Optionally sets up the Cloudflare tunnel and builds the Android APK.
-
-Run chat:
+Run chat natively:
 
 ```bash
 cd rueckgrat/chat
 ./run.sh
 ```
 
-### Alternatives
-
-Clone, then install:
+Alternatively clone first and then install:
 
 ```bash
 git clone https://github.com/tanzfisch/Rueckgrat.git
@@ -102,7 +88,7 @@ cd Rueckgrat
 ./install.sh
 ```
 
-Reinstall from a saved config, without the setup questions:
+Reinstall from a saved config, skipping the setup questions:
 
 ```bash
 ./install.sh -c rueckgrat/config/config_example.json -y
@@ -153,7 +139,7 @@ docker exec -it rueckgrat_node python -m app.registry_manager nodes
 
 Models default location is `/var/lib/Rueckgrat/models` on the host.
 
-## Hub management
+# Hub management
 
 Invites and users are managed with the hub management tool. Run the hub container, then use it inside the hub container as follows
 

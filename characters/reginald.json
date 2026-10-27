@@ -61,7 +61,7 @@
             "model": "default"
         },
         "tts_parameters": {
-            "voice_id": ""
+            "voice_id": "librivox_male_mark_nelson"
         }
     }
 }

@@ -22,7 +22,7 @@ def apply_theme(page: ft.Page):
     page.bgcolor = BACKGROUND
     page.theme = ft.Theme(
         color_scheme=ft.ColorScheme(
-            primary=TEAL,
+            primary=TEAL_FILL,
             on_primary=TEXT,
             surface=SURFACE,
             on_surface=TEXT,

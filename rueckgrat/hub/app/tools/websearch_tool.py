@@ -1,14 +1,17 @@
-from typing import Dict,  Any
+from typing import Dict, Any, Optional
 import re
+import json
 from .tool import Tool, ToolCategory
 from app.jobs.find_answer_job import FindAnswerJob
 import requests
-import datetime
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 import tldextract
 from bs4 import BeautifulSoup
 from ddgs import DDGS
+from app.utils.content_filter import strip_text_noise
+from app.utils.page_render import render_page
+from app.utils.url_check import is_public_http_url
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -16,6 +19,7 @@ logger = get_logger()
 class WebsearchTool(Tool):
     category = ToolCategory.WEB
     description = "searches the web for current, factual or local information (news, events, prices, stocks, opening hours)"
+    question = "Does the user want current information from the web?"
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
@@ -24,13 +28,10 @@ class WebsearchTool(Tool):
     def name(cls) -> str: 
         return "websearch"
     
-    def _remove_short_lines(self, text):
-        return '\n'.join(line for line in text.splitlines() if len(line.split()) >= 10)    
-    
-    def _remove_non_sentence_lines(self, text):
-        text = self._remove_short_lines(text)
-        return '\n'.join(line for line in text.splitlines() if re.search(r'[.!?]', line.strip()))    
-    
+    def _keep_content_lines(self, text):
+        # sentences, headlines and live blog posts have 4+ words, times, scores and prices have digits. menu items have neither
+        return '\n'.join(line for line in text.splitlines() if len(line.split()) >= 4 or re.search(r'\d', line))
+
     def _get_org_name(self, url: str) -> str:
         ext = tldextract.extract(url)
         domain = f"{ext.domain}.{ext.suffix}"
@@ -161,63 +162,126 @@ class WebsearchTool(Tool):
 
         return org_map.get(domain, domain)
 
-    def _extract_page(self, url) -> str:
-        resulting_url = url
-        logger.debug(f"extract from page {url}")        
-        try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            }
-            resp = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
-            resp.raise_for_status()
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    PAGE_TIMEOUT = 8            # seconds per page, the pages of a batch load in parallel
+    BROWSER_FALLBACK = False    # websearch falls back to the search snippet, it can't wait for a browser per result
+    MIN_PAGE_CHARS = 200        # less text than this is not worth reading
+    THIN_PAGE_CHARS = 500       # less than this from plain http looks like a javascript page, try the browser
+    BLOCKED_STATUS = {401, 403, 429, 503}   # bot walls, a real browser often gets through
+    OVERLAY = re.compile(r"cookie|consent|gdpr|paywall|banner|modal|popup|overlay", re.IGNORECASE)
+    OVERLAY_MAX_WORDS = 80      # only short overlays go, a "hero-banner" holding the lead paragraph stays
+    CHALLENGE = re.compile(r"not a (ro)?bot|checking your browser|just a moment|enable javascript and cookies|"
+                           r"verify you are human|access denied", re.IGNORECASE)   # bot wall pages, not content
 
-            # Handle JS/meta redirect pages
-            if len(resp.text.strip()) < 500 and ('location.replace' in resp.text or 'http-equiv="refresh"' in resp.text):
-                import re
-                match = re.search(r'location\.replace\("([^"]+)"\)', resp.text) or \
-                        re.search(r'URL=([^"]+)', resp.text)
-                if match:
-                    redirect_url = match.group(1)
-                    if not redirect_url.startswith('http'):
-                        redirect_url = 'https://' + redirect_url.lstrip('/')
-                    logger.debug(f"following redirect to {redirect_url}")
-                    resp = requests.get(redirect_url, headers=headers, timeout=20, allow_redirects=True)
-                    resulting_url = redirect_url
-                    resp.raise_for_status()
+    def _is_overlay(self, elem) -> bool:
+        attrs = " ".join(elem.get("class") or []) + " " + (elem.get("id") or "")
+        return bool(self.OVERLAY.search(attrs)) and len(elem.get_text(" ", strip=True).split()) < self.OVERLAY_MAX_WORDS
 
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            
-            # Stronger cleanup
-            for tag in soup(["script", "style", "nav", "header", "footer", "aside", "form", "button", "svg"]):
-                tag.decompose()
-            
-            # Remove common paywall / cookie banners
-            for elem in soup.find_all(['div', 'section'], class_=lambda x: x and any(c in str(x).lower() for c in ['cookie', 'banner', 'paywall', 'modal'])):
+    def _structured_text(self, soup) -> str:
+        """text a page carries for search engines: json-ld articleBody (also of live blog updates), else og:description"""
+        bodies = []
+        def walk(node):
+            if isinstance(node, dict):
+                if isinstance(node.get("articleBody"), str):
+                    bodies.append(node["articleBody"].strip())
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                walk(json.loads(script.string or ""))
+            except ValueError:
+                continue
+        if bodies:
+            return "\n".join(bodies)
+        meta = soup.find("meta", property="og:description") or soup.find("meta", attrs={"name": "description"})
+        return (meta.get("content") or "").strip() if meta else ""
+
+    def _parse_html(self, html, url) -> Dict[str, Any]:
+        """text, images and url of one page. html as bytes lets bs4 find the charset (meta tag or detection)
+        instead of requests' latin-1 guess when the server sends none"""
+        soup = BeautifulSoup(html, 'html.parser')
+        structured = self._structured_text(soup)
+
+        for tag in soup(["script", "style", "noscript", "iframe", "nav", "header", "footer", "aside", "form", "button", "svg"]):
+            tag.decompose()
+        # collect first, decompose after: decomposing while find_all walks the tree would visit dead children
+        overlays = [elem for elem in soup.find_all(['div', 'section']) if self._is_overlay(elem)]
+        for elem in overlays:
+            if not elem.decomposed:
                 elem.decompose()
-            
-            text = self._remove_non_sentence_lines(soup.get_text(separator='\n', strip=True))
 
-            logger.debug(f"text found on page {text}")
-            
-            if len(text.strip()) < 200:
-                return None  # still too empty (JS-heavy page)
-                
-            images = [img.get('src') or img.get('data-src') or img.get('data-original') 
-                    for img in soup.find_all('img') if img.get('src') or img.get('data-src')]
-            
-            return {"text": text, "images": images, "url": resulting_url}
+        text = self._keep_content_lines(strip_text_noise(soup.get_text(separator='\n', strip=True)))
+        if len(structured) > len(text):
+            text = structured
+
+        images = [img.get('src') or img.get('data-src') or img.get('data-original')
+                for img in soup.find_all('img') if img.get('src') or img.get('data-src')]
+        return {"text": text, "images": images, "url": url}
+
+    def _http_get(self, url):
+        resp = requests.get(url, headers=self.HEADERS, timeout=self.PAGE_TIMEOUT, allow_redirects=True)
+
+        # Handle JS/meta redirect pages
+        if len(resp.text.strip()) < 500 and ('location.replace' in resp.text or 'http-equiv="refresh"' in resp.text):
+            match = re.search(r'location\.replace\("([^"]+)"\)', resp.text) or \
+                    re.search(r'URL=([^"]+)', resp.text)
+            if match:
+                redirect_url = match.group(1)
+                if not redirect_url.startswith('http'):
+                    redirect_url = 'https://' + redirect_url.lstrip('/')
+                if is_public_http_url(redirect_url):
+                    logger.debug(f"following redirect to {redirect_url}")
+                    resp = requests.get(redirect_url, headers=self.HEADERS, timeout=self.PAGE_TIMEOUT, allow_redirects=True)
+        return resp
+
+    def _extract_page(self, url) -> Optional[Dict[str, Any]]:
+        """reads one page: plain http first, the headless browser (if BROWSER_FALLBACK) when that is blocked
+        or comes back too thin. returns {"text", "images", "url"} or None"""
+        logger.debug(f"extract from page {url}")
+        page, try_browser = None, False
+        try:
+            if not is_public_http_url(url):
+                return None
+            resp = self._http_get(url)
+            if not is_public_http_url(resp.url):
+                return None     # redirected into the lan
+            if resp.status_code in self.BLOCKED_STATUS:
+                logger.debug(f"{url} answered {resp.status_code}")
+                try_browser = True
+            else:
+                resp.raise_for_status()
+                content_type = resp.headers.get("Content-Type", "").lower()
+                if content_type and "html" not in content_type and "xml" not in content_type:
+                    logger.warning(f"not reading {url}, it is {content_type}")
+                    return None
+                page = self._parse_html(resp.content, resp.url)
+                try_browser = len(page["text"]) < self.THIN_PAGE_CHARS
         except Exception as e:
             logger.error(f"failed to extract {url}: {repr(e)}")
-            return None
 
-    def _improve_search_query(self, query):
-        improvements = [
-            " -inurl:(/world/ /topic/ /section/ /tag/ /category/)",
-            f" after:{datetime.datetime.now().year - 2}",
-        ]
-        return query + " " + " ".join(improvements)
+        if try_browser and self.BROWSER_FALLBACK:
+            rendered = render_page(url, self.HEADERS["User-Agent"])
+            if rendered and is_public_http_url(rendered[0]):
+                rendered_page = self._parse_html(rendered[1], rendered[0])
+                logger.debug(f"browser got {len(rendered_page['text'])} characters from {url}")
+                if not page or len(rendered_page["text"]) > len(page["text"]):
+                    page = rendered_page
+
+        if not page or len(page["text"]) < self.MIN_PAGE_CHARS:
+            logger.warning(f"was not able to get text from {url}")
+            return None
+        if len(page["text"]) < self.THIN_PAGE_CHARS * 2 and self.CHALLENGE.search(page["text"]):
+            logger.warning(f"{url} is behind a bot wall")
+            return None
+        return page
 
     # all ddgs 9.16.0 text engines, best first (results of higher engines come first). every engine runs in its
     # own thread with its own try/except: ddgs' own multi-backend search drops good results when another engine
@@ -320,25 +384,30 @@ class WebsearchTool(Tool):
                 batch = search_results[i:i+5]
                 i += len(batch)
                 
+                # the pages of a batch load in parallel, a slow site only costs its own timeout
+                with ThreadPoolExecutor(max_workers=len(batch), thread_name_prefix="extract") as pool:
+                    extractions = list(pool.map(self._extract_page, [result["url"] for result in batch]))
+
                 batch_jobs = []
-                for result in batch:
-                    url = result["url"]
-                    extraction = self._extract_page(url)
-                    if not extraction:
+                for result, extraction in zip(batch, extractions):
+                    if extraction:
+                        result["url"] = extraction["url"]
+                        information = extraction["text"]
+                    elif result["snippet"]:
+                        # page not readable (javascript, paywall, bot wall), the engine's snippet often has the answer
+                        information = f"{result['title']}\n{result['snippet']}"
+                    else:
                         continue
 
-                    actual_url = extraction["url"]
-                    if actual_url in seen_urls:
+                    if result["url"] in seen_urls:
                         continue
-                    seen_urls.add(actual_url)
+                    seen_urls.add(result["url"])
 
-                    result["url"] = actual_url
-
-                    job = FindAnswerJob(question=query, information=extraction["text"], infrastructure=self.infrastructure)
+                    job = FindAnswerJob(question=query, information=information, infrastructure=self.infrastructure)
                     self.add_sub_job(job)
                     batch_jobs.append((result, job))
                     jobs.append((result, job))
-                
+
                 if batch_jobs:
                     self.wait_for([j[1] for j in batch_jobs])
                 
@@ -366,7 +435,7 @@ class WebsearchTool(Tool):
                         logger.debug(f"missed threshold: {answer['answer']} at {answer['quality']}")
 
             if good_results:
-                self.response["websearch_results"] = sorted(good_results, key=lambda x: x["answer_quality"])  
+                self.response["websearch_results"] = sorted(good_results, key=lambda x: x["answer_quality"], reverse=True)    # best first
             else:
                 logger.error("web search failed. found no results")
                 self.response["websearch_results"] = []

@@ -9,7 +9,7 @@ logger = get_logger()
 class PromptCompiler:
     def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_role_name: str = None, thinking: bool = False, tool_registry: ToolRegistry = None, tool_names: Optional[List[str]] = None):
         self.contact = contact
-        self.tool_names = tool_names  # None: compact tool index only. list: full prompt() of exactly these tools
+        self.tool_names = tool_names  # the full prompt() of exactly these tools
         self.conversation = conversation
         self.user_role_name = user_role_name
         self.profile = contact.get("profile", {})
@@ -94,11 +94,7 @@ OBJECTIVES:
 """.strip()
    
     def _build_tools(self) -> str:
-        if not self.tool_registry:
-            return ""
-        if self.tool_names is None:
-            return self.tool_registry.get_tools_index()
-        if not self.tool_names:
+        if not self.tool_registry or not self.tool_names:
             return ""  # an empty list would make get_tools_prompt() return all tools
         return self.tool_registry.get_tools_hydrated(self.tool_names)
 

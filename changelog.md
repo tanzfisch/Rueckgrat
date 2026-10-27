@@ -1,6 +1,16 @@
 Changelog
 =========
 
+0.22.0
+------
+
+- #139 faster replies by optimizing meta job
+      using Laya to detect tool usage where possible
+      improved websearch now using headless browser
+      cach tts data for faster replay
+      improved conversation context now focuses on open questions and decisions
+- #140 fixed text bubble selection color
+
 0.21.1
 ------
 

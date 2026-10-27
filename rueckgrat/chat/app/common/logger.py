@@ -120,6 +120,7 @@ class Logger:
             logfile = None
 
         self._logger = logging.getLogger("Rückgrat")
+        self._logger.propagate = False
         self._logger.setLevel(level)
         self._lock = threading.Lock()
 

@@ -1,40 +1,20 @@
 from typing import Dict,  Any
-import ipaddress
-import socket
-from urllib.parse import urlparse
 from .tool import ToolCategory
 from .websearch_tool import WebsearchTool
 from app.jobs.summarize_job import SummarizeJob
+from app.utils.url_check import is_public_http_url
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
-
-
-def is_public_http_url(url: str) -> bool:
-    """only http(s) urls whose host resolves to public addresses. keeps the hub from fetching
-    localhost, the docker network or the lan on behalf of the model (SSRF)"""
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
-            return False
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        infos = socket.getaddrinfo(parsed.hostname, port, proto=socket.IPPROTO_TCP)
-    except (ValueError, socket.gaierror, UnicodeError) as e:
-        logger.warning(f"fetch_url: can't resolve {url}: {repr(e)}")
-        return False
-
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0].split("%")[0])     # strip an ipv6 zone id
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
-            logger.warning(f"fetch_url: {url} resolves to non public address {ip}")
-            return False
-    return bool(infos)
 
 
 class FetchUrlTool(WebsearchTool):
     """subclass of WebsearchTool only to reuse _extract_page and _get_org_name, everything else is its own"""
     category = ToolCategory.WEB
     description = "reads a web page the user gives a link to and returns a condensed summary of it"
+    question = "Does the user want you to read a web page they linked?"
+    PAGE_TIMEOUT = 20           # one page the user is waiting for, not a batch
+    BROWSER_FALLBACK = True     # the user asked for this page, worth a headless browser if plain http comes back thin
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)

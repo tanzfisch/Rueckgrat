@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
     db_path = "/hub/db/chat.db"
     app.state.db = ChatDB(db_path)
     app.state.image_store = ImageStore(app.state.db, app.state.infrastructure)
-    app.state.job_queue = JobQueue()
+    app.state.job_queue = JobQueue(max_parallel = 10)
     app.state.turns = Turns(app.state.db)
 
     logger.info("loading tool registry")
@@ -58,7 +58,12 @@ async def lifespan(app: FastAPI):
     app.state.vad = load_silero_vad(onnx=True)
     torch.set_num_threads(1)
 
-    logger.info("hub initialized")
+    logger.info("\n"
+    "          ╭───────────────────────────╮\n"
+    "          │     🚀   Rückgrat   🚀    │\n"
+    "          │                           │\n"
+    "          │      Hub  initialized     │\n"
+    "          ╰───────────────────────────╯")
 
     yield
 

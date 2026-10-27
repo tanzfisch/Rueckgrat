@@ -3,9 +3,12 @@ from typing import Dict, Any
 import json
 import re
 import random
+import datetime
 
 from app.common import get_logger, ChatRequest, Utils
 logger = get_logger()
+
+MAX_CHARS = 12000   # same cap as SummarizeJob, a long page would overflow the context
 
 class FindAnswerJob(Job):
     def __init__(self, question: str, information: str, infrastructure):
@@ -30,7 +33,7 @@ class FindAnswerJob(Job):
 Find the answer to a search query in a given text. 
 
 TEXT:
-{self.information}
+{self.information[:MAX_CHARS]}
 
 SEARCH QUERY:
 {self.question}
@@ -43,6 +46,7 @@ Respond with a json structure like this:
 
 Give a concise answer (maximum of 100 words).
 Rate the quality of the source from 1 to 10 in terms of how well it answeres the question and how current the information is.
+Today is {datetime.date.today().strftime("%A, %d %B %Y")}.
 """
             
             logger.debug(f"find answer query:\n{query}")

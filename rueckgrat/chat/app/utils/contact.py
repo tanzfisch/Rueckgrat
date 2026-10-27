@@ -33,7 +33,7 @@ class Contact:
     def get_latest_profile_image_name(self) -> str:
         images = Utils.get_nested_value(self.data, ["images"], [])
         if not images:
-            logger.error("no images in this profile")
+            logger.warning("no images in this profile")
             return ""
 
         profile_images = [img for img in images if img.get("type") == "profile"]
