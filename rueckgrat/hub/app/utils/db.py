@@ -1016,6 +1016,21 @@ class ChatDB:
                 logger.error(f"failed reading contact memories: {e}")
         return []
 
+    def delete_contact_memory(self, user_id: int, contact_id: int, memory_id: int) -> bool:
+        """deletes one memory of the user's contact, the trigger removes its vector. False for foreign and unknown memories"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute("""
+                    DELETE FROM contact_memories
+                    WHERE id = ? AND contact_id = ? AND user_id = ?
+                    AND contact_id IN (SELECT id FROM contacts WHERE user_id = ?)
+                """, (memory_id, contact_id, user_id, user_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"failed deleting contact memory: {e}")
+        return False
+
     def get_message_count_by_conversation(self, conversation_id: int):
         with self.get_connection() as conn:
             try:

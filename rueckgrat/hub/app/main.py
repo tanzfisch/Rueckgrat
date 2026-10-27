@@ -405,6 +405,14 @@ def get_contact_memories(contact_id: int, username: str = Depends(get_current_us
         raise HTTPException(status_code=404, detail="contact not found")
     return {"memories": app.state.db.get_contact_memories(user_id, contact_id)}
 
+@app.delete("/contacts/{contact_id}/memories/{memory_id}")
+def delete_contact_memory(contact_id: int, memory_id: int, username: str = Depends(get_current_user)):
+    """removes one memory (and its vector) the contact has of the logged in user"""
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.delete_contact_memory(user_id, contact_id, memory_id):
+        raise HTTPException(status_code=404, detail="memory not found")
+    return {"status": "ok"}
+
 ########### conversations handling
 @app.get("/contacts/{contact_id}/conversations")
 def get_conversations(contact_id: int, username: str = Depends(get_current_user)):
