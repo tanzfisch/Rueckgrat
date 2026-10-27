@@ -31,7 +31,7 @@ from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
-from app.common import get_logger, set_log_level, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
+from app.common import get_logger, set_log_level, Utils, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
 logger = get_logger()
 
 @asynccontextmanager
@@ -369,8 +369,7 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
     if not app.state.db.owns_contact(user_id, contact_id):
         raise HTTPException(status_code=404, detail="contact not found")
     resolve_contact_voice(user_id, request.contact_data)
-    app.state.db.update_contact(user_id, contact_id, request.contact_data)
-    
+
     job = AssistantImageJob(
         user_id = user_id,
         contact_id = contact_id,
@@ -381,9 +380,78 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
         width = 1024,
         height = 1024,
     )        
-    app.state.job_queue.add(job)
+    image_before = profile_image_hash(job)
+    app.state.db.update_contact(user_id, contact_id, request.contact_data)
+
+    # an unchanged look keeps the current profile image, e.g. one the user uploaded or picked from the gallery
+    if image_before is None or profile_image_hash(job) != image_before or not app.state.db.get_current_profile_image_key(contact_id):
+        app.state.job_queue.add(job)
 
     return {"status": "ok"}
+
+def profile_image_hash(job: AssistantImageJob) -> str | None:
+    """hash (= file name) of the profile image the contact's data asks for, None if the data can't make one yet"""
+    try:
+        return Utils.hash_image_request(job.build_request())
+    except Exception:
+        return None
+
+########### contact image: upload or pick from the gallery
+MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024
+
+def image_extension(data: bytes) -> str | None:
+    """file extension from the first bytes, None if it is no png, jpeg or webp"""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+def set_contact_image(contact_id: int, file_key: str) -> dict:
+    """the image becomes the contact's current profile image (the newest 'profile' row), older ones stay"""
+    if app.state.db.add_contact_image(contact_id, file_key, "profile") == -1:
+        raise HTTPException(status_code=500, detail="failed to set the contact image")
+    return {"status": "ok", "file_key": file_key}
+
+@app.post("/contacts/{contact_id}/image")
+async def upload_contact_image(contact_id: int, request: Request, username: str = Depends(get_current_user)):
+    """
+    raw image bytes in the body (png, jpeg or webp), no multipart, like POST /voices.
+    stored as /hub/images/<sha256 of the bytes>.<ext>, the same bytes again reuse that file.
+    an upload has no stored generation, so ImageStore.ensure never generates it again: a lost upload is gone
+    """
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty upload")
+    if len(data) > MAX_IMAGE_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="image too large")
+    extension = image_extension(data)
+    if not extension:
+        raise HTTPException(status_code=400, detail="not a png, jpeg or webp image")
+
+    file_key = f"{hashlib.sha256(data).hexdigest()}.{extension}"
+    path = app.state.image_store.path(file_key)
+    if not path.exists():
+        part = path.with_name(file_key + ".part")
+        part.write_bytes(data)
+        part.replace(path)
+    return set_contact_image(contact_id, file_key)
+
+@app.put("/contacts/{contact_id}/image/{file_key}")
+def pick_contact_image(contact_id: int, file_key: str, username: str = Depends(get_current_user)):
+    """an image from the user's gallery becomes the contact's image. the file and its stored generation
+    (if it has one, then it can still be generated again) are shared, only a new contact_images row points to it"""
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
+    if not app.state.db.user_has_image(user_id, file_key) or not app.state.image_store.ensure(file_key):
+        raise HTTPException(status_code=404, detail="image not found")
+    return set_contact_image(contact_id, file_key)
 
 @app.delete("/contacts/{contact_id}")
 def delete_contact(contact_id: int, username: str = Depends(get_current_user)):
@@ -456,7 +524,10 @@ def get_messages(conversation_id: int, request: GetMessagesRequest, username: st
     user_id = app.state.db.get_user_id(username)
     if not app.state.db.owns_conversation(user_id, conversation_id):
         raise HTTPException(status_code=404, detail="conversation not found")
-    messages = app.state.db.get_messages_by_conversation(conversation_id, request.max_messages)
+    messages = app.state.db.get_messages_by_conversation(conversation_id, request.max_messages) or []
+    attachments = app.state.db.get_attachments_for_messages([message["id"] for message in messages])
+    for message in messages:
+        message["attachments"] = attachments.get(message["id"], [])
     return {"messages": messages}
 
 @app.get("/messages/{message_id}/attachments")
@@ -706,6 +777,26 @@ def get_generated_images(username: str = Depends(get_current_user)):
     only their own, the user comes from the token"""
     user_id = app.state.db.get_user_id(username)
     return {"images": app.state.db.get_generated_images(user_id)}
+
+########### gallery
+GALLERY_MAX_LIMIT = 200
+
+@app.get("/gallery")
+def get_gallery(limit: int = 60, offset: int = 0, username: str = Depends(get_current_user)):
+    """all images of the logged in user across all contacts (and the image tool), newest first, one page.
+    next_offset is None on the last page. an image whose file is gone and that has no stored generation
+    can't be downloaded (or generated again), it is left out. a profile still rendering has its generation already"""
+    user_id = app.state.db.get_user_id(username)
+    limit = max(1, min(limit, GALLERY_MAX_LIMIT))
+    offset = max(0, offset)
+    rows = app.state.db.get_user_images(user_id, limit, offset)
+    image_dir = Path("/hub/images")
+    images = [
+        {k: v for k, v in row.items() if k != "has_generation"}
+        for row in rows
+        if row["has_generation"] or (image_dir / row["file_key"]).is_file()
+    ]
+    return {"images": images, "next_offset": offset + len(rows) if len(rows) == limit else None}
 
 ########### model handling
 @app.get("/models/{model_name}/url", response_model=GetModelURLResponse)

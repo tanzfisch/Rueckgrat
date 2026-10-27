@@ -78,17 +78,9 @@ host_config="$(find_local_host_config)" || {
 
 REGISTRY_JSON="$(pwd)/rueckgrat/node/data/registry.json"
 parse_host_config "$host_config"
-
 print_header "🔧 Rückgrat Dev"
+format_host $HOST_ADDR
 
-echo "Config   $CONFIG_FILE"
-echo "Hub      $INSTALL_HUB"
-echo "Node     $INSTALL_NODE"
-echo "Llama    $INSTALL_LLAMA ${INSTALL_LLAMA_MODEL:+($INSTALL_LLAMA_MODEL)}"
-echo "ImageGen $INSTALL_IMAGE_GEN"
-echo ""
-
-echo "clean build ..."
 if $CLEAN_BUILD; then
     volume_cleanup
     docker builder prune -af >/dev/null

@@ -301,9 +301,6 @@ class MetaJob(Job):
                     raise TimeoutError("5 min timeout")
                 time.sleep(0.01)
 
-            MessageQueue().send_status_message("update context")
-            self._update_conversation_context()
-
             if not self.turns.set_state(self, "done"):
                 self._interrupted()
                 return

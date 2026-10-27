@@ -11,6 +11,8 @@ Changelog
       improved conversation context now focuses on open questions and decisions
 - #140 fixed text bubble selection color
 - #136 user can delete individual memories
+- #124 added galllery containing all pictures of the user account
+- #142 fixed slow load of chat page
 
 0.21.1
 ------

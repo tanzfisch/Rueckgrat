@@ -261,7 +261,7 @@ print_info_block() {
 
     echo ""
     echo "Current dir    $(pwd)"
-    echo "Launched with  $(echo "$PARAMETERS" | sed -E 's/-p [^ ]+/-p ******/g')"
+    echo "Launched with  \"$(echo "$PARAMETERS" | sed -E 's/-p [^ ]+/-p ******/g')\""
 }
 
 # volume_cleanup - Check for and optionally remove existing Rueckgrat Docker resources
@@ -877,21 +877,37 @@ select_components() {
     echo -e "\e[1A\e[K     Models: $HOST_MODELS_DIR"
 }
 
+_format_host_jq='
+  "\nHost: \($h.addr)",
+  "  "+(if $h.chat then "[✅]" else "[⚫]" end)+" Native Chat Client",
+  "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub"+(if $h.hub.signup_mode then " (signup: \($h.hub.signup_mode))" else "" end),
+  "  "+(if $h.node then "[✅]" else "[⚫]" end)+" Node",
+  "  "+($h.node.services[]? | "    [✅] \(.name)" + (if .name == "tts" then " (\(.model // "chatterbox"))" else "" end)),
+  "  "+($h.node.modules[]? | "    [✅] \(.name)")
+'
+
 format_hosts() {
     if [[ -z "${CONFIG_FILE:-}" ]] || ! jq . "$CONFIG_FILE" >/dev/null 2>&1; then
         echo "❌ Error: Invalid config" >&2
         return 1
     fi
 
-  jq -r '
-    .hosts[] as $h |
-    "\nHost: \($h.addr)",
-    "  "+(if $h.chat then "[✅]" else "[⚫]" end)+" Native Chat Client",
-    "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub"+(if $h.hub.signup_mode then " (signup: \($h.hub.signup_mode))" else "" end),
-    "  "+(if $h.node then "[✅]" else "[⚫]" end)+" Node",
-    "  "+($h.node.services[]? | "    [✅] \(.name)" + (if .name == "tts" then " (\(.model // "chatterbox"))" else "" end)),
-    "  "+($h.node.modules[]? | "    [✅] \(.name)")
-  ' "$CONFIG_FILE"
+    jq -r ".hosts[] as \$h | $_format_host_jq" "$CONFIG_FILE"
+}
+
+format_host() {
+    local host="${1:-}"
+    if [[ -z "${CONFIG_FILE:-}" ]] || ! jq . "$CONFIG_FILE" >/dev/null 2>&1; then
+        echo "❌ Error: Invalid config" >&2
+        return 1
+    fi
+
+    if [[ -z "$host" ]]; then
+        echo "❌ Error: No host specified" >&2
+        return 1
+    fi
+
+    jq -r --arg host "$host" ".hosts[] | select(.addr == \$host) as \$h | $_format_host_jq" "$CONFIG_FILE"
 }
 
 # confirm_install_configuration - Print full multi-host installation plan and ask for final confirmation

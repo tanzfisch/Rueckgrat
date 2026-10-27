@@ -456,6 +456,43 @@ class ChatDB:
                 logger.error(f"failed reading generated images of user {user_id}: {e}")
         return []
 
+    def get_user_images(self, user_id: int, limit: int = 60, offset: int = 0) -> list[dict]:
+        """every image of this user, newest first, for the gallery: the contacts' images (profile, conversation_images),
+        images attached to messages of their conversations and the done images of the image tool (no contact).
+        an image in several places is one row: its first created_at, its contact and conversation if it has one.
+        [{file_key, contact_id, contact_name, conversation_id, created_at, has_generation}], contact_* None for image tool images"""
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute("""
+                    WITH all_images AS (
+                        SELECT ci.file_key AS file_key, ci.contact_id AS contact_id, NULL AS conversation_id, ci.created_at AS created_at
+                        FROM contact_images ci JOIN contacts c ON c.id = ci.contact_id
+                        WHERE c.user_id = ?
+                        UNION ALL
+                        SELECT a.file_name, cv.contact_id, cv.id, m.timestamp
+                        FROM attachments a
+                        JOIN messages m ON m.id = a.message_id
+                        JOIN conversations cv ON cv.id = m.conversation_id
+                        WHERE cv.user_id = ? AND a.file_url = 'images/' || a.file_name
+                        UNION ALL
+                        SELECT file_name, NULL, NULL, created_at FROM generated_images
+                        WHERE user_id = ? AND status = 'done' AND file_name IS NOT NULL
+                    ), grouped AS (
+                        SELECT file_key, MAX(contact_id) AS contact_id, MAX(conversation_id) AS conversation_id, MIN(created_at) AS created_at
+                        FROM all_images WHERE file_key IS NOT NULL AND file_key != ''
+                        GROUP BY file_key
+                    )
+                    SELECT g.file_key, g.contact_id, ct.name AS contact_name, g.conversation_id, g.created_at,
+                           EXISTS (SELECT 1 FROM images i WHERE i.file_key = g.file_key) AS has_generation
+                    FROM grouped g LEFT JOIN contacts ct ON ct.id = g.contact_id
+                    ORDER BY g.created_at DESC, g.file_key DESC
+                    LIMIT ? OFFSET ?
+                """, (user_id, user_id, user_id, limit, offset)).fetchall()
+                return [dict(row) for row in rows]
+            except Exception as e:
+                logger.error(f"failed reading images of user {user_id}: {e}")
+        return []
+
     def add_contact_image(self, contact_id: int, file_name: str, image_type: str) -> int:
         with self.get_connection() as conn:
             try:
@@ -874,6 +911,10 @@ class ChatDB:
                     if cursor.execute("SELECT 1 FROM contact_images WHERE file_key = ? LIMIT 1", (file_key,)).fetchone():
                         continue
 
+                    # an image tool image picked as a contact image stays in the image tool's list
+                    if cursor.execute("SELECT 1 FROM generated_images WHERE file_name = ? LIMIT 1", (file_key,)).fetchone():
+                        continue
+
                     cursor.execute("DELETE FROM images WHERE file_key = ?", (file_key,))
                     unused.append(file_key)
                 conn.commit()
@@ -910,6 +951,24 @@ class ChatDB:
                 return row is not None
             except Exception as e:
                 logger.error(f"failed checking message owner: {e}")
+        return False
+
+    def user_has_image(self, user_id: int, file_key: str) -> bool:
+        """True if the image is in the user's gallery (get_user_images): a contact image, a chat attachment or an image tool image"""
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("""
+                    SELECT 1 FROM contact_images ci JOIN contacts c ON c.id = ci.contact_id WHERE ci.file_key = ? AND c.user_id = ?
+                    UNION ALL
+                    SELECT 1 FROM attachments a JOIN messages m ON m.id = a.message_id JOIN conversations cv ON cv.id = m.conversation_id
+                    WHERE a.file_name = ? AND cv.user_id = ? AND a.file_url = 'images/' || a.file_name
+                    UNION ALL
+                    SELECT 1 FROM generated_images WHERE file_name = ? AND user_id = ? AND status = 'done'
+                    LIMIT 1
+                """, (file_key, user_id, file_key, user_id, file_key, user_id)).fetchone()
+                return row is not None
+            except Exception as e:
+                logger.error(f"failed checking image of user: {e}")
         return False
 
     def owns_image(self, user_id: int, file_key: str) -> bool:
@@ -1180,6 +1239,37 @@ class ChatDB:
                 logger.error(f"Failed fetching attachments for message {message_id}: {e}")
         
         return []    
+
+    def get_attachments_for_messages(self, message_ids: list[int]) -> dict[int, list]:
+        """attachments of many messages in one query: message id -> list shaped like get_attachments_for_message"""
+        if not message_ids:
+            return {}
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                placeholders = ",".join("?" * len(message_ids))
+                cursor.execute(f"""
+                    SELECT message_id, id, file_name, file_url, file_type, file_size
+                    FROM attachments
+                    WHERE message_id IN ({placeholders})
+                    ORDER BY id
+                """, message_ids)
+
+                attachments = {}
+                for row in cursor.fetchall():
+                    attachments.setdefault(row[0], []).append({
+                        "id": row[1],
+                        "file_name": row[2],
+                        "file_url": row[3],
+                        "file_type": row[4],
+                        "file_size": row[5],
+                    })
+                return attachments
+
+            except Exception as e:
+                logger.error(f"Failed fetching attachments for messages: {e}")
+
+        return {}
 
     # ---- voices ---------------------------------------------------------
     # the wav file lives in VOICES_DIR/<file_key>, the row only knows the file key

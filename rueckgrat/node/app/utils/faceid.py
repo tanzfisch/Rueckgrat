@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.utils.registry import ModelRegistry, MODEL_BASE_DIR
 from app.common import get_logger
@@ -48,8 +48,8 @@ CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60   # unused entries (deleted contacts, 
 CACHE_CLEANUP_INTERVAL_SECONDS = 6 * 60 * 60
 MEMORY_CACHE_SIZE = 16
 
-# hub file keys are "<sha256>.png", anything else is not used as a file name
-KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}\.png")
+# hub file keys are "<sha256>.png" (generated) or .jpg/.webp (uploaded contact images), anything else is not used as a file name
+KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}\.(png|jpg|webp)")
 
 
 class FaceReference:
@@ -158,7 +158,8 @@ class FaceReference:
         if model_dir is None:
             raise RuntimeError(f"{FACEID_MODEL} not installed")
 
-        image = Image.open(io.BytesIO(base64.b64decode(image_b64, validate=True))).convert("RGB")
+        # exif_transpose: phone photos are often stored sideways with an orientation tag, insightface needs the face upright
+        image = ImageOps.exif_transpose(Image.open(io.BytesIO(base64.b64decode(image_b64, validate=True)))).convert("RGB")
         bgr = np.ascontiguousarray(np.array(image)[:, :, ::-1])     # insightface works on opencv bgr images
 
         faces = self._face_analysis(model_dir).get(bgr)

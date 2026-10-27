@@ -403,6 +403,52 @@ class Hub:
         return None
 
     @classmethod
+    def get_gallery(cls, offset: int = 0, limit: int = 60) -> dict | None:
+        """one page of all images of this user, newest first: {images: [{file_key, contact_id, contact_name,
+        conversation_id, created_at}], next_offset (None on the last page)}. None if the hub could not be asked"""
+        try:
+            response = requests.get(
+                f"{cls.url}/gallery",
+                params={"offset": offset, "limit": limit},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json()
+            logger.error(f"get gallery - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_gallery {repr(e)}")
+        return None
+
+    @classmethod
+    def upload_contact_image(cls, contact_id: int, data: bytes) -> Optional[str]:
+        """png, jpeg or webp bytes become the contact's profile image, returns its file key or None"""
+        return cls._set_contact_image(requests.post, f"contacts/{contact_id}/image", data)
+
+    @classmethod
+    def pick_contact_image(cls, contact_id: int, file_key: str) -> Optional[str]:
+        """an image of the gallery becomes the contact's profile image, returns its file key or None"""
+        return cls._set_contact_image(requests.put, f"contacts/{contact_id}/image/{file_key}")
+
+    @classmethod
+    def _set_contact_image(cls, send, path: str, data: bytes | None = None) -> Optional[str]:
+        try:
+            response = send(
+                f"{cls.url}/{path}",
+                data=data,
+                headers={"Authorization": f"Bearer {cls.access_token}", "Content-Type": "application/octet-stream"},
+                timeout=60,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("file_key")
+            logger.error(f"set contact image - {response.status_code} {response.text}")
+        except Exception as e:
+            logger.error(f"failed to set the contact image {repr(e)}")
+        return None
+
+    @classmethod
     def get_contact(cls, contact_id: int):
         url = f"{cls.url}/contact/{contact_id}"
 
@@ -650,11 +696,12 @@ class Hub:
         return None
 
     @classmethod
-    def get_messages(cls, conversation_id: int, max_message: int = 100):
+    def get_messages(cls, conversation_id: int, max_messages: int = 100):
+        """the last max_messages of a conversation, each with its "attachments" list"""
         url = f"{cls.url}/conversations/{conversation_id}/messages"
 
         request = GetMessagesRequest(
-            max_message=max_message
+            max_messages=max_messages
         )
 
         try:
