@@ -445,6 +445,23 @@ class Hub:
         return None
 
     @classmethod
+    def delete_contact_memory(cls, contact_id: int, memory_id: int) -> bool:
+        """removes one memory of the contact on the hub, False if that failed"""
+        try:
+            response = requests.delete(
+                f"{cls.url}/contacts/{contact_id}/memories/{memory_id}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return True
+            logger.error(f"delete contact memory - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to delete_contact_memory {repr(e)}")
+        return False
+
+    @classmethod
     def get_signup_mode(cls) -> str:
         """
         Returns "open" or "invite". Falls back to "invite" if the hub can't tell,

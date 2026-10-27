@@ -10,6 +10,7 @@ Changelog
       cach tts data for faster replay
       improved conversation context now focuses on open questions and decisions
 - #140 fixed text bubble selection color
+- #136 user can delete individual memories
 
 0.21.1
 ------
