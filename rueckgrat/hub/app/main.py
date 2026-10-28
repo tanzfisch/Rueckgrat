@@ -79,6 +79,9 @@ security = HTTPBearer(auto_error=False)
 SECRET_KEY = "change_this_later"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
+# the app keeps the refresh token (stay logged in after a restart), POST /refresh swaps it for a new pair.
+# stateless like the access token: logout only forgets it on the device
+REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 ph = PasswordHasher()
 
@@ -89,6 +92,8 @@ def decode_token(token: str):
             SECRET_KEY,
             algorithms=[ALGORITHM]
         )
+        if payload.get("type") == "refresh":
+            raise ValueError("a refresh token is no access token")
         return payload["sub"]
 
     except Exception:        
@@ -115,6 +120,10 @@ def create_access_token(username: str):
         "exp": expire
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+def create_refresh_token(username: str):
+    expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    return jwt.encode({"sub": username, "exp": expire, "type": "refresh"}, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_current_user(credentials=Depends(security)):
     # a missing or expired token is a 401, not a request for nobody's (empty) data
@@ -258,13 +267,31 @@ def login(data: LoginRequest):
     if not verify_password(data.user_passwd or "", user["password"]):
         raise HTTPException(status_code=401)
 
-    token = create_access_token(user["username"])
+    return session_response(user)
 
+def session_response(user: dict) -> dict:
     return {
-        "access_token": token,
+        "access_token": create_access_token(user["username"]),
+        "refresh_token": create_refresh_token(user["username"]),
         "user_id": user["id"],
+        "user_name": user["username"],
         "nsfw_allowed": bool(user["nsfw_allowed"])
     }
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+@app.post("/refresh")
+def refresh(data: RefreshRequest):
+    """a new access and refresh token for a valid refresh token, 401 if it is invalid, expired or its user is gone"""
+    try:
+        payload = jwt.decode(data.refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = app.state.db.get_user(payload.get("sub")) if payload.get("type") == "refresh" else None
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return session_response(user)
 
 class ChangePasswordRequest(BaseModel):
     current_passwd: str

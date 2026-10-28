@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import certifi
 from urllib.parse import urlparse
@@ -14,6 +15,8 @@ class Hub:
     user_id = -1
     user_name = ""
     access_token = ""
+    refresh_token = ""
+    token_time = 0.0    # time.time() of the access token (wall clock, it counts while the phone sleeps), it is refreshed before the hub's 60 minutes run out
     nsfw_allowed = False
     download_queue = DownloadQueue()
     ws_task = None
@@ -99,6 +102,45 @@ class Hub:
         cls.ws_task = asyncio.create_task(cls._start_websocket(token))
 
     @classmethod
+    def _set_session(cls, data: dict):
+        """takes the tokens of /login or /refresh and stores the refresh token, so a restart stays logged in"""
+        cls.access_token = data.get("access_token", "")
+        cls.refresh_token = data.get("refresh_token", "")
+        cls.token_time = time.time()
+        cls.user_id = data.get("user_id", -1)
+        cls.user_name = data.get("user_name", cls.user_name)
+        cls.nsfw_allowed = bool(data.get("nsfw_allowed", False))
+        cls.config.refresh_token = cls.refresh_token
+
+    @classmethod
+    def has_stored_session(cls) -> bool:
+        cls.refresh_token = cls.refresh_token or cls.config.refresh_token
+        return bool(cls.refresh_token)
+
+    @classmethod
+    async def refresh_session(cls) -> bool | None:
+        """new tokens for the stored refresh token. True: logged in, False: no session or the hub refused it
+        (the stored one is dropped), None: hub not reachable, keep the session and try again later"""
+        if not cls.has_stored_session():
+            return False
+        try:
+            response = await asyncio.to_thread(requests.post, f"{cls.url}/refresh", json={"refresh_token": cls.refresh_token},
+                                               timeout=10, verify=cls.server_cert)
+        except Exception as e:
+            logger.error(f"failed to refresh the session {repr(e)}")
+            return None
+        if response.status_code == 200:
+            cls._set_session(response.json())
+            cls.websocket_client.start(cls.access_token)   # same user: running, the next reconnect uses the new token
+            return True
+        logger.error(f"refresh session - {response.status_code} {response.reason}")
+        if response.status_code == 401:
+            cls.refresh_token = ""
+            cls.config.refresh_token = ""
+            return False
+        return None
+
+    @classmethod
     async def stop_websocket(cls):
         if cls.ws_task:
             cls.ws_task.cancel()
@@ -120,6 +162,8 @@ class Hub:
         logger.info(f"logged out {cls.user_name} id:{cls.user_id}")
     
         cls.access_token = ""
+        cls.refresh_token = ""
+        cls.config.refresh_token = ""
         cls.user_id = -1
         cls.user_name = ""
         cls.nsfw_allowed = False
@@ -834,12 +878,9 @@ class Hub:
             )
 
             if response.status_code == 200:
-                data = response.json()
-                cls.access_token = data.get("access_token", "")
-                cls._on_login_success(cls.access_token)
-                cls.user_id = data.get("user_id", -1)
                 cls.user_name = user_name
-                cls.nsfw_allowed = bool(data.get("nsfw_allowed", False))
+                cls._set_session(response.json())
+                cls._on_login_success(cls.access_token)
                 return None
 
             logger.error(f"login failed {response.status_code} {response.reason}")
