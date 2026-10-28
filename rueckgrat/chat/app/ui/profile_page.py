@@ -146,6 +146,9 @@ class ProfilePage(BasePage):
         self.personality = _text_field("Persona", "text")
         self.age = _text_field("Age", "text")
         self.voice_selector = VoiceSelector()
+        # a pending choice, Save Profile sends it. hidden for a new contact
+        self.companion_switch = ft.Switch(label="Companion (plans its own day, may write first)", active_color="#0D7377", visible=False)
+        self.companion_loaded = False   # the hub's state, a different switch value is sent on save
 
         # original profile dict, so fields without a form entry survive a save
         self.profile_base = {}
@@ -213,6 +216,7 @@ class ProfilePage(BasePage):
                                     ]
                                 ),
                                 self.age,
+                                self.companion_switch,
                                 ft.Row(
                                     controls=[
                                         ft.Text("Voice"),
@@ -260,6 +264,8 @@ class ProfilePage(BasePage):
         self.set_gender("male")
         self.voice_selector.set_current_voice("")
         self.image_row.visible = False
+        self.companion_switch.visible = False
+        self.companion_switch.value = self.companion_loaded = False
         self.update()
 
     def fill_form(self, contact):
@@ -288,6 +294,11 @@ class ProfilePage(BasePage):
             return
         contact = Hub.get_contact(self.contact_id)
         self.fill_form(contact)
+        # only the hub sets the flag (PUT /contacts/{id}/companion), so it is read here and not in fill_form: Load must not change it
+        self.companion_loaded = bool(Utils.get_nested_value(contact, ["profile", "companion"], False))
+        self.companion_switch.value = self.companion_loaded
+        self.companion_switch.visible = True
+        self.companion_switch.update()
         self.image_row.visible = True
         self._show_image(Contact(contact or {}).get_latest_profile_image_name())
 
@@ -392,6 +403,13 @@ class ProfilePage(BasePage):
         data = self.get_data()
         _set_nested_value(data["profile"], ["tts_parameters", "voice_id"], self._resolve_voice_id())
         Hub.update_contact(self.contact_id, data)
+
+        enabled = bool(self.companion_switch.value)
+        if enabled != self.companion_loaded:
+            if not Hub.set_contact_companion(self.contact_id, enabled):
+                self.page.show_dialog(ft.SnackBar(ft.Text("The companion could not be switched " + ("on" if enabled else "off"))))
+                return
+            self.companion_loaded = enabled
         self.navigator("contacts")
 
     def _resolve_voice_id(self) -> str:
@@ -419,6 +437,7 @@ class ProfilePage(BasePage):
     def get_data(self):
         gender = self.gender_group.value or "male"
         profile = copy.deepcopy(self.profile_base)
+        profile.pop("companion", None)
         for path, kind, field in self.profile_fields:
             text = field.value or ""
             if kind == "list":

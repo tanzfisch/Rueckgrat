@@ -54,6 +54,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
 - code highlighting
 - contacts, character templates, character-creation wizard, settings
 - assiting a conversation with someone in an other language (using your own llm for translation)
+- persistent companion (opt-in per contact): plans its own day and may write first
 
 Some screenhots of the app ...
 
@@ -150,6 +151,8 @@ docker exec -it rueckgrat_hub python -m app.hub_management invite create --email
 docker exec -it rueckgrat_hub python -m app.hub_management user create [user_name]
 docker exec -it rueckgrat_hub python -m app.hub_management user list
 docker exec -it rueckgrat_hub python -m app.hub_management invite list
+docker exec -it rueckgrat_hub python -m app.hub_management companion list
+docker exec -it rueckgrat_hub python -m app.hub_management companion status [contact_id]
 ```
 
 **Note: The invite token is printed only once, copy it immediately.**

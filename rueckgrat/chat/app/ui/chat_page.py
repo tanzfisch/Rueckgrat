@@ -467,8 +467,8 @@ class ChatPage(BasePage):
         self.history.update()
 
     def on_incomming_message(self, message: dict):
-        if not "delta" in message:
-            logger.debug(f"incomming message:\n{Utils.pretty_print(message)}")
+        #if not "delta" in message:
+            #logger.debug(f"incomming message:\n{Utils.pretty_print(message)}")
 
         try:
             if "status" in message:

@@ -57,6 +57,11 @@ class Turns:
             if merge or not mergeable:
                 self._running[request.conversation_id] = job
 
+    def busy(self, conversation_id: int) -> bool:
+        """a reply is being made in this conversation"""
+        with self._lock:
+            return conversation_id in self._running
+
     def set_state(self, job, state: str) -> bool:
         """"images" (an image tool is queued) or "done" (the final goes out): from then on nothing merges into the job.
         False if the job was cancelled already"""

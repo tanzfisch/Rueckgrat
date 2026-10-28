@@ -213,7 +213,7 @@ Return ONLY valid JSON in the same format.
             }
         }
 
-        logger.debug(f"new context:\n{Utils.pretty_print(new_context)}")
+        #logger.debug(f"new context:\n{Utils.pretty_print(new_context)}")
 
         return new_context
 
