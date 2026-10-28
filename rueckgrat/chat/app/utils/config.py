@@ -97,6 +97,15 @@ class RueckgratConfig:
     def log_level(self):
         return self._get("chat", "log_level", "ERROR")
 
+    @property
+    def refresh_token(self):
+        """the stored session (stay logged in), "" when logged out"""
+        return self._get("session", "refresh_token", "")
+
+    @refresh_token.setter
+    def refresh_token(self, value):
+        self._set("session", "refresh_token", value or "")
+
     _LEVELS = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
 
     @log_level.setter

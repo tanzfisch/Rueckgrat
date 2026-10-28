@@ -14,6 +14,7 @@ Changelog
 - #124 added galllery containing all pictures of the user account
 - #142 fixed slow load of chat page
 - #143 uploading images for profile images
+- #111 stay logged in on android until user explicitly loggs out
 
 0.21.1
 ------

@@ -22,6 +22,7 @@ class WebSocketClient:
         self.state_handlers: List[Callable[[str], None]] = []
         self._lost = False  # an established connection dropped and is not back yet
         self._supervisor_task: Optional[asyncio.Task] = None
+        self.token: Optional[str] = None    # used on every (re)connect
         self._stopped = False
         self.server_cert = server_cert
         self.uri = uri
@@ -161,16 +162,18 @@ class WebSocketClient:
 
     def start(self, token: Optional[str] = None):
         """keep the connection alive in the background: connect whenever the peer
-        becomes reachable and reconnect after it goes away. returns immediately"""
+        becomes reachable and reconnect after it goes away. returns immediately.
+        while running only the token is replaced, the next reconnect uses it"""
+        self.token = token
         if self._supervisor_task and not self._supervisor_task.done():
             return
         self._stopped = False
-        self._supervisor_task = asyncio.create_task(self._supervise(token))
+        self._supervisor_task = asyncio.create_task(self._supervise())
 
-    async def _supervise(self, token: Optional[str]):
+    async def _supervise(self):
         while not self._stopped:
             try:
-                await self.connect(token, timeout=None)
+                await self.connect(self.token, timeout=None)
                 if self._lost:
                     self._lost = False
                     logger.info(f"reconnected to {self.uri}")
