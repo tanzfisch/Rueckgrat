@@ -6,6 +6,14 @@ from app.ui.widgets import RowSelector, Header, MessageBox
 from app.utils import RueckgratConfig, Hub
 from app.ui.profile_wizzard import ProfileWizzardMode
 
+# common IANA zones, east to west. the hub accepts any IANA name, one not listed here is added when it is the stored one
+TIMEZONES = [
+    "Pacific/Auckland", "Australia/Sydney", "Asia/Tokyo", "Asia/Shanghai", "Asia/Singapore", "Australia/Perth",
+    "Asia/Kolkata", "Asia/Dubai", "Europe/Moscow", "Europe/Istanbul", "Africa/Johannesburg", "Europe/Berlin",
+    "Europe/London", "UTC", "America/Sao_Paulo", "America/New_York", "America/Chicago", "America/Denver",
+    "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu",
+]
+
 
 def _section(title: str, *controls) -> ft.Column:
     # same heading style as the sections of the contact profile page
@@ -47,6 +55,11 @@ class UserProfileSettingsPage(ft.Column):
         self.navigator = navigator
         # optional, the hub only checks the format
         self.email_edit = ft.TextField(label="Email (optional)", value=Hub.get_email(), **STYLES["field"])
+        # the companions of all contacts plan their day and keep quiet hours in it
+        timezone = Hub.get_timezone()   # "" if the hub can't be reached, then nothing is selected
+        timezones = TIMEZONES if timezone in TIMEZONES or not timezone else [timezone, *TIMEZONES]
+        self.timezone_edit = ft.Dropdown(label="Timezone", value=timezone or None,
+                                         options=[ft.DropdownOption(key=tz, text=tz) for tz in timezones], **STYLES["field"])
         self.current_pass_edit = ft.TextField(label="Current password", password=True, can_reveal_password=True, **STYLES["field"])
         self.new_pass_edit = ft.TextField(label="New password", password=True, can_reveal_password=True, **STYLES["field"])
         self.confirm_pass_edit = ft.TextField(label="Confirm new password", password=True, can_reveal_password=True, **STYLES["field"])
@@ -60,6 +73,11 @@ class UserProfileSettingsPage(ft.Column):
                 "Email",
                 self.email_edit,
                 ft.Button("save email", on_click=self.on_click_save_email, style=STYLES["button"]["style"]),
+            ),
+            _section(
+                "Timezone",
+                self.timezone_edit,
+                ft.Button("save timezone", on_click=self.on_click_save_timezone, style=STYLES["button"]["style"]),
             ),
             _section(
                 "Password",
@@ -104,6 +122,16 @@ class UserProfileSettingsPage(ft.Column):
             MessageBox.error(self.page, error, title="Email not saved")
             return
         MessageBox.show(self.page, "your email has been saved", title="Email saved")
+
+    def on_click_save_timezone(self, e=None):
+        if not self.timezone_edit.value:
+            MessageBox.error(self.page, "please choose a timezone", title="Timezone not saved")
+            return
+        error = Hub.set_timezone(self.timezone_edit.value)
+        if error:
+            MessageBox.error(self.page, error, title="Timezone not saved")
+            return
+        MessageBox.show(self.page, "your timezone has been saved", title="Timezone saved")
 
     def on_click_change_password(self, e=None):
         if self.new_pass_edit.value != self.confirm_pass_edit.value:

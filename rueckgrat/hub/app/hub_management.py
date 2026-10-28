@@ -13,10 +13,15 @@ Hub management tool (signup invites and users), run inside the hub container:
     docker exec -it rueckgrat_hub python -m app.hub_management user list
     docker exec -it rueckgrat_hub python -m app.hub_management user modify martin --nsfw off
     docker exec -it rueckgrat_hub python -m app.hub_management user modify martin --nsfw       (asks: on or off?)
+    docker exec -it rueckgrat_hub python -m app.hub_management companion list
+    docker exec -it rueckgrat_hub python -m app.hub_management companion list --user martin
+    docker exec -it rueckgrat_hub python -m app.hub_management companion status 31
+    docker exec -it rueckgrat_hub python -m app.hub_management companion status 31 --log 50 --json
 
 Whoever can run docker on the host is trusted as admin.
 """
 import argparse
+import json
 from datetime import datetime, timezone
 
 from argon2 import PasswordHasher
@@ -78,6 +83,68 @@ def print_users(users):
         print(f"{bg}{line:<100}{RESET}")
 
 
+def companion_now(db):
+    """the hub's companion clock: real time, or when simulated (COMPANION_TIME_SCALE) estimated from the last logged pass"""
+    from app.companion import clock
+    if clock.TIME_SCALE == 1 and not clock.TIME_START:
+        return clock.now(), "real time"
+    simulated = f"simulated x{clock.TIME_SCALE:g}"
+    last = db.get_companion_log(limit=1)
+    if not last:
+        return None, f"{simulated}, unknown before the first pass"
+    wall = datetime.now(timezone.utc) - clock.from_db(last[0]["created_at"])
+    return clock.from_db(last[0]["at"]) + wall * clock.TIME_SCALE, f"{simulated}, estimated from the last pass"
+
+
+def companion_status(db, contact, log_entries):
+    """everything about one companion as a dict, times in the user's timezone"""
+    from app.companion import clock, companion_job as cj
+    from app.companion.scheduler import CompanionScheduler
+    contact_id = contact["id"]
+    tz = clock.user_timezone(db, contact["user_id"])
+    def local(text):
+        return clock.from_db(text).astimezone(tz).strftime("%a %d %H:%M") if text else None
+
+    now, clock_text = companion_now(db)
+    last_run = db.last_companion_run(contact_id)
+    status = {
+        "contact_id": contact_id, "name": contact["name"], "user": contact["username"], "companion": bool(contact["companion"]),
+        "timezone": str(tz), "now": now.astimezone(tz).strftime("%a %Y-%m-%d %H:%M") if now else None, "clock": clock_text,
+        "last_run": local(last_run),
+        "cutoff": CompanionScheduler(db, None, None, None).cutoff(contact_id, tz, now).astimezone(tz).strftime("%a %d %H:%M") if now else None,
+        "messages_today": db.count_companion_messages(contact_id, clock.local_day(now.astimezone(tz))[0]) if now else None,
+        "limits": f"{cj.MAX_MESSAGES_PER_DAY}/day, {cj.MIN_HOURS_BETWEEN_MESSAGES}h apart, quiet {cj.QUIET_HOURS[0]}-{cj.QUIET_HOURS[1]}h, "
+                  f"not within {cj.USER_ACTIVE_MINUTES} min of the user writing",
+        "calendar": [{"row": r["id"], "due": local(r["due_at"]), "kind": r["kind"], "note": r["note"], "daily": r["recurrence"] == "daily"}
+                     for r in db.pending_companion_rows(contact_id)],
+        "hub_next_wake": local(db.next_companion_due()),
+        "log": [{"at": local(e["at"]), **e["record"], "occurrence": local(e["record"].get("occurrence"))} for e in log_entries],
+    }
+    return status
+
+
+def print_companion_status(s):
+    print(f"\ncompanion {s['contact_id']} {s['name']} (user {s['user']}): {'ON' if s['companion'] else 'OFF'}")
+    print(f"  timezone   {s['timezone']}")
+    print(f"  now        {s['now'] or '?'} ({s['clock']})")
+    print(f"  last run   {s['last_run'] or 'never'}, catch-up cutoff {s['cutoff'] or '?'}")
+    print(f"  messages   {s['messages_today'] if s['messages_today'] is not None else '?'} today, limits {s['limits']}")
+    print(f"  next wake  {s['calendar'][0]['due'] if s['calendar'] else '-'} (hub: {s['hub_next_wake'] or '-'})")
+    print("  calendar")
+    for r in s["calendar"] or [{"due": "", "kind": "nothing pending", "note": "", "daily": False}]:
+        print(f"    {r['due']:<12} {r['kind']:<10} {'daily' if r['daily'] else '':<6}{r['note']}")
+    print(f"  last {len(s['log'])} pass{'' if len(s['log']) == 1 else 'es'}")
+    for e in s["log"]:
+        due = f" (due {e['occurrence']})" if e["occurrence"] != e["at"] else ""
+        print(f"    {e['at']} {e['kind']} #{e['row']} {e['note']!r}{due}")
+        for key in ("missed", "reflection", "lookup", "plan", "thoughts", "message", "error"):
+            if key == "plan" and (e.get("plan") or (e["kind"] == "planning" and "plan" in e)):
+                for line in e["plan"] or ["empty plan"]:
+                    print(f"        {'plan':<10} {line}")
+            elif e.get(key):
+                print(f"        {key:<10} {e[key]}")
+
+
 def add_nsfw_switch(cmd):
     # "--nsfw on" / "--nsfw off", or just "--nsfw" (value None) to be asked
     cmd.add_argument("--nsfw", nargs="?", choices=["on", "off"], required=True,
@@ -117,7 +184,13 @@ def main():
   user list       list all users and their NSFW permission
   user modify NAME --nsfw [on|off]
                   allow (on) or forbid (off) NSFW for a user, asks if on/off is left out
-                  (takes effect on their next login)""",
+                  (takes effect on their next login)
+
+  companion list [--user NAME]
+                  the companions (and contacts with a companion log), or all contacts of a user
+  companion status CONTACT_ID [--log N] [--json]
+                  a companion's state: clock, calendar, catch-up cutoff, messages today and its last N passes
+                  (default 10). read only, safe next to the running hub""",
     )
     # two levels of subcommands: first the noun (invite/user), then the action
     nouns = parser.add_subparsers(dest="noun", required=True)
@@ -156,7 +229,37 @@ def main():
     user_modify.add_argument("name", help="user name as shown by user list")
     add_nsfw_switch(user_modify)
 
+    # --- companion (read only) ---
+    companion = nouns.add_parser("companion", help="look at the companions (read only)")
+    companion_actions = companion.add_subparsers(dest="action", required=True)
+    companion_list = companion_actions.add_parser("list", help="the companions, or all contacts of a user")
+    companion_list.add_argument("--user", default=None, help="user name as shown by user list")
+    status = companion_actions.add_parser("status", help="a companion's state and its last passes")
+    status.add_argument("contact_id", type=int, help="contact id as shown by companion list")
+    status.add_argument("--log", type=int, default=10, help="how many of the last passes (default 10, at most 50 are kept)")
+    status.add_argument("--json", action="store_true", help="print json")
+
     args = parser.parse_args()
+    if args.noun == "companion":
+        db = ChatDB.read_only(DB_PATH)
+        if args.action == "list":
+            rows = db.companion_contacts(user_name=args.user)
+            print(f"\n{'ID':<5} {'USER':<16} {'CONTACT':<20} {'COMPANION':<10} {'PENDING':<8} LAST PASS (UTC)")
+            for r in rows:
+                print(f"{r['id']:<5} {r['username']:<16} {r['name'][:20]:<20} {'on' if r['companion'] else 'off':<10} {r['pending']:<8} {r['last_pass'] or '-'}")
+            if not rows:
+                print("No companions")
+        else:
+            contacts = db.companion_contacts(contact_id=args.contact_id)
+            if not contacts:
+                print("not found")
+                return
+            s = companion_status(db, contacts[0], db.get_companion_log(args.contact_id, args.log))
+            if args.json:
+                print(json.dumps(s, indent=2, ensure_ascii=False))
+            else:
+                print_companion_status(s)
+        return
     db = ChatDB(DB_PATH)
 
     if args.noun == "invite":

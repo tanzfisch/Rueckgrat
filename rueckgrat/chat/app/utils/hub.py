@@ -493,6 +493,24 @@ class Hub:
         return None
 
     @classmethod
+    def set_contact_companion(cls, contact_id: int, enabled: bool) -> bool:
+        """switches the companion (plans its own day, may write first) of a contact on or off"""
+        try:
+            response = requests.put(
+                f"{cls.url}/contacts/{contact_id}/companion",
+                json={"enabled": enabled},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return True
+            logger.error(f"set contact companion - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to set_contact_companion {repr(e)}")
+        return False
+
+    @classmethod
     def get_contact(cls, contact_id: int):
         url = f"{cls.url}/contact/{contact_id}"
 
@@ -833,6 +851,46 @@ class Hub:
             return detail if isinstance(detail, str) else f"saving the email failed ({response.status_code})"
         except Exception as e:
             logger.error(f"failed to set_email {repr(e)}")
+            return "could not reach the hub"
+
+    @classmethod
+    def get_timezone(cls) -> str:
+        """the user's IANA timezone (the hub answers UTC if none is set), "" if the hub can't be reached"""
+        try:
+            response = requests.get(
+                f"{cls.url}/users/me/timezone",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("timezone", "")
+            logger.error(f"get timezone - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_timezone {repr(e)}")
+        return ""
+
+    @classmethod
+    def set_timezone(cls, timezone: str) -> str | None:
+        """IANA name, e.g. Pacific/Auckland. returns None on success, else an error message for the user"""
+        try:
+            response = requests.put(
+                f"{cls.url}/users/me/timezone",
+                json={"timezone": timezone},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return None
+            logger.error(f"set timezone - {response.status_code} {response.reason}")
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+            return detail if isinstance(detail, str) else f"saving the timezone failed ({response.status_code})"
+        except Exception as e:
+            logger.error(f"failed to set_timezone {repr(e)}")
             return "could not reach the hub"
 
     @classmethod

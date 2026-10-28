@@ -26,6 +26,9 @@ from app.tools import ToolRegistry
 from app.jobs import JobQueue, MetaJob, AssistantImageJob, ContactGeneratorJob, TranslateJob, GenerateImageJob
 from app.jobs.meta_job import Turns
 from app.utils.tts_stream import TtsStreams
+from app.companion import CompanionScheduler, DEFAULT_TIMEZONE
+from collections import Counter
+from zoneinfo import ZoneInfo
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
@@ -54,6 +57,12 @@ async def lifespan(app: FastAPI):
         job_queue=app.state.job_queue
     )
 
+    # proactive companions: pushes only to users with an open /ws, the message is in the db anyway
+    app.state.connections = Counter()   # user_id -> open /ws connections
+    app.state.companion = CompanionScheduler(app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.job_queue,
+                                             app.state.turns, is_connected=lambda user_id: app.state.connections[user_id] > 0)
+    app.state.companion.start()
+
     logger.info("loading vad")
     app.state.vad = load_silero_vad(onnx=True)
     torch.set_num_threads(1)
@@ -67,6 +76,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    app.state.companion.stop()
     app.state.job_queue.stop()
 
     logger.info("hub shut down")
@@ -313,6 +323,23 @@ def change_password(request: ChangePasswordRequest, username: str = Depends(get_
 # the email is optional and only informational, so just a format check: no verification, not unique
 EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
+class TimezoneRequest(BaseModel):
+    timezone: str
+
+@app.get("/users/me/timezone")
+def get_timezone(username: str = Depends(get_current_user)):
+    return {"timezone": app.state.db.get_user_timezone(app.state.db.get_user_id(username)) or DEFAULT_TIMEZONE}
+
+@app.put("/users/me/timezone")
+def set_timezone(request: TimezoneRequest, username: str = Depends(get_current_user)):
+    """IANA name, e.g. Pacific/Auckland. the companion plans and keeps quiet hours in it"""
+    try:
+        ZoneInfo(request.timezone)
+    except Exception:
+        raise HTTPException(status_code=400, detail="unknown timezone")
+    app.state.db.set_user_timezone(app.state.db.get_user_id(username), request.timezone)
+    return {"status": "ok"}
+
 class EmailRequest(BaseModel):
     email: str
 
@@ -479,6 +506,18 @@ def pick_contact_image(contact_id: int, file_key: str, username: str = Depends(g
     if not app.state.db.user_has_image(user_id, file_key) or not app.state.image_store.ensure(file_key):
         raise HTTPException(status_code=404, detail="image not found")
     return set_contact_image(contact_id, file_key)
+
+class CompanionRequest(BaseModel):
+    enabled: bool
+
+@app.put("/contacts/{contact_id}/companion")
+def set_companion(contact_id: int, request: CompanionRequest, username: str = Depends(get_current_user)):
+    """a companion has a life of its own and may write first (app/companion). off drops its calendar"""
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.set_contact_companion(user_id, contact_id, request.enabled):
+        raise HTTPException(status_code=404, detail="contact not found")
+    app.state.companion.wake()
+    return {"status": "ok"}
 
 @app.delete("/contacts/{contact_id}")
 def delete_contact(contact_id: int, username: str = Depends(get_current_user)):
@@ -877,6 +916,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
     closed = asyncio.Event()
     logger.debug(f"username: {username}")
     user_id = app.state.db.get_user_id(username)
+    app.state.connections[user_id] += 1
 
     async def safe_close(code: int = 1000):
         if not closed.is_set():
@@ -996,6 +1036,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
     )
 
     await safe_close()
+    app.state.connections[user_id] -= 1
 
     for task in pending:
         task.cancel()

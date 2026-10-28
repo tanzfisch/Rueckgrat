@@ -15,6 +15,7 @@ Changelog
 - #142 fixed slow load of chat page
 - #143 uploading images for profile images
 - #111 stay logged in on android until user explicitly loggs out
+- #37 persistent companion: plans its own day every night (private calendar), writes first now and then
 
 0.21.1
 ------
