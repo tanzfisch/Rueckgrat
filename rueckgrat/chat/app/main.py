@@ -18,6 +18,7 @@ from app.ui import (
     SettingsPage,
     TranslatePage,
     ImagePage,
+    GalleryPage,
 )
 from app.ui.theme import apply_theme
 from app.ui.widgets import ImageOverlay, MessageBox, ConnectionBanner
@@ -40,6 +41,7 @@ PAGES = {
     "initial_settings": InitialSettingsPage,
     "translate": TranslatePage,
     "image": ImagePage,
+    "gallery": GalleryPage,
 }
 
 

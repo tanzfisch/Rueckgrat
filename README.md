@@ -96,7 +96,7 @@ Reinstall from a saved config, skipping the setup questions:
 
 ## Android
 
-Make sure to run the installer at least once so it can generate the caddy certificate.
+Make sure to run the installer at least once before so it can generate the caddy certificate the client needs.
 Either select build apk in the installer or alternatively you can manually build the apk with:
 
 ```bash

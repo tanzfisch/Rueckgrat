@@ -1,14 +1,20 @@
+import asyncio
 import copy
 import json
+from pathlib import Path
 import flet as ft
 from app.ui.theme import STYLES
 
 from app.ui import BasePage
-from app.ui.widgets import Header, VoiceSelector
-from app.utils import Hub
+from app.ui.gallery_page import GalleryPage, broken_image_fallback
+from app.ui.widgets import Header, Image, VoiceSelector
+from app.utils import Contact, Hub, Paths
 from app.common import get_logger, Utils, IMAGE_STYLE_OPTIONS, IMAGE_STYLE_ICONS
 
 logger = get_logger()
+
+IMAGE_SIZE = 120
+IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp"]   # what the hub accepts
 
 PROFILE_SECTIONS = [
     ("Story", [
@@ -153,6 +159,36 @@ class ProfilePage(BasePage):
                 profile_controls.append(field)
         self.file_picker = ft.FilePicker()
 
+        # the contact's current profile image, a tap on it or on the pen changes it. hidden for a new contact
+        self.image_slot = ft.Container(
+            width=IMAGE_SIZE,
+            height=IMAGE_SIZE,
+            border_radius=8,
+            clip_behavior=ft.ClipBehavior.HARD_EDGE,
+            alignment=ft.Alignment.CENTER,
+            on_click=self._on_edit_image,
+        )
+        self.image_row = ft.Row(
+            alignment=ft.MainAxisAlignment.CENTER,
+            visible=False,
+            controls=[
+                ft.Stack(
+                    width=IMAGE_SIZE,
+                    height=IMAGE_SIZE,
+                    controls=[
+                        self.image_slot,
+                        ft.Container(
+                            right=0,
+                            bottom=0,
+                            border_radius=20,
+                            bgcolor=ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
+                            content=ft.IconButton(ft.Icons.EDIT, icon_size=18, tooltip="Change image", on_click=self._on_edit_image),
+                        ),
+                    ],
+                ),
+            ],
+        )
+
         self.controls = [
             
             ft.Container(
@@ -167,6 +203,7 @@ class ProfilePage(BasePage):
                             spacing=12,
                             padding=12,
                             controls=[
+                                self.image_row,
                                 self.name,
                                 ft.Row(
                                     tight=True,
@@ -222,6 +259,7 @@ class ProfilePage(BasePage):
             field.value = None if kind == "select" else ""
         self.set_gender("male")
         self.voice_selector.set_current_voice("")
+        self.image_row.visible = False
         self.update()
 
     def fill_form(self, contact):
@@ -248,7 +286,88 @@ class ProfilePage(BasePage):
         self.clear_form()
         if self.contact_id == -1:
             return
-        self.fill_form(Hub.get_contact(self.contact_id))
+        contact = Hub.get_contact(self.contact_id)
+        self.fill_form(contact)
+        self.image_row.visible = True
+        self._show_image(Contact(contact or {}).get_latest_profile_image_name())
+
+    def _show_image(self, file_key: str):
+        # file names are content hashes, so a cached file is never stale: a new image is a new name
+        if not file_key:
+            self.image_slot.content = ft.Icon(ft.Icons.PERSON, size=64)
+        else:
+            image_path = Paths.get_image_path() / file_key
+            if not image_path.exists():
+                Hub.download_file(f"images/{file_key}", Paths.get_image_path())
+            image = Image(image_path, size=(IMAGE_SIZE, IMAGE_SIZE), fit=ft.BoxFit.COVER)
+            image.on_tap = self._on_edit_image     # change it instead of opening it full screen
+            self.image_slot.content = image
+            self.page.run_task(broken_image_fallback, self.image_slot, image_path, lambda: self.image_slot.content is image)
+        self.image_row.update()
+
+    def _on_edit_image(self, e=None):
+        self.page.show_dialog(
+            ft.AlertDialog(
+                title=ft.Text("Contact image"),
+                actions=[
+                    ft.TextButton("Upload image", on_click=self._on_upload_image, style=STYLES["button"]["style"]),
+                    ft.TextButton("Choose from gallery", on_click=self._on_choose_from_gallery, style=STYLES["button"]["style"]),
+                    ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog(), style=STYLES["button"]["style"]),
+                ],
+            )
+        )
+
+    async def _on_upload_image(self, e=None):
+        self.page.pop_dialog()
+        data = await self._pick_image_bytes()
+        if data:
+            await self._set_image(Hub.upload_contact_image, data)
+
+    async def _pick_image_bytes(self) -> bytes | None:
+        """android: the phone's photo picker, the bytes come with the result (there may be no file path).
+        desktop: a file dialog for the types the hub accepts, the bytes are read from the path"""
+        if self.page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS):
+            files = await self.file_picker.pick_files(dialog_title="Contact image", file_type=ft.FilePickerFileType.IMAGE, with_data=True)
+        else:
+            files = await self.file_picker.pick_files(dialog_title="Contact image", file_type=ft.FilePickerFileType.CUSTOM, allowed_extensions=IMAGE_EXTENSIONS)
+        if not files:
+            return None
+        if files[0].bytes:
+            return files[0].bytes
+        if files[0].path:
+            return Path(files[0].path).read_bytes()
+        logger.error("the picked image has neither bytes nor a path")
+        return None
+
+    def _on_choose_from_gallery(self, e=None):
+        self.page.pop_dialog()
+
+        def close(e=None):
+            gallery.on_leave()
+            self.page.pop_dialog()
+
+        def select(file_key: str):
+            close()
+            self.page.run_task(self._set_image, Hub.pick_contact_image, file_key)
+
+        gallery = GalleryPage(None, on_select=select)
+        self.page.show_dialog(
+            ft.AlertDialog(
+                title=ft.Text("Choose from gallery"),
+                content=ft.Container(width=500, height=600, content=gallery),
+                actions=[ft.TextButton("Cancel", on_click=close, style=STYLES["button"]["style"])],
+                on_dismiss=lambda e: gallery.on_leave(),
+            )
+        )
+        gallery.on_enter()
+
+    async def _set_image(self, send, value):
+        """send: Hub.upload_contact_image (bytes) or Hub.pick_contact_image (file key), both answer the new file key"""
+        file_key = await asyncio.to_thread(send, self.contact_id, value)
+        if not file_key:
+            self.page.show_dialog(ft.SnackBar(ft.Text("The image could not be set")))
+            return
+        self._show_image(file_key)
 
     async def _on_load(self, e=None):
         files = await self.file_picker.pick_files(dialog_title="Import Profile")

@@ -18,7 +18,7 @@ class UpdateContextJob(Job):
         try:
             conversation = self.db.get_conversation(self.request.conversation_id)
             context = Utils.get_nested_value(conversation, ["context"], "")
-            messages = self.db.get_messages_by_conversation(self.request.conversation_id, 1)
+            messages = self.db.get_messages_by_conversation(self.request.conversation_id, 2)
             self.updated_context = self._update_context(context, messages)
         except Exception as e:
             logger.error(f"failed to update context {repr(e)}")

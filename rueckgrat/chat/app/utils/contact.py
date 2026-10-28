@@ -40,5 +40,6 @@ class Contact:
         if not profile_images:
             logger.error("no profile image in this profile")
             return ""
-        latest = max(profile_images, key=lambda img: img.get("created_at", ""))
+        # the id breaks a tie: an image set within the same second as the last one
+        latest = max(profile_images, key=lambda img: (img.get("created_at", ""), img.get("id", 0)))
         return latest.get("file_key", "")

@@ -9,6 +9,7 @@ from .settings_page import SettingsPage
 from .profile_wizzard import ProfileWizard
 from .translate_page import TranslatePage
 from .image_page import ImagePage
+from .gallery_page import GalleryPage
 
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "ProfileWizard",
     "TranslatePage",
     "ImagePage",
+    "GalleryPage",
 ]
