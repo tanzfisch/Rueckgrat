@@ -13,6 +13,7 @@ Changelog
 - #136 user can delete individual memories
 - #124 added galllery containing all pictures of the user account
 - #142 fixed slow load of chat page
+- #143 uploading images for profile images
 
 0.21.1
 ------
