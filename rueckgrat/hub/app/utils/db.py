@@ -123,6 +123,24 @@ class ChatDB:
                 FOREIGN KEY (used_by) REFERENCES users(id) ON DELETE SET NULL
         )""")
 
+        # stay-logged-in sessions, one row per device login. only a sha256 of the token is stored: the token is
+        # 256 random bits, so unlike a password it can't be guessed or brute forced from the hash and a fast
+        # hash is enough. a db leak gives no usable tokens. rotated_at: swapped for a new one by /refresh, kept
+        # until it expires so a second use (stolen copy) is noticed
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token_hash TEXT UNIQUE NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                last_used_at TEXT DEFAULT NULL,
+                rotated_at TEXT DEFAULT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)")
+        cursor.execute("DELETE FROM refresh_tokens WHERE expires_at < ?", (self._now(),))
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_data (
             user_id INTEGER PRIMARY KEY,
@@ -307,6 +325,65 @@ class ChatDB:
             conn.commit()
             return cursor.rowcount == 1
 
+    ########### refresh tokens (stay logged in)
+    def add_refresh_token(self, user_id: int, token: str, days: float) -> None:
+        now = datetime.now(timezone.utc)
+        with self.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO refresh_tokens (user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?)",
+                (user_id, self._hash_token(token), now.isoformat(timespec="seconds"),
+                 (now + timedelta(days=days)).isoformat(timespec="seconds")))
+            conn.commit()
+
+    def rotate_refresh_token(self, token: str, new_token: str, days: float, reuse_grace_seconds: float = 30) -> tuple[int | None, str]:
+        """swaps a valid refresh token for new_token (new expiry: sliding window).
+        returns (user_id, "ok") or (None, reason): "unknown", "expired", "reused" (all of the user's sessions
+        were revoked: an already rotated token came back, so someone else has a copy) or "retry" (rotated
+        within the last reuse_grace_seconds, e.g. a retried request: refused, nothing revoked)"""
+        now = datetime.now(timezone.utc)
+        now_s = now.isoformat(timespec="seconds")
+        with self.get_connection() as conn:
+            # one writer at a time: two refreshes with the same token can't both win
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("DELETE FROM refresh_tokens WHERE expires_at < ?", (now_s,))
+            row = conn.execute("SELECT id, user_id, expires_at, rotated_at FROM refresh_tokens WHERE token_hash = ?",
+                               (self._hash_token(token),)).fetchone()
+            if not row:
+                conn.commit()
+                return None, "unknown"
+            if row["rotated_at"]:
+                rotated = datetime.fromisoformat(row["rotated_at"])
+                if (now - rotated).total_seconds() <= reuse_grace_seconds:
+                    conn.commit()
+                    return None, "retry"
+                conn.execute("DELETE FROM refresh_tokens WHERE user_id = ?", (row["user_id"],))
+                conn.commit()
+                return None, "reused"
+            if row["expires_at"] < now_s:
+                conn.execute("DELETE FROM refresh_tokens WHERE id = ?", (row["id"],))
+                conn.commit()
+                return None, "expired"
+            conn.execute("UPDATE refresh_tokens SET rotated_at = ?, last_used_at = ? WHERE id = ?", (now_s, now_s, row["id"]))
+            conn.execute(
+                "INSERT INTO refresh_tokens (user_id, token_hash, created_at, expires_at, last_used_at) VALUES (?, ?, ?, ?, ?)",
+                (row["user_id"], self._hash_token(new_token), now_s, (now + timedelta(days=days)).isoformat(timespec="seconds"), now_s))
+            conn.commit()
+            return row["user_id"], "ok"
+
+    def delete_refresh_token(self, user_id: int, token: str) -> bool:
+        """logout of one device. only the user's own token"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM refresh_tokens WHERE user_id = ? AND token_hash = ?", (user_id, self._hash_token(token)))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_refresh_tokens(self, user_id: int) -> int:
+        """logs every device of the user out (password change)"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM refresh_tokens WHERE user_id = ?", (user_id,))
+            conn.commit()
+            return cursor.rowcount
+
     def get_email(self, user_id: int) -> str:
         with self.get_connection() as conn:
             row = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -345,7 +422,7 @@ class ChatDB:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, username, hashed_password, created_at FROM users WHERE id = ?",
+                "SELECT id, username, password, nsfw_allowed, created_at FROM users WHERE id = ?",
                 (user_id,)
             )
             row = cursor.fetchone()

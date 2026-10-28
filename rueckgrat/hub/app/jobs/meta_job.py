@@ -50,7 +50,7 @@ class Turns:
                     "conversation_id": request.conversation_id,
                     "user_message_id": job.user_message_id,
                     "content": request.content
-                }})
+                }}, user_id=job.user_id)   # runs on the websocket loop, not in a job
                 logger.info(f"follow-up merged into message {job.user_message_id}, conversation {request.conversation_id}")
             else:
                 job.user_message_id = self.db.add_message(request.conversation_id, request.role, request.content, request.name)
@@ -111,7 +111,7 @@ class MetaJob(Job):
                 "delta": delta,
                 "conversation_id": self.request.conversation_id,
                 "message_id": self.message_id
-            })
+            }, user_id=self.user_id)   # called on the node's websocket thread, no job context there
 
         if data.get("error"):
             logger.error(f"chat stream failed: {data['error']}")
@@ -200,7 +200,7 @@ class MetaJob(Job):
         MessageQueue().send_data({"cancelled": {
             "conversation_id": self.request.conversation_id,
             "message_id": self.message_id if self.message_id != -1 else None
-        }})
+        }}, user_id=self.user_id)
         logger.info(f"reply interrupted by a follow-up, conversation {self.request.conversation_id}")
         return True
 

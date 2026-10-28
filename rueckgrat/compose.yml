@@ -7,7 +7,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "2019:2019"
+      # caddy admin api (can rewrite the whole proxy config, no auth): this machine only
+      - "127.0.0.1:2019:2019"
     volumes:
       - caddy_data:/data
       - caddy_config:/config
@@ -35,6 +36,9 @@ services:
     environment:
       SIGNUP_MODE: ${SIGNUP_MODE:-open}
       HUB_PORT: ${HUB_PORT}
+      HUB_SECRET_KEY: ${HUB_SECRET_KEY:-}
+      HUB_DOCS: ${HUB_DOCS:-false}
+      HUB_FETCH_ALLOW: ${HUB_FETCH_ALLOW:-}
     restart: unless-stopped
     stdin_open: true
     tty: true

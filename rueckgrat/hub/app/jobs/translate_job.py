@@ -10,8 +10,9 @@ logger = get_logger()
 class TranslateJob(Job):
     """translates one message of the translator mode. stateless, nothing is stored.
     result() goes to the client as {"translate": {request_id, from_language, to_language, text, translation or error}}"""
-    def __init__(self, infrastructure, from_language: str, to_language: str, text: str, request_id: str = ""):
+    def __init__(self, infrastructure, from_language: str, to_language: str, text: str, request_id: str = "", user_id: int = None):
         super().__init__()
+        self.user_id = user_id  # the result goes back to this user only
         self.infrastructure = infrastructure
         self.from_language = from_language
         self.to_language = to_language
