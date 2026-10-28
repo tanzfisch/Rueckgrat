@@ -13,7 +13,7 @@ ASSETS_DIR = os.getenv("FLET_ASSETS_DIR") or "assets"
 
 
 class Image(ft.GestureDetector):
-    def __init__(self, image_path: Path, size: tuple[int, int] | None = None, **kwargs):
+    def __init__(self, image_path: Path, size: tuple[int, int] | None = None, fit: ft.BoxFit = ft.BoxFit.CONTAIN, **kwargs):
         self.image_path = Path(image_path) if image_path else Path()
         self.fixed_size = size
         self._poll_task = None
@@ -30,7 +30,7 @@ class Image(ft.GestureDetector):
             src=None,
             width=w,
             height=h,
-            fit=ft.BoxFit.CONTAIN,
+            fit=fit,
             visible=False,
         )
         self.stack = ft.Stack(

@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import time
 import atexit
 import platform
 from urllib.parse import parse_qs, urlparse
@@ -18,6 +19,7 @@ from app.ui import (
     SettingsPage,
     TranslatePage,
     ImagePage,
+    GalleryPage,
 )
 from app.ui.theme import apply_theme
 from app.ui.widgets import ImageOverlay, MessageBox, ConnectionBanner
@@ -28,6 +30,8 @@ from app.utils.hub import Hub
 
 from app.common import get_logger, set_log_level, Utils
 logger = get_logger()
+
+TOKEN_REFRESH_SECONDS = 45 * 60
 
 PAGES = {
     "login": LoginPage,
@@ -40,6 +44,7 @@ PAGES = {
     "initial_settings": InitialSettingsPage,
     "translate": TranslatePage,
     "image": ImagePage,
+    "gallery": GalleryPage,
 }
 
 
@@ -63,8 +68,10 @@ class App:
         page.overlay.append(self.connection_banner)
         Hub.register_connection_state(self._on_connection_state)
 
-        start = "login" if has_config else "initial_settings"
-        page.navigate(f"/{start}")
+        if has_config and Hub.has_stored_session():
+            page.run_task(self._restore_session)
+        else:
+            page.navigate("/login" if has_config else "/initial_settings")
         page.run_task(self._heartbeat_loop)
 
     def navigate(self, page_name: str, **kwargs):
@@ -144,7 +151,16 @@ class App:
         if state == "rejected":
             self.page.run_task(self._session_expired)
 
+    async def _restore_session(self):
+        """stay logged in after a restart. hub not reachable: contacts anyway, the banner shows it and the heartbeat retries"""
+        restored = await Hub.refresh_session()
+        self.navigate("login" if restored is False else "contacts")
+
     async def _session_expired(self):
+        # the access token ran out: a stored session gets new tokens, only a refused one logs out
+        restored = await Hub.refresh_session()
+        if restored is not False:
+            return
         await Hub.logout()
         self.navigate("login")
         MessageBox.error(self.page, "your session has expired, please log in again", title="Logged out")
@@ -153,6 +169,10 @@ class App:
         while True:
             await asyncio.sleep(10)
             Hub.check_health()
+            # new tokens well before the hub's 60 minutes, or as soon as the hub is back after a failed restore
+            if Hub.refresh_token and (not Hub.access_token or time.time() - Hub.token_time > TOKEN_REFRESH_SECONDS):
+                if await Hub.refresh_session() is False:
+                    await self._session_expired()
 
     async def _on_disconnect(self, e):
         await Hub.stop_websocket()

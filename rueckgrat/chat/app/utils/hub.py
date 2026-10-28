@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import certifi
 from urllib.parse import urlparse
@@ -14,6 +15,8 @@ class Hub:
     user_id = -1
     user_name = ""
     access_token = ""
+    refresh_token = ""
+    token_time = 0.0    # time.time() of the access token (wall clock, it counts while the phone sleeps), it is refreshed before the hub's 60 minutes run out
     nsfw_allowed = False
     download_queue = DownloadQueue()
     ws_task = None
@@ -99,6 +102,45 @@ class Hub:
         cls.ws_task = asyncio.create_task(cls._start_websocket(token))
 
     @classmethod
+    def _set_session(cls, data: dict):
+        """takes the tokens of /login or /refresh and stores the refresh token, so a restart stays logged in"""
+        cls.access_token = data.get("access_token", "")
+        cls.refresh_token = data.get("refresh_token", "")
+        cls.token_time = time.time()
+        cls.user_id = data.get("user_id", -1)
+        cls.user_name = data.get("user_name", cls.user_name)
+        cls.nsfw_allowed = bool(data.get("nsfw_allowed", False))
+        cls.config.refresh_token = cls.refresh_token
+
+    @classmethod
+    def has_stored_session(cls) -> bool:
+        cls.refresh_token = cls.refresh_token or cls.config.refresh_token
+        return bool(cls.refresh_token)
+
+    @classmethod
+    async def refresh_session(cls) -> bool | None:
+        """new tokens for the stored refresh token. True: logged in, False: no session or the hub refused it
+        (the stored one is dropped), None: hub not reachable, keep the session and try again later"""
+        if not cls.has_stored_session():
+            return False
+        try:
+            response = await asyncio.to_thread(requests.post, f"{cls.url}/refresh", json={"refresh_token": cls.refresh_token},
+                                               timeout=10, verify=cls.server_cert)
+        except Exception as e:
+            logger.error(f"failed to refresh the session {repr(e)}")
+            return None
+        if response.status_code == 200:
+            cls._set_session(response.json())
+            cls.websocket_client.start(cls.access_token)   # same user: running, the next reconnect uses the new token
+            return True
+        logger.error(f"refresh session - {response.status_code} {response.reason}")
+        if response.status_code == 401:
+            cls.refresh_token = ""
+            cls.config.refresh_token = ""
+            return False
+        return None
+
+    @classmethod
     async def stop_websocket(cls):
         if cls.ws_task:
             cls.ws_task.cancel()
@@ -120,6 +162,8 @@ class Hub:
         logger.info(f"logged out {cls.user_name} id:{cls.user_id}")
     
         cls.access_token = ""
+        cls.refresh_token = ""
+        cls.config.refresh_token = ""
         cls.user_id = -1
         cls.user_name = ""
         cls.nsfw_allowed = False
@@ -403,6 +447,70 @@ class Hub:
         return None
 
     @classmethod
+    def get_gallery(cls, offset: int = 0, limit: int = 60) -> dict | None:
+        """one page of all images of this user, newest first: {images: [{file_key, contact_id, contact_name,
+        conversation_id, created_at}], next_offset (None on the last page)}. None if the hub could not be asked"""
+        try:
+            response = requests.get(
+                f"{cls.url}/gallery",
+                params={"offset": offset, "limit": limit},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json()
+            logger.error(f"get gallery - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_gallery {repr(e)}")
+        return None
+
+    @classmethod
+    def upload_contact_image(cls, contact_id: int, data: bytes) -> Optional[str]:
+        """png, jpeg or webp bytes become the contact's profile image, returns its file key or None"""
+        return cls._set_contact_image(requests.post, f"contacts/{contact_id}/image", data)
+
+    @classmethod
+    def pick_contact_image(cls, contact_id: int, file_key: str) -> Optional[str]:
+        """an image of the gallery becomes the contact's profile image, returns its file key or None"""
+        return cls._set_contact_image(requests.put, f"contacts/{contact_id}/image/{file_key}")
+
+    @classmethod
+    def _set_contact_image(cls, send, path: str, data: bytes | None = None) -> Optional[str]:
+        try:
+            response = send(
+                f"{cls.url}/{path}",
+                data=data,
+                headers={"Authorization": f"Bearer {cls.access_token}", "Content-Type": "application/octet-stream"},
+                timeout=60,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("file_key")
+            logger.error(f"set contact image - {response.status_code} {response.text}")
+        except Exception as e:
+            logger.error(f"failed to set the contact image {repr(e)}")
+        return None
+
+    @classmethod
+    def set_contact_companion(cls, contact_id: int, enabled: bool) -> bool:
+        """switches the companion (plans its own day, may write first) of a contact on or off"""
+        try:
+            response = requests.put(
+                f"{cls.url}/contacts/{contact_id}/companion",
+                json={"enabled": enabled},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return True
+            logger.error(f"set contact companion - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to set_contact_companion {repr(e)}")
+        return False
+
+    @classmethod
     def get_contact(cls, contact_id: int):
         url = f"{cls.url}/contact/{contact_id}"
 
@@ -443,6 +551,23 @@ class Hub:
         except Exception as e:
             logger.error(f"failed to get_contact_memories {repr(e)}")
         return None
+
+    @classmethod
+    def delete_contact_memory(cls, contact_id: int, memory_id: int) -> bool:
+        """removes one memory of the contact on the hub, False if that failed"""
+        try:
+            response = requests.delete(
+                f"{cls.url}/contacts/{contact_id}/memories/{memory_id}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return True
+            logger.error(f"delete contact memory - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to delete_contact_memory {repr(e)}")
+        return False
 
     @classmethod
     def get_signup_mode(cls) -> str:
@@ -633,11 +758,12 @@ class Hub:
         return None
 
     @classmethod
-    def get_messages(cls, conversation_id: int, max_message: int = 100):
+    def get_messages(cls, conversation_id: int, max_messages: int = 100):
+        """the last max_messages of a conversation, each with its "attachments" list"""
         url = f"{cls.url}/conversations/{conversation_id}/messages"
 
         request = GetMessagesRequest(
-            max_message=max_message
+            max_messages=max_messages
         )
 
         try:
@@ -728,6 +854,46 @@ class Hub:
             return "could not reach the hub"
 
     @classmethod
+    def get_timezone(cls) -> str:
+        """the user's IANA timezone (the hub answers UTC if none is set), "" if the hub can't be reached"""
+        try:
+            response = requests.get(
+                f"{cls.url}/users/me/timezone",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("timezone", "")
+            logger.error(f"get timezone - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_timezone {repr(e)}")
+        return ""
+
+    @classmethod
+    def set_timezone(cls, timezone: str) -> str | None:
+        """IANA name, e.g. Pacific/Auckland. returns None on success, else an error message for the user"""
+        try:
+            response = requests.put(
+                f"{cls.url}/users/me/timezone",
+                json={"timezone": timezone},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return None
+            logger.error(f"set timezone - {response.status_code} {response.reason}")
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+            return detail if isinstance(detail, str) else f"saving the timezone failed ({response.status_code})"
+        except Exception as e:
+            logger.error(f"failed to set_timezone {repr(e)}")
+            return "could not reach the hub"
+
+    @classmethod
     def change_password(cls, current_passwd: str, new_passwd: str) -> str | None:
         """returns None on success, else an error message for the user"""
         try:
@@ -770,12 +936,9 @@ class Hub:
             )
 
             if response.status_code == 200:
-                data = response.json()
-                cls.access_token = data.get("access_token", "")
-                cls._on_login_success(cls.access_token)
-                cls.user_id = data.get("user_id", -1)
                 cls.user_name = user_name
-                cls.nsfw_allowed = bool(data.get("nsfw_allowed", False))
+                cls._set_session(response.json())
+                cls._on_login_success(cls.access_token)
                 return None
 
             logger.error(f"login failed {response.status_code} {response.reason}")

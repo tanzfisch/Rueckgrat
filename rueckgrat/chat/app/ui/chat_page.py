@@ -38,8 +38,7 @@ class ChatPage(BasePage):
 
         self.history = ft.ListView(expand=True, spacing=10, padding=0, auto_scroll=True)
         self.status_widget = StatusWidget()
-        self.stream_bubble = ChatBubble("assistant", "", None)
-        self.stream_bubble.visible = False
+        self.status_row = ft.Row(controls=[self.status_widget])   # always the last row, messages go above it
 
         self._input_focused = False
         self.input_box = ft.TextField(
@@ -174,16 +173,11 @@ class ChatPage(BasePage):
 
     def clear_history(self):
         self.status_widget.clear_status()
-        self.stream_bubble.clear_content()
-        self.stream_bubble.visible = False
         self._stream_message_id = None
         self._finished_message_ids.clear()
         self._bubbles.clear()
         self._pending_images.clear()
-        self.history.controls = [
-            ft.Row(controls=[self.status_widget]),
-            ft.Row(controls=[self.stream_bubble]),
-        ]
+        self.history.controls = [self.status_row]
         self.history.update()
 
     def on_enter(self, **kwargs):
@@ -197,12 +191,14 @@ class ChatPage(BasePage):
         self.clear_history()
 
         for message in Hub.get_messages(self.conversation_id):
-            attachments = Hub.get_attachments(message["id"])
+            attachments = message.get("attachments", [])
             if attachments:
                 image_path = self._get_image(attachments[0]["file_name"])
                 self._append_history(message["role"], message["content"], image_path, message_id=message["id"])
             else:
                 self._append_history(message["role"], message["content"], message_id=message["id"])
+        # a reply still being made is already loaded with its text so far: skip its deltas, the final "chat" fills it
+        self._finished_message_ids.update(self._bubbles)
 
         self.temperature = float(self.contact.get_llm_temperature())
         Hub.register_incomming_message(self.on_incomming_message)
@@ -318,7 +314,7 @@ class ChatPage(BasePage):
             row = ft.Row(
                 controls=[spacer, bubble_slot] if role == "user" else [bubble_slot, spacer],
             )
-            self.history.controls.insert(len(self.history.controls) - 2, row)
+            self.history.controls.insert(self.history.controls.index(self.status_row), row)
             self.history.update()
             return bubble
         except Exception as e:
@@ -428,10 +424,10 @@ class ChatPage(BasePage):
     def _flush_delta(self):
         if not self.delta_buffer:
             return
-        self.stream_bubble.visible = True
-        self.stream_bubble.append_content(self.delta_buffer)
+        bubble = self._bubbles.get(self._stream_message_id) or self._append_history("assistant", "", message_id=self._stream_message_id)
+        bubble.append_content(self.delta_buffer)
         self.delta_buffer = ""
-        self.stream_bubble.update()
+        bubble.update()
         self.history.update()
 
     async def _schedule_flush(self, gen: int):
@@ -441,16 +437,21 @@ class ChatPage(BasePage):
         self._flush_delta()
 
     def _drop_stream(self, message_id: int | None = None):
-        """hides the reply that is streaming, its late deltas are ignored"""
+        """removes the reply that is streaming, its late deltas are ignored"""
         for finished in (message_id, self._stream_message_id):
             if finished is not None:
                 self._finished_message_ids.add(finished)
+                self._remove_bubble(finished)
         self._stream_message_id = None
         self._stream_gen += 1
         self.delta_buffer = ""
-        self.stream_bubble.clear_content()
-        self.stream_bubble.visible = False
-        self.stream_bubble.update()
+
+    def _remove_bubble(self, message_id: int):
+        bubble = self._bubbles.pop(message_id, None)
+        if bubble:
+            self.history.controls = [row for row in self.history.controls
+                                     if not any(getattr(c, "content", None) is bubble for c in row.controls)]
+            self.history.update()
 
     def _merge_user_message(self, content: str):
         """the hub merged the follow-up into the previous user message: drop the follow-up's bubble, update the previous one"""
@@ -466,8 +467,8 @@ class ChatPage(BasePage):
         self.history.update()
 
     def on_incomming_message(self, message: dict):
-        if not "delta" in message:
-            logger.debug(f"incomming message:\n{Utils.pretty_print(message)}")
+        #if not "delta" in message:
+            #logger.debug(f"incomming message:\n{Utils.pretty_print(message)}")
 
         try:
             if "status" in message:
@@ -500,9 +501,6 @@ class ChatPage(BasePage):
                         self._stream_message_id = None
                     self._stream_gen += 1
                     self.delta_buffer = ""
-                    self.stream_bubble.clear_content()
-                    self.stream_bubble.visible = False
-                    self.stream_bubble.update()
                     content = self._cleanup_content(chat["content"])
                     role = chat["role"]
                     image_filename = self._pending_images.pop(message_id, None)
@@ -512,7 +510,16 @@ class ChatPage(BasePage):
                         elif "generate_image" in message:
                             image_filename = message["generate_image"]["filename"]
                     image_path = self._get_image(image_filename) if image_filename else None
-                    self._append_history(role, content, image_path, message_id=message_id)
+                    bubble = self._bubbles.get(message_id)
+                    if bubble:  # streamed, or loaded from history in on_enter: the final text replaces what it has
+                        bubble.clear_content()
+                        bubble.append_content(content)
+                        bubble.update()
+                        if image_path:
+                            bubble.set_image(image_path)
+                        self.replay_content = content
+                    else:
+                        self._append_history(role, content, image_path, message_id=message_id)
 
                     if self.mute_btn.selected:
                         self._speak(content, message_id)
@@ -529,7 +536,7 @@ class ChatPage(BasePage):
         if message_id is None or not filename:
             return
         bubble = self._bubbles.get(message_id)
-        if bubble:
+        if bubble and message_id != self._stream_message_id:   # while it streams, the "chat" message adds the image once
             bubble.set_image(self._get_image(filename))
         else:
             self._pending_images[message_id] = filename

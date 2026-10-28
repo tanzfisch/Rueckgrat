@@ -33,12 +33,13 @@ class Contact:
     def get_latest_profile_image_name(self) -> str:
         images = Utils.get_nested_value(self.data, ["images"], [])
         if not images:
-            logger.error("no images in this profile")
+            logger.warning("no images in this profile")
             return ""
 
         profile_images = [img for img in images if img.get("type") == "profile"]
         if not profile_images:
             logger.error("no profile image in this profile")
             return ""
-        latest = max(profile_images, key=lambda img: img.get("created_at", ""))
+        # the id breaks a tie: an image set within the same second as the last one
+        latest = max(profile_images, key=lambda img: (img.get("created_at", ""), img.get("id", 0)))
         return latest.get("file_key", "")

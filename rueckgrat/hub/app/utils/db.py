@@ -15,6 +15,16 @@ logger = get_logger()
 MEMORY_EMBEDDING_DIM = 384
 
 class ChatDB:
+    _read_only = False
+
+    @classmethod
+    def read_only(cls, db_path):
+        """an existing db for queries only, e.g. hub management next to a running hub: no table setup, writes fail"""
+        db = cls.__new__(cls)
+        db.db_path = db_path
+        db._read_only = True
+        return db
+
     def __init__(self, db_path):
         self.db_path = db_path
 
@@ -187,6 +197,46 @@ class ChatDB:
             END
         """)
 
+        # per user settings. timezone: IANA name, the companion plans in it (timestamps stay UTC)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_settings (
+            user_id INTEGER PRIMARY KEY,
+            timezone TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+
+        # the private calendar of a companion contact (profile "companion": true), see app/companion.
+        # due_at / fired_at are UTC "YYYY-MM-DD HH:MM:SS" like CURRENT_TIMESTAMP. recurrence '' (once) or 'daily'.
+        # a daily row stays pending and moves on after firing, result and message_id are of its last firing
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS companion_calendar (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            contact_id INTEGER NOT NULL,
+            due_at TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            recurrence TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'done', 'missed')),
+            result TEXT NOT NULL DEFAULT '',
+            message_id INTEGER DEFAULT NULL,
+            fired_at TEXT DEFAULT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+        )""")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_companion_due ON companion_calendar(status, due_at)")
+
+        # what each companion pass decided (json, see CompanionJob.log), the last COMPANION_LOG_KEEP per contact.
+        # at = the companion's clock (may be simulated), created_at = the wall clock. only for hub management
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS companion_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            contact_id INTEGER NOT NULL,
+            at TEXT NOT NULL,
+            record TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+        )""")
+
         # the db is opened once at hub start: no job survives a restart, so a row still pending was interrupted
         cursor.execute("UPDATE generated_images SET status = 'failed' WHERE status = 'pending'")
         if cursor.rowcount:
@@ -203,7 +253,7 @@ class ChatDB:
         logger.info("Database initialized")
 
     def get_connection(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) if self._read_only else sqlite3.connect(self.db_path)
         conn.execute("PRAGMA foreign_keys = ON")
         # on every connection: the delete trigger needs vec0 wherever contacts, users or memories are deleted
         try:
@@ -456,6 +506,43 @@ class ChatDB:
                 logger.error(f"failed reading generated images of user {user_id}: {e}")
         return []
 
+    def get_user_images(self, user_id: int, limit: int = 60, offset: int = 0) -> list[dict]:
+        """every image of this user, newest first, for the gallery: the contacts' images (profile, conversation_images),
+        images attached to messages of their conversations and the done images of the image tool (no contact).
+        an image in several places is one row: its first created_at, its contact and conversation if it has one.
+        [{file_key, contact_id, contact_name, conversation_id, created_at, has_generation}], contact_* None for image tool images"""
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute("""
+                    WITH all_images AS (
+                        SELECT ci.file_key AS file_key, ci.contact_id AS contact_id, NULL AS conversation_id, ci.created_at AS created_at
+                        FROM contact_images ci JOIN contacts c ON c.id = ci.contact_id
+                        WHERE c.user_id = ?
+                        UNION ALL
+                        SELECT a.file_name, cv.contact_id, cv.id, m.timestamp
+                        FROM attachments a
+                        JOIN messages m ON m.id = a.message_id
+                        JOIN conversations cv ON cv.id = m.conversation_id
+                        WHERE cv.user_id = ? AND a.file_url = 'images/' || a.file_name
+                        UNION ALL
+                        SELECT file_name, NULL, NULL, created_at FROM generated_images
+                        WHERE user_id = ? AND status = 'done' AND file_name IS NOT NULL
+                    ), grouped AS (
+                        SELECT file_key, MAX(contact_id) AS contact_id, MAX(conversation_id) AS conversation_id, MIN(created_at) AS created_at
+                        FROM all_images WHERE file_key IS NOT NULL AND file_key != ''
+                        GROUP BY file_key
+                    )
+                    SELECT g.file_key, g.contact_id, ct.name AS contact_name, g.conversation_id, g.created_at,
+                           EXISTS (SELECT 1 FROM images i WHERE i.file_key = g.file_key) AS has_generation
+                    FROM grouped g LEFT JOIN contacts ct ON ct.id = g.contact_id
+                    ORDER BY g.created_at DESC, g.file_key DESC
+                    LIMIT ? OFFSET ?
+                """, (user_id, user_id, user_id, limit, offset)).fetchall()
+                return [dict(row) for row in rows]
+            except Exception as e:
+                logger.error(f"failed reading images of user {user_id}: {e}")
+        return []
+
     def add_contact_image(self, contact_id: int, file_name: str, image_type: str) -> int:
         with self.get_connection() as conn:
             try:
@@ -574,9 +661,11 @@ class ChatDB:
                     updates.append(f"{key} = ?")
                     values.append(value)
 
+            # the companion flag is only set by PUT /contacts/{id}/companion: a saved or imported profile keeps the stored one
             value = json.dumps(profile)
-            updates.append(f"profile = ?")
-            values.append(value)
+            updates.append("profile = CASE WHEN json_extract(profile, '$.companion') = 1 "
+                           "THEN json_set(?, '$.companion', json('true')) ELSE json_remove(?, '$.companion') END")
+            values += [value, value]
 
             # Nothing to update
             if not updates:
@@ -874,6 +963,10 @@ class ChatDB:
                     if cursor.execute("SELECT 1 FROM contact_images WHERE file_key = ? LIMIT 1", (file_key,)).fetchone():
                         continue
 
+                    # an image tool image picked as a contact image stays in the image tool's list
+                    if cursor.execute("SELECT 1 FROM generated_images WHERE file_name = ? LIMIT 1", (file_key,)).fetchone():
+                        continue
+
                     cursor.execute("DELETE FROM images WHERE file_key = ?", (file_key,))
                     unused.append(file_key)
                 conn.commit()
@@ -910,6 +1003,24 @@ class ChatDB:
                 return row is not None
             except Exception as e:
                 logger.error(f"failed checking message owner: {e}")
+        return False
+
+    def user_has_image(self, user_id: int, file_key: str) -> bool:
+        """True if the image is in the user's gallery (get_user_images): a contact image, a chat attachment or an image tool image"""
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("""
+                    SELECT 1 FROM contact_images ci JOIN contacts c ON c.id = ci.contact_id WHERE ci.file_key = ? AND c.user_id = ?
+                    UNION ALL
+                    SELECT 1 FROM attachments a JOIN messages m ON m.id = a.message_id JOIN conversations cv ON cv.id = m.conversation_id
+                    WHERE a.file_name = ? AND cv.user_id = ? AND a.file_url = 'images/' || a.file_name
+                    UNION ALL
+                    SELECT 1 FROM generated_images WHERE file_name = ? AND user_id = ? AND status = 'done'
+                    LIMIT 1
+                """, (file_key, user_id, file_key, user_id, file_key, user_id)).fetchone()
+                return row is not None
+            except Exception as e:
+                logger.error(f"failed checking image of user: {e}")
         return False
 
     def owns_image(self, user_id: int, file_key: str) -> bool:
@@ -1015,6 +1126,21 @@ class ChatDB:
             except Exception as e:
                 logger.error(f"failed reading contact memories: {e}")
         return []
+
+    def delete_contact_memory(self, user_id: int, contact_id: int, memory_id: int) -> bool:
+        """deletes one memory of the user's contact, the trigger removes its vector. False for foreign and unknown memories"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute("""
+                    DELETE FROM contact_memories
+                    WHERE id = ? AND contact_id = ? AND user_id = ?
+                    AND contact_id IN (SELECT id FROM contacts WHERE user_id = ?)
+                """, (memory_id, contact_id, user_id, user_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"failed deleting contact memory: {e}")
+        return False
 
     def get_message_count_by_conversation(self, conversation_id: int):
         with self.get_connection() as conn:
@@ -1165,6 +1291,37 @@ class ChatDB:
                 logger.error(f"Failed fetching attachments for message {message_id}: {e}")
         
         return []    
+
+    def get_attachments_for_messages(self, message_ids: list[int]) -> dict[int, list]:
+        """attachments of many messages in one query: message id -> list shaped like get_attachments_for_message"""
+        if not message_ids:
+            return {}
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                placeholders = ",".join("?" * len(message_ids))
+                cursor.execute(f"""
+                    SELECT message_id, id, file_name, file_url, file_type, file_size
+                    FROM attachments
+                    WHERE message_id IN ({placeholders})
+                    ORDER BY id
+                """, message_ids)
+
+                attachments = {}
+                for row in cursor.fetchall():
+                    attachments.setdefault(row[0], []).append({
+                        "id": row[1],
+                        "file_name": row[2],
+                        "file_url": row[3],
+                        "file_type": row[4],
+                        "file_size": row[5],
+                    })
+                return attachments
+
+            except Exception as e:
+                logger.error(f"Failed fetching attachments for messages: {e}")
+
+        return {}
 
     # ---- voices ---------------------------------------------------------
     # the wav file lives in VOICES_DIR/<file_key>, the row only knows the file key
@@ -1383,3 +1540,191 @@ class ChatDB:
             raise
         finally:
             conn.close()
+
+    ########### user settings
+
+    def get_user_timezone(self, user_id: int) -> str | None:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT timezone FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
+            return row["timezone"] if row and row["timezone"] else None
+
+    def set_user_timezone(self, user_id: int, timezone: str) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                INSERT INTO user_settings (user_id, timezone) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET timezone = excluded.timezone
+            """, (user_id, timezone))
+            conn.commit()
+            return cursor.rowcount == 1
+
+    ########### companion calendar
+
+    # only rows of contacts that are still companions fire
+    _COMPANION = "json_extract(c.profile, '$.companion') = 1"
+
+    def set_contact_companion(self, user_id: int, contact_id: int, enabled: bool) -> bool:
+        """the companion flag lives in the profile. switching it off drops the calendar, on again seeds a new one"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("UPDATE contacts SET profile = json_set(profile, '$.companion', json(?)) WHERE id = ? AND user_id = ?",
+                                  ("true" if enabled else "false", contact_id, user_id))
+            if cursor.rowcount == 1 and not enabled:
+                conn.execute("DELETE FROM companion_calendar WHERE contact_id = ?", (contact_id,))
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def is_companion(self, contact_id: int) -> bool:
+        with self.get_connection() as conn:
+            return conn.execute(f"SELECT 1 FROM contacts c WHERE c.id = ? AND {self._COMPANION}", (contact_id,)).fetchone() is not None
+
+    def drop_inactive_companion_rows(self) -> int:
+        """the calendars of contacts that are no companions (anymore), e.g. the flag was edited in the db"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(f"""
+                DELETE FROM companion_calendar WHERE contact_id NOT IN (SELECT c.id FROM contacts c WHERE {self._COMPANION})
+            """)
+            conn.commit()
+            return cursor.rowcount
+
+    def last_companion_run(self, contact_id: int) -> str | None:
+        """when the companion's last pass ran (missed rows don't count)"""
+        with self.get_connection() as conn:
+            return conn.execute("SELECT MAX(fired_at) FROM companion_calendar WHERE contact_id = ?", (contact_id,)).fetchone()[0]
+
+    def unseeded_companions(self) -> list[dict]:
+        """companions without a calendar yet: id, user_id"""
+        with self.get_connection() as conn:
+            rows = conn.execute(f"""
+                SELECT c.id, c.user_id FROM contacts c
+                WHERE {self._COMPANION} AND NOT EXISTS (SELECT 1 FROM companion_calendar r WHERE r.contact_id = c.id)
+            """).fetchall()
+            return [dict(row) for row in rows]
+
+    def add_companion_row(self, contact_id: int, due_at: str, kind: str, note: str = "", recurrence: str = "") -> int:
+        with self.get_connection() as conn:
+            cursor = conn.execute("INSERT INTO companion_calendar (contact_id, due_at, kind, note, recurrence) VALUES (?, ?, ?, ?, ?)",
+                                  (contact_id, due_at, kind, note, recurrence))
+            conn.commit()
+            return cursor.lastrowid
+
+    def due_companion_rows(self, now: str) -> list[dict]:
+        """pending rows due at or before now, oldest first, with the contact's user_id"""
+        with self.get_connection() as conn:
+            rows = conn.execute(f"""
+                SELECT r.*, c.user_id FROM companion_calendar r JOIN contacts c ON c.id = r.contact_id
+                WHERE r.status = 'pending' AND r.due_at <= ? AND {self._COMPANION}
+                ORDER BY r.due_at, r.id
+            """, (now,)).fetchall()
+            return [dict(row) for row in rows]
+
+    def next_companion_due(self) -> str | None:
+        with self.get_connection() as conn:
+            row = conn.execute(f"""
+                SELECT MIN(r.due_at) AS due_at FROM companion_calendar r JOIN contacts c ON c.id = r.contact_id
+                WHERE r.status = 'pending' AND {self._COMPANION}
+            """).fetchone()
+            return row["due_at"]
+
+    def finish_companion_row(self, row_id: int, status: str, fired_at: str, result: str = "", message_id: int | None = None, next_due: str | None = None) -> bool:
+        """next_due re-arms a recurring row (it stays pending), otherwise the row gets status.
+        fired_at None (a missed row): the last run stays as it was"""
+        with self.get_connection() as conn:
+            if fired_at is None:
+                cursor = conn.execute("UPDATE companion_calendar SET status = ?, due_at = COALESCE(?, due_at) WHERE id = ?",
+                                      ("pending" if next_due else status, next_due, row_id))
+                conn.commit()
+                return cursor.rowcount == 1
+            cursor = conn.execute("""
+                UPDATE companion_calendar SET status = ?, due_at = COALESCE(?, due_at), fired_at = ?, result = ?, message_id = ?
+                WHERE id = ?
+            """, ("pending" if next_due else status, next_due, fired_at, result, message_id, row_id))
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def get_companion_day(self, contact_id: int, start: str, end: str) -> list[dict]:
+        """the rows due or fired in [start, end), in time order"""
+        with self.get_connection() as conn:
+            rows = conn.execute("""
+                SELECT * FROM companion_calendar WHERE contact_id = ?
+                AND ((due_at >= ? AND due_at < ?) OR (fired_at >= ? AND fired_at < ?))
+                ORDER BY COALESCE(fired_at, due_at), id
+            """, (contact_id, start, end, start, end)).fetchall()
+            return [dict(row) for row in rows]
+
+    def last_companion_result(self, contact_id: int, kind: str) -> str:
+        with self.get_connection() as conn:
+            row = conn.execute("""
+                SELECT result FROM companion_calendar WHERE contact_id = ? AND kind = ? AND fired_at IS NOT NULL AND result != ''
+                ORDER BY fired_at DESC LIMIT 1
+            """, (contact_id, kind)).fetchone()
+            return row["result"] if row else ""
+
+    def count_companion_messages(self, contact_id: int, since: str) -> int:
+        """proactive messages sent since"""
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM companion_calendar WHERE contact_id = ? AND message_id IS NOT NULL AND fired_at >= ?",
+                               (contact_id, since)).fetchone()
+            return row[0]
+
+    def count_pending_companion_rows(self, contact_id: int) -> int:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM companion_calendar WHERE contact_id = ? AND status = 'pending' AND recurrence = ''",
+                               (contact_id,)).fetchone()
+            return row[0]
+
+    def has_companion_row(self, contact_id: int, due_at: str, kind: str, note: str) -> bool:
+        """the same kind at the same time, or the same kind and note still pending: models like to plan things twice"""
+        with self.get_connection() as conn:
+            row = conn.execute("""
+                SELECT 1 FROM companion_calendar WHERE contact_id = ? AND kind = ? AND (due_at = ? OR (status = 'pending' AND note = ?))
+            """, (contact_id, kind, due_at, note)).fetchone()
+            return row is not None
+
+    COMPANION_LOG_KEEP = 50
+
+    def add_companion_log(self, contact_id: int, at: str, record: dict) -> int:
+        with self.get_connection() as conn:
+            cursor = conn.execute("INSERT INTO companion_log (contact_id, at, record) VALUES (?, ?, ?)",
+                                  (contact_id, at, json.dumps(record, ensure_ascii=False)))
+            conn.execute("""
+                DELETE FROM companion_log WHERE contact_id = ? AND id NOT IN
+                (SELECT id FROM companion_log WHERE contact_id = ? ORDER BY id DESC LIMIT ?)
+            """, (contact_id, contact_id, self.COMPANION_LOG_KEEP))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_companion_log(self, contact_id: int | None = None, limit: int = 20) -> list[dict]:
+        """the last entries, oldest first, of one contact or of all"""
+        with self.get_connection() as conn:
+            rows = conn.execute("""
+                SELECT * FROM companion_log WHERE ? IS NULL OR contact_id = ? ORDER BY id DESC LIMIT ?
+            """, (contact_id, contact_id, limit)).fetchall()
+            return [{**dict(row), "record": json.loads(row["record"])} for row in reversed(rows)]
+
+    def companion_contacts(self, user_name: str | None = None, contact_id: int | None = None) -> list[dict]:
+        """hub management: one contact, all contacts of a user, or else the companions and contacts with a companion log"""
+        with self.get_connection() as conn:
+            rows = conn.execute(f"""
+                SELECT c.id, c.name, c.user_id, u.username, {self._COMPANION} AS companion,
+                    (SELECT COUNT(*) FROM companion_calendar r WHERE r.contact_id = c.id AND r.status = 'pending') AS pending,
+                    (SELECT MAX(at) FROM companion_log l WHERE l.contact_id = c.id) AS last_pass
+                FROM contacts c JOIN users u ON u.id = c.user_id
+                WHERE CASE WHEN ? IS NOT NULL THEN c.id = ? WHEN ? IS NOT NULL THEN u.username = ?
+                    ELSE {self._COMPANION} OR EXISTS (SELECT 1 FROM companion_log l WHERE l.contact_id = c.id) END
+                ORDER BY c.id
+            """, (contact_id, contact_id, user_name, user_name)).fetchall()
+            return [dict(row) for row in rows]
+
+    def pending_companion_rows(self, contact_id: int) -> list[dict]:
+        with self.get_connection() as conn:
+            rows = conn.execute("SELECT * FROM companion_calendar WHERE contact_id = ? AND status = 'pending' ORDER BY due_at, id",
+                                (contact_id,)).fetchall()
+            return [dict(row) for row in rows]
+
+    def last_user_message_time(self, contact_id: int) -> str | None:
+        """UTC timestamp of the user's last message to this contact, any conversation"""
+        with self.get_connection() as conn:
+            row = conn.execute("""
+                SELECT MAX(m.timestamp) FROM messages m JOIN conversations c ON c.id = m.conversation_id
+                WHERE c.contact_id = ? AND m.role = 'user'
+            """, (contact_id,)).fetchone()
+            return row[0]

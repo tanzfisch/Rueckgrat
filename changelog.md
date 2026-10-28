@@ -1,6 +1,22 @@
 Changelog
 =========
 
+0.22.0
+------
+
+- #139 faster replies by optimizing meta job
+      using Laya to detect tool usage where possible
+      improved websearch now using headless browser
+      cach tts data for faster replay
+      improved conversation context now focuses on open questions and decisions
+- #140 fixed text bubble selection color
+- #136 user can delete individual memories
+- #124 added galllery containing all pictures of the user account
+- #142 fixed slow load of chat page
+- #143 uploading images for profile images
+- #111 stay logged in on android until user explicitly loggs out
+- #37 persistent companion: plans its own day every night (private calendar), writes first now and then
+
 0.21.1
 ------
 

@@ -60,6 +60,7 @@ def date_calc(start, end=None, days=None, timezone="UTC") -> str:
 class DateCalcTool(Tool):
     category = ToolCategory.TIME
     description = "days between two dates, or a date plus/minus a number of days"
+    question = "Does the user want to work something out with dates?"
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)

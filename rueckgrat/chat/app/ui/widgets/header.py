@@ -1,15 +1,17 @@
 import os
 import flet as ft
-from app.ui.theme import STYLES
+from app.ui.theme import STYLES, RADIUS, SURFACE_3, TEXT
 from app.utils import Contact, Hub, Paths
 
 ASSETS_DIR = os.getenv("FLET_ASSETS_DIR") or "assets"
 
-def _tool_icon(icon, tooltip: str) -> ft.Control:
-    """icon only menu entry, the tooltip names it"""
-    if isinstance(icon, str):
-        return ft.Image(src=icon, width=24, height=24, fit=ft.BoxFit.CONTAIN, tooltip=tooltip)
-    return ft.Icon(icon, tooltip=tooltip)
+# the app level views, in the order of the tools grid: (route, icon, label)
+TOOLS = [
+    ("translate", ft.Icons.TRANSLATE, "translate"),
+    ("contacts", ft.Icons.CHAT, "charaters"),
+    ("image", ft.Icons.IMAGE, "image generation"),
+    ("gallery", ft.Icons.PHOTO_LIBRARY, "gallery"),
+]
 
 
 class Header(ft.Row):
@@ -88,17 +90,51 @@ class Header(ft.Row):
             **kwargs,
         )
 
-    def _tools_menu(self) -> ft.PopupMenuButton:
-        return ft.PopupMenuButton(
+    def _tools_menu(self) -> ft.IconButton:
+        return ft.IconButton(
             icon=ft.Icons.APPS,
             tooltip="tools",
+            width=40,
+            height=40,
             style=STYLES["icon_button"]["style"],
-            items=[
-                ft.PopupMenuItem(content=_tool_icon(ft.Icons.TRANSLATE, "translate"), on_click=lambda e: self.navigator("translate")),
-                ft.PopupMenuItem(content=_tool_icon(ft.Icons.CHAT, "chat"), on_click=lambda e: self.navigator("contacts")),
-                ft.PopupMenuItem(content=_tool_icon(ft.Icons.IMAGE, "image generation"), on_click=lambda e: self.navigator("image")),
-            ],
+            on_click=self._open_tools,
         )
+
+    def _open_tools(self, e):
+        """the app level views as a grid of tiles (icon + label), a tap switches to it"""
+        def pick(route: str):
+            self.page.pop_dialog()
+            self.navigator(route)
+
+        tiles = [
+            ft.Container(
+                bgcolor=SURFACE_3,
+                border_radius=RADIUS,
+                padding=8,
+                ink=True,
+                on_click=lambda e, r=route: pick(r),
+                content=ft.Column(
+                    [ft.Icon(icon, size=32), ft.Text(label, text_align=ft.TextAlign.CENTER, color=TEXT)],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=6,
+                    tight=True,
+                ),
+            )
+            for route, icon, label in TOOLS
+        ]
+        tile, gap, columns = 120, 10, 2      # square tiles, the dialog is as high as its rows
+        rows = (len(tiles) + columns - 1) // columns
+        self.page.show_dialog(ft.AlertDialog(
+            modal=False,
+            content_padding=ft.Padding.all(15),
+            actions_padding=ft.Padding.all(0),
+            content=ft.Container(
+                width=columns * tile + (columns - 1) * gap,
+                height=rows * tile + (rows - 1) * gap,
+                content=ft.GridView(controls=tiles, runs_count=columns, child_aspect_ratio=1.0, spacing=gap, run_spacing=gap),
+            ),
+        ))
 
     def set_contact(self, contact: Contact):
         self.contact = contact

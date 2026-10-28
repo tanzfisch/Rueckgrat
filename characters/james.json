@@ -61,7 +61,7 @@
             "model": "default"
         },
         "tts_parameters": {
-            "voice_id": ""
+            "voice_id": "ears_male_p019"
         }
     }
 }

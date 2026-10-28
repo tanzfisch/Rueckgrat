@@ -1,6 +1,5 @@
 from .job_queue import Job
 from typing import Dict, Any
-import json
 import re
 import random
 from ..utils.prompt_compiler import PromptCompiler
@@ -19,11 +18,10 @@ class UpdateContextJob(Job):
         try:
             conversation = self.db.get_conversation(self.request.conversation_id)
             context = Utils.get_nested_value(conversation, ["context"], "")
-            messages = self.db.get_messages_by_conversation(self.request.conversation_id, 6)
+            messages = self.db.get_messages_by_conversation(self.request.conversation_id, 2)
             self.updated_context = self._update_context(context, messages)
         except Exception as e:
             logger.error(f"failed to update context {repr(e)}")
-
 
     def result(self) -> Dict[str, Any]:
         return self.updated_context
@@ -109,10 +107,12 @@ INSTRUCTIONS:
 - Keep ALL fields SHORT (max 40 words each)
 - an empty string is perfectly valid and means the absence of things or actions
 - topic = 1 short phrase about what is happening
-- user|assistant/action = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
-- user|assistant/head = items this person is wearing on the head
-- user|assistant/upper_body = items this person is wearing specifically on the upper body or carrying in their hands
-- user|assistant/body = items this person is wearing on the body
+- "user" = the person who wrote the (role: user) messages, "assistant" = the person who wrote the (role: assistant) messages, never swap them
+- fields of user and of assistant, each about that person only:
+  - action = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
+  - head = items worn on the head
+  - upper_body = items worn on the upper body or carried in the hands
+  - body = items worn on the body
 - location = environment or setting
 
 OUTPUT:
@@ -129,7 +129,7 @@ CURRENT CONTEXT:
 {{
     "location": "{context['location']}",
     "topic": "{context['topic']}",
-    "summary": "",
+    "summary": "{context['summary']}",
 
     "user": {{
         "action": "{context['user']['action']}",
@@ -152,16 +152,24 @@ INSTRUCTIONS:
 - do not invent items or actions
 - if an item was transfered between people remove it from the source
 - keep the information consitent, avoid redundancies or conflicting statements
-- Keep ALL fields SHORT (max 40 words each)
+- Keep ALL fields except summary SHORT (max 40 words each)
 - an empty string is perfectly valid and means the absence of things or actions
-- there is two people relevant in this conversation the user and the assistant identify which is which and update accordingly
 - topic = 1 short phrase about what is happening
-- user|assistant/action = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
-- user|assistant/head = items this person is wearing on the head
-- user|assistant/upper_body = items this person is wearing specifically on the upper body or carrying in their hands
-- user|assistant/body = items this person is wearing on the body
+- "user" = the person who wrote the (role: user) messages, "assistant" = the person who wrote the (role: assistant) messages, never swap them
+- fields of user and of assistant, each about that person only:
+  - action = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
+  - head = items worn on the head
+  - upper_body = items worn on the upper body or carried in the hands
+  - body = items worn on the body
 - location = environment or setting
-- summary = write a detailed summary of the whole conversation and put it here (max 300 words)
+- summary = a running record of the whole conversation (max 500 words), focused on:
+  - open questions: what is still unresolved, being asked or waiting for an answer
+  - decisions: concrete choices that were made or agreed, and why
+  - ruled out: options that were considered and rejected
+  - open branches: choices still pending and the alternatives still on the table
+  - skip small talk and minor exchanges
+  - keep scene and appearance short or leave them out unless they matter for an open question or decision
+  - drop questions once they are answered and record the answer as a decision
 
 OUTPUT:
 Return ONLY valid JSON in the same format.
@@ -205,7 +213,7 @@ Return ONLY valid JSON in the same format.
             }
         }
 
-        logger.debug(f"new context:\n{json.dumps(new_context, indent=4)}")
+        #logger.debug(f"new context:\n{Utils.pretty_print(new_context)}")
 
         return new_context
 

@@ -26,12 +26,15 @@ from app.tools import ToolRegistry
 from app.jobs import JobQueue, MetaJob, AssistantImageJob, ContactGeneratorJob, TranslateJob, GenerateImageJob
 from app.jobs.meta_job import Turns
 from app.utils.tts_stream import TtsStreams
+from app.companion import CompanionScheduler, DEFAULT_TIMEZONE
+from collections import Counter
+from zoneinfo import ZoneInfo
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
-from app.common import get_logger, set_log_level, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
+from app.common import get_logger, set_log_level, Utils, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
 logger = get_logger()
 
 @asynccontextmanager
@@ -44,7 +47,7 @@ async def lifespan(app: FastAPI):
     db_path = "/hub/db/chat.db"
     app.state.db = ChatDB(db_path)
     app.state.image_store = ImageStore(app.state.db, app.state.infrastructure)
-    app.state.job_queue = JobQueue()
+    app.state.job_queue = JobQueue(max_parallel = 10)
     app.state.turns = Turns(app.state.db)
 
     logger.info("loading tool registry")
@@ -54,14 +57,26 @@ async def lifespan(app: FastAPI):
         job_queue=app.state.job_queue
     )
 
+    # proactive companions: pushes only to users with an open /ws, the message is in the db anyway
+    app.state.connections = Counter()   # user_id -> open /ws connections
+    app.state.companion = CompanionScheduler(app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.job_queue,
+                                             app.state.turns, is_connected=lambda user_id: app.state.connections[user_id] > 0)
+    app.state.companion.start()
+
     logger.info("loading vad")
     app.state.vad = load_silero_vad(onnx=True)
     torch.set_num_threads(1)
 
-    logger.info("hub initialized")
+    logger.info("\n"
+    "          ╭───────────────────────────╮\n"
+    "          │     🚀   Rückgrat   🚀    │\n"
+    "          │                           │\n"
+    "          │      Hub  initialized     │\n"
+    "          ╰───────────────────────────╯")
 
     yield
 
+    app.state.companion.stop()
     app.state.job_queue.stop()
 
     logger.info("hub shut down")
@@ -74,6 +89,9 @@ security = HTTPBearer(auto_error=False)
 SECRET_KEY = "change_this_later"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
+# the app keeps the refresh token (stay logged in after a restart), POST /refresh swaps it for a new pair.
+# stateless like the access token: logout only forgets it on the device
+REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 ph = PasswordHasher()
 
@@ -84,6 +102,8 @@ def decode_token(token: str):
             SECRET_KEY,
             algorithms=[ALGORITHM]
         )
+        if payload.get("type") == "refresh":
+            raise ValueError("a refresh token is no access token")
         return payload["sub"]
 
     except Exception:        
@@ -110,6 +130,10 @@ def create_access_token(username: str):
         "exp": expire
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+def create_refresh_token(username: str):
+    expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    return jwt.encode({"sub": username, "exp": expire, "type": "refresh"}, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_current_user(credentials=Depends(security)):
     # a missing or expired token is a 401, not a request for nobody's (empty) data
@@ -253,13 +277,31 @@ def login(data: LoginRequest):
     if not verify_password(data.user_passwd or "", user["password"]):
         raise HTTPException(status_code=401)
 
-    token = create_access_token(user["username"])
+    return session_response(user)
 
+def session_response(user: dict) -> dict:
     return {
-        "access_token": token,
+        "access_token": create_access_token(user["username"]),
+        "refresh_token": create_refresh_token(user["username"]),
         "user_id": user["id"],
+        "user_name": user["username"],
         "nsfw_allowed": bool(user["nsfw_allowed"])
     }
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+@app.post("/refresh")
+def refresh(data: RefreshRequest):
+    """a new access and refresh token for a valid refresh token, 401 if it is invalid, expired or its user is gone"""
+    try:
+        payload = jwt.decode(data.refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = app.state.db.get_user(payload.get("sub")) if payload.get("type") == "refresh" else None
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return session_response(user)
 
 class ChangePasswordRequest(BaseModel):
     current_passwd: str
@@ -280,6 +322,23 @@ def change_password(request: ChangePasswordRequest, username: str = Depends(get_
 
 # the email is optional and only informational, so just a format check: no verification, not unique
 EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+class TimezoneRequest(BaseModel):
+    timezone: str
+
+@app.get("/users/me/timezone")
+def get_timezone(username: str = Depends(get_current_user)):
+    return {"timezone": app.state.db.get_user_timezone(app.state.db.get_user_id(username)) or DEFAULT_TIMEZONE}
+
+@app.put("/users/me/timezone")
+def set_timezone(request: TimezoneRequest, username: str = Depends(get_current_user)):
+    """IANA name, e.g. Pacific/Auckland. the companion plans and keeps quiet hours in it"""
+    try:
+        ZoneInfo(request.timezone)
+    except Exception:
+        raise HTTPException(status_code=400, detail="unknown timezone")
+    app.state.db.set_user_timezone(app.state.db.get_user_id(username), request.timezone)
+    return {"status": "ok"}
 
 class EmailRequest(BaseModel):
     email: str
@@ -364,8 +423,7 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
     if not app.state.db.owns_contact(user_id, contact_id):
         raise HTTPException(status_code=404, detail="contact not found")
     resolve_contact_voice(user_id, request.contact_data)
-    app.state.db.update_contact(user_id, contact_id, request.contact_data)
-    
+
     job = AssistantImageJob(
         user_id = user_id,
         contact_id = contact_id,
@@ -376,8 +434,89 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
         width = 1024,
         height = 1024,
     )        
-    app.state.job_queue.add(job)
+    image_before = profile_image_hash(job)
+    app.state.db.update_contact(user_id, contact_id, request.contact_data)
 
+    # an unchanged look keeps the current profile image, e.g. one the user uploaded or picked from the gallery
+    if image_before is None or profile_image_hash(job) != image_before or not app.state.db.get_current_profile_image_key(contact_id):
+        app.state.job_queue.add(job)
+
+    return {"status": "ok"}
+
+def profile_image_hash(job: AssistantImageJob) -> str | None:
+    """hash (= file name) of the profile image the contact's data asks for, None if the data can't make one yet"""
+    try:
+        return Utils.hash_image_request(job.build_request())
+    except Exception:
+        return None
+
+########### contact image: upload or pick from the gallery
+MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024
+
+def image_extension(data: bytes) -> str | None:
+    """file extension from the first bytes, None if it is no png, jpeg or webp"""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+def set_contact_image(contact_id: int, file_key: str) -> dict:
+    """the image becomes the contact's current profile image (the newest 'profile' row), older ones stay"""
+    if app.state.db.add_contact_image(contact_id, file_key, "profile") == -1:
+        raise HTTPException(status_code=500, detail="failed to set the contact image")
+    return {"status": "ok", "file_key": file_key}
+
+@app.post("/contacts/{contact_id}/image")
+async def upload_contact_image(contact_id: int, request: Request, username: str = Depends(get_current_user)):
+    """
+    raw image bytes in the body (png, jpeg or webp), no multipart, like POST /voices.
+    stored as /hub/images/<sha256 of the bytes>.<ext>, the same bytes again reuse that file.
+    an upload has no stored generation, so ImageStore.ensure never generates it again: a lost upload is gone
+    """
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty upload")
+    if len(data) > MAX_IMAGE_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="image too large")
+    extension = image_extension(data)
+    if not extension:
+        raise HTTPException(status_code=400, detail="not a png, jpeg or webp image")
+
+    file_key = f"{hashlib.sha256(data).hexdigest()}.{extension}"
+    path = app.state.image_store.path(file_key)
+    if not path.exists():
+        part = path.with_name(file_key + ".part")
+        part.write_bytes(data)
+        part.replace(path)
+    return set_contact_image(contact_id, file_key)
+
+@app.put("/contacts/{contact_id}/image/{file_key}")
+def pick_contact_image(contact_id: int, file_key: str, username: str = Depends(get_current_user)):
+    """an image from the user's gallery becomes the contact's image. the file and its stored generation
+    (if it has one, then it can still be generated again) are shared, only a new contact_images row points to it"""
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_contact(user_id, contact_id):
+        raise HTTPException(status_code=404, detail="contact not found")
+    if not app.state.db.user_has_image(user_id, file_key) or not app.state.image_store.ensure(file_key):
+        raise HTTPException(status_code=404, detail="image not found")
+    return set_contact_image(contact_id, file_key)
+
+class CompanionRequest(BaseModel):
+    enabled: bool
+
+@app.put("/contacts/{contact_id}/companion")
+def set_companion(contact_id: int, request: CompanionRequest, username: str = Depends(get_current_user)):
+    """a companion has a life of its own and may write first (app/companion). off drops its calendar"""
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.set_contact_companion(user_id, contact_id, request.enabled):
+        raise HTTPException(status_code=404, detail="contact not found")
+    app.state.companion.wake()
     return {"status": "ok"}
 
 @app.delete("/contacts/{contact_id}")
@@ -399,6 +538,14 @@ def get_contact_memories(contact_id: int, username: str = Depends(get_current_us
     if not app.state.db.owns_contact(user_id, contact_id):
         raise HTTPException(status_code=404, detail="contact not found")
     return {"memories": app.state.db.get_contact_memories(user_id, contact_id)}
+
+@app.delete("/contacts/{contact_id}/memories/{memory_id}")
+def delete_contact_memory(contact_id: int, memory_id: int, username: str = Depends(get_current_user)):
+    """removes one memory (and its vector) the contact has of the logged in user"""
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.delete_contact_memory(user_id, contact_id, memory_id):
+        raise HTTPException(status_code=404, detail="memory not found")
+    return {"status": "ok"}
 
 ########### conversations handling
 @app.get("/contacts/{contact_id}/conversations")
@@ -443,7 +590,10 @@ def get_messages(conversation_id: int, request: GetMessagesRequest, username: st
     user_id = app.state.db.get_user_id(username)
     if not app.state.db.owns_conversation(user_id, conversation_id):
         raise HTTPException(status_code=404, detail="conversation not found")
-    messages = app.state.db.get_messages_by_conversation(conversation_id, request.max_messages)
+    messages = app.state.db.get_messages_by_conversation(conversation_id, request.max_messages) or []
+    attachments = app.state.db.get_attachments_for_messages([message["id"] for message in messages])
+    for message in messages:
+        message["attachments"] = attachments.get(message["id"], [])
     return {"messages": messages}
 
 @app.get("/messages/{message_id}/attachments")
@@ -694,6 +844,26 @@ def get_generated_images(username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
     return {"images": app.state.db.get_generated_images(user_id)}
 
+########### gallery
+GALLERY_MAX_LIMIT = 200
+
+@app.get("/gallery")
+def get_gallery(limit: int = 60, offset: int = 0, username: str = Depends(get_current_user)):
+    """all images of the logged in user across all contacts (and the image tool), newest first, one page.
+    next_offset is None on the last page. an image whose file is gone and that has no stored generation
+    can't be downloaded (or generated again), it is left out. a profile still rendering has its generation already"""
+    user_id = app.state.db.get_user_id(username)
+    limit = max(1, min(limit, GALLERY_MAX_LIMIT))
+    offset = max(0, offset)
+    rows = app.state.db.get_user_images(user_id, limit, offset)
+    image_dir = Path("/hub/images")
+    images = [
+        {k: v for k, v in row.items() if k != "has_generation"}
+        for row in rows
+        if row["has_generation"] or (image_dir / row["file_key"]).is_file()
+    ]
+    return {"images": images, "next_offset": offset + len(rows) if len(rows) == limit else None}
+
 ########### model handling
 @app.get("/models/{model_name}/url", response_model=GetModelURLResponse)
 def get_model_url(model_name: str, username: str = Depends(get_current_user)):
@@ -746,6 +916,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
     closed = asyncio.Event()
     logger.debug(f"username: {username}")
     user_id = app.state.db.get_user_id(username)
+    app.state.connections[user_id] += 1
 
     async def safe_close(code: int = 1000):
         if not closed.is_set():
@@ -865,6 +1036,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
     )
 
     await safe_close()
+    app.state.connections[user_id] -= 1
 
     for task in pending:
         task.cancel()

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional, Dict, Callable
 from dataclasses import dataclass
 from ..jobs.image_job import ImageRequest
+from .tts_cache import TtsCache
 
 from app.common import get_logger, ChatRequestLlama, DownloadQueue, Utils, WebSocketClient
 logger = get_logger()
@@ -42,6 +43,7 @@ class WebSocketClientNode(WebSocketClient):
 
 class Infrastructure:
     callback_handlers: Dict[str, tuple[int, Callable[[str], None]]] = {}
+    _tts_cache = TtsCache()  # generated speech, 1 h, max 100 MB
 
     def __init__(self):
         if not INFRASTRUCTURE_CONFIG_PATH.exists():
@@ -97,6 +99,9 @@ class Infrastructure:
 
         if not "text_to_embedding" in self.node_by_type:
             logger.warning("couldn't find text_to_embedding service, no memory vectors and no memory search")
+
+        if not "text_to_decision" in self.node_by_type:
+            logger.info("couldn't find text_to_decision service, no laya decisions")
 
     def get_status(self) -> StatusResult:
         # the websocket supervisor already tracks every node, no need to poll them over http
@@ -210,7 +215,12 @@ class Infrastructure:
         return str(filepath)
 
     def tts(self, text: str, voice: str = "", language: str = "") -> Optional[bytes]:
-        """forward a speech request to the tts node, returns wav bytes or None. language "" = the node detects it"""
+        """forward a speech request to the tts node, returns wav bytes or None. language "" = the node detects it.
+        the wav is cached for an hour, so replaying a recent message does not generate it again"""
+        key = (text, voice, language)
+        if (wav := self._tts_cache.get(key)) is not None:
+            logger.debug("tts: using cached wav")
+            return wav
         if not "text_to_speech" in self.node_by_type:
             logger.error("no text to speech generator available")
             return None
@@ -225,6 +235,7 @@ class Infrastructure:
             if response.status_code != 200:
                 logger.error(f"failed tts request: {response.status_code} {response.reason}")
                 return None
+            self._tts_cache.put(key, response.content)
             return response.content
         except Exception as e:
             logger.error(f"failed to get a tts response {repr(e)}")
@@ -271,6 +282,25 @@ class Infrastructure:
             return response.json().get("vectors")
         except Exception as e:
             logger.error(f"failed to get an embed response {repr(e)}")
+            return None
+
+    def decide(self, state: str, questions: dict) -> Optional[dict]:
+        """laya typed decisions about state from the decision node, all questions in one forward pass.
+        questions: {id: {"type": "choice"|"score"|"noul", "instructions": ..., "criteria": ...}}
+        returns the answers by id (noul: {"noul": P(true), ...}, choice: {"choice": label, ...}) or None"""
+        if not "text_to_decision" in self.node_by_type:
+            return None
+
+        node = self.node_by_type["text_to_decision"]
+        url = f"http://{node.addr}:{node.port}/decide"
+        try:
+            response = requests.post(url, json={"state": state, "questions": questions}, timeout=30)
+            if response.status_code != 200:
+                logger.error(f"failed decide request: {response.status_code} {response.reason}")
+                return None
+            return response.json().get("answers")
+        except Exception as e:
+            logger.error(f"failed to get a decide response {repr(e)}")
             return None
 
     def drop_voice(self, voice: str) -> bool:

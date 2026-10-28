@@ -12,6 +12,7 @@ class SearchMemoryTool(Tool):
     category = ToolCategory.MEMORY
     description = ("what the user told you before (name, where they live, family, work, plans, preferences, etc). "
                    "Use for any personal question about the user, e.g. \"do you know where I was born?\", even without \"remember\"")
+    question = ""
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
@@ -50,10 +51,11 @@ class SearchMemoryTool(Tool):
     def prompt(cls) -> str:
         return """
 SEARCH MEMORY:
-Use before answering any question about the user (name, location, family, work, preferences, past facts). Do not guess.
+
+Call this tool whenever you need to recall a fact about the user or anything from past interactions with them (name, location, family, work, preferences, previous statements, etc.). Do not guess or invent details.
 
 Parameters:
-- query (string, required): what to look for (max 200 characters)
+- query (string, required): what to look for (max 100 characters)
 
 Example:
 {"tool": "search_memory", "query": "where the user lives"}

@@ -261,7 +261,7 @@ print_info_block() {
 
     echo ""
     echo "Current dir    $(pwd)"
-    echo "Launched with  $(echo "$PARAMETERS" | sed -E 's/-p [^ ]+/-p ******/g')"
+    echo "Launched with  \"$(echo "$PARAMETERS" | sed -E 's/-p [^ ]+/-p ******/g')\""
 }
 
 # volume_cleanup - Check for and optionally remove existing Rueckgrat Docker resources
@@ -619,6 +619,10 @@ setup() {
                 services_json=$(jq '. + [{type: "text_to_embedding", name: "embedding"}]' <<< "$services_json")
             fi
 
+            if $INSTALL_DECISION; then
+                services_json=$(jq '. + [{type: "text_to_decision", name: "decision"}]' <<< "$services_json")
+            fi
+
             host_json=$(jq \
                 --arg port "$NODE_PORT" \
                 --argjson services "$services_json" \
@@ -774,6 +778,7 @@ select_components() {
     TTS_MODEL="chatterbox_multilingual"
     INSTALL_STT=false
     INSTALL_EMBEDDING=false
+    INSTALL_DECISION=false
     REGISTRY_JSON="${REGISTRY_JSON:-$WORKING_DIR/rueckgrat/node/data/registry.json}"
 
     echo "Select components:"
@@ -861,6 +866,10 @@ select_components() {
         read_tty "Install text embeddings (memory search) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_EMBEDDING=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_EMBEDDING == true ]] && echo '✅' || echo '⚫' )] Embedding"
+
+        read_tty "Install decision model (Laya, experimental, needs torch) on Node? (Y/n): " "Y"
+        [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_DECISION=true
+        echo -e "\e[1A\e[K     [$( [[ $INSTALL_DECISION == true ]] && echo '✅' || echo '⚫' )] Decision"
     fi
 
     read_tty "Models folder? [$HOST_MODELS_DIR_DEFAULT]: " "$HOST_MODELS_DIR_DEFAULT" $YES
@@ -868,21 +877,37 @@ select_components() {
     echo -e "\e[1A\e[K     Models: $HOST_MODELS_DIR"
 }
 
+_format_host_jq='
+  "\nHost: \($h.addr)",
+  "  "+(if $h.chat then "[✅]" else "[⚫]" end)+" Native Chat Client",
+  "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub"+(if $h.hub.signup_mode then " (signup: \($h.hub.signup_mode))" else "" end),
+  "  "+(if $h.node then "[✅]" else "[⚫]" end)+" Node",
+  "  "+($h.node.services[]? | "    [✅] \(.name)" + (if .name == "tts" then " (\(.model // "chatterbox"))" else "" end)),
+  "  "+($h.node.modules[]? | "    [✅] \(.name)")
+'
+
 format_hosts() {
     if [[ -z "${CONFIG_FILE:-}" ]] || ! jq . "$CONFIG_FILE" >/dev/null 2>&1; then
         echo "❌ Error: Invalid config" >&2
         return 1
     fi
 
-  jq -r '
-    .hosts[] as $h |
-    "\nHost: \($h.addr)",
-    "  "+(if $h.chat then "[✅]" else "[⚫]" end)+" Native Chat Client",
-    "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub"+(if $h.hub.signup_mode then " (signup: \($h.hub.signup_mode))" else "" end),
-    "  "+(if $h.node then "[✅]" else "[⚫]" end)+" Node",
-    "  "+($h.node.services[]? | "    [✅] \(.name)" + (if .name == "tts" then " (\(.model // "chatterbox"))" else "" end)),
-    "  "+($h.node.modules[]? | "    [✅] \(.name)")
-  ' "$CONFIG_FILE"
+    jq -r ".hosts[] as \$h | $_format_host_jq" "$CONFIG_FILE"
+}
+
+format_host() {
+    local host="${1:-}"
+    if [[ -z "${CONFIG_FILE:-}" ]] || ! jq . "$CONFIG_FILE" >/dev/null 2>&1; then
+        echo "❌ Error: Invalid config" >&2
+        return 1
+    fi
+
+    if [[ -z "$host" ]]; then
+        echo "❌ Error: No host specified" >&2
+        return 1
+    fi
+
+    jq -r --arg host "$host" ".hosts[] | select(.addr == \$host) as \$h | $_format_host_jq" "$CONFIG_FILE"
 }
 
 # confirm_install_configuration - Print full multi-host installation plan and ask for final confirmation
@@ -1023,7 +1048,11 @@ deploy_node() {
         BUILD_ARGS+=(--build-arg INSTALL_EMBEDDING=true)
     fi
 
-    if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_TTS" == true ]]; then
+    if [ "$INSTALL_DECISION" = true ]; then
+        BUILD_ARGS+=(--build-arg INSTALL_DECISION=true)
+    fi
+
+    if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_TTS" == true || "$INSTALL_DECISION" == true ]]; then
         BUILD_ARGS+=(--build-arg "TORCH_BACKEND=${TORCH_BACKEND:-cpu}")
         BUILD_ARGS+=(--build-arg "TORCH_CUDA_INDEX=${TORCH_CUDA_INDEX:-cu128}")
         BUILD_ARGS+=(--build-arg "TORCH_ROCM_INDEX=${TORCH_ROCM_INDEX:-rocm6.3}")
@@ -1366,6 +1395,7 @@ parse_host_config() {
     TTS_MODEL="chatterbox_multilingual"
     INSTALL_STT=false
     INSTALL_EMBEDDING=false
+    INSTALL_DECISION=false
     INSTALL_CLOUDFLARED=false
     CLOUDFLARE_TUNNEL_TOKEN=""
     CLOUDFLARE_HUB_ADDR=""
@@ -1454,6 +1484,9 @@ parse_host_config() {
             if [[ "$type" == "text_to_embedding" ]]; then
                 INSTALL_EMBEDDING=true
             fi
+            if [[ "$type" == "text_to_decision" ]]; then
+                INSTALL_DECISION=true
+            fi
         done < <(echo "$host_config" | jq -c '.node.services // [] | .[]')
 
         while IFS= read -r item; do
@@ -1471,6 +1504,9 @@ parse_host_config() {
             fi
             if [[ "$type" == "text_to_embedding" ]]; then
                 INSTALL_EMBEDDING=true
+            fi
+            if [[ "$type" == "text_to_decision" ]]; then
+                INSTALL_DECISION=true
             fi
         done < <(echo "$host_config" | jq -c '.node.modules // [] | .[]')
     fi
@@ -1543,7 +1579,7 @@ deploy_components() {
     fi
 
     if $INSTALL_NODE; then
-        if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_TTS" == true || "$INSTALL_STT" == true || "$INSTALL_LLAMA" == true ]]; then
+        if [[ "$INSTALL_IMAGE_GEN" == true || "$INSTALL_TTS" == true || "$INSTALL_STT" == true || "$INSTALL_DECISION" == true || "$INSTALL_LLAMA" == true ]]; then
             install_nvidia_toolkit
         fi
 

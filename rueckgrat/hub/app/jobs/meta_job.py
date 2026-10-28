@@ -4,8 +4,9 @@ import time
 import threading
 from .job_queue import Job
 from .chat_job import ChatJob
-from .thinking_job import ThinkingJob
+from .tool_directing_job import ToolDirectingJob
 from .update_context_job import UpdateContextJob
+from .tool_detection_job import ToolDetectionJob
 from typing import Dict, Any, List, Optional
 
 from app.common import get_logger, ChatRequest, Utils, MessageQueue
@@ -55,6 +56,11 @@ class Turns:
                 job.user_message_id = self.db.add_message(request.conversation_id, request.role, request.content, request.name)
             if merge or not mergeable:
                 self._running[request.conversation_id] = job
+
+    def busy(self, conversation_id: int) -> bool:
+        """a reply is being made in this conversation"""
+        with self._lock:
+            return conversation_id in self._running
 
     def set_state(self, job, state: str) -> bool:
         """"images" (an image tool is queued) or "done" (the final goes out): from then on nothing merges into the job.
@@ -171,19 +177,18 @@ class MetaJob(Job):
             return None
         return f"\n\nTOOL_RESULT{tool_response}\n"
 
-    def _run_thinking(self, tool_names: Optional[List[str]] = None) -> Dict[str, Any]:
-        """one thinking call as a sub job. tool_names None: with the tool index. a list: with the full prompts
-        of these tools, the same path no matter who selected them (request_tools today, other selectors later)"""
-        thinking_job = ThinkingJob(
+    def _direct_tools(self, tool_names: List[str]) -> Dict[str, Any]:
+        """one tool directing call as a sub job, with the full prompts of these tools. the model writes their calls"""
+        tool_directing_job = ToolDirectingJob(
             request=self.request,
             db=self.db,
             infrastructure=self.infrastructure,
             tool_registry=self.tool_registry,
             tool_names=tool_names
         )
-        self.add_sub_job(thinking_job)
-        self.wait_for([thinking_job])
-        return thinking_job.result()
+        self.add_sub_job(tool_directing_job)
+        self.wait_for([tool_directing_job])
+        return tool_directing_job.result()
 
     def _interrupted(self) -> bool:
         """True once a follow-up was merged into this turn: drops the partial reply, the merged job answers instead"""
@@ -201,35 +206,33 @@ class MetaJob(Job):
 
     def execute(self) -> None:
         self.response = {}
-        try:
-            self._execute()
-        finally:
-            self.turns.set_state(self, "done")  # also after a failure, nothing merges into a dead turn
 
-    def _execute(self) -> None:
-        if self.db.get_message_count_by_conversation(self.request.conversation_id) <= 1:  # only the user message stored by Turns.start
+        if self.db.get_message_count_by_conversation(self.request.conversation_id) <= 1:
             MessageQueue().send_status_message("creating scenario")
         else:
             MessageQueue().send_status_message("update context")
 
-        self._update_conversation_context()
+        # run this in parallel to updateing the context
+        tool_detection_job = ToolDetectionJob(self.request.content, self.tool_registry, self.infrastructure)
+        self.add_sub_job(tool_detection_job)
+
+        self._update_conversation_context() # update context after user message was added
         if self._interrupted():
             return
 
         try:
             MessageQueue().send_status_message("thinking")
+            self.wait_for([tool_detection_job])
+            tool_names = tool_detection_job.result()
+            logger.info(f"tools detected: {tool_names}")
+            
+            tool_names = (tool_names or []) + self.tool_registry.PROMPT_TOOLS
             contact = self.db.get_contact_by_id(self.request.contact_id)
 
-            thinking_response = self._run_thinking()
-            # logger.debug(f"thinking response (1):\n{Utils.pretty_print(thinking_response)}")
-
-            tool_request = thinking_response.get("tool_request")
-            if tool_request and tool_request["names"]:
-                logger.debug(f"tools requested: {tool_request['names']}")
-                MessageQueue().send_status_message("thinking some more")
-                thinking_response = self._run_thinking(tool_request["names"])
-                # logger.debug(f"thinking response (2):\n{Utils.pretty_print(thinking_response)}")
-            tool_calls = thinking_response["tool_calls"]
+            tool_calls, compiled_response = [], ""
+            if tool_names:
+                tool_response = self._direct_tools(tool_names)
+                tool_calls, compiled_response = tool_response["tool_calls"], tool_response["content"]
             if self._interrupted():
                 return
 
@@ -244,7 +247,6 @@ class MetaJob(Job):
 
             MessageQueue().send_status_message("compile response")
 
-            compiled_response = thinking_response['content']
             websearch_block = self._format_websearch_results()
             if websearch_block:
                 compiled_response += websearch_block
@@ -257,7 +259,7 @@ class MetaJob(Job):
             if tool_block:
                 compiled_response += tool_block
             
-            logger.debug(f"compiled response:\n{compiled_response}")
+            #logger.debug(f"compiled response:\n{compiled_response}")
             if self._interrupted():
                 return
 
@@ -312,6 +314,8 @@ class MetaJob(Job):
 
         except Exception as e:
             logger.error(f"failed to execute MetaJob {repr(e)}")
+        finally:
+            self.turns.set_state(self, "done")
 
     def result(self) -> Dict[str, Any]:
         return self.response
