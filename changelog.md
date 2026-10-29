@@ -1,6 +1,18 @@
 Changelog
 =========
 
+0.23.0
+------
+
+- #146 patching security issues
+      installer: no sudo password handling (ssh keys or ssh/sudo prompt themselves), -p removed, host keys pinned (accept-new)
+      installer: asks for each machine's sudo password once at the start, temporary sudoers rule removed on exit
+      revocable refresh tokens (hashed, rotated, logout and password change revoke), log in once after the update
+      web fetches pinned to the checked address, redirects checked, HUB_FETCH_ALLOW for local pages
+      client config file only readable by its owner
+      create_rueckgrat_user.sh sets up a separate install user (ssh key, passwordless sudo) on all machines, use with install.sh -u
+      README explains which users, sudo rights and ssh keys the installer needs
+
 0.22.0
 ------
 

@@ -72,8 +72,6 @@ chmod +x install.sh
 
 The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen, TTS, STT, text embeddings), an optional Cloudflare tunnel and an optional Android APK of the chat client.
 
-**Note: Every machine needs sudo with the same username, plus `ssh` and `rsync` for the installer to work**
-
 Run chat natively:
 
 ```bash
@@ -94,6 +92,29 @@ Reinstall from a saved config, skipping the setup questions:
 ```bash
 ./install.sh -c rueckgrat/config/config_example.json -y
 ```
+
+### Running multiple hosts
+
+**What every machine needs**
+
+- `ssh` and `rsync` installed
+- the same user name on every machine, and that user is allowed to use sudo
+- your ssh key, so the installer can log in from the machine you install from
+
+The user should also be in the `docker` group, so it can run the containers. If docker was not installed already the installer adds it after it installs Docker automatically.
+
+**Recommended: a separate user for Rueckgrat**
+
+The easiest way is a separate user just for Rueckgrat, with your ssh key and sudo without a password. Then the installer never asks for a password. `create_rueckgrat_user.sh` sets this up on all your machines in one go. It asks for your sudo password once per machine:
+
+```bash
+./create_rueckgrat_user.sh rueckgrat localhost 192.168.2.10 192.168.2.11
+./install.sh -u rueckgrat
+```
+
+`-u` tells the installer which user to log in as on every machine. Without it, it uses the user you are logged in as. Rueckgrat is then installed in that user's home folder (`~/Rueckgrat-install`).
+
+Keep in mind that sudo without a password means anyone who gets your ssh key can do anything on those machines. Protect your key with a passphrase.
 
 ## Android
 
@@ -156,6 +177,20 @@ docker exec -it rueckgrat_hub python -m app.hub_management companion status [con
 ```
 
 **Note: The invite token is printed only once, copy it immediately.**
+
+## Local web pages
+
+By default the AI can only open public websites. It cannot open pages in your home network or on the hub machine itself.
+
+If you want the AI to read your own local websites or services, list them in `rueckgrat/.env` on the hub machine and rebuild the hub. Separate entries with commas. You can list a single address, a whole network, or a machine name:
+
+```bash
+HUB_FETCH_ALLOW=192.168.2.0/24,nas.local,127.0.0.1
+```
+
+Write `private` to allow your whole home network. This does not include the hub machine itself (`127.0.0.1`), which you have to list on its own.
+
+You can also set this in the installer config as `"fetch_allow"` in the hub section, so it is kept when you reinstall.
 
 # Hardware requirements
 

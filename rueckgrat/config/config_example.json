@@ -30,7 +30,8 @@
       },
       "hub": {
         "port": 14223,
-        "signup_mode": "open"
+        "signup_mode": "open",
+        "secret_key": "123...456"
       },
       "chat": {}
     },
@@ -71,8 +72,16 @@
   },
   "users": [
     {
-      "name": "Martin",
+      "name": "user1",
+      "email": null
+    },
+    {
+      "name": "user2",
+      "email": null
+    },
+    {
+      "name": "user3",
       "email": null
     }
-  ]  
+  ]
 }

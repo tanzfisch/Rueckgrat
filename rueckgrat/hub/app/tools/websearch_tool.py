@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from ddgs import DDGS
 from app.utils.content_filter import strip_text_noise
 from app.utils.page_render import render_page
-from app.utils.url_check import is_public_http_url
+from app.utils.url_check import is_public_http_url, fetch, FetchBlocked
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -227,7 +227,8 @@ class WebsearchTool(Tool):
         return {"text": text, "images": images, "url": url}
 
     def _http_get(self, url):
-        resp = requests.get(url, headers=self.HEADERS, timeout=self.PAGE_TIMEOUT, allow_redirects=True)
+        # pinned to the checked address, redirects checked hop by hop (url_check). raises FetchBlocked
+        resp = fetch(url, headers=self.HEADERS, timeout=self.PAGE_TIMEOUT)
 
         # Handle JS/meta redirect pages
         if len(resp.text.strip()) < 500 and ('location.replace' in resp.text or 'http-equiv="refresh"' in resp.text):
@@ -237,9 +238,8 @@ class WebsearchTool(Tool):
                 redirect_url = match.group(1)
                 if not redirect_url.startswith('http'):
                     redirect_url = 'https://' + redirect_url.lstrip('/')
-                if is_public_http_url(redirect_url):
-                    logger.debug(f"following redirect to {redirect_url}")
-                    resp = requests.get(redirect_url, headers=self.HEADERS, timeout=self.PAGE_TIMEOUT, allow_redirects=True)
+                logger.debug(f"following redirect to {redirect_url}")
+                resp = fetch(redirect_url, headers=self.HEADERS, timeout=self.PAGE_TIMEOUT)
         return resp
 
     def _extract_page(self, url) -> Optional[Dict[str, Any]]:
@@ -247,12 +247,9 @@ class WebsearchTool(Tool):
         or comes back too thin. returns {"text", "images", "url"} or None"""
         logger.debug(f"extract from page {url}")
         page, try_browser = None, False
+        self.blocked_reason = None
         try:
-            if not is_public_http_url(url):
-                return None
             resp = self._http_get(url)
-            if not is_public_http_url(resp.url):
-                return None     # redirected into the lan
             if resp.status_code in self.BLOCKED_STATUS:
                 logger.debug(f"{url} answered {resp.status_code}")
                 try_browser = True
@@ -264,6 +261,9 @@ class WebsearchTool(Tool):
                     return None
                 page = self._parse_html(resp.content, resp.url)
                 try_browser = len(page["text"]) < self.THIN_PAGE_CHARS
+        except FetchBlocked as e:
+            self.blocked_reason = str(e)    # logged at debug by url_check, fetch_url shows it
+            return None
         except Exception as e:
             logger.error(f"failed to extract {url}: {repr(e)}")
 

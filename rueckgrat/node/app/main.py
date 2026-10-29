@@ -269,7 +269,10 @@ async def download_file(file_path: str):
     base_path = Path("/node").resolve()
     path = (base_path / file_path).resolve()
 
-    if not path.is_relative_to(base_path):    # compares whole path parts, so /node_secret is not inside /node
+    # only what the hub fetches: generated images and model files. /node also holds the config
+    # (infrastructure.json with the tunnel token) and the code, and this endpoint has no auth
+    allowed = [base_path / "images", base_path / "models"]
+    if not any(path.is_relative_to(folder) and path != folder for folder in allowed):
         raise HTTPException(status_code=400, detail="Invalid path")
 
     if not os.path.exists(path):

@@ -8,6 +8,7 @@ import os
 import io
 import wave
 import hashlib
+import secrets
 from tqdm import tqdm
 from pathlib import Path
 import numpy as np
@@ -36,6 +37,9 @@ from datetime import datetime, timedelta, timezone
 
 from app.common import get_logger, set_log_level, Utils, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
 logger = get_logger()
+
+# every message the hub sends belongs to one user (MessageQueue per user), never to whoever pops next
+MessageQueue.require_user = True
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -82,15 +86,24 @@ async def lifespan(app: FastAPI):
     logger.info("hub shut down")
 
 
-app = FastAPI(lifespan=lifespan)
+# the interactive api docs (/docs, /redoc, /openapi.json) list every endpoint to anyone who can reach the hub,
+# also through the cloudflare tunnel. off unless HUB_DOCS=true (e.g. for local development)
+_docs = os.environ.get("HUB_DOCS", "").lower() in ("1", "true", "yes")
+app = FastAPI(lifespan=lifespan, **({} if _docs else {"docs_url": None, "redoc_url": None, "openapi_url": None}))
 security = HTTPBearer(auto_error=False)
 
 ########### user handling
-SECRET_KEY = "change_this_later"
+# signs every access and refresh token. set HUB_SECRET_KEY in rueckgrat/.env (e.g. openssl rand -hex 32).
+# the old built-in key stays the fallback so existing setups keep working, but anyone who knows it (it is
+# in the public repo) can mint tokens for any user. changing the key logs every device out once
+SECRET_KEY = os.environ.get("HUB_SECRET_KEY") or "change_this_later"
+if SECRET_KEY == "change_this_later":
+    logger.warning("HUB_SECRET_KEY is not set, tokens are signed with the public default key. set it in rueckgrat/.env")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 # the app keeps the refresh token (stay logged in after a restart), POST /refresh swaps it for a new pair.
-# stateless like the access token: logout only forgets it on the device
+# a random token, the db keeps its sha256 (refresh_tokens): every refresh rotates it (30 days from the last
+# use), POST /logout and a password change revoke it, a rotated token used again revokes all of the user's
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 ph = PasswordHasher()
@@ -131,9 +144,9 @@ def create_access_token(username: str):
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-def create_refresh_token(username: str):
-    expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    return jwt.encode({"sub": username, "exp": expire, "type": "refresh"}, SECRET_KEY, algorithm=ALGORITHM)
+def create_refresh_token() -> str:
+    """opaque, 256 random bits. the caller stores its hash"""
+    return secrets.token_urlsafe(32)
 
 def get_current_user(credentials=Depends(security)):
     # a missing or expired token is a 401, not a request for nobody's (empty) data
@@ -279,10 +292,14 @@ def login(data: LoginRequest):
 
     return session_response(user)
 
-def session_response(user: dict) -> dict:
+def session_response(user: dict, refresh_token: str | None = None) -> dict:
+    """a new access token plus a refresh token: the given one (already stored by a rotation) or a new stored one"""
+    if refresh_token is None:
+        refresh_token = create_refresh_token()
+        app.state.db.add_refresh_token(user["id"], refresh_token, REFRESH_TOKEN_EXPIRE_DAYS)
     return {
         "access_token": create_access_token(user["username"]),
-        "refresh_token": create_refresh_token(user["username"]),
+        "refresh_token": refresh_token,
         "user_id": user["id"],
         "user_name": user["username"],
         "nsfw_allowed": bool(user["nsfw_allowed"])
@@ -293,15 +310,31 @@ class RefreshRequest(BaseModel):
 
 @app.post("/refresh")
 def refresh(data: RefreshRequest):
-    """a new access and refresh token for a valid refresh token, 401 if it is invalid, expired or its user is gone"""
-    try:
-        payload = jwt.decode(data.refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    user = app.state.db.get_user(payload.get("sub")) if payload.get("type") == "refresh" else None
+    """a new access and refresh token for a valid refresh token (the old one is used up), 401 if it is unknown,
+    expired, already used or its user is gone. old jwt refresh tokens (before #146) are unknown: log in once"""
+    new_token = create_refresh_token()
+    user_id, reason = app.state.db.rotate_refresh_token(data.refresh_token, new_token, REFRESH_TOKEN_EXPIRE_DAYS)
+    user = app.state.db.get_user_by_id(user_id) if user_id is not None else None
     if not user:
+        if reason == "reused":
+            logger.warning("a refresh token was used twice, all sessions of its user are revoked")
+        else:
+            logger.debug(f"refresh refused: {reason}")
         raise HTTPException(status_code=401, detail="Invalid token")
-    return session_response(user)
+    return session_response(user, new_token)
+
+class LogoutRequest(BaseModel):
+    refresh_token: str = ""
+
+@app.post("/logout")
+def logout(data: LogoutRequest, username: str = Depends(get_current_user)):
+    """revokes the session (refresh token) of this device. the access token runs out by itself (minutes)"""
+    user_id = app.state.db.get_user_id(username)
+    if user_id is None:
+        raise HTTPException(status_code=401)
+    if data.refresh_token:
+        app.state.db.delete_refresh_token(user_id, data.refresh_token)
+    return {"status": "ok"}
 
 class ChangePasswordRequest(BaseModel):
     current_passwd: str
@@ -310,7 +343,8 @@ class ChangePasswordRequest(BaseModel):
 @app.post("/users/me/password")
 def change_password(request: ChangePasswordRequest, username: str = Depends(get_current_user)):
     # signup has no password rules, so the new password is only hashed the same way.
-    # tokens are not revoked, they run out after ACCESS_TOKEN_EXPIRE_MINUTES anyway
+    # every stay-logged-in session of the user is revoked (other devices log in again), this device gets a new one.
+    # access tokens are not revoked, they run out after ACCESS_TOKEN_EXPIRE_MINUTES
     user = app.state.db.get_user(username) if username else None
     if not user:
         raise HTTPException(status_code=401)
@@ -318,7 +352,8 @@ def change_password(request: ChangePasswordRequest, username: str = Depends(get_
         raise HTTPException(status_code=403, detail="current password is wrong")
     if not app.state.db.update_password(user["id"], hash_password(request.new_passwd)):
         raise HTTPException(status_code=500, detail="failed to change password")
-    return {"status": "ok"}
+    app.state.db.delete_refresh_tokens(user["id"])
+    return {"status": "ok", **session_response(user)}
 
 # the email is optional and only informational, so just a format check: no verification, not unique
 EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
@@ -365,16 +400,16 @@ def set_email(request: EmailRequest, username: str = Depends(get_current_user)):
 ########### system handling
 @app.get("/health")
 def health():
-    # hub is up; missing nodes make the system degraded, not broken
     status = app.state.infrastructure.get_status()
     missing = [f"{node.url} {node.error}" for node in status.nodes if not node.ok]
     if missing:
-        return {"status": "degraded", "message": ", ".join(missing)}
+        logger.warning(f"health degraded: {', '.join(missing)}")
+        return {"status": "degraded", "message": f"{len(missing)} node(s) not reachable, see the hub log"}
 
     return {"status": "ok"}
 
 @app.put("/log-level/{level}")
-def _set_log_level(level: str):
+def _set_log_level(level: str, username: str = Depends(get_current_user)):
     name = level.upper()
     try:
         set_log_level(name)
@@ -930,7 +965,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
     def pump_done_jobs():
         # wakes up to notice the close: a thread still waiting after it would take the next done job and drop it
         while not closed.is_set():
-            job = app.state.job_queue.get_done(timeout=0.5)
+            job = app.state.job_queue.get_done(user_id, timeout=0.5)   # only this user's finished jobs
             if job:
                 loop.call_soon_threadsafe(done_queue.put_nowait, job)
 
@@ -946,6 +981,14 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                 if "chat" in data:
                     chat_request = ChatRequest(**data["chat"])
 
+                    # conversation and contact ids come from the client: only their owner may write into them
+                    # (and get the replies, the contact's profile and memories that go into them)
+                    if not (app.state.db.owns_conversation(user_id, chat_request.conversation_id)
+                            and app.state.db.owns_contact(user_id, chat_request.contact_id)):
+                        logger.warning(f"user {user_id} sent a chat message to foreign or unknown conversation {chat_request.conversation_id} / contact {chat_request.contact_id}")
+                        await websocket.send_text(json.dumps({"error": "conversation not found"}))
+                        continue
+
                     if chat_request.content == "ping":
                         MessageQueue().send_data({ 
                             "chat": {
@@ -954,7 +997,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                                 "content": "pong",
                                 "tool_calls": [] 
                             }
-                        })
+                        }, user_id=user_id)
                     else:
                         job = MetaJob(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.turns)
                         app.state.turns.start(job)  # stores the user message, or merges it into the reply still being made
@@ -975,7 +1018,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                 elif "translate" in data:
                     translate = data["translate"]   # translator mode, the result goes back as {"translate": ...}
                     job = TranslateJob(app.state.infrastructure, translate["from_language"], translate["to_language"],
-                                       translate["text"], translate.get("request_id", ""))
+                                       translate["text"], translate.get("request_id", ""), user_id=user_id)
                     app.state.job_queue.add(job)
                 elif "generate_image" in data:
                     generate_image = data["generate_image"]   # image tool, the result goes back as {"generated_image": ...}
@@ -998,7 +1041,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
     async def sender():
         try:
             while not closed.is_set():
-                message = MessageQueue().pop_message()
+                message = MessageQueue().pop_message(user_id)   # only this user's messages
                 if message:
                     try:
                         await websocket.send_text(json.dumps(message))
@@ -1024,7 +1067,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                 break
 
             if job.has_response():
-                MessageQueue().send_data(job.result())
+                MessageQueue().send_data(job.result(), user_id=user_id)
 
     receiver_task = asyncio.create_task(receiver())
     finish_job_task = asyncio.create_task(finish_job())

@@ -56,6 +56,7 @@ class CompanionJob(Job):
     def __init__(self, row: dict, db, infrastructure, tool_registry, tz, now: datetime, turns=None, is_connected=None):
         super().__init__()
         self.row = row
+        self.user_id = row["user_id"]   # status messages of its tool lookups and the push go to the contact's owner only
         self.db = db
         self.infrastructure = infrastructure
         self.tool_registry = tool_registry
@@ -257,5 +258,5 @@ class CompanionJob(Job):
                 "content": text,
                 "tool_calls": [],
                 "message_id": message_id
-            }})
+            }}, user_id=user_id)   # only the contact's owner
         return message_id, "sent"
