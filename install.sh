@@ -1736,30 +1736,22 @@ remove_line_breaks() {
     echo -n "${1//$'\n'$'\r'/}"
 }
 
-# deploy_components_remote - Copy workspace + run installer with --host-config on target host
-# Usage: deploy_components_remote <host> <comps>
-# Args:
-#   $1 - host config string
-deploy_components_remote() {
-    local host_config="$1"
+# sync_host - copy the workspace to a host (nothing to do for an --in-place host)
+# Usage: sync_host <host config> [progress, e.g. "(1 of 4)"]
+sync_host() {
+    local host_config="$1" progress="${2:-}" host_addr
     host_addr=$(echo "$host_config" | jq -r '.addr')
-    clean_config=$(remove_line_breaks "$host_config")
 
-    # --in-place: same host -> install right here in the working dir, no copy, no ssh
     if $IN_PLACE && is_local_host "$host_addr"; then
-        print_section
-        echo "🏠 Installing $host_addr in place ($(pwd))"
-        ./install.sh --local-config "$clean_config" $([[ $CLEAN_BUILD == true ]] && echo -f) $([[ $VERBOSE == true ]] && echo -v) $([[ $YES == true ]] && echo -y) -u "$SUDO_USER" \
-            || echo "❌ Error: Installation failed on $host_addr"
-        return
+        [[ -n "$progress" ]] && echo "🏠 $host_addr installs in place, nothing to copy $progress"
+        return 0
     fi
 
     install_dependencies rsync
 
     print_section
-    echo "🌐 Deploying to $host_addr"
+    echo "🌐 Preparing installation on $host_addr $progress"
 
-    local remote_dir="Rueckgrat-install"
     ssh_open_master "$host_addr" || { echo "❌ Error: failed to connect with $host_addr"; return 1; }
 
     # rsync must exist on both ends of the copy, so check the target before using it
@@ -1772,33 +1764,105 @@ deploy_components_remote() {
     if $CLEAN_BUILD; then
         echo "Clean destination..."
         # -t: sudo on the host asks for the password itself, if it needs one
-        ssh "${SSH_OPTS[@]}" -t "$host_addr" "sudo rm -rf $remote_dir/*"
+        ssh "${SSH_OPTS[@]}" -t "$host_addr" "sudo rm -rf $REMOTE_DIR/*"
     fi
 
-    echo "Copying files..."
-    rsync -az --checksum -e "ssh ${SSH_OPTS[*]}" --exclude='.git' --exclude='logs' --exclude='.venv' ./ "$host_addr:$remote_dir/" || {
+    echo "Copy data..."
+    rsync -az --checksum -e "ssh ${SSH_OPTS[*]}" --exclude='.git' --exclude='logs' --exclude='.venv' ./ "$host_addr:$REMOTE_DIR/" || {
         echo "❌ Error: rsync failed for $host_addr"
         return 1
     }
-
-    echo "Running installer..."
-    # -t: a terminal on the host, so sudo there can ask for the password itself (the installer never sees it)
-    ssh "${SSH_OPTS[@]}" -t "$host_addr" "
-        set -euo pipefail
-        cd $remote_dir
-        chmod +x install.sh
-        ./install.sh --local-config '$clean_config' $([[ $CLEAN_BUILD == true ]] && echo -f) $([[ $VERBOSE == true ]] && echo -v) $([[ $YES == true ]] && echo -y) -u $SUDO_USER
-    " || echo "❌ Error: Installation failed on $host_addr"
 }
 
-# deploy_on_hosts - Iterate host components and execute installs per host
+# install_host - run the installer for one host config on that host (or here, --in-place), after sync_host
+# Usage: install_host <host config> [-t]
+# Args:
+#   $2 - -t: a terminal on the host, so sudo there could ask for a password (not for parallel installs)
+install_host() {
+    local host_config="$1" tty="${2:-}" host_addr clean_config args
+    host_addr=$(echo "$host_config" | jq -r '.addr')
+    clean_config=$(remove_line_breaks "$host_config")
+    args="$([[ $CLEAN_BUILD == true ]] && echo -f) $([[ $VERBOSE == true ]] && echo -v) $([[ $YES == true ]] && echo -y) -u $SUDO_USER"
+
+    if $IN_PLACE && is_local_host "$host_addr"; then
+        echo "🏠 Installing $host_addr in place ($(pwd))"
+        ./install.sh --local-config "$clean_config" $args
+        return
+    fi
+
+    echo "🌐 Installing $host_addr"
+    ssh_opts "$host_addr"
+    ssh "${SSH_OPTS[@]}" $tty "$host_addr" "
+        set -euo pipefail
+        cd $REMOTE_DIR
+        chmod +x install.sh
+        ./install.sh --local-config '$clean_config' $args
+    "
+}
+
+# deploy_components_remote - copy the workspace to one host and install there, with live output
+# Usage: deploy_components_remote <host config>
+deploy_components_remote() {
+    local host_config="$1" host_addr
+    host_addr=$(echo "$host_config" | jq -r '.addr')
+    sync_host "$host_config" || return 1
+    print_section
+    install_host "$host_config" -t || echo "❌ Error: Installation failed on $host_addr"
+}
+
+# deploy_on_hosts - install all hosts of the config at the same time
+# First the copies, one after the other (an --in-place install writes into the folder they are made from),
+# then every host installs in the background into logs/install-<host>.log. Hosts don't need each other
+# during the install, the hub and the nodes only get each other's addresses from the config.
 # Usage: deploy_on_hosts
-# No arguments
 deploy_on_hosts() {
-    while IFS= read -r -u3 host_config; do
-        [[ -z "$host_config" ]] && continue
-        deploy_components_remote "$host_config"
-    done 3< <(jq -c '.hosts[]' "$CONFIG_FILE")
+    local configs=() addrs=() logs=() failed=() i n total pid rc
+    local -A index=()   # background job pid -> host
+    local start=$SECONDS
+
+    if ! jq -e '[.hosts[].addr] | length == (unique | length)' "$CONFIG_FILE" >/dev/null; then
+        echo "❌ Error: a host is in the config twice, put all of its components into one entry"
+        exit 1
+    fi
+
+    mapfile -t configs < <(jq -c '.hosts[]' "$CONFIG_FILE")
+    total=${#configs[@]}
+    for i in "${!configs[@]}"; do
+        addrs[i]=$(echo "${configs[i]}" | jq -r '.addr')
+        sync_host "${configs[i]}" "($((i + 1)) of $total)" || { echo "❌ Error: ${addrs[i]} not installed"; failed+=("${addrs[i]}"); unset 'configs[i]'; }
+    done
+
+    print_section
+    mkdir -p logs
+    n=0
+    for i in "${!configs[@]}"; do
+        logs[i]="logs/install-${addrs[i]//[@:]/_}.log"
+        install_host "${configs[i]}" > "${logs[i]}" 2>&1 < /dev/null &
+        index[$!]=$i
+        n=$((n + 1))
+        echo "🚀 ${addrs[i]} installing ($n of ${#configs[@]}), follow with: tail -f ${logs[i]}"
+    done
+
+    # report each host as it finishes, not in config order
+    n=0
+    while (( ${#index[@]} )); do
+        rc=0
+        wait -n -p pid "${!index[@]}" || rc=$?
+        i=${index[$pid]}
+        unset "index[$pid]"
+        n=$((n + 1))
+        if (( rc == 0 )); then
+            echo "✅ ${addrs[i]} done ($n of ${#configs[@]} finished, $(( (SECONDS - start) / 60 )) min)"
+        else
+            failed+=("${addrs[i]}")
+            echo "❌ Error: installation failed on ${addrs[i]} ($n of ${#configs[@]} finished), end of ${logs[i]}:"
+            tail -n 20 "${logs[i]}" | sed 's/^/   /'
+        fi
+    done
+
+    print_section
+    echo "📋 $((total - ${#failed[@]})) of $total hosts installed in $(( (SECONDS - start) / 60 )) min${failed[*]:+, failed: ${failed[*]}}"
+    (( ${#failed[@]} == 0 ))
 }
 
 # deploy_cloudflare_node - Deploy the Cloudflare node saved in the config by setup
@@ -1966,6 +2030,13 @@ sudo_cleanup() {
 
 # on_exit - EXIT trap: remove the temporary sudo rule, then close the ssh connections
 on_exit() {
+    # parallel host installs still running (Ctrl-C): stop them before their sudo rule and ssh connection go
+    local pid
+    for pid in $(jobs -pr); do
+        pkill -P "$pid" 2>/dev/null || true    # the ssh or the in-place installer running in that job
+        kill "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
     sudo_cleanup
     close_ssh_masters
 }
@@ -2079,6 +2150,7 @@ sync_on_hosts() {
 }
 
 readonly CONTAINER_MODELS_DIR="/models"
+readonly REMOTE_DIR="Rueckgrat-install"        # where the installer copies itself to on every host
 readonly HUB_PORT_DEFAULT=14223
 readonly SIGNUP_MODE_DEFAULT="invite"                # open: anyone can sign up, invite: signup needs an invite token
 readonly NODE_PORT_DEFAULT=7346
@@ -2256,7 +2328,7 @@ main() {
         # every sudo password prompt now, then the install runs without you
         sudo_prepare_hosts $(jq -r '.hosts[].addr, (if .cloudflare.enabled == true then .cloudflare.addr // empty else empty end)' "$CONFIG_FILE")
 
-        deploy_on_hosts
+        deploy_on_hosts || echo "⚠️ Warning: not every host was installed, see above"
 
         deploy_cloudflare_node
 

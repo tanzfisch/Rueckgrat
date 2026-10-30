@@ -25,6 +25,7 @@ Changelog
       chat input has the keyboard focus on opening a conversation also with "Enter sends" on (flet's focus() missed shift_enter fields)
       no more flet deprecation warnings: text field and dropdown borders use border=OutlineInputBorder (field_border in theme.py), NoInputBorder instead of InputBorder.NONE
 - #18 page navigation with a back stack: back (header, Android, browser) returns to the page you came from, login and contacts start the stack anew
+- #148 installer installs all hosts at the same time (copies first, then one log per host in logs/install-<host>.log)
 
 0.22.0
 ------
