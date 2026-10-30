@@ -155,7 +155,7 @@ class ProfilePage(BasePage):
         self.profile_fields = []  # (key path, kind, TextField)
         profile_controls = []
         for section, fields in PROFILE_SECTIONS:
-            profile_controls.append(ft.Text(section, weight=ft.FontWeight.BOLD, size=16))
+            profile_controls.append(ft.Text(section, style=STYLES["section_heading"]))
             for label, path, kind in fields:
                 field = _select_field(label, path) if kind == "select" else _text_field(label, kind)
                 self.profile_fields.append((path, kind, field))

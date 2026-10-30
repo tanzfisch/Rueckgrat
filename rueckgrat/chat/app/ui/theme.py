@@ -118,6 +118,7 @@ STYLES = {
     "input_box": dict(bgcolor=ft.Colors.TRANSPARENT, border_color=ft.Colors.TRANSPARENT, color=TEXT),
     "label": dict(color=TEXT),
     "label_slider": ft.TextStyle(color=TEXT_DIM, size=12),
+    "section_heading": ft.TextStyle(color=TEXT, size=18*SIZE_FACTOR, weight=ft.FontWeight.BOLD),   # settings and contact profile sections
     "contact_card": dict(bgcolor=SURFACE, border_radius=RADIUS, padding=10),
     "overlay_scrim": dict(bgcolor=ft.Colors.with_opacity(150 / 255, ft.Colors.BLACK)),
     "overlay_dialog": dict(bgcolor=TEAL, border_radius=RADIUS),

@@ -8,7 +8,7 @@ from pathlib import Path
 from app.ui import BasePage
 from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget
 from app.audio import Text_To_Speech
-from app.utils import Hub, Contact, Paths, AudioStreamer
+from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig
 from app.common import get_logger, Utils
 
 logger = get_logger()
@@ -41,11 +41,14 @@ class ChatPage(BasePage):
         self.status_row = ft.Row(controls=[self.status_widget])   # always the last row, messages go above it
 
         self._input_focused = False
+        self._enter_sends = RueckgratConfig().enter_sends   # user setting, else ctrl+enter sends
         self.input_box = ft.TextField(
             hint_text="Type here...",
             multiline=True,
             min_lines=1,
             max_lines=8,
+            shift_enter=self._enter_sends,   # enter sends, shift+enter is a new line
+            on_submit=(lambda e: self.send_message()) if self._enter_sends else None,
             expand=True,
             border=ft.InputBorder.NONE,
             on_focus=lambda e: setattr(self, "_input_focused", True),
@@ -97,12 +100,13 @@ class ChatPage(BasePage):
                 controls=[
                     ft.Container(
                         expand=True,
+                        padding=ft.Padding(left=8, top=0, right=0, bottom=0),
                         content=ft.Column(
                             expand=True,
                             controls=[
                                 self.input_box,                                
                                 ft.Container(
-                                    expand=True,
+                                    expand=True,                                    
                                     content=ft.Row(
                                         expand=True,
                                         controls=[
@@ -152,7 +156,7 @@ class ChatPage(BasePage):
         self.page.on_keyboard_event = self._on_keyboard
 
     def _on_keyboard(self, e: ft.KeyboardEvent):
-        if e.key == "Enter" and e.ctrl and self._input_focused:
+        if e.key == "Enter" and e.ctrl and self._input_focused and not self._enter_sends:   # enter_sends: on_submit sends
             self.send_message()
 
     async def open_emoji_picker(self, e=None):

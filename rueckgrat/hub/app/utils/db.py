@@ -79,6 +79,7 @@ class ChatDB:
             content TEXT NOT NULL,
             timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
             sources TEXT,
+            tools TEXT,
 
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         )""")
@@ -1357,7 +1358,7 @@ class ChatDB:
                 cursor.execute("""
                     SELECT *
                     FROM (
-                        SELECT id, role, name, content, timestamp, sources
+                        SELECT id, role, name, content, timestamp, sources, tools
                         FROM messages
                         WHERE conversation_id = ?
                         ORDER BY timestamp DESC
@@ -1369,6 +1370,7 @@ class ChatDB:
                 messages = [dict(row) for row in cursor.fetchall()]
                 for message in messages:
                     message["sources"] = json.loads(message["sources"]) if message["sources"] else []
+                    message["tools"] = json.loads(message["tools"]) if message["tools"] else []
                 return messages
             except Exception as e:
                 logger.error(f"failed returning messages: {e}")         
@@ -1451,6 +1453,17 @@ class ChatDB:
                 return cursor.rowcount > 0
             except Exception as e:
                 logger.error(f"setting message sources: {e}")
+        return False
+
+    def set_message_tools(self, message_id: int, tools: list) -> bool:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE messages SET tools = ? WHERE id = ?", (json.dumps(tools), message_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"setting message tools: {e}")
         return False
 
     def add_attachment(self, message_id: int, file_name: str, file_url: str, file_type: str, file_size: int) -> int:

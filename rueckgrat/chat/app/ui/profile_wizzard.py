@@ -156,6 +156,7 @@ class WizardProfilePage(ft.Column):
             value=name_value,
             hint_text="Name of your character" if user_profile else None,
             on_change=self.on_name_changed,
+            on_focus=self.on_name_focus,
             filled=True,
             bgcolor="#2C2C2C",
             border_radius=22,
@@ -281,6 +282,13 @@ class WizardProfilePage(ft.Column):
     def get_voice(self):
         # kept out of get_values() because those values are json encoded and sent to the hub
         return self.voice_selector.get_voice()
+
+    def on_name_focus(self, e=None):
+        # a random name is only a suggestion: select it, so typing replaces it
+        name = self.name_input.value or ""
+        if self._randomize_name() and name in self.male_names + self.female_names:
+            self.name_input.selection = ft.TextSelection(base_offset=0, extent_offset=len(name))
+            self.name_input.update()
 
     def on_name_changed(self, e=None):
         # clear the validation message once the user starts typing
