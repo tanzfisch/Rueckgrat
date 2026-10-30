@@ -12,6 +12,8 @@ Changelog
       client config file only readable by its owner
       create_rueckgrat_user.sh sets up a separate install user (ssh key, passwordless sudo) on all machines, use with install.sh -u
       README explains which users, sudo rights and ssh keys the installer needs
+- #121 fixed display of source URLs. now part of the chat bubble
+- #147 nightly maintenance: conversation summaries with vectors to find old conversations by meaning
 
 0.22.0
 ------

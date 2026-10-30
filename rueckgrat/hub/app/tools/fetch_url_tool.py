@@ -47,7 +47,7 @@ class FetchUrlTool(WebsearchTool):
                 summary = job.result()
                 if summary:
                     result = {"tool": self.name(), "text": f"{summary} - source {self._get_org_name(page['url'])} ({page['url']})"}
-                    MessageQueue().send_url(page["url"])
+                    self.add_source(page["url"])
                 else:
                     result = {"tool": self.name(), "error": "could not summarize the page"}
         except FetchBlocked as e:

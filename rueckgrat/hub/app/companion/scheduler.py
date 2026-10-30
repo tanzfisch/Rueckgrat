@@ -56,7 +56,7 @@ class CompanionScheduler:
         if not due:
             return MAX_SLEEP
         now = now or clock.now()
-        return min(MAX_SLEEP, max(MIN_SLEEP, clock.real_seconds((from_db(due) - now).total_seconds())))
+        return min(MAX_SLEEP, max(MIN_SLEEP, (from_db(due) - now).total_seconds()))
 
     def cutoff(self, contact_id: int, tz, now: datetime) -> datetime:
         midnight = at_local(now.astimezone(tz).date(), time(0), tz)

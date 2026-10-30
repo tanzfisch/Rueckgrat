@@ -7,7 +7,7 @@ from app.utils.url_check import fetch, FetchBlocked
 logger = get_logger()
 
 # headless chromium for pages that only fill in with javascript (spa news sites) or block plain http clients.
-# optional: playwright comes with the INSTALL_BROWSER build arg of the hub image, without it render_page returns None
+# playwright is always in the hub image. without it (e.g. a local run) render_page returns None
 
 RENDER_TIMEOUT = 15     # seconds for one page, launch to html
 MAX_BROWSERS = 2        # a chromium takes ~200 MB, don't let a burst of tool calls start many
@@ -30,7 +30,7 @@ def render_page(url: str, user_agent: str, timeout: float = RENDER_TIMEOUT) -> O
         from playwright.sync_api import sync_playwright, Error as PlaywrightError
     except ImportError:
         if not _missing_logged:
-            logger.warning("playwright not installed (hub built without INSTALL_BROWSER), no browser fallback")
+            logger.warning("playwright not installed, no browser fallback")
             _missing_logged = True
         return None
 

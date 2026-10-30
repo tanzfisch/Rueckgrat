@@ -25,11 +25,6 @@ logger = get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.dev_mode = os.getenv("DEV_MODE", "")
-    if app.state.dev_mode == "":
-        app.state.dev_mode = "prod"
-    logger.info(f"running DEV_MODE={app.state.dev_mode}")
-
     if os.getenv("USE_LLAMA") == "true":
         host = "host.docker.internal"
         app.state.llamacpp = LLamaCppInterface(host, os.getenv("LLAMA_SERVER_PORT"))

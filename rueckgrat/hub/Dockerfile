@@ -11,16 +11,13 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --index-url https://download.pytorch.org/whl/cpu torch && \
     pip install -r requirements.txt
 
-# headless chromium for javascript pages (fetch_url browser fallback), ~+800 MB. without it fetch_url reads plain http only
+# headless chromium for javascript pages (fetch_url browser fallback), ~+800 MB
 COPY requirements_browser.txt .
-ARG INSTALL_BROWSER=true
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN --mount=type=cache,target=/root/.cache/pip \
-    if [ "$INSTALL_BROWSER" = "true" ]; then \
-      pip install -r requirements_browser.txt && \
-      playwright install --with-deps --only-shell chromium && \
-      rm -rf /var/lib/apt/lists/*; \
-    fi
+    pip install -r requirements_browser.txt && \
+    playwright install --with-deps --only-shell chromium && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY app app
 

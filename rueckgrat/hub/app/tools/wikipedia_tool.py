@@ -75,7 +75,7 @@ class WikipediaTool(Tool):
             article = wikipedia_summary(query, self.tool_call.get("lang", "en"))
             result = {"tool": self.name(), "text": f"{article['title']}: {article['summary']} - source Wikipedia {article['url']}"}
             if article["url"]:
-                MessageQueue().send_url(article["url"])
+                self.add_source(article["url"], article["title"])
         except WikipediaError as e:
             logger.warning(f"wikipedia {query} failed: {e}")
             result = {"tool": self.name(), "error": str(e)}
