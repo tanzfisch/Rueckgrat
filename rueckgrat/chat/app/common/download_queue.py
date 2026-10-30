@@ -55,7 +55,10 @@ class DownloadQueue:
         threading.Thread(target=self._run, daemon=True).start()
 
     def download(self, url: str, download_path: str, access_token: str = "", server_cert: str = "", force_download: bool=False) -> bool:
-        return self._download(url, download_path, access_token, server_cert, force_download)
+        success = self._download(url, download_path, access_token, server_cert, force_download)
+        if not success:
+            logger.error(f"failed to download {url}")
+        return success
 
     def add(self, url: str, download_path: str, access_token: str = "", server_cert: str = "", max_retry: int = 4, force_download: bool=False, callback=None):
         job = DownloadJob(
@@ -126,13 +129,11 @@ class DownloadQueue:
             if target_filepath.exists() and force_download:
                 target_filepath.unlink(missing_ok=True)
 
-            if not self._download_file(url, target_filepath, access_token, server_cert):
-                logger.error(f"failed to download {url}")
-                return False
-            return True
+            return self._download_file(url, target_filepath, access_token, server_cert)
 
         except Exception as e:
-            logger.error(f"failed to download {url} {repr(e)}")
+            # files are often not there yet (still being made), so single attempts only log at debug. the caller logs an error once it gives up
+            logger.debug(f"download attempt failed {url} {repr(e)}")
             return False
 
     def _download_file(self, url: str, filepath: Path, access_token: str, server_cert: str) -> bool:
@@ -163,13 +164,13 @@ class DownloadQueue:
                     return False
                 
         except Exception as e:
-            logger.error(f"failed to download {url} {repr(e)}")
+            logger.debug(f"download attempt failed {url} {repr(e)}")
             return False
         
         total_size = int(response.headers.get("content-length", 0))
 
         # write to a .part file and rename when complete, so nobody sees a half written file under the final name
-        part_filepath = filepath.with_name(filepath.name + ".part")
+        part_filepath = filepath.with_name(f"{filepath.name}.{threading.get_ident()}.part")   # per thread, two downloads of the same file must not share one .part file
         with open(part_filepath, "wb") as file:
             with tqdm(total=total_size, unit="B", unit_scale=True, desc=f"Downloading {url}", unit_divisor=1024) as pbar:
                 for chunk in response.iter_content(chunk_size=64*1024):

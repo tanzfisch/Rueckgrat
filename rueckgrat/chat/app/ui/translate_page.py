@@ -6,7 +6,7 @@ from app.ui.theme import STYLES, RADIUS, TEAL_BRIGHT
 from app.ui import BasePage
 from app.ui.widgets import ChatBubble, Header, LanguagePicker, flag_text
 from app.audio import Text_To_Speech
-from app.utils import Hub, AudioStreamer
+from app.utils import Hub, AudioStreamer, RueckgratConfig
 from app.common import get_logger
 from app.common.languages import LANGUAGES, language_name
 
@@ -56,13 +56,16 @@ class TranslateHalf(ft.Container):
         self.owner = owner
         self.language = language
         self.history = ft.ListView(expand=True, spacing=10, padding=0, auto_scroll=True)
+        enter_sends = RueckgratConfig().enter_sends   # same user setting as the chat, else ctrl+enter sends
         self.input_box = ft.TextField(
             hint_text="Type here...",
             multiline=True,
+            shift_enter=enter_sends,
+            on_submit=(lambda e: owner.send(self)) if enter_sends else None,
             min_lines=1,
             max_lines=4,
             expand=True,
-            border=ft.InputBorder.NONE,
+            border=ft.NoInputBorder(),
             on_focus=lambda e: owner.set_active(self),
             text_style=ft.TextStyle(font_family="DejaVu Sans", font_family_fallback=["Noto Color Emoji"]),
         )
@@ -139,7 +142,7 @@ class TranslatePage(BasePage):
         self.page.on_keyboard_event = self._on_keyboard
 
     def _on_keyboard(self, e: ft.KeyboardEvent):
-        if e.key == "Enter" and e.ctrl and self.active:
+        if e.key == "Enter" and e.ctrl and self.active and not self.active.input_box.shift_enter:   # enter sends: on_submit sends
             self.send(self.active)
 
     def on_go_back(self, e=None):

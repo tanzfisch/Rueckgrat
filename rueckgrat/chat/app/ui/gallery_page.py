@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 import flet as ft
 from app.ui.theme import TEXT_DIM
 
@@ -20,6 +21,14 @@ def _update(control: ft.Control):
         control.update()
     except RuntimeError:
         pass  # not on the page (anymore)
+
+
+def _local_date(created_at) -> str:
+    """the hub stores UTC ("2026-10-30 18:40:10"), shown as the date on this device"""
+    try:
+        return datetime.fromisoformat(str(created_at)).replace(tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d")
+    except ValueError:
+        return str(created_at or "")[:10]
 
 
 async def broken_image_fallback(slot: ft.Container, image_path, is_active=lambda: True):
@@ -125,7 +134,7 @@ class GalleryPage(BasePage):
         if self.on_select:
             slot.content.on_tap = lambda e: self.on_select(filename)
         self.page.run_task(broken_image_fallback, slot, image_path, lambda: self._active)
-        label = f"{item.get('contact_name') or 'image tool'} · {str(item.get('created_at') or '')[:10]}"
+        label = f"{item.get('contact_name') or 'image tool'} · {_local_date(item.get('created_at'))}"
         return ft.Column(
             spacing=2,
             controls=[slot, ft.Text(label, size=11, color=TEXT_DIM, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS)],

@@ -49,8 +49,10 @@ class ChatPage(BasePage):
             max_lines=8,
             shift_enter=self._enter_sends,   # enter sends, shift+enter is a new line
             on_submit=(lambda e: self.send_message()) if self._enter_sends else None,
+            # autofocus, not focus(): flet 1.0.4 focus() only reaches the normal focus node, a shift_enter field has another one
+            autofocus=True,
             expand=True,
-            border=ft.InputBorder.NONE,
+            border=ft.NoInputBorder(),
             on_focus=lambda e: setattr(self, "_input_focused", True),
             on_blur=lambda e: setattr(self, "_input_focused", False),
             text_style=ft.TextStyle(
@@ -201,9 +203,6 @@ class ChatPage(BasePage):
         self.temperature = float(self.contact.get_llm_temperature())
         Hub.register_incomming_message(self.on_incomming_message)
 
-        if self.page:
-            self.page.run_task(self.input_box.focus)
-
     def on_leave(self):
         if self.page:
             self.page.run_task(self._stop_mic)
@@ -238,8 +237,16 @@ class ChatPage(BasePage):
             cert=Hub.server_cert,
             on_message=self._on_audio_message,
         )
-        self.audio_streamer.attach(self.page)
-        await self.audio_streamer.start()
+        try:
+            self.audio_streamer.attach(self.page)
+            await self.audio_streamer.start()
+        except Exception as e:    # e.g. no audio device or sounddevice missing: the button goes back to off, like the translate page
+            logger.error(f"failed to start the mic: {e!r}")
+            await self._stop_mic()
+            self.mic_btn.selected = False
+            self.mic_btn.icon = ft.Icons.MIC_OFF
+            self.mic_btn.update()
+            return
         self._wave_task = asyncio.create_task(self._wave_loop())
 
     async def _wave_loop(self):
