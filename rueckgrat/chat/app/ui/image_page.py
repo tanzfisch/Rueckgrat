@@ -54,7 +54,7 @@ class ImagePage(BasePage):
             shift_enter=True,   # enter sends, shift+enter is a new line
             on_submit=self.send,
             expand=True,
-            border=ft.InputBorder.NONE,
+            border=ft.NoInputBorder(),
         )
         self.send_btn = ft.IconButton(icon=ft.Icons.SEND, icon_size=24, on_click=self.send)
         bar = ft.Container(
@@ -72,7 +72,7 @@ class ImagePage(BasePage):
         ]
 
     def on_go_back(self, e=None):
-        self.navigator("contacts")
+        self.navigator.back()
 
     def on_enter(self, **kwargs):
         self._active = True

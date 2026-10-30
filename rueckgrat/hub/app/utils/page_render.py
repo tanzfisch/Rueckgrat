@@ -1,14 +1,13 @@
 import threading
 import time
 from typing import Optional, Tuple
-from urllib.parse import urlparse
 
 from app.common import get_logger
-from app.utils.url_check import is_public_http_url
+from app.utils.url_check import fetch, FetchBlocked
 logger = get_logger()
 
 # headless chromium for pages that only fill in with javascript (spa news sites) or block plain http clients.
-# optional: playwright comes with the INSTALL_BROWSER build arg of the hub image, without it render_page returns None
+# playwright is always in the hub image. without it (e.g. a local run) render_page returns None
 
 RENDER_TIMEOUT = 15     # seconds for one page, launch to html
 MAX_BROWSERS = 2        # a chromium takes ~200 MB, don't let a burst of tool calls start many
@@ -31,23 +30,38 @@ def render_page(url: str, user_agent: str, timeout: float = RENDER_TIMEOUT) -> O
         from playwright.sync_api import sync_playwright, Error as PlaywrightError
     except ImportError:
         if not _missing_logged:
-            logger.warning("playwright not installed (hub built without INSTALL_BROWSER), no browser fallback")
+            logger.warning("playwright not installed, no browser fallback")
             _missing_logged = True
         return None
 
     deadline = time.monotonic() + timeout
     remaining_ms = lambda: max(1, int((deadline - time.monotonic()) * 1000))
-    public_hosts = {}
 
     def route(r):
-        # the page's own requests get the same SSRF check as the url, and skip what we don't read
-        host = urlparse(r.request.url).hostname
-        if host not in public_hosts:
-            public_hosts[host] = r.request.url.startswith(("http://", "https://")) and is_public_http_url(r.request.url)
-        if not public_hosts[host] or r.request.resource_type in SKIP_RESOURCES:
+        # chromium never goes to the network itself: every request of the page is fetched here, with the same
+        # SSRF check and pinning as plain http (url_check). redirects go back to chromium, which asks again for
+        # the new url, so every hop is checked. what we don't read is skipped
+        req = r.request
+        if req.resource_type in SKIP_RESOURCES or not req.url.startswith(("http://", "https://")):
             r.abort()
-        else:
-            r.continue_()
+            return
+        try:
+            try:
+                headers = req.all_headers()     # incl. cookies
+            except Exception:
+                headers = req.headers
+            resp = fetch(req.url, headers=headers, method=req.method, body=req.post_data_buffer,
+                         timeout=max(1.0, deadline - time.monotonic()), follow_redirects=False)
+        except FetchBlocked:
+            r.abort("blockedbyclient")
+            return
+        except Exception as e:
+            logger.debug(f"browser request {req.url} failed: {repr(e)}")
+            r.abort()
+            return
+        # the body is already decoded and complete
+        drop = {"content-encoding", "content-length", "transfer-encoding", "connection"}
+        r.fulfill(status=resp.status_code, headers={k: v for k, v in resp.headers.items() if k.lower() not in drop}, body=resp.content)
 
     if not _slots.acquire(timeout=timeout):
         logger.warning(f"no free browser to render {url}")

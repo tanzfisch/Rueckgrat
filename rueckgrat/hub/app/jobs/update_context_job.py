@@ -85,6 +85,7 @@ EXAMPLE CONTEXT:
 {{
     "location": "Paris",
     "topic": "sight seeing",
+    "user_facts": "",
 
     "user": {{
         "action": "standing and looking around",
@@ -107,6 +108,7 @@ INSTRUCTIONS:
 - Keep ALL fields SHORT (max 40 words each)
 - an empty string is perfectly valid and means the absence of things or actions
 - topic = 1 short phrase about what is happening
+- user_facts = lasting facts the user told about themselves (name, health and allergies, plans and dates, family, pets, hobbies, job, likes and dislikes), empty if none, do not invent any (max 100 words)
 - "user" = the person who wrote the (role: user) messages, "assistant" = the person who wrote the (role: assistant) messages, never swap them
 - fields of user and of assistant, each about that person only:
   - action = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
@@ -130,6 +132,7 @@ CURRENT CONTEXT:
     "location": "{context['location']}",
     "topic": "{context['topic']}",
     "summary": "{context['summary']}",
+    "user_facts": "{Utils.get_nested_value(context, ['user_facts'], '')}",
 
     "user": {{
         "action": "{context['user']['action']}",
@@ -152,7 +155,7 @@ INSTRUCTIONS:
 - do not invent items or actions
 - if an item was transfered between people remove it from the source
 - keep the information consitent, avoid redundancies or conflicting statements
-- Keep ALL fields except summary SHORT (max 40 words each)
+- Keep ALL fields except summary and user_facts SHORT (max 40 words each)
 - an empty string is perfectly valid and means the absence of things or actions
 - topic = 1 short phrase about what is happening
 - "user" = the person who wrote the (role: user) messages, "assistant" = the person who wrote the (role: assistant) messages, never swap them
@@ -162,6 +165,9 @@ INSTRUCTIONS:
   - upper_body = items worn on the upper body or carried in the hands
   - body = items worn on the body
 - location = environment or setting
+- user_facts = lasting facts the user told about themselves (name, health and allergies, plans and dates, family, pets, hobbies, job, likes and dislikes), max 100 words:
+  - keep every fact from the current context, never drop one unless the user corrects it
+  - add new facts from the latest messages, do not invent any
 - summary = a running record of the whole conversation (max 500 words), focused on:
   - open questions: what is still unresolved, being asked or waiting for an answer
   - decisions: concrete choices that were made or agreed, and why
@@ -197,6 +203,7 @@ Return ONLY valid JSON in the same format.
             "location": Utils.get_nested_value(reply, ["location"], "unknown"),
             "topic": Utils.get_nested_value(reply, ["topic"], "unknown"),
             "summary": Utils.get_nested_value(reply, ["summary"], ""),
+            "user_facts": Utils.get_nested_value(reply, ["user_facts"], ""),
 
             "user": {
                 "action": Utils.get_nested_value(reply, ["user", "action"], ""),

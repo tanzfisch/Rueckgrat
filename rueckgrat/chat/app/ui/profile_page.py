@@ -155,7 +155,7 @@ class ProfilePage(BasePage):
         self.profile_fields = []  # (key path, kind, TextField)
         profile_controls = []
         for section, fields in PROFILE_SECTIONS:
-            profile_controls.append(ft.Text(section, weight=ft.FontWeight.BOLD, size=16))
+            profile_controls.append(ft.Text(section, style=STYLES["section_heading"]))
             for label, path, kind in fields:
                 field = _select_field(label, path) if kind == "select" else _text_field(label, kind)
                 self.profile_fields.append((path, kind, field))
@@ -251,7 +251,7 @@ class ProfilePage(BasePage):
             self.page.services.append(self.file_picker)
 
     def on_go_back(self, e=None):
-        self.navigator("contacts")
+        self.navigator.back()
 
     def clear_form(self):
         self.name.value = ""
@@ -395,7 +395,7 @@ class ProfilePage(BasePage):
             json.dump(self.get_data(), file, indent=4)
 
     def _on_cancel(self, e=None):
-        self.navigator("contacts")
+        self.navigator.back()
 
     def _on_save(self, e=None):
         if self.contact_id == -1:
@@ -410,7 +410,7 @@ class ProfilePage(BasePage):
                 self.page.show_dialog(ft.SnackBar(ft.Text("The companion could not be switched " + ("on" if enabled else "off"))))
                 return
             self.companion_loaded = enabled
-        self.navigator("contacts")
+        self.navigator.back()
 
     def _resolve_voice_id(self) -> str:
         # "" means the default voice. if the hub call fails keep the voice the contact had instead of wiping it

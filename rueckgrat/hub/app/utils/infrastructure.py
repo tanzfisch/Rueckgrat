@@ -59,14 +59,16 @@ class Infrastructure:
 
         self.download_queue = DownloadQueue()
 
-    async def connect_nodes(self):
+    async def connect_nodes(self, connect: bool = True):
+        """connect=False: only looks up the nodes, for the http calls (chat without streaming, embed), e.g. hub management"""
         for host in self.hosts:
             if "node" in host:
                 node = host["node"]
                 websocket_node = WebSocketClientNode(host["addr"], node["port"])
                 self.nodes.append(websocket_node)
                 # non-blocking: connects whenever the node comes up, reconnects if it restarts
-                websocket_node.start()
+                if connect:
+                    websocket_node.start()
                 logger.debug(f"connecting with node {host['addr']}:{node['port']} in background")
 
                 if "services" in node:

@@ -50,7 +50,7 @@ class Turns:
                     "conversation_id": request.conversation_id,
                     "user_message_id": job.user_message_id,
                     "content": request.content
-                }})
+                }}, user_id=job.user_id)   # runs on the websocket loop, not in a job
                 logger.info(f"follow-up merged into message {job.user_message_id}, conversation {request.conversation_id}")
             else:
                 job.user_message_id = self.db.add_message(request.conversation_id, request.role, request.content, request.name)
@@ -61,6 +61,11 @@ class Turns:
         """a reply is being made in this conversation"""
         with self._lock:
             return conversation_id in self._running
+
+    def any_busy(self) -> bool:
+        """a reply is being made in any conversation"""
+        with self._lock:
+            return bool(self._running)
 
     def set_state(self, job, state: str) -> bool:
         """"images" (an image tool is queued) or "done" (the final goes out): from then on nothing merges into the job.
@@ -86,6 +91,7 @@ class MetaJob(Job):
         self.cancelled = threading.Event()  # set when a follow-up merged into this turn
         self.state = "running"  # "images" / "done", see Turns.set_state
         self.message_id = -1
+        self.sources = []   # pages the web tools used, shown as links under the answer
         self.done = False
 
     def _update_conversation_context(self):
@@ -111,7 +117,7 @@ class MetaJob(Job):
                 "delta": delta,
                 "conversation_id": self.request.conversation_id,
                 "message_id": self.message_id
-            })
+            }, user_id=self.user_id)   # called on the node's websocket thread, no job context there
 
         if data.get("error"):
             logger.error(f"chat stream failed: {data['error']}")
@@ -122,7 +128,8 @@ class MetaJob(Job):
                 "role": "assistant",
                 "content": data["response"],
                 "tool_calls": [],
-                "message_id": self.message_id
+                "message_id": self.message_id,
+                "sources": self.sources
             }
             self.done = True
             
@@ -142,7 +149,7 @@ class MetaJob(Job):
 
         if websearch_response == "":
             return None
-        return f"\n\nWEBSEARCH_RESULT{websearch_response}\n"
+        return f"\n\nWEBSEARCH_RESULT{websearch_response}\nBase your answer on the WEBSEARCH_RESULT. Do not invent or add any information. Answer concisely.\n"
 
     def _format_conversion_results(self) -> Optional[str]:
         """removes the convert tool results from self.response, returns the CONVERSION_RESULT block or None"""
@@ -200,7 +207,7 @@ class MetaJob(Job):
         MessageQueue().send_data({"cancelled": {
             "conversation_id": self.request.conversation_id,
             "message_id": self.message_id if self.message_id != -1 else None
-        }})
+        }}, user_id=self.user_id)
         logger.info(f"reply interrupted by a follow-up, conversation {self.request.conversation_id}")
         return True
 
@@ -250,6 +257,8 @@ class MetaJob(Job):
             websearch_block = self._format_websearch_results()
             if websearch_block:
                 compiled_response += websearch_block
+            else:
+                compiled_response += "\n\nNo web search was done for this message. If you don't know current facts like opening hours, prices or news, say so.\n"
 
             conversion_block = self._format_conversion_results()
             if conversion_block:
@@ -281,6 +290,15 @@ class MetaJob(Job):
                 tool_calls=parallel_tool_calls,
                 parallel=True
             )
+
+            self.sources = self.response.pop("sources", [])
+            if self.sources:
+                self.db.set_message_sources(self.message_id, self.sources)
+
+            # the tools this answer used, so later turns know what was done. the memory tools run every turn, they'd only add noise
+            used_tools = list(dict.fromkeys(call["tool"] for call in tool_calls if call["tool"] not in ("remember", "search_memory")))
+            if used_tools:
+                self.db.set_message_tools(self.message_id, used_tools)
 
             MessageQueue().send_status_message("finalize answer")
 

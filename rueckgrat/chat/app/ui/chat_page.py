@@ -8,7 +8,7 @@ from pathlib import Path
 from app.ui import BasePage
 from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget
 from app.audio import Text_To_Speech
-from app.utils import Hub, Contact, Paths, AudioStreamer
+from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig
 from app.common import get_logger, Utils
 
 logger = get_logger()
@@ -24,13 +24,13 @@ class ChatPage(BasePage):
         self.play_wave_animation = False
         self._wave_task = None
         self._tts_running = False   # tts bars on the mute button are animating
+        self._play_btn = None       # play button of the bubble being spoken, it shows stop meanwhile
         self.delta_buffer = ""
         self._stream_gen = 0
         self._stream_message_id = None
         self._finished_message_ids = set()
         self._bubbles: dict[int, ChatBubble] = {}       # message id -> its bubble in the history
         self._pending_images: dict[int, str] = {}       # message id -> image file name that came before its bubble
-        self.replay_content = ""
         self.user_role_name = ""   # set from the user's own character profile in on_enter
 
         self.header = Header(navigator)
@@ -41,13 +41,18 @@ class ChatPage(BasePage):
         self.status_row = ft.Row(controls=[self.status_widget])   # always the last row, messages go above it
 
         self._input_focused = False
+        self._enter_sends = RueckgratConfig().enter_sends   # user setting, else ctrl+enter sends
         self.input_box = ft.TextField(
             hint_text="Type here...",
             multiline=True,
             min_lines=1,
             max_lines=8,
+            shift_enter=self._enter_sends,   # enter sends, shift+enter is a new line
+            on_submit=(lambda e: self.send_message()) if self._enter_sends else None,
+            # autofocus, not focus(): flet 1.0.4 focus() only reaches the normal focus node, a shift_enter field has another one
+            autofocus=True,
             expand=True,
-            border=ft.InputBorder.NONE,
+            border=ft.NoInputBorder(),
             on_focus=lambda e: setattr(self, "_input_focused", True),
             on_blur=lambda e: setattr(self, "_input_focused", False),
             text_style=ft.TextStyle(
@@ -57,12 +62,6 @@ class ChatPage(BasePage):
         )
 
         self.icon_size = 24
-
-        self.menu_btn = ft.PopupMenuButton(
-            icon=ft.Icons.MENU,
-            icon_size=self.icon_size,
-            items=[ft.PopupMenuItem(content="... replay", on_click=lambda e: self.replay())],
-        )
 
         self.emoji_btn = ft.IconButton(
             icon=ft.Icons.EMOJI_EMOTIONS, 
@@ -103,16 +102,16 @@ class ChatPage(BasePage):
                 controls=[
                     ft.Container(
                         expand=True,
+                        padding=ft.Padding(left=8, top=0, right=0, bottom=0),
                         content=ft.Column(
                             expand=True,
                             controls=[
                                 self.input_box,                                
                                 ft.Container(
-                                    expand=True,
+                                    expand=True,                                    
                                     content=ft.Row(
                                         expand=True,
                                         controls=[
-                                            self.menu_btn,
                                             ft.Container(expand=True),  # spacer
                                             self.emoji_btn,
                                             ft.Container(
@@ -159,7 +158,7 @@ class ChatPage(BasePage):
         self.page.on_keyboard_event = self._on_keyboard
 
     def _on_keyboard(self, e: ft.KeyboardEvent):
-        if e.key == "Enter" and e.ctrl and self._input_focused:
+        if e.key == "Enter" and e.ctrl and self._input_focused and not self._enter_sends:   # enter_sends: on_submit sends
             self.send_message()
 
     async def open_emoji_picker(self, e=None):
@@ -169,7 +168,7 @@ class ChatPage(BasePage):
             self.input_box.update()
 
     def on_go_back(self, e=None):
-        self.navigator("conversations", contact_id=self.contact_id)
+        self.navigator.back()
 
     def clear_history(self):
         self.status_widget.clear_status()
@@ -177,6 +176,7 @@ class ChatPage(BasePage):
         self._finished_message_ids.clear()
         self._bubbles.clear()
         self._pending_images.clear()
+        self._play_btn = None
         self.history.controls = [self.status_row]
         self.history.update()
 
@@ -194,17 +194,14 @@ class ChatPage(BasePage):
             attachments = message.get("attachments", [])
             if attachments:
                 image_path = self._get_image(attachments[0]["file_name"])
-                self._append_history(message["role"], message["content"], image_path, message_id=message["id"])
+                self._append_history(message["role"], message["content"], image_path, message_id=message["id"], sources=message.get("sources"))
             else:
-                self._append_history(message["role"], message["content"], message_id=message["id"])
+                self._append_history(message["role"], message["content"], message_id=message["id"], sources=message.get("sources"))
         # a reply still being made is already loaded with its text so far: skip its deltas, the final "chat" fills it
         self._finished_message_ids.update(self._bubbles)
 
         self.temperature = float(self.contact.get_llm_temperature())
         Hub.register_incomming_message(self.on_incomming_message)
-
-        if self.page:
-            self.page.run_task(self.input_box.focus)
 
     def on_leave(self):
         if self.page:
@@ -240,8 +237,16 @@ class ChatPage(BasePage):
             cert=Hub.server_cert,
             on_message=self._on_audio_message,
         )
-        self.audio_streamer.attach(self.page)
-        await self.audio_streamer.start()
+        try:
+            self.audio_streamer.attach(self.page)
+            await self.audio_streamer.start()
+        except Exception as e:    # e.g. no audio device or sounddevice missing: the button goes back to off, like the translate page
+            logger.error(f"failed to start the mic: {e!r}")
+            await self._stop_mic()
+            self.mic_btn.selected = False
+            self.mic_btn.icon = ft.Icons.MIC_OFF
+            self.mic_btn.update()
+            return
         self._wave_task = asyncio.create_task(self._wave_loop())
 
     async def _wave_loop(self):
@@ -295,13 +300,18 @@ class ChatPage(BasePage):
             await self.audio_streamer.stop()
             self.audio_streamer = None
 
-    def _append_history(self, role: str, content: str, image_filepath: str = None, message_id: int = None) -> ChatBubble | None:
+    def _append_history(self, role: str, content: str, image_filepath: str = None, message_id: int = None, sources: list | None = None) -> ChatBubble | None:
         try:
             bubble = ChatBubble(role, content, image_filepath)
             if message_id is not None:
                 self._bubbles[message_id] = bubble
-            if role in ("assistant", "error"):
-                self.replay_content = content
+            if role == "assistant":
+                bubble.action_row.add_button(ft.IconButton(
+                    icon=ft.Icons.PLAY_ARROW, icon_size=16, tooltip="Play",
+                    on_click=lambda e, b=bubble: self._on_play(e.control, b),
+                ))
+            if sources:
+                bubble.action_row.set_sources(sources)
 
             style = {
                 "user": STYLES["chat_user"],
@@ -309,10 +319,16 @@ class ChatPage(BasePage):
                 "error": STYLES["chat_error"],
             }.get(role, STYLES["chat_assistant"])
 
-            bubble_slot = ft.Container(content=bubble, expand=85, **style)
+            # the bubble with its button row under it
+            bubble_slot = ft.Column(
+                controls=[ft.Container(content=bubble, **style), bubble.action_row],
+                expand=85, spacing=0, tight=True,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            )
             spacer = ft.Container(expand=15)
             row = ft.Row(
                 controls=[spacer, bubble_slot] if role == "user" else [bubble_slot, spacer],
+                data=bubble,
             )
             self.history.controls.insert(self.history.controls.index(self.status_row), row)
             self.history.update()
@@ -321,12 +337,29 @@ class ChatPage(BasePage):
             logger.error(f"failed to append to history: {repr(e)}")
             return None            
 
-    def replay(self):
-        if self.mute_btn.selected:
-            self._speak(self.replay_content)
+    def _on_play(self, button: ft.IconButton, bubble: ChatBubble):
+        """play button under an answer: speaks it with the contact's voice, a tap while it plays stops it"""
+        if button is self._play_btn and Text_To_Speech.state != "idle":
+            Text_To_Speech.kill_current_speech()   # _tts_loop ends and shows play again
+            return
+        self._speak(bubble.raw_content, play_btn=button)
 
-    def _speak(self, content: str, message_id: int | None = None):
+    def _show_playing(self, button: ft.IconButton | None):
+        """the play button of the bubble being spoken shows stop, the one before goes back to play"""
+        if button is self._play_btn:
+            return
+        for btn, icon in ((self._play_btn, ft.Icons.PLAY_ARROW), (button, ft.Icons.STOP)):
+            if btn:
+                btn.icon = icon
+                try:
+                    btn.update()
+                except RuntimeError:
+                    pass    # its bubble is not on the page (anymore)
+        self._play_btn = button
+
+    def _speak(self, content: str, message_id: int | None = None, play_btn: ft.IconButton | None = None):
         """speaks a message and animates the bars on the mute button while it is generated and played"""
+        self._show_playing(play_btn)
         Text_To_Speech.speak(text=self._cleanup_for_speech(content), voice=self.contact.get_voice_id(), message_id=message_id)
         if not self._tts_running and self.page:
             self._tts_running = True
@@ -386,6 +419,8 @@ class ChatPage(BasePage):
                     bar.height = 0
                 self.tts_wave.visible = False
                 self.tts_wave.update()
+                if Text_To_Speech.state == "idle":
+                    self._show_playing(None)
             except Exception:
                 pass
             if restart and Text_To_Speech.state != "idle" and self.page:
@@ -449,19 +484,16 @@ class ChatPage(BasePage):
     def _remove_bubble(self, message_id: int):
         bubble = self._bubbles.pop(message_id, None)
         if bubble:
-            self.history.controls = [row for row in self.history.controls
-                                     if not any(getattr(c, "content", None) is bubble for c in row.controls)]
+            self.history.controls = [row for row in self.history.controls if row.data is not bubble]
             self.history.update()
 
     def _merge_user_message(self, content: str):
         """the hub merged the follow-up into the previous user message: drop the follow-up's bubble, update the previous one"""
-        rows = [row for row in self.history.controls
-                if isinstance(row, ft.Row) and row.controls and isinstance(getattr(row.controls[-1], "content", None), ChatBubble)
-                and row.controls[-1].content.role == "user"]
+        rows = [row for row in self.history.controls if isinstance(row.data, ChatBubble) and row.data.role == "user"]
         if len(rows) < 2:
             return
         self.history.controls.remove(rows[-1])
-        previous = rows[-2].controls[-1].content
+        previous = rows[-2].data
         previous.clear_content()
         previous.append_content(content)
         self.history.update()
@@ -510,6 +542,7 @@ class ChatPage(BasePage):
                         elif "generate_image" in message:
                             image_filename = message["generate_image"]["filename"]
                     image_path = self._get_image(image_filename) if image_filename else None
+                    sources = chat.get("sources") or []
                     bubble = self._bubbles.get(message_id)
                     if bubble:  # streamed, or loaded from history in on_enter: the final text replaces what it has
                         bubble.clear_content()
@@ -517,9 +550,11 @@ class ChatPage(BasePage):
                         bubble.update()
                         if image_path:
                             bubble.set_image(image_path)
-                        self.replay_content = content
+                        if sources:
+                            bubble.action_row.set_sources(sources)
+                            self.history.update()
                     else:
-                        self._append_history(role, content, image_path, message_id=message_id)
+                        self._append_history(role, content, image_path, message_id=message_id, sources=sources)
 
                     if self.mute_btn.selected:
                         self._speak(content, message_id)

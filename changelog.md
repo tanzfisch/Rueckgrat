@@ -1,6 +1,32 @@
 Changelog
 =========
 
+0.23.0
+------
+
+- #146 patching security issues
+      installer: no sudo password handling (ssh keys or ssh/sudo prompt themselves), -p removed, host keys pinned (accept-new)
+      installer: asks for each machine's sudo password once at the start, temporary sudoers rule removed on exit
+      revocable refresh tokens (hashed, rotated, logout and password change revoke), log in once after the update
+      web fetches pinned to the checked address, redirects checked, HUB_FETCH_ALLOW for local pages
+      client config file only readable by its owner
+      create_rueckgrat_user.sh sets up a separate install user (ssh key, passwordless sudo) on all machines, use with install.sh -u
+      README explains which users, sudo rights and ssh keys the installer needs
+- #121 fixed display of source URLs. now part of the chat bubble
+- #147 nightly maintenance: conversation summaries with vectors to find old conversations by meaning
+- #149 improve conversations: supressing made-up facts, sources or shared memories, lasting user facts kept in the context, fewer *actions* and questions
+- #150 stability pass
+      image downloads: failed single attempts only logged at debug, one error once all retries gave up
+      image downloads: two downloads of the same file no longer share one .part file (FileNotFoundError on rename)
+      edit profile from the settings goes back to the settings (was the contact list), also after save
+      translate page follows the "Enter sends" setting like the chat (Enter always made a new line)
+      gallery dates shown in local time (were UTC, images from the morning showed the day before)
+      chat mic: if the mic can't start (no audio device) the button goes back to off instead of an unhandled traceback
+      chat input has the keyboard focus on opening a conversation also with "Enter sends" on (flet's focus() missed shift_enter fields)
+      no more flet deprecation warnings: text field and dropdown borders use border=OutlineInputBorder (field_border in theme.py), NoInputBorder instead of InputBorder.NONE
+- #18 page navigation with a back stack: back (header, Android, browser) returns to the page you came from, login and contacts start the stack anew
+- #148 installer installs all hosts at the same time (copies first, then one log per host in logs/install-<host>.log)
+
 0.22.0
 ------
 

@@ -3,7 +3,7 @@ from enum import Enum
 import os
 import random
 import flet as ft
-from app.ui.theme import STYLES
+from app.ui.theme import STYLES, field_border
 
 from app.utils import Hub
 from app.ui import BasePage
@@ -156,11 +156,10 @@ class WizardProfilePage(ft.Column):
             value=name_value,
             hint_text="Name of your character" if user_profile else None,
             on_change=self.on_name_changed,
+            on_focus=self.on_name_focus,
             filled=True,
             bgcolor="#2C2C2C",
-            border_radius=22,
-            border_color="transparent",
-            focused_border_color="#0D7377",
+            border=field_border(22, "#0D7377"),
             content_padding=ft.Padding.only(left=16, right=16, top=10, bottom=10),
             height=44,
         )
@@ -201,9 +200,7 @@ class WizardProfilePage(ft.Column):
             value=profile["backstory"] if profile else "",
             filled=True,
             bgcolor="#2C2C2C",
-            border_radius=16,
-            border_color="transparent",
-            focused_border_color="#0D7377",
+            border=field_border(16, "#0D7377"),
             content_padding=16,
         )
 
@@ -227,9 +224,7 @@ class WizardProfilePage(ft.Column):
             value="",
             filled=True,
             bgcolor="#2C2C2C",
-            border_radius=16,
-            border_color="transparent",
-            focused_border_color="#0D7377",
+            border=field_border(16, "#0D7377"),
             content_padding=16,
         )
         self.sfw_switch = ft.Switch(value=True, active_color="#0D7377")
@@ -281,6 +276,13 @@ class WizardProfilePage(ft.Column):
     def get_voice(self):
         # kept out of get_values() because those values are json encoded and sent to the hub
         return self.voice_selector.get_voice()
+
+    def on_name_focus(self, e=None):
+        # a random name is only a suggestion: select it, so typing replaces it
+        name = self.name_input.value or ""
+        if self._randomize_name() and name in self.male_names + self.female_names:
+            self.name_input.selection = ft.TextSelection(base_offset=0, extent_offset=len(name))
+            self.name_input.update()
 
     def on_name_changed(self, e=None):
         # clear the validation message once the user starts typing
@@ -404,7 +406,9 @@ class ProfileWizard(BasePage):
         ]
 
     def on_go_back(self, e=None):
-        self.navigator("contacts")
+        # the first setup after login (Skip) carries on to the contacts, the others go back to where they were opened
+        if self.user_profile_mode == ProfileWizzardMode.UserSetup or not self.navigator.back():
+            self.navigator("contacts")
 
     def _show(self, content, button_text: str = None):
         # button_text None hides the button, e.g. while the character is generated
@@ -421,7 +425,7 @@ class ProfileWizard(BasePage):
         if self.user_profile_mode != ProfileWizzardMode.AIContact:
             # the entered name is stored in the "name" key of the profile json in user_data
             Hub.update_user_data({"profile": json.dumps(profile)})
-            self.navigator("contacts")
+            self.on_go_back()
             return
 
         # the hub infers role, personality and looks from the backstory

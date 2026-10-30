@@ -41,30 +41,53 @@ class RueckgratConfig:
         if not self.config_path.exists():            
             logger.info("Config file not found, creating with defaults")
 
-            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            if not self.config_path.parent.exists():
+                self.config_path.parent.mkdir(parents=True, exist_ok=True)
+                # only the folder we create here; existing ones (e.g. ~/.config) are left as they are
+                self._chmod(self.config_path.parent, 0o700)
 
             # Write default config
             for section, values in self.DEFAULTS.items():
                 self.config[section] = values
 
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                self.config.write(f)
+            self._write()
 
             if not self.config_path.exists():            
                 logger.error(f"failed to write config to {self.config_path}")
         else:
             self.found_config = True
 
+    @staticmethod
+    def _chmod(path, mode):
+        """best effort: some platforms (Android storage) don't do unix modes"""
+        try:
+            os.chmod(path, mode)
+        except OSError as e:
+            logger.debug(f"chmod {oct(mode)} {path} failed: {e}")
+
+    def _write(self):
+        """write the config owner read/write only: it holds the session token (stay logged in)"""
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        fd = os.open(self.config_path, flags, 0o600)  # mode applies when the file is created
+        try:
+            os.fchmod(fd, 0o600)  # an existing file keeps its old mode otherwise
+        except (OSError, AttributeError) as e:
+            logger.debug(f"chmod 0o600 {self.config_path} failed: {e}")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            self.config.write(f)
+
     def _load(self):
         """Load config from file."""
+        # files written by older versions were world readable
+        if os.name == "posix" and self.config_path.stat().st_mode & 0o077:
+            self._chmod(self.config_path, 0o600)
         with open(self.config_path, encoding="utf-8-sig") as f:
             self.config.read_file(f)
 
     def _save(self):
         """Persist current config back to disk."""
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            self.config.write(f)
-            logger.debug("writing config file")
+        self._write()
+        logger.debug("writing config file")
 
     def _get(self, section, key, fallback=None):
         return self.config.get(section, key, fallback=fallback)
@@ -96,6 +119,15 @@ class RueckgratConfig:
     @property
     def log_level(self):
         return self._get("chat", "log_level", "ERROR")
+
+    @property
+    def enter_sends(self) -> bool:
+        """enter sends a chat message (shift+enter is a new line). off: ctrl+enter sends"""
+        return self._get("chat", "enter_sends", "false") == "true"
+
+    @enter_sends.setter
+    def enter_sends(self, value: bool):
+        self._set("chat", "enter_sends", "true" if value else "false")
 
     @property
     def refresh_token(self):

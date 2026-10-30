@@ -78,6 +78,8 @@ class ChatDB:
             name TEXT,
             content TEXT NOT NULL,
             timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            sources TEXT,
+            tools TEXT,
 
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         )""")
@@ -122,6 +124,24 @@ class ChatDB:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (used_by) REFERENCES users(id) ON DELETE SET NULL
         )""")
+
+        # stay-logged-in sessions, one row per device login. only a sha256 of the token is stored: the token is
+        # 256 random bits, so unlike a password it can't be guessed or brute forced from the hash and a fast
+        # hash is enough. a db leak gives no usable tokens. rotated_at: swapped for a new one by /refresh, kept
+        # until it expires so a second use (stolen copy) is noticed
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token_hash TEXT UNIQUE NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                last_used_at TEXT DEFAULT NULL,
+                rotated_at TEXT DEFAULT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)")
+        cursor.execute("DELETE FROM refresh_tokens WHERE expires_at < ?", (self._now(),))
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_data (
@@ -194,6 +214,32 @@ class ChatDB:
             CREATE TRIGGER IF NOT EXISTS contact_memory_vectors_delete AFTER DELETE ON contact_memories
             BEGIN
                 DELETE FROM contact_memory_vectors WHERE memory_id = OLD.id;
+            END
+        """)
+
+        # #147 one summary per conversation for finding it again by meaning, made by the maintenance sweeper (app/maintenance).
+        # updated_at (UTC, like messages.timestamp): when it was made, messages newer than this make it stale
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_summaries (
+            conversation_id INTEGER PRIMARY KEY,
+            summary TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        )""")
+
+        # the summaries' vectors (same model and dimension as the memories), one partition per user.
+        # the trigger removes the vector with its conversation, also in the contact/user cascade. memories are not touched
+        cursor.execute(f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS conversation_summary_vectors USING vec0(
+            conversation_id INTEGER PRIMARY KEY,
+            user_id INTEGER PARTITION KEY,
+            contact_id INTEGER,
+            embedding FLOAT[{MEMORY_EMBEDDING_DIM}] distance_metric=cosine
+        )""")
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS conversation_summary_vectors_delete AFTER DELETE ON conversations
+            BEGIN
+                DELETE FROM conversation_summary_vectors WHERE conversation_id = OLD.id;
             END
         """)
 
@@ -307,6 +353,65 @@ class ChatDB:
             conn.commit()
             return cursor.rowcount == 1
 
+    ########### refresh tokens (stay logged in)
+    def add_refresh_token(self, user_id: int, token: str, days: float) -> None:
+        now = datetime.now(timezone.utc)
+        with self.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO refresh_tokens (user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?)",
+                (user_id, self._hash_token(token), now.isoformat(timespec="seconds"),
+                 (now + timedelta(days=days)).isoformat(timespec="seconds")))
+            conn.commit()
+
+    def rotate_refresh_token(self, token: str, new_token: str, days: float, reuse_grace_seconds: float = 30) -> tuple[int | None, str]:
+        """swaps a valid refresh token for new_token (new expiry: sliding window).
+        returns (user_id, "ok") or (None, reason): "unknown", "expired", "reused" (all of the user's sessions
+        were revoked: an already rotated token came back, so someone else has a copy) or "retry" (rotated
+        within the last reuse_grace_seconds, e.g. a retried request: refused, nothing revoked)"""
+        now = datetime.now(timezone.utc)
+        now_s = now.isoformat(timespec="seconds")
+        with self.get_connection() as conn:
+            # one writer at a time: two refreshes with the same token can't both win
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("DELETE FROM refresh_tokens WHERE expires_at < ?", (now_s,))
+            row = conn.execute("SELECT id, user_id, expires_at, rotated_at FROM refresh_tokens WHERE token_hash = ?",
+                               (self._hash_token(token),)).fetchone()
+            if not row:
+                conn.commit()
+                return None, "unknown"
+            if row["rotated_at"]:
+                rotated = datetime.fromisoformat(row["rotated_at"])
+                if (now - rotated).total_seconds() <= reuse_grace_seconds:
+                    conn.commit()
+                    return None, "retry"
+                conn.execute("DELETE FROM refresh_tokens WHERE user_id = ?", (row["user_id"],))
+                conn.commit()
+                return None, "reused"
+            if row["expires_at"] < now_s:
+                conn.execute("DELETE FROM refresh_tokens WHERE id = ?", (row["id"],))
+                conn.commit()
+                return None, "expired"
+            conn.execute("UPDATE refresh_tokens SET rotated_at = ?, last_used_at = ? WHERE id = ?", (now_s, now_s, row["id"]))
+            conn.execute(
+                "INSERT INTO refresh_tokens (user_id, token_hash, created_at, expires_at, last_used_at) VALUES (?, ?, ?, ?, ?)",
+                (row["user_id"], self._hash_token(new_token), now_s, (now + timedelta(days=days)).isoformat(timespec="seconds"), now_s))
+            conn.commit()
+            return row["user_id"], "ok"
+
+    def delete_refresh_token(self, user_id: int, token: str) -> bool:
+        """logout of one device. only the user's own token"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM refresh_tokens WHERE user_id = ? AND token_hash = ?", (user_id, self._hash_token(token)))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_refresh_tokens(self, user_id: int) -> int:
+        """logs every device of the user out (password change)"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM refresh_tokens WHERE user_id = ?", (user_id,))
+            conn.commit()
+            return cursor.rowcount
+
     def get_email(self, user_id: int) -> str:
         with self.get_connection() as conn:
             row = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -345,7 +450,7 @@ class ChatDB:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, username, hashed_password, created_at FROM users WHERE id = ?",
+                "SELECT id, username, password, nsfw_allowed, created_at FROM users WHERE id = ?",
                 (user_id,)
             )
             row = cursor.fetchone()
@@ -1142,6 +1247,96 @@ class ChatDB:
                 logger.error(f"failed deleting contact memory: {e}")
         return False
 
+    ########### conversation summaries (#147, app/maintenance)
+
+    # conversations with messages, their last message time and whether they have a summary / a vector
+    _SUMMARY_STATE = """
+        SELECT c.id, c.user_id, c.contact_id, s.summary, s.updated_at,
+            (SELECT MAX(m.timestamp) FROM messages m WHERE m.conversation_id = c.id) AS last_message,
+            EXISTS (SELECT 1 FROM conversation_summary_vectors v WHERE v.conversation_id = c.id) AS has_vector
+        FROM conversations c LEFT JOIN conversation_summaries s ON s.conversation_id = c.id
+    """
+
+    def conversations_to_summarize(self, user_id: int | None = None, limit: int | None = None) -> list[dict]:
+        """conversations without a summary, with messages newer than their summary or without a vector, oldest change first.
+        stale = the summary has to be made (again), else only the vector is missing. user_id None = all users"""
+        with self.get_connection() as conn:
+            rows = conn.execute(f"""
+                SELECT *, (summary IS NULL OR last_message > updated_at) AS stale FROM ({self._SUMMARY_STATE})
+                WHERE last_message IS NOT NULL AND (? IS NULL OR user_id = ?)
+                AND (summary IS NULL OR last_message > updated_at OR NOT has_vector)
+                ORDER BY last_message LIMIT ?
+            """, (user_id, user_id, -1 if limit is None else int(limit))).fetchall()
+            return [dict(row) for row in rows]
+
+    def summary_status(self) -> dict:
+        """hub management: how many conversations (with messages) are summarized, stale or without a vector"""
+        with self.get_connection() as conn:
+            row = conn.execute(f"""
+                SELECT COUNT(*) AS conversations, COUNT(summary) AS summarized,
+                    SUM(summary IS NULL) AS missing, SUM(summary IS NOT NULL AND last_message > updated_at) AS stale,
+                    SUM(summary IS NOT NULL AND NOT has_vector) AS without_vector, MAX(updated_at) AS last_update
+                FROM ({self._SUMMARY_STATE}) WHERE last_message IS NOT NULL
+            """).fetchone()
+            return {k: row[k] or 0 for k in row.keys()} | {"last_update": row["last_update"]}
+
+    def set_conversation_summary(self, conversation_id: int, summary: str, updated_at: str) -> bool:
+        """stores or replaces the summary. the old vector goes with it, set_conversation_embedding adds the new one"""
+        with self.get_connection() as conn:
+            conn.execute("DELETE FROM conversation_summary_vectors WHERE conversation_id = ?", (conversation_id,))
+            cursor = conn.execute("""
+                INSERT INTO conversation_summaries (conversation_id, summary, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(conversation_id) DO UPDATE SET summary = excluded.summary, updated_at = excluded.updated_at
+            """, (conversation_id, summary, updated_at))
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def set_conversation_embedding(self, conversation_id: int, embedding: list[float]) -> bool:
+        """stores or replaces the vector of a conversation's summary. False for unknown conversations or a wrong dimension"""
+        if len(embedding) != MEMORY_EMBEDDING_DIM:
+            logger.error(f"summary embedding not stored (dimension {len(embedding)} of {MEMORY_EMBEDDING_DIM})")
+            return False
+        with self.get_connection() as conn:
+            try:
+                # vec0 has no upsert, like set_memory_embedding
+                conn.execute("DELETE FROM conversation_summary_vectors WHERE conversation_id = ?", (conversation_id,))
+                cursor = conn.execute("""
+                    INSERT INTO conversation_summary_vectors (conversation_id, user_id, contact_id, embedding)
+                    SELECT id, user_id, contact_id, ? FROM conversations WHERE id = ?
+                """, (sqlite_vec.serialize_float32(embedding), conversation_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"failed storing summary embedding: {e}")
+        return False
+
+    def nearest_conversations(self, user_id: int, embedding: list[float], k: int = 5, contact_id: int | None = None,
+                              exclude_id: int | None = None) -> list[dict]:
+        """the k conversations of the user whose summaries are closest to embedding, closest first (cosine distance),
+        optionally only those with one contact and without one conversation (e.g. the current one)"""
+        if len(embedding) != MEMORY_EMBEDDING_DIM:
+            return []
+        contact_filter = "AND contact_id = ?" if contact_id is not None else ""
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute(f"""
+                    WITH knn AS (
+                        SELECT conversation_id, distance FROM conversation_summary_vectors
+                        WHERE embedding MATCH ? AND k = ? AND user_id = ? {contact_filter}
+                    )
+                    SELECT c.id, c.contact_id, ct.name AS contact, c.title, c.created_at, s.summary, s.updated_at, knn.distance
+                    FROM knn JOIN conversations c ON c.id = knn.conversation_id
+                    JOIN conversation_summaries s ON s.conversation_id = c.id
+                    JOIN contacts ct ON ct.id = c.contact_id
+                    WHERE c.user_id = ? AND c.id IS NOT ?
+                    ORDER BY knn.distance LIMIT ?
+                """, (sqlite_vec.serialize_float32(embedding), int(k) + 1, user_id,
+                      *([contact_id] if contact_id is not None else []), user_id, exclude_id, int(k))).fetchall()
+                return [dict(row) for row in rows]
+            except Exception as e:
+                logger.error(f"failed searching conversation summaries: {e}")
+        return []
+
     def get_message_count_by_conversation(self, conversation_id: int):
         with self.get_connection() as conn:
             try:
@@ -1163,7 +1358,7 @@ class ChatDB:
                 cursor.execute("""
                     SELECT *
                     FROM (
-                        SELECT id, role, name, content, timestamp
+                        SELECT id, role, name, content, timestamp, sources, tools
                         FROM messages
                         WHERE conversation_id = ?
                         ORDER BY timestamp DESC
@@ -1172,7 +1367,11 @@ class ChatDB:
                     ORDER BY timestamp ASC;
                 """, (conversation_id, max_messages))
 
-                return [dict(row) for row in cursor.fetchall()]
+                messages = [dict(row) for row in cursor.fetchall()]
+                for message in messages:
+                    message["sources"] = json.loads(message["sources"]) if message["sources"] else []
+                    message["tools"] = json.loads(message["tools"]) if message["tools"] else []
+                return messages
             except Exception as e:
                 logger.error(f"failed returning messages: {e}")         
 
@@ -1243,6 +1442,28 @@ class ChatDB:
                 return cursor.rowcount > 0
             except Exception as e:
                 logger.error(f"deleting message: {e}")
+        return False
+
+    def set_message_sources(self, message_id: int, sources: list) -> bool:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE messages SET sources = ? WHERE id = ?", (json.dumps(sources), message_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"setting message sources: {e}")
+        return False
+
+    def set_message_tools(self, message_id: int, tools: list) -> bool:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE messages SET tools = ? WHERE id = ?", (json.dumps(tools), message_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"setting message tools: {e}")
         return False
 
     def add_attachment(self, message_id: int, file_name: str, file_url: str, file_type: str, file_size: int) -> int:

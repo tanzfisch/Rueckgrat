@@ -62,6 +62,17 @@ read_tty() {
     REPLY="${var:-$default}"
 }
 
+# read_setting - read_tty with a default, asks again until the answer matches the pattern
+# Usage: read_setting "Prompt" default pattern   (result in REPLY)
+read_setting() {
+    local prompt="$1" default="$2" pattern="$3"
+    while true; do
+        read_tty "$prompt [$default]: " "$default" $YES
+        [[ "$REPLY" =~ $pattern ]] && return
+        echo -e "\e[1A\e[K     ⚠️ please answer like $default"
+    done
+}
+
 # read_tty_s - like read_tty but with hidden output. used for passwords
 # Usage: read_tty_s <prompt> [default]
 # Args:
@@ -334,10 +345,10 @@ package_available() {
 #   $@ - Package names to install
 install_pkg() {
     case "$DISTRO" in
-        *debian*|*ubuntu*) echo "$SUDO_PASSWORD" | sudo -S apt update -y && echo "$SUDO_PASSWORD" | sudo -S apt install -y "$@" ;;
-        *fedora*|*rhel*|*centos*|*rocky*|*alma*) echo "$SUDO_PASSWORD" | sudo -S dnf install -y "$@" ;;
-        *arch*) echo "$SUDO_PASSWORD" | sudo -S pacman -Syu --noconfirm "$@" ;;
-        *suse*|*opensuse*) echo "$SUDO_PASSWORD" | sudo -S zypper install -y "$@" ;;
+        *debian*|*ubuntu*) sudo apt update -y && sudo apt install -y "$@" ;;
+        *fedora*|*rhel*|*centos*|*rocky*|*alma*) sudo dnf install -y "$@" ;;
+        *arch*) sudo pacman -Syu --noconfirm "$@" ;;
+        *suse*|*opensuse*) sudo zypper install -y "$@" ;;
         *) echo "❌ Error: Unsupported distro. Install $@ manually."; exit 1 ;;
     esac
 }
@@ -386,9 +397,9 @@ install_docker() {
         read_tty "Install docker? (Y/n): " "Y" $YES
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             curl -fsSL https://get.docker.com -o get-docker.sh
-            echo "$SUDO_PASSWORD" | sudo -S sh get-docker.sh
+            sudo sh get-docker.sh
             rm -f get-docker.sh
-            echo "$SUDO_PASSWORD" | sudo -S usermod -aG docker "$SUDO_USER"
+            sudo usermod -aG docker "$SUDO_USER"
             echo "✅ Docker installed."
         else
             echo "⚠️ Warning: Aborted by user"
@@ -441,16 +452,16 @@ install_nvidia_toolkit() {
     gpg --batch --yes --dearmor -o "$tmp/keyring.gpg" "$tmp/key.asc"
     sed "s#deb https://#deb [signed-by=$keyring] https://#g" "$tmp/list" > "$tmp/list.signed"
 
-    echo "$SUDO_PASSWORD" | sudo -S mkdir -p /usr/share/keyrings
-    echo "$SUDO_PASSWORD" | sudo -S cp "$tmp/keyring.gpg" "$keyring"
-    echo "$SUDO_PASSWORD" | sudo -S cp "$tmp/list.signed" "$list"
-    echo "$SUDO_PASSWORD" | sudo -S chmod 644 "$keyring" "$list"
+    sudo mkdir -p /usr/share/keyrings
+    sudo cp "$tmp/keyring.gpg" "$keyring"
+    sudo cp "$tmp/list.signed" "$list"
+    sudo chmod 644 "$keyring" "$list"
     rm -rf "$tmp"
 
-    echo "$SUDO_PASSWORD" | sudo -S apt-get update
+    sudo apt-get update
     install_dependencies nvidia-container-toolkit
-    echo "$SUDO_PASSWORD" | sudo -S nvidia-ctk runtime configure --runtime=docker
-    echo "$SUDO_PASSWORD" | sudo -S systemctl restart docker
+    sudo nvidia-ctk runtime configure --runtime=docker
+    sudo systemctl restart docker
 
     if docker info 2>/dev/null | grep -qiE 'Runtimes:.*nvidia'; then
         echo "✅ NVIDIA container toolkit installed"
@@ -470,7 +481,7 @@ safe_rm_rf() {
     if [[ -w "$1" ]] || [[ -w "$(dirname "$1")" ]]; then
         rm -rf "$1"
     else
-        echo "$SUDO_PASSWORD" | sudo -S rm -rf "$1"
+        sudo rm -rf "$1"
     fi
 }
 
@@ -612,7 +623,8 @@ setup() {
             fi
 
             if $INSTALL_STT; then
-                services_json=$(jq '. + [{type: "speech_to_text", name: "stt"}]' <<< "$services_json")
+                services_json=$(jq --arg workers "$STT_WORKERS" \
+                    '. + [{type: "speech_to_text", name: "stt", workers: ($workers | tonumber)}]' <<< "$services_json")
             fi
 
             if $INSTALL_EMBEDDING; then
@@ -630,8 +642,16 @@ setup() {
         fi
 
         if $INSTALL_HUB; then
-            host_json=$(jq --arg port "$HUB_PORT" --arg signup_mode "$SIGNUP_MODE" \
-                '. + {hub: {port: ($port | tonumber), signup_mode: $signup_mode}}' <<< "$host_json")
+            # hub.secret_key signs the hub's login tokens, saved here like cloudflare.token (empty = not saved)
+            host_json=$(jq --arg port "$HUB_PORT" --arg signup_mode "$SIGNUP_MODE" --arg secret_key "$HUB_SECRET_KEY" \
+                --arg fetch_allow "${HUB_FETCH_ALLOW:-}" \
+                --arg m_start "$HUB_MAINTENANCE_START" --arg m_end "$HUB_MAINTENANCE_END" --arg m_batch "$HUB_MAINTENANCE_BATCH" \
+                --arg m_interval "$HUB_MAINTENANCE_INTERVAL" --arg m_small "$HUB_MAINTENANCE_SMALL_BATCH" \
+                '. + {hub: ({port: ($port | tonumber), signup_mode: $signup_mode,
+                             maintenance: {start: $m_start, end: $m_end, batch: ($m_batch | tonumber),
+                                           interval: ($m_interval | tonumber), small_batch: ($m_small | tonumber)}}
+                            + (if $secret_key == "" then {} else {secret_key: $secret_key} end)
+                            + (if $fetch_allow == "" then {} else {fetch_allow: $fetch_allow} end))}' <<< "$host_json")
         fi
 
         if $INSTALL_CHAT; then
@@ -744,6 +764,59 @@ select_cloudflare() {
         '{enabled: true, addr: $addr, hub_addr: $hub_addr, hub_port: ($hub_port | tonumber), token: $token}')
 }
 
+# select_hub_secret - Ask for the key that signs the hub's login tokens (HUB_SECRET_KEY).
+# Saved in the hub host's config as "hub.secret_key", so a reinstall from it (-c) keeps
+# every device logged in. Enter (or -y) generates one, "none" leaves it unset
+# (the hub then falls back to its public default key and logs a warning)
+# Usage: select_hub_secret
+# Sets: HUB_SECRET_KEY
+select_hub_secret() {
+    HUB_SECRET_KEY=""
+    if [[ "${YES:-false}" != true ]]; then
+        while true; do
+            read_tty_s "Hub secret key (empty = generate, none = no key): "
+            [[ -z "$REPLY" || "$REPLY" == "none" ]] && break
+            # .env and sed safe characters only, and long enough to not be guessable
+            [[ "$REPLY" =~ ^[A-Za-z0-9._~+/=-]{32,}$ ]] && break
+            echo -e "\e[1A\e[K     ⚠️ at least 32 characters of A-Z a-z 0-9 . _ ~ + / = -"
+        done
+        if [[ "$REPLY" == "none" ]]; then
+            echo -e "\e[1A\e[K     Secret key: none (hub uses its public default key)"
+            return
+        fi
+        HUB_SECRET_KEY="$REPLY"
+    fi
+    if [[ -z "$HUB_SECRET_KEY" ]]; then
+        HUB_SECRET_KEY=$(openssl rand -hex 32 2>/dev/null || od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
+        echo -e "\e[1A\e[K     Secret key: generated (${#HUB_SECRET_KEY} characters)"
+    else
+        # the input is hidden, so confirm that something arrived without showing it
+        echo -e "\e[1A\e[K     Secret key: ******** (${#HUB_SECRET_KEY} characters)"
+    fi
+}
+
+# select_maintenance - the hub's maintenance (conversation summaries): a nightly window with a big batch,
+# and small batches during the day. times are each user's local time
+# Sets: HUB_MAINTENANCE_START, HUB_MAINTENANCE_END, HUB_MAINTENANCE_BATCH, HUB_MAINTENANCE_INTERVAL, HUB_MAINTENANCE_SMALL_BATCH
+select_maintenance() {
+    local hhmm='^([01][0-9]|2[0-3]):[0-5][0-9]$' number='^[0-9]+$'
+    read_setting "Nightly maintenance from?" "$HUB_MAINTENANCE_START_DEFAULT" "$hhmm"
+    HUB_MAINTENANCE_START=$REPLY
+    echo -e "\e[1A\e[K     Maintenance from: $HUB_MAINTENANCE_START"
+    read_setting "Nightly maintenance until?" "$HUB_MAINTENANCE_END_DEFAULT" "$hhmm"
+    HUB_MAINTENANCE_END=$REPLY
+    echo -e "\e[1A\e[K     Maintenance until: $HUB_MAINTENANCE_END"
+    read_setting "Items per night?" "$HUB_MAINTENANCE_BATCH_DEFAULT" "$number"
+    HUB_MAINTENANCE_BATCH=$REPLY
+    echo -e "\e[1A\e[K     Items per night: $HUB_MAINTENANCE_BATCH"
+    read_setting "During the day, run every how many minutes (0 = never)?" "$HUB_MAINTENANCE_INTERVAL_DEFAULT" "$number"
+    HUB_MAINTENANCE_INTERVAL=$REPLY
+    echo -e "\e[1A\e[K     During the day every: $HUB_MAINTENANCE_INTERVAL min"
+    read_setting "Items per daytime run?" "$HUB_MAINTENANCE_SMALL_BATCH_DEFAULT" "$number"
+    HUB_MAINTENANCE_SMALL_BATCH=$REPLY
+    echo -e "\e[1A\e[K     Items per daytime run: $HUB_MAINTENANCE_SMALL_BATCH"
+}
+
 # select_tts_model - Ask which Chatterbox model the TTS node of this host uses.
 # Saved in the host's tts service as "model", so a reinstall from the config (-c) uses it again.
 # Configs from before this option have no "model" there -> chatterbox (English)
@@ -779,6 +852,7 @@ select_components() {
     INSTALL_STT=false
     INSTALL_EMBEDDING=false
     INSTALL_DECISION=false
+    HUB_SECRET_KEY=""
     REGISTRY_JSON="${REGISTRY_JSON:-$WORKING_DIR/rueckgrat/node/data/registry.json}"
 
     echo "Select components:"
@@ -802,6 +876,8 @@ select_components() {
         done
         SIGNUP_MODE=$REPLY
         echo -e "\e[1A\e[K     Signup: $SIGNUP_MODE"
+        select_maintenance
+        select_hub_secret
     fi
 
     read_tty "Install Node? (Y/n): " "Y"
@@ -862,12 +938,17 @@ select_components() {
         read_tty "Install speech to text (faster-whisper) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_STT=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_STT == true ]] && echo '✅' || echo '⚫' )] STT"
+        if $INSTALL_STT; then
+            read_setting "STT workers (parallel transcriptions)?" "$STT_WORKERS_DEFAULT" '^[1-9][0-9]*$'
+            STT_WORKERS=$REPLY
+            echo -e "\e[1A\e[K         Workers: $STT_WORKERS"
+        fi
 
         read_tty "Install text embeddings (memory search) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_EMBEDDING=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_EMBEDDING == true ]] && echo '✅' || echo '⚫' )] Embedding"
 
-        read_tty "Install decision model (Laya, experimental, needs torch) on Node? (Y/n): " "Y"
+        read_tty "Install decision model (using Laya) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_DECISION=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_DECISION == true ]] && echo '✅' || echo '⚫' )] Decision"
     fi
@@ -880,9 +961,11 @@ select_components() {
 _format_host_jq='
   "\nHost: \($h.addr)",
   "  "+(if $h.chat then "[✅]" else "[⚫]" end)+" Native Chat Client",
-  "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub"+(if $h.hub.signup_mode then " (signup: \($h.hub.signup_mode))" else "" end),
+  "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub"+(if $h.hub.signup_mode then " (signup: \($h.hub.signup_mode))" else "" end)
+      +(if $h.hub and (($h.hub.secret_key // "") == "") then " ⚠️ no secret key, default token key" else "" end)
+      +(if $h.hub.maintenance then " (maintenance \($h.hub.maintenance.start)-\($h.hub.maintenance.end))" else "" end),
   "  "+(if $h.node then "[✅]" else "[⚫]" end)+" Node",
-  "  "+($h.node.services[]? | "    [✅] \(.name)" + (if .name == "tts" then " (\(.model // "chatterbox"))" else "" end)),
+  "  "+($h.node.services[]? | "    [✅] \(.name)" + (if .name == "tts" then " (\(.model // "chatterbox"))" else "" end) + (if .workers then " (\(.workers) workers)" else "" end)),
   "  "+($h.node.modules[]? | "    [✅] \(.name)")
 '
 
@@ -944,9 +1027,30 @@ deploy_hub() {
     set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
     set_env_value SIGNUP_MODE "${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
     set_env_value HUB_PORT "${HUB_PORT:-$HUB_PORT_DEFAULT}"
+    # only from the config: no key there -> leave .env alone (a key set by hand stays,
+    # otherwise the hub falls back to its default key and warns)
+    if [[ -n "${HUB_SECRET_KEY:-}" ]]; then
+        set_env_value HUB_SECRET_KEY "$HUB_SECRET_KEY"
+    fi
+    # optional, only from the config (no prompt): local addresses the hub may fetch, see hub/app/utils/url_check.py.
+    # not in the config -> .env is left alone (a value set by hand stays)
+    if [[ -n "${HUB_FETCH_ALLOW:-}" ]]; then
+        set_env_value HUB_FETCH_ALLOW "$HUB_FETCH_ALLOW"
+        echo "   fetch allow  $HUB_FETCH_ALLOW"
+    fi
+
+    set_env_value HUB_MAINTENANCE_START "${HUB_MAINTENANCE_START:-$HUB_MAINTENANCE_START_DEFAULT}"
+    set_env_value HUB_MAINTENANCE_END "${HUB_MAINTENANCE_END:-$HUB_MAINTENANCE_END_DEFAULT}"
+    set_env_value HUB_MAINTENANCE_BATCH "${HUB_MAINTENANCE_BATCH:-$HUB_MAINTENANCE_BATCH_DEFAULT}"
+    set_env_value HUB_MAINTENANCE_INTERVAL "${HUB_MAINTENANCE_INTERVAL:-$HUB_MAINTENANCE_INTERVAL_DEFAULT}"
+    set_env_value HUB_MAINTENANCE_SMALL_BATCH "${HUB_MAINTENANCE_SMALL_BATCH:-$HUB_MAINTENANCE_SMALL_BATCH_DEFAULT}"
 
     echo "   signup mode  ${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
+    echo "   maintenance  ${HUB_MAINTENANCE_START:-$HUB_MAINTENANCE_START_DEFAULT}-${HUB_MAINTENANCE_END:-$HUB_MAINTENANCE_END_DEFAULT}" \
+         "${HUB_MAINTENANCE_BATCH:-$HUB_MAINTENANCE_BATCH_DEFAULT} items, every ${HUB_MAINTENANCE_INTERVAL:-$HUB_MAINTENANCE_INTERVAL_DEFAULT} min" \
+         "${HUB_MAINTENANCE_SMALL_BATCH:-$HUB_MAINTENANCE_SMALL_BATCH_DEFAULT} items"
     echo "   port         ${HUB_PORT:-$HUB_PORT_DEFAULT}"
+    echo "   secret key   $( [[ -n "${HUB_SECRET_KEY:-}" ]] && echo "from config (${#HUB_SECRET_KEY} characters)" || echo "not in config" )"
 
     pushd rueckgrat > /dev/null
     docker compose stop hub caddy 2>/dev/null || true
@@ -982,7 +1086,7 @@ seed_default_users() {
     done
 
     for name in "${names[@]}"; do
-        docker exec rueckgrat_hub python -m app.hub_management user create "$name" \
+        docker exec rueckgrat_hub python -m app.hub_management user create "$name" --nsfw \
             || echo "⚠️ Warning: could not create user $name"
     done
 }
@@ -1028,6 +1132,7 @@ deploy_node() {
     set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
     set_env_value NODE_PORT "${NODE_PORT:-$NODE_PORT_DEFAULT}"
     set_env_value TTS_MODEL "${TTS_MODEL:-chatterbox}"
+    set_env_value STT_WORKERS "${STT_WORKERS:-$STT_WORKERS_DEFAULT}"
 
     BUILD_ARGS=()
     COMPOSE_FILES=(-f compose.yml)
@@ -1076,6 +1181,7 @@ deploy_node() {
 
     echo "   port        ${NODE_PORT:-$NODE_PORT_DEFAULT}"
     [ "$INSTALL_TTS" = true ] && echo "   tts_model   ${TTS_MODEL:-chatterbox}"
+    [ "$INSTALL_STT" = true ] && echo "   stt_workers ${STT_WORKERS:-$STT_WORKERS_DEFAULT}"
     echo "   vendor      ${GPU_VENDOR:-cpu}"
     echo "   backend     ${TORCH_BACKEND:-cpu}"
     echo "   cuda_index  ${TORCH_CUDA_INDEX:-n/a}"
@@ -1266,9 +1372,9 @@ build_chat_apk() {
         [[ "$(jq -r '.chat_apk // false' "$CONFIG_FILE")" == "true" ]] || return 0
     fi
 
-    # only ask for the sudo password if something has to be installed
+    # only check sudo if something has to be installed
     if ! command -v python3 &> /dev/null || ! eval "${pkg_check[python3.13-venv]}"; then
-        get_user_passwd
+        get_sudo_user
     fi
     install_dependencies python3 python3.13-venv
 
@@ -1342,9 +1448,9 @@ prep_data_dirs() {
         return
     fi    
     echo "prep $HOST_MODELS_DIR ..."
-    echo "$SUDO_PASSWORD" | sudo -S mkdir -p "$HOST_MODELS_DIR"
-    echo "$SUDO_PASSWORD" | sudo -S chown -R root:root "$HOST_MODELS_DIR"
-    echo "$SUDO_PASSWORD" | sudo -S chmod -R 777 "$HOST_MODELS_DIR"
+    sudo mkdir -p "$HOST_MODELS_DIR"
+    sudo chown -R root:root "$HOST_MODELS_DIR"
+    sudo chmod -R 777 "$HOST_MODELS_DIR"
 }
 
 check_docker_group() {
@@ -1403,6 +1509,14 @@ parse_host_config() {
     INSTALL_LLAMA_MODEL=""
     HUB_PORT=""
     SIGNUP_MODE=""
+    HUB_SECRET_KEY=""
+    HUB_FETCH_ALLOW=""
+    HUB_MAINTENANCE_START=""
+    HUB_MAINTENANCE_END=""
+    HUB_MAINTENANCE_BATCH=""
+    HUB_MAINTENANCE_INTERVAL=""
+    HUB_MAINTENANCE_SMALL_BATCH=""
+    STT_WORKERS=""
     NODE_PORT=""
     LLAMA_SERVER_PORT=""
     LLAMA_SERVER_MODEL=""
@@ -1417,6 +1531,14 @@ parse_host_config() {
         INSTALL_HUB=true
         HUB_PORT=$(echo "$host_config" | jq -r '.hub.port // empty')
         SIGNUP_MODE=$(echo "$host_config" | jq -r '.hub.signup_mode // empty')
+        HUB_SECRET_KEY=$(echo "$host_config" | jq -r '.hub.secret_key // empty')
+        HUB_FETCH_ALLOW=$(echo "$host_config" | jq -r '.hub.fetch_allow // empty')
+        # configs from before these options have no "maintenance" -> the defaults
+        HUB_MAINTENANCE_START=$(echo "$host_config" | jq -r '.hub.maintenance.start // empty')
+        HUB_MAINTENANCE_END=$(echo "$host_config" | jq -r '.hub.maintenance.end // empty')
+        HUB_MAINTENANCE_BATCH=$(echo "$host_config" | jq -r '.hub.maintenance.batch // empty')
+        HUB_MAINTENANCE_INTERVAL=$(echo "$host_config" | jq -r '.hub.maintenance.interval // empty')
+        HUB_MAINTENANCE_SMALL_BATCH=$(echo "$host_config" | jq -r '.hub.maintenance.small_batch // empty')
     fi
 
     if echo "$host_config" | jq -e '.chat' >/dev/null; then
@@ -1480,6 +1602,7 @@ parse_host_config() {
             fi
             if [[ "$type" == "speech_to_text" || "$name" == "stt" ]]; then
                 INSTALL_STT=true
+                STT_WORKERS=$(echo "$item" | jq -r '.workers // empty')
             fi
             if [[ "$type" == "text_to_embedding" ]]; then
                 INSTALL_EMBEDDING=true
@@ -1538,7 +1661,8 @@ deploy_components() {
     print_section
     echo "deploy components..."
     
-    echo "reading config $(echo "$host_config" | jq -c 'if .cloudflared.token then .cloudflared.token = "******" else . end')"
+    echo "reading config $(echo "$host_config" | jq -c 'if .cloudflared.token then .cloudflared.token = "******" else . end
+                                                     | if .hub.secret_key then .hub.secret_key = "******" else . end')"
     REGISTRY_JSON="$(pwd)/rueckgrat/node/data/registry.json"
     [[ -f "$REGISTRY_JSON" ]] || { echo "❌ Error: registry file missing at $REGISTRY_JSON"; exit 1; }
 
@@ -1612,36 +1736,23 @@ remove_line_breaks() {
     echo -n "${1//$'\n'$'\r'/}"
 }
 
-# deploy_components_remote - Copy workspace + run installer with --host-config on target host
-# Usage: deploy_components_remote <host> <comps>
-# Args:
-#   $1 - host config string
-deploy_components_remote() {
-    local host_config="$1"
+# sync_host - copy the workspace to a host (nothing to do for an --in-place host)
+# Usage: sync_host <host config> [progress, e.g. "(1 of 4)"]
+sync_host() {
+    local host_config="$1" progress="${2:-}" host_addr
     host_addr=$(echo "$host_config" | jq -r '.addr')
-    clean_config=$(remove_line_breaks "$host_config")
 
-    # --in-place: same host -> install right here in the working dir, no copy, no ssh
     if $IN_PLACE && is_local_host "$host_addr"; then
-        print_section
-        echo "🏠 Installing $host_addr in place ($(pwd))"
-        ./install.sh --local-config "$clean_config" $([[ $CLEAN_BUILD == true ]] && echo -f) $([[ $VERBOSE == true ]] && echo -v) $([[ $YES == true ]] && echo -y) -p "$SUDO_PASSWORD" -u "$SUDO_USER" \
-            || echo "❌ Error: Installation failed on $host_addr"
-        return
+        [[ -n "$progress" ]] && echo "🏠 $host_addr installs in place, nothing to copy $progress"
+        return 0
     fi
 
-    install_dependencies rsync sshpass
+    install_dependencies rsync
 
     print_section
-    echo "🌐 Deploying to $host_addr"
+    echo "🌐 Preparing installation on $host_addr $progress"
 
-    local remote_dir="Rueckgrat-install"
-    local SSH_CONTROL="/tmp/deploy-$SUDO_USER-$(echo "$host_addr" | tr '@:' '__')"
-    local SSH_OPTS=( -o ControlMaster=auto -o ControlPersist=5m -o ControlPath="$SSH_CONTROL" )
-
-    trap 'ssh -O exit "${SSH_OPTS[@]}" "$host_addr" >/dev/null 2>&1 || true' EXIT
-
-    sshpass -p "$SUDO_PASSWORD" ssh "${SSH_OPTS[@]}" -o User="$SUDO_USER" -Nf "$host_addr" || { echo "❌ Error: failed to connect with $host_addr"; return 1; }
+    ssh_open_master "$host_addr" || { echo "❌ Error: failed to connect with $host_addr"; return 1; }
 
     # rsync must exist on both ends of the copy, so check the target before using it
     # (jq is installed by the target's own installer at the start of main)
@@ -1652,32 +1763,106 @@ deploy_components_remote() {
 
     if $CLEAN_BUILD; then
         echo "Clean destination..."
-        echo "$SUDO_PASSWORD" | ssh -tt "${SSH_OPTS[@]}" "$host_addr" "sudo rm -rf $remote_dir/*"
+        # -t: sudo on the host asks for the password itself, if it needs one
+        ssh "${SSH_OPTS[@]}" -t "$host_addr" "sudo rm -rf $REMOTE_DIR/*"
     fi
 
-    echo "Copying files..."
-    rsync -az --checksum -e "ssh ${SSH_OPTS[*]}" --exclude='.git' --exclude='logs' --exclude='.venv' ./ "$host_addr:$remote_dir/" || {
+    echo "Copy data..."
+    rsync -az --checksum -e "ssh ${SSH_OPTS[*]}" --exclude='.git' --exclude='logs' --exclude='.venv' ./ "$host_addr:$REMOTE_DIR/" || {
         echo "❌ Error: rsync failed for $host_addr"
         return 1
     }
-
-    echo "Running installer..."
-    ssh "${SSH_OPTS[@]}" -t -o StrictHostKeyChecking=no -o ConnectTimeout=15 "$host_addr" "
-        set -euo pipefail
-        cd $remote_dir
-        chmod +x install.sh
-        ./install.sh --local-config '$clean_config' $([[ $CLEAN_BUILD == true ]] && echo -f) $([[ $VERBOSE == true ]] && echo -v) $([[ $YES == true ]] && echo -y) -p $SUDO_PASSWORD -u $SUDO_USER
-    " || echo "❌ Error: Installation failed on $host_addr"
 }
 
-# deploy_on_hosts - Iterate host components and execute installs per host
+# install_host - run the installer for one host config on that host (or here, --in-place), after sync_host
+# Usage: install_host <host config> [-t]
+# Args:
+#   $2 - -t: a terminal on the host, so sudo there could ask for a password (not for parallel installs)
+install_host() {
+    local host_config="$1" tty="${2:-}" host_addr clean_config args
+    host_addr=$(echo "$host_config" | jq -r '.addr')
+    clean_config=$(remove_line_breaks "$host_config")
+    args="$([[ $CLEAN_BUILD == true ]] && echo -f) $([[ $VERBOSE == true ]] && echo -v) $([[ $YES == true ]] && echo -y) -u $SUDO_USER"
+
+    if $IN_PLACE && is_local_host "$host_addr"; then
+        echo "🏠 Installing $host_addr in place ($(pwd))"
+        ./install.sh --local-config "$clean_config" $args
+        return
+    fi
+
+    echo "🌐 Installing $host_addr"
+    ssh_opts "$host_addr"
+    ssh "${SSH_OPTS[@]}" $tty "$host_addr" "
+        set -euo pipefail
+        cd $REMOTE_DIR
+        chmod +x install.sh
+        ./install.sh --local-config '$clean_config' $args
+    "
+}
+
+# deploy_components_remote - copy the workspace to one host and install there, with live output
+# Usage: deploy_components_remote <host config>
+deploy_components_remote() {
+    local host_config="$1" host_addr
+    host_addr=$(echo "$host_config" | jq -r '.addr')
+    sync_host "$host_config" || return 1
+    print_section
+    install_host "$host_config" -t || echo "❌ Error: Installation failed on $host_addr"
+}
+
+# deploy_on_hosts - install all hosts of the config at the same time
+# First the copies, one after the other (an --in-place install writes into the folder they are made from),
+# then every host installs in the background into logs/install-<host>.log. Hosts don't need each other
+# during the install, the hub and the nodes only get each other's addresses from the config.
 # Usage: deploy_on_hosts
-# No arguments
 deploy_on_hosts() {
-    while IFS= read -r -u3 host_config; do
-        [[ -z "$host_config" ]] && continue
-        deploy_components_remote "$host_config"
-    done 3< <(jq -c '.hosts[]' "$CONFIG_FILE")
+    local configs=() addrs=() logs=() failed=() i n total pid rc
+    local -A index=()   # background job pid -> host
+    local start=$SECONDS
+
+    if ! jq -e '[.hosts[].addr] | length == (unique | length)' "$CONFIG_FILE" >/dev/null; then
+        echo "❌ Error: a host is in the config twice, put all of its components into one entry"
+        exit 1
+    fi
+
+    mapfile -t configs < <(jq -c '.hosts[]' "$CONFIG_FILE")
+    total=${#configs[@]}
+    for i in "${!configs[@]}"; do
+        addrs[i]=$(echo "${configs[i]}" | jq -r '.addr')
+        sync_host "${configs[i]}" "($((i + 1)) of $total)" || { echo "❌ Error: ${addrs[i]} not installed"; failed+=("${addrs[i]}"); unset 'configs[i]'; }
+    done
+
+    print_section
+    mkdir -p logs
+    n=0
+    for i in "${!configs[@]}"; do
+        logs[i]="logs/install-${addrs[i]//[@:]/_}.log"
+        install_host "${configs[i]}" > "${logs[i]}" 2>&1 < /dev/null &
+        index[$!]=$i
+        n=$((n + 1))
+        echo "🚀 ${addrs[i]} installing ($n of ${#configs[@]}), follow with: tail -f ${logs[i]}"
+    done
+
+    # report each host as it finishes, not in config order
+    n=0
+    while (( ${#index[@]} )); do
+        rc=0
+        wait -n -p pid "${!index[@]}" || rc=$?
+        i=${index[$pid]}
+        unset "index[$pid]"
+        n=$((n + 1))
+        if (( rc == 0 )); then
+            echo "✅ ${addrs[i]} done ($n of ${#configs[@]} finished, $(( (SECONDS - start) / 60 )) min)"
+        else
+            failed+=("${addrs[i]}")
+            echo "❌ Error: installation failed on ${addrs[i]} ($n of ${#configs[@]} finished), end of ${logs[i]}:"
+            tail -n 20 "${logs[i]}" | sed 's/^/   /'
+        fi
+    done
+
+    print_section
+    echo "📋 $((total - ${#failed[@]})) of $total hosts installed in $(( (SECONDS - start) / 60 )) min${failed[*]:+, failed: ${failed[*]}}"
+    (( ${#failed[@]} == 0 ))
 }
 
 # deploy_cloudflare_node - Deploy the Cloudflare node saved in the config by setup
@@ -1733,7 +1918,6 @@ usage() {
     echo "  --in-place                          Install in the current directory when the target is this host"
     echo "  --apk | -a                          Only build the Android APK of the chat client, then exit"
     echo "  --user | -u            USER         Sudo username"
-    echo "  --password | -p        PASSWORD     Sudo password"
     echo "  --info | -i                         Print system info"
     echo "  --help | -h                         Show this help"
     echo ""
@@ -1748,19 +1932,188 @@ info() {
     print_section
 }
 
-# get_user_passwd - makes sure we have user and password ready
-# Usage: get_user_passwd
+# get_sudo_user - makes sure we know the sudo user and that sudo works on this machine for the whole run
+# (see sudo_prepare). the installer never handles a password: sudo asks for it itself
+# Usage: get_sudo_user
 # No arguments
-get_user_passwd() {
+get_sudo_user() {
     if [[ -z "$SUDO_USER" ]]; then
         read_tty "Enter sudo username ($(whoami)): " "$(whoami)" $YES
         SUDO_USER="$REPLY"
     fi
+    # --local-config is started by the installer on another machine, that one prepared sudo here already
+    if [[ -n "$LOCAL_CONFIG" ]] && sudo -n true 2>/dev/null; then
+        return 0
+    fi
+    sudo_prepare local
+}
 
-    if [[ -z "$SUDO_PASSWORD" ]]; then
-        read_tty_s "Enter password for $SUDO_USER: "
-        SUDO_PASSWORD="$REPLY"
-    fi    
+readonly SUDO_DROPIN=/etc/sudoers.d/rueckgrat-install
+
+# SUDO_PREPARE_CMD - shell code sudo_prepare runs on a host (here or over ssh). Exit codes:
+#   0 - SUDO_DROPIN added now, or left over from a crashed run: remove it at the end
+#   3 - sudo needs no password there anyway, nothing changed
+#   other - no sudo rights
+# the file is written under a name with a dot (sudo ignores those), checked with visudo, then renamed
+read -r -d '' SUDO_PREPARE_CMD <<'EOF' || true
+f=/etc/sudoers.d/rueckgrat-install
+if sudo -n true 2>/dev/null; then
+    sudo -n test -f "$f" || exit 3
+    echo "🔐 $(uname -n): $f is left over from an earlier run, it gets removed at the end"
+    exit 0
+fi
+echo "🔐 $(uname -n): sudo password for $(id -un), asked only once for the whole install"
+sudo sh -c '
+    t=$(mktemp "$1/.rueckgrat-install.XXXXXX") || exit 1
+    printf "# added by the Rueckgrat installer on %s, removed again when the install ends\n%s ALL=(ALL) NOPASSWD: ALL\n" "$(date "+%F %T")" "$2" > "$t" &&
+        chmod 0440 "$t" && visudo -cf "$t" >/dev/null && mv "$t" "$1/rueckgrat-install" || { rm -f "$t"; exit 1; }
+' sh /etc/sudoers.d "$(id -un)" || exit 1
+sudo -n true 2>/dev/null || echo "⚠️ Warning: $(uname -n): sudo still asks for a password, another sudoers rule wins over $f"
+EOF
+
+# sudo_prepare - ask for the sudo password at most once per machine, at the start. if sudo there needs a password,
+# one sudo prompt adds SUDO_DROPIN (sudo without password for this user) and sudo_cleanup removes it on exit.
+# a sudo -v keepalive can't do this: sudo remembers the password per terminal, and every ssh -t gets a new one
+# Usage: sudo_prepare local|<host>   (for a host, call ssh_open_master first)
+sudo_prepare() {
+    local host="$1" rc=0
+    [[ " ${SUDO_CHECKED[*]:-} " == *" $host "* ]] && return 0
+    SUDO_CHECKED+=("$host")
+    if [[ "$host" == local ]]; then
+        sh -c "$SUDO_PREPARE_CMD" || rc=$?
+    else
+        ssh "${SSH_OPTS[@]}" -t "$host" "$SUDO_PREPARE_CMD" || rc=$?
+    fi
+    case $rc in
+        0) SUDO_GRANTED+=("$host") ;;
+        3) ;;
+        *) echo "❌ Error: $SUDO_USER needs sudo rights on $host"; exit 1 ;;
+    esac
+}
+
+# sudo_prepare_hosts - sudo_prepare for every machine in the plan, so all password prompts come right at the start
+# (a machine installed --in-place is this machine, get_sudo_user did it already)
+# Usage: sudo_prepare_hosts <host>...
+sudo_prepare_hosts() {
+    local host_addr
+    for host_addr in "$@"; do
+        if $IN_PLACE && is_local_host "$host_addr"; then
+            continue
+        fi
+        ssh_open_master "$host_addr" || { echo "❌ Error: failed to connect with $host_addr"; exit 1; }
+        sudo_prepare "$host_addr"
+    done
+}
+
+# sudo_cleanup - remove SUDO_DROPIN from every machine sudo_prepare added it to (EXIT trap).
+# needs no password: the file itself still allows sudo without one. if sudo already asks for a password again,
+# the file is gone (e.g. this machine was also in the host list and is cleaned up already)
+sudo_cleanup() {
+    local host ok cmd="! sudo -n true 2>/dev/null || sudo -n rm -f $SUDO_DROPIN"
+    for host in "${SUDO_GRANTED[@]:-}"; do
+        [[ -n "$host" ]] || continue
+        ok=true
+        if [[ "$host" == local ]]; then
+            sh -c "$cmd" || ok=false
+        else
+            ssh_opts "$host"
+            ssh "${SSH_OPTS[@]}" "$host" "$cmd" || ok=false
+        fi
+        if $ok; then
+            echo "🔐 $host: sudo without password removed again"
+        else
+            echo "⚠️ Warning: could not remove $SUDO_DROPIN on $host, please run there: sudo rm $SUDO_DROPIN"
+        fi
+    done
+    SUDO_GRANTED=()
+}
+
+# on_exit - EXIT trap: remove the temporary sudo rule, then close the ssh connections
+on_exit() {
+    # parallel host installs still running (Ctrl-C): stop them before their sudo rule and ssh connection go
+    local pid
+    for pid in $(jobs -pr); do
+        pkill -P "$pid" 2>/dev/null || true    # the ssh or the in-place installer running in that job
+        kill "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
+    sudo_cleanup
+    close_ssh_masters
+}
+
+# ssh_opts - set SSH_OPTS for a host (shared connection, user, host key check)
+# Usage: ssh_opts <host>
+ssh_opts() {
+    local control="/tmp/deploy-$SUDO_USER-$(echo "$1" | tr '@:' '__')"
+    SSH_OPTS=( -o ControlMaster=auto -o ControlPersist=5m -o ControlPath="$control"
+               -o User="$SUDO_USER" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 )
+}
+
+# ssh_open_master - one authenticated ssh connection per host, every later ssh/rsync to it reuses it (ControlMaster)
+# Order: your ssh key (BatchMode, no password) -> otherwise ssh asks for the password itself on the terminal;
+# without -y you can first install your key there with ssh-copy-id. the installer never sees a password
+# Host keys: StrictHostKeyChecking=accept-new in your normal ~/.ssh/known_hosts, a new host is pinned on first
+# connect, a changed key is refused
+# Usage: ssh_open_master <host>
+# Sets: SSH_OPTS (for ssh and rsync -e)
+ssh_open_master() {
+    local host_addr="$1"
+    ssh_opts "$host_addr"
+    SSH_MASTERS+=("$host_addr")
+
+    ssh -O check "${SSH_OPTS[@]}" "$host_addr" >/dev/null 2>&1 && return 0
+
+    # stderr to a file, not $(...): the master stays in the background and would keep the pipe open
+    local errf
+    errf=$(mktemp)
+    if ssh "${SSH_OPTS[@]}" -o BatchMode=yes -Nf "$host_addr" 2>"$errf"; then
+        rm -f "$errf"
+        echo "🔑 $host_addr: ssh key"
+        return 0
+    fi
+    if grep -q "HOST IDENTIFICATION HAS CHANGED\|Host key verification failed" "$errf"; then
+        cat "$errf" >&2
+        rm -f "$errf"
+        echo "❌ Error: the host key of $host_addr changed. If that is expected (reinstalled machine): ssh-keygen -R $host_addr" >&2
+        return 1
+    fi
+    rm -f "$errf"
+
+    echo "🔑 $host_addr: your ssh key doesn't work there"
+    if [[ "${YES:-false}" != true ]]; then
+        read_tty "   [k] install your ssh key there (asks for the password once), [p] type the password this time (K/p): " "k"
+        if [[ "$REPLY" =~ ^[Kk]$ ]]; then
+            ensure_ssh_key || return 1
+            ssh-copy-id -o User="$SUDO_USER" -o StrictHostKeyChecking=accept-new "$host_addr" || return 1
+            ssh "${SSH_OPTS[@]}" -o BatchMode=yes -Nf "$host_addr" && { echo "🔑 $host_addr: ssh key installed"; return 0; }
+            echo "❌ Error: the key still doesn't work on $host_addr" >&2
+            return 1
+        fi
+    fi
+    # ssh asks for the password itself (also with -y)
+    ssh "${SSH_OPTS[@]}" -Nf "$host_addr"
+}
+
+# ensure_ssh_key - make sure there is a key for ssh-copy-id, creates ~/.ssh/id_ed25519 if there is none
+# (ssh-keygen asks for an optional passphrase)
+ensure_ssh_key() {
+    local key
+    for key in ~/.ssh/id_ed25519.pub ~/.ssh/id_ecdsa.pub ~/.ssh/id_rsa.pub; do
+        [[ -f "$key" ]] && return 0
+    done
+    echo "🔑 no ssh key yet, creating ~/.ssh/id_ed25519"
+    mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 </dev/tty
+}
+
+# close_ssh_masters - close the ssh connections opened by ssh_open_master (EXIT trap)
+close_ssh_masters() {
+    local host_addr control
+    for host_addr in "${SSH_MASTERS[@]:-}"; do
+        [[ -n "$host_addr" ]] || continue
+        control="/tmp/deploy-$SUDO_USER-$(echo "$host_addr" | tr '@:' '__')"
+        ssh -O exit -o ControlPath="$control" "$host_addr" >/dev/null 2>&1 || true
+    done
 }
 
 # resolve_config_file checks if config file already exists
@@ -1773,12 +2126,7 @@ resolve_config_file() {
 rsync_to_host() {
     local host_addr="$1"
     local remote_dir="Rueckgrat-install"
-    local SSH_CONTROL="/tmp/deploy-$SUDO_USER-$(echo "$host_addr" | tr '@:' '__')"
-    local SSH_OPTS=( -o ControlMaster=auto -o ControlPersist=5m -o ControlPath="$SSH_CONTROL" )
-
-    trap 'ssh -O exit "${SSH_OPTS[@]}" "$host_addr" >/dev/null 2>&1 || true' EXIT
-
-    sshpass -p "$SUDO_PASSWORD" ssh "${SSH_OPTS[@]}" -o User="$SUDO_USER" -Nf "$host_addr" || { echo "❌ Error: failed to connect with $host_addr"; return 1; }
+    ssh_open_master "$host_addr" || { echo "❌ Error: failed to connect with $host_addr"; return 1; }
 
     echo "Copying files to $host_addr..."
     rsync -az --checksum -e "ssh ${SSH_OPTS[*]}" \
@@ -1791,7 +2139,7 @@ rsync_to_host() {
 }
 
 sync_on_hosts() {
-    install_dependencies rsync sshpass jq
+    install_dependencies rsync jq
 
     while IFS= read -r host_config; do
         host_addr=$(echo "$host_config" | jq -r '.addr')
@@ -1802,9 +2150,16 @@ sync_on_hosts() {
 }
 
 readonly CONTAINER_MODELS_DIR="/models"
+readonly REMOTE_DIR="Rueckgrat-install"        # where the installer copies itself to on every host
 readonly HUB_PORT_DEFAULT=14223
 readonly SIGNUP_MODE_DEFAULT="invite"                # open: anyone can sign up, invite: signup needs an invite token
 readonly NODE_PORT_DEFAULT=7346
+readonly HUB_MAINTENANCE_START_DEFAULT="02:00"   # nightly maintenance window, each user's local time
+readonly HUB_MAINTENANCE_END_DEFAULT="05:00"
+readonly HUB_MAINTENANCE_BATCH_DEFAULT=50        # items per task and user and night
+readonly HUB_MAINTENANCE_INTERVAL_DEFAULT=15     # minutes between daytime runs, 0 = off
+readonly HUB_MAINTENANCE_SMALL_BATCH_DEFAULT=10  # items per task and user and daytime run
+readonly STT_WORKERS_DEFAULT=4                   # parallel speech to text transcriptions
 readonly HOST_MODELS_DIR_DEFAULT="/var/lib/Rueckgrat/models"
 
 readonly LLAMA_SERVER_MAX_CONTEXT_DEFAULT=4096
@@ -1831,7 +2186,9 @@ main() {
     CERT_FILE=""
     YES=false
     SUDO_USER="$(whoami)"
-    SUDO_PASSWORD=""
+    SSH_MASTERS=()
+    SUDO_CHECKED=()
+    SUDO_GRANTED=()
     NO_CACHE=""
     SYNC_ONLY=false
     IN_PLACE=false
@@ -1840,6 +2197,10 @@ main() {
     NODE_PORT=NODE_PORT_DEFAULT
     HUB_PORT=HUB_PORT_DEFAULT
     LLAMA_SERVER_PORT=LLAMA_SERVER_PORT_DEFAULT
+
+    # cleanup also on errors and Ctrl-C
+    trap on_exit EXIT
+    trap 'exit 130' INT TERM HUP
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -1893,14 +2254,6 @@ main() {
                 SUDO_USER="$2"
                 shift 2
                 ;;
-            -p|--password)
-                if [[ -z "${2:-}" ]]; then
-                    echo "❌ Error: --password requires a password"
-                    exit 1
-                fi
-                SUDO_PASSWORD="$2"
-                shift 2
-                ;;
             -v|--verbose) VERBOSE=true; DOCKER_QUIET_BUILD=""; shift ;;
             -f|--fresh) CLEAN_BUILD=true; NO_CACHE="--no-cache"; shift ;;
             -s|--sync) SYNC_ONLY=true; shift ;;
@@ -1924,14 +2277,14 @@ main() {
     fi
 
     if ! command -v jq &> /dev/null; then
-        get_user_passwd
+        get_sudo_user
         install_dependencies jq
     fi
 
     if $SYNC_ONLY; then
         print_header "🔄 Rückgrat Sync"
     
-        get_user_passwd
+        get_sudo_user
 
         setup_repository
 
@@ -1945,24 +2298,25 @@ main() {
   
     if [[ -n "$LOCAL_CONFIG" ]]; then
         print_header "🌐 Rückgrat Installer ($HOSTNAME - $HOST_ADDR)"
-        get_user_passwd
+        get_sudo_user
         deploy_components "$LOCAL_CONFIG"
     elif [[ -n "$HOST_CONFIG" ]]; then
         REMOTE_ADDR=$(echo "$HOST_CONFIG" | jq -r '.addr')
         echo "$HOST_ADDR $REMOTE_ADDR"
         if [ $HOST_ADDR == $REMOTE_ADDR ]; then
             print_header "🏠 Rückgrat Installer ($HOSTNAME - $HOST_ADDR)"
-            get_user_passwd
+            get_sudo_user
             deploy_components "$HOST_CONFIG"
         else
             print_header "🚀 Rückgrat Installer"
-            get_user_passwd
+            get_sudo_user
+            sudo_prepare_hosts "$REMOTE_ADDR"
             deploy_components_remote "$HOST_CONFIG"
         fi
     else
         print_header "🚀 Rückgrat Installer"
 
-        get_user_passwd
+        get_sudo_user
 
         setup_repository
 
@@ -1971,7 +2325,10 @@ main() {
         setup
         confirm_install_configuration
 
-        deploy_on_hosts
+        # every sudo password prompt now, then the install runs without you
+        sudo_prepare_hosts $(jq -r '.hosts[].addr, (if .cloudflare.enabled == true then .cloudflare.addr // empty else empty end)' "$CONFIG_FILE")
+
+        deploy_on_hosts || echo "⚠️ Warning: not every host was installed, see above"
 
         deploy_cloudflare_node
 

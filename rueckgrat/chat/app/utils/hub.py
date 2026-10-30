@@ -22,6 +22,7 @@ class Hub:
     ws_task = None
     websocket_client = None
     _last_health: Optional[str] = None
+    _refresh_lock: Optional[asyncio.Lock] = None
 
     @classmethod
     def init(cls, config):
@@ -123,6 +124,18 @@ class Hub:
         (the stored one is dropped), None: hub not reachable, keep the session and try again later"""
         if not cls.has_stored_session():
             return False
+        # one refresh at a time: each refresh token works once (the hub rotates it), a second request with the
+        # same token would be refused. whoever waited gets the result of the refresh before it
+        if cls._refresh_lock is None:
+            cls._refresh_lock = asyncio.Lock()
+        token = cls.refresh_token
+        async with cls._refresh_lock:
+            if cls.refresh_token != token:
+                return bool(cls.refresh_token)
+            return await cls._refresh_session()
+
+    @classmethod
+    async def _refresh_session(cls) -> bool | None:
         try:
             response = await asyncio.to_thread(requests.post, f"{cls.url}/refresh", json={"refresh_token": cls.refresh_token},
                                                timeout=10, verify=cls.server_cert)
@@ -152,9 +165,18 @@ class Hub:
     @classmethod
     async def logout(cls):
         """
-        Forgets the session and closes the websocket. The hub keeps no sessions,
-        so there is nothing to tell it, the token is simply dropped.
+        Revokes the session on the hub (best effort: unreachable or an expired access token
+        still logs out here), forgets it and closes the websocket.
         """
+        if cls.refresh_token and cls.access_token:
+            try:
+                response = await asyncio.to_thread(requests.post, f"{cls.url}/logout", json={"refresh_token": cls.refresh_token},
+                                                   headers={"Authorization": f"Bearer {cls.access_token}"},
+                                                   timeout=5, verify=cls.server_cert)
+                if response.status_code != 200:
+                    logger.debug(f"logout on the hub - {response.status_code} {response.reason}")
+            except Exception as e:
+                logger.debug(f"logout on the hub failed {repr(e)}")
         await cls.stop_websocket()
         if cls.websocket_client:
             await cls.websocket_client.close()
@@ -905,6 +927,12 @@ class Hub:
                 verify=cls.server_cert,
             )
             if response.status_code == 200:
+                # the hub logged every device out, this one gets a new session
+                data = response.json()
+                if data.get("refresh_token"):
+                    cls._set_session({"user_name": cls.user_name, **data})
+                    if cls.websocket_client:
+                        cls.websocket_client.token = cls.access_token   # the next reconnect uses it (may run off the event loop, so no start())
                 return None
             logger.error(f"change password - {response.status_code} {response.reason}")
             try:

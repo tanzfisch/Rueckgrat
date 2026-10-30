@@ -11,26 +11,9 @@ DEFAULT_TIMEZONE = os.environ.get("DEFAULT_TIMEZONE", "UTC")
 
 DB_FORMAT = "%Y-%m-%d %H:%M:%S"   # like sqlite's CURRENT_TIMESTAMP, UTC
 
-# testing only: the companion's clock runs TIME_SCALE times faster (720 = a day in 2 minutes),
-# from TIME_START ("2026-10-29T23:50+13:00", no offset = UTC) or from the hub start. unset = real time
-TIME_SCALE = float(os.environ.get("COMPANION_TIME_SCALE") or 1)
-TIME_START = os.environ.get("COMPANION_TIME_START")
-_REAL_START = datetime.now(timezone.utc)
-_START = datetime.fromisoformat(TIME_START) if TIME_START else _REAL_START
-_START = _START if _START.tzinfo else _START.replace(tzinfo=timezone.utc)
-if TIME_SCALE != 1 or TIME_START:
-    logger.warning(f"companion clock simulated: x{TIME_SCALE} from {_START.isoformat()}")
-
 def now() -> datetime:
     """the companion's now, UTC"""
-    real = datetime.now(timezone.utc)
-    if TIME_SCALE == 1 and not TIME_START:
-        return real
-    return _START + (real - _REAL_START) * TIME_SCALE
-
-def real_seconds(seconds: float) -> float:
-    """how long companion seconds take on the wall clock"""
-    return seconds / TIME_SCALE
+    return datetime.now(timezone.utc)
 
 def to_db(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime(DB_FORMAT)

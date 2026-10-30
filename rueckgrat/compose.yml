@@ -7,7 +7,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "2019:2019"
+      # caddy admin api (can rewrite the whole proxy config, no auth): this machine only
+      - "127.0.0.1:2019:2019"
     volumes:
       - caddy_data:/data
       - caddy_config:/config
@@ -20,8 +21,6 @@ services:
     build:
       context: ./hub
       dockerfile: Dockerfile
-      args:
-        INSTALL_BROWSER: ${INSTALL_BROWSER:-true}
     ports:
       - "${HUB_PORT}:${HUB_PORT}"
     volumes:
@@ -35,6 +34,14 @@ services:
     environment:
       SIGNUP_MODE: ${SIGNUP_MODE:-open}
       HUB_PORT: ${HUB_PORT}
+      HUB_SECRET_KEY: ${HUB_SECRET_KEY:-}
+      HUB_DOCS: ${HUB_DOCS:-false}
+      HUB_FETCH_ALLOW: ${HUB_FETCH_ALLOW:-}
+      HUB_MAINTENANCE_START: ${HUB_MAINTENANCE_START:-02:00}
+      HUB_MAINTENANCE_END: ${HUB_MAINTENANCE_END:-05:00}
+      HUB_MAINTENANCE_BATCH: ${HUB_MAINTENANCE_BATCH:-50}
+      HUB_MAINTENANCE_INTERVAL: ${HUB_MAINTENANCE_INTERVAL:-15}
+      HUB_MAINTENANCE_SMALL_BATCH: ${HUB_MAINTENANCE_SMALL_BATCH:-10}
     restart: unless-stopped
     stdin_open: true
     tty: true
@@ -78,6 +85,7 @@ services:
       NODE_PORT: ${NODE_PORT}
       LLAMA_SERVER_PORT: ${LLAMA_SERVER_PORT}
       TTS_MODEL: ${TTS_MODEL:-chatterbox}
+      STT_WORKERS: ${STT_WORKERS:-4}
     stdin_open: true
     tty: true
     restart: unless-stopped

@@ -70,6 +70,14 @@ MARKDOWN_STYLE = ft.MarkdownStyleSheet(
     h6_text_style=_md_text(16),
 )
 
+def field_border(radius: float = RADIUS, focused_color: str = TEAL) -> dict:
+    """outlined text field or dropdown border: invisible, coloured while focused (flet 1.0 replaced border_radius, border_color and focused_border_color with this)"""
+    return {
+        ft.ControlState.DEFAULT: ft.OutlineInputBorder(border_radius=radius, side=ft.BorderSide(color=ft.Colors.TRANSPARENT)),
+        ft.ControlState.FOCUSED: ft.OutlineInputBorder(border_radius=radius, side=ft.BorderSide(width=2, color=focused_color)),
+    }
+
+
 STYLES = {
     "one_line_bubble": dict(bgcolor=TEAL, border_radius=RADIUS, padding=10),
     "chat_bubble": dict(bgcolor=TEAL, border_radius=RADIUS, padding=10),
@@ -110,18 +118,17 @@ STYLES = {
     "field": dict(
         bgcolor=SURFACE,
         color=TEXT,
-        border_radius=RADIUS,
-        border_color=ft.Colors.TRANSPARENT,
-        focused_border_color=TEAL,
+        border=field_border(),
         content_padding=10,
     ),
-    "input_box": dict(bgcolor=ft.Colors.TRANSPARENT, border_color=ft.Colors.TRANSPARENT, color=TEXT),
+    "input_box": dict(bgcolor=ft.Colors.TRANSPARENT, border=ft.NoInputBorder(), color=TEXT),
     "label": dict(color=TEXT),
     "label_slider": ft.TextStyle(color=TEXT_DIM, size=12),
+    "section_heading": ft.TextStyle(color=TEXT, size=18*SIZE_FACTOR, weight=ft.FontWeight.BOLD),   # settings and contact profile sections
     "contact_card": dict(bgcolor=SURFACE, border_radius=RADIUS, padding=10),
     "overlay_scrim": dict(bgcolor=ft.Colors.with_opacity(150 / 255, ft.Colors.BLACK)),
     "overlay_dialog": dict(bgcolor=TEAL, border_radius=RADIUS),
-    "dropdown": dict(bgcolor=SURFACE, color=TEXT, border_radius=RADIUS, focused_border_color=TEAL),
+    "dropdown": dict(bgcolor=SURFACE, color=TEXT, border=field_border()),
 }
 
 

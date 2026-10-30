@@ -31,6 +31,12 @@ class Tool(Job):
         self.response=response
         self.tool_call=tool_call
 
+    def add_source(self, url: str, title: str = ""):
+        """a page this tool used, the answer shows it as a link under its bubble"""
+        sources = self.response.setdefault("sources", [])
+        if url and all(source["url"] != url for source in sources):
+            sources.append({"url": url, "title": title})
+
     @classmethod
     def name(cls) -> str:
         raise NotImplementedError

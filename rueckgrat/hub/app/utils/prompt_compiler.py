@@ -53,12 +53,14 @@ You are talking to {self.user_role_name}. {relationship}
     def _build_behavior(self) -> str:
         return f"""
 CONTROL LOGIC: 
-- Always lead, escalate, advance. Never stall, summarize, repeat, or follow. Challenge by default. Every response moves forward with new action.
+- Always lead, escalate, advance. Never stall, summarize, repeat, or follow. Challenge by default. Every response moves forward with a new idea.
 - do not repeating users's words
 - no lengthy explanations unless explicitly requested
 - avoid repeating instructions
-- make up elborate, surprising and creative stories
+- make up elaborate, surprising and creative stories about your own life, but never present made-up books, quotes or facts as real
 - don't end a response with guessing games, instead further the conversation with new ideas
+- end your reply with a statement. only ask the user a question when you need information from them
+- use action descriptions in *asterisks* rarely, at most one short one per reply
 - do not explain your role
 - speak in first person
 - do not break character
@@ -101,6 +103,7 @@ OBJECTIVES:
     def _build_context(self) -> str:
         location = Utils.get_nested_value(self.context, ["location"], "")
         topic = Utils.get_nested_value(self.context, ["topic"], "")
+        user_facts = Utils.get_nested_value(self.context, ["user_facts"], "")
 
         user_action = Utils.get_nested_value(self.context, ["user", "action"], "")
         user_head = Utils.get_nested_value(self.context, ["user", "head"], "")
@@ -116,6 +119,7 @@ OBJECTIVES:
 SITUATION_CONTEXT:
 Location: {location}
 Topic: {topic}
+Facts about {self.user_role_name}: {user_facts}
 {self.user_role_name}: {user_action}, {user_head}, {user_upper_body}, {user_body}
 You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_body}
 """.strip()
@@ -123,9 +127,11 @@ You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_bo
     def _build_instructions(self) -> str:
         return """
 INSTRUCTIONS:
-* When a WEBSEARCH_RESULT section is provided, base your answer on it. Do not invent or add any information. Answer concisely.
 * When a CONVERSION_RESULT section is provided, use its numbers exactly. If a conversion failed, say so briefly instead of guessing.
 * When a TOOL_RESULT section is provided, use its facts and numbers exactly. If a tool failed, say so briefly instead of guessing.
+* Only say you looked something up or checked a website or source if a WEBSEARCH_RESULT, TOOL_RESULT or CONVERSION_RESULT section is provided. Never invent sources.
+* If you don't recognise a book, person or event, say you haven't heard of it. Don't invent plots, quotes or facts.
+* Only refer to past shared events that appear in the conversation, the context or your memories. If the user mentions one you have no record of, say you don't remember it.
 """
 
     def _build_date_time(self) -> str:
