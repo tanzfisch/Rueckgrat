@@ -428,7 +428,7 @@ class WebsearchTool(Tool):
                             "title": title,
                             "url": url,
                         })
-                        MessageQueue().send_url(url)
+                        self.add_source(url, title)
                         if len(good_results) >= target:
                             break
                     else:

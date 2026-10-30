@@ -17,6 +17,9 @@ Hub management tool (signup invites and users), run inside the hub container:
     docker exec -it rueckgrat_hub python -m app.hub_management companion list --user martin
     docker exec -it rueckgrat_hub python -m app.hub_management companion status 31
     docker exec -it rueckgrat_hub python -m app.hub_management companion status 31 --log 50 --json
+    docker exec -it rueckgrat_hub python -m app.hub_management maintenance status
+    docker exec -it rueckgrat_hub python -m app.hub_management maintenance run
+    docker exec -it rueckgrat_hub python -m app.hub_management maintenance run --job summaries --all
 
 Whoever can run docker on the host is trusted as admin.
 """
@@ -84,16 +87,9 @@ def print_users(users):
 
 
 def companion_now(db):
-    """the hub's companion clock: real time, or when simulated (COMPANION_TIME_SCALE) estimated from the last logged pass"""
+    """the hub's companion clock, real time"""
     from app.companion import clock
-    if clock.TIME_SCALE == 1 and not clock.TIME_START:
-        return clock.now(), "real time"
-    simulated = f"simulated x{clock.TIME_SCALE:g}"
-    last = db.get_companion_log(limit=1)
-    if not last:
-        return None, f"{simulated}, unknown before the first pass"
-    wall = datetime.now(timezone.utc) - clock.from_db(last[0]["created_at"])
-    return clock.from_db(last[0]["at"]) + wall * clock.TIME_SCALE, f"{simulated}, estimated from the last pass"
+    return clock.now(), "real time"
 
 
 def companion_status(db, contact, log_entries):
@@ -145,6 +141,43 @@ def print_companion_status(s):
                 print(f"        {key:<10} {e[key]}")
 
 
+def maintenance_status(db):
+    from app.maintenance import maintenance_tasks, sweeper
+    print(f"\nnightly window {sweeper.QUIET_START:%H:%M}-{sweeper.QUIET_END:%H:%M} (each user's timezone), "
+          f"at most {sweeper.BATCH} items per task and user and night")
+    if sweeper.INTERVAL_MINUTES > 0:
+        print(f"during the day every {sweeper.INTERVAL_MINUTES} min, at most {sweeper.SMALL_BATCH} items per task and user")
+    else:
+        print("no runs during the day (HUB_MAINTENANCE_INTERVAL=0)")
+    for task in maintenance_tasks(db, None):
+        print(f"  {task.name}")
+        for key, value in task.status().items():
+            print(f"    {key:<16} {value if value is not None else '-'}")
+
+
+def maintenance_run(db, args):
+    """runs the pending maintenance now, outside the window, one item at a time on this process.
+    it does not see the hub's chats: it does not wait for replies being made"""
+    import asyncio
+    from app.jobs import JobQueue
+    from app.utils import Infrastructure
+    from app.maintenance import MaintenanceSweeper, maintenance_tasks, sweeper
+    infrastructure = Infrastructure()
+    asyncio.run(infrastructure.connect_nodes(connect=False))   # chat and embed go over http, no websocket next to the hub's
+    tasks = maintenance_tasks(db, infrastructure)
+    if args.job and args.job not in [t.name for t in tasks]:
+        print(f"unknown job {args.job}, known: {', '.join(t.name for t in tasks)}")
+        return
+    user_id = None
+    if args.user:
+        user_id = db.get_user_id(args.user)
+        if user_id is None:
+            print("user not found")
+            return
+    MaintenanceSweeper(db, JobQueue(max_parallel=1), tasks).sweep(user_id, None if args.all else sweeper.BATCH, [args.job] if args.job else None)
+    maintenance_status(db)
+
+
 def add_nsfw_switch(cmd):
     # "--nsfw on" / "--nsfw off", or just "--nsfw" (value None) to be asked
     cmd.add_argument("--nsfw", nargs="?", choices=["on", "off"], required=True,
@@ -190,7 +223,15 @@ def main():
                   the companions (and contacts with a companion log), or all contacts of a user
   companion status CONTACT_ID [--log N] [--json]
                   a companion's state: clock, calendar, catch-up cutoff, messages today and its last N passes
-                  (default 10). read only, safe next to the running hub""",
+                  (default 10). read only, safe next to the running hub
+
+  maintenance status
+                  the nightly maintenance: window, and per job what is done and what waits (e.g. summaries)
+  maintenance run [--job NAME] [--all] [--user NAME]
+                  run the waiting maintenance now instead of at night (one item at a time, uses the llm)
+      --job       only this job (e.g. summaries), default all
+      --all       everything that waits, e.g. the first backfill, default at most one night's batch
+      --user      only this user's items""",
     )
     # two levels of subcommands: first the noun (invite/user), then the action
     nouns = parser.add_subparsers(dest="noun", required=True)
@@ -239,7 +280,19 @@ def main():
     status.add_argument("--log", type=int, default=10, help="how many of the last passes (default 10, at most 50 are kept)")
     status.add_argument("--json", action="store_true", help="print json")
 
+    # --- maintenance ---
+    maintenance = nouns.add_parser("maintenance", help="the nightly maintenance (summaries of the conversations)")
+    maintenance_actions = maintenance.add_subparsers(dest="action", required=True)
+    maintenance_actions.add_parser("status", help="what is done and what waits, read only")
+    run = maintenance_actions.add_parser("run", help="run the waiting maintenance now")
+    run.add_argument("--job", default=None, help="only this job, e.g. summaries")
+    run.add_argument("--all", action="store_true", help="everything that waits, not just one night's batch")
+    run.add_argument("--user", default=None, help="user name as shown by user list")
+
     args = parser.parse_args()
+    if args.noun == "maintenance" and args.action == "status":
+        maintenance_status(ChatDB.read_only(DB_PATH))
+        return
     if args.noun == "companion":
         db = ChatDB.read_only(DB_PATH)
         if args.action == "list":
@@ -277,6 +330,8 @@ def main():
             nsfw = resolve_nsfw(args.nsfw)
             ok = db.set_invite_nsfw(args.id, nsfw)
             print(f"invite {args.id}: {'NSFW' if nsfw else 'SFW'}" if ok else "not found")
+    elif args.noun == "maintenance":
+        maintenance_run(db, args)
     elif args.noun == "user":
         if args.action == "create":
             # same hashing as signup in main.py (argon2). An empty password is hashed too,

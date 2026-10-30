@@ -28,6 +28,7 @@ from app.jobs import JobQueue, MetaJob, AssistantImageJob, ContactGeneratorJob, 
 from app.jobs.meta_job import Turns
 from app.utils.tts_stream import TtsStreams
 from app.companion import CompanionScheduler, DEFAULT_TIMEZONE
+from app.maintenance import MaintenanceSweeper, maintenance_tasks
 from collections import Counter
 from zoneinfo import ZoneInfo
 from argon2 import PasswordHasher
@@ -67,6 +68,11 @@ async def lifespan(app: FastAPI):
                                              app.state.turns, is_connected=lambda user_id: app.state.connections[user_id] > 0)
     app.state.companion.start()
 
+    # nightly maintenance in each user's quiet hours (HUB_MAINTENANCE_START/END), waits while a reply is being made
+    app.state.maintenance = MaintenanceSweeper(app.state.db, app.state.job_queue, maintenance_tasks(app.state.db, app.state.infrastructure),
+                                               is_busy=lambda: app.state.turns.any_busy() or not app.state.job_queue.queue.empty())
+    app.state.maintenance.start()
+
     logger.info("loading vad")
     app.state.vad = load_silero_vad(onnx=True)
     torch.set_num_threads(1)
@@ -81,6 +87,7 @@ async def lifespan(app: FastAPI):
     yield
 
     app.state.companion.stop()
+    app.state.maintenance.stop()
     app.state.job_queue.stop()
 
     logger.info("hub shut down")

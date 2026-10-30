@@ -78,6 +78,7 @@ class ChatDB:
             name TEXT,
             content TEXT NOT NULL,
             timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            sources TEXT,
 
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         )""")
@@ -212,6 +213,32 @@ class ChatDB:
             CREATE TRIGGER IF NOT EXISTS contact_memory_vectors_delete AFTER DELETE ON contact_memories
             BEGIN
                 DELETE FROM contact_memory_vectors WHERE memory_id = OLD.id;
+            END
+        """)
+
+        # #147 one summary per conversation for finding it again by meaning, made by the maintenance sweeper (app/maintenance).
+        # updated_at (UTC, like messages.timestamp): when it was made, messages newer than this make it stale
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_summaries (
+            conversation_id INTEGER PRIMARY KEY,
+            summary TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        )""")
+
+        # the summaries' vectors (same model and dimension as the memories), one partition per user.
+        # the trigger removes the vector with its conversation, also in the contact/user cascade. memories are not touched
+        cursor.execute(f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS conversation_summary_vectors USING vec0(
+            conversation_id INTEGER PRIMARY KEY,
+            user_id INTEGER PARTITION KEY,
+            contact_id INTEGER,
+            embedding FLOAT[{MEMORY_EMBEDDING_DIM}] distance_metric=cosine
+        )""")
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS conversation_summary_vectors_delete AFTER DELETE ON conversations
+            BEGIN
+                DELETE FROM conversation_summary_vectors WHERE conversation_id = OLD.id;
             END
         """)
 
@@ -1219,6 +1246,96 @@ class ChatDB:
                 logger.error(f"failed deleting contact memory: {e}")
         return False
 
+    ########### conversation summaries (#147, app/maintenance)
+
+    # conversations with messages, their last message time and whether they have a summary / a vector
+    _SUMMARY_STATE = """
+        SELECT c.id, c.user_id, c.contact_id, s.summary, s.updated_at,
+            (SELECT MAX(m.timestamp) FROM messages m WHERE m.conversation_id = c.id) AS last_message,
+            EXISTS (SELECT 1 FROM conversation_summary_vectors v WHERE v.conversation_id = c.id) AS has_vector
+        FROM conversations c LEFT JOIN conversation_summaries s ON s.conversation_id = c.id
+    """
+
+    def conversations_to_summarize(self, user_id: int | None = None, limit: int | None = None) -> list[dict]:
+        """conversations without a summary, with messages newer than their summary or without a vector, oldest change first.
+        stale = the summary has to be made (again), else only the vector is missing. user_id None = all users"""
+        with self.get_connection() as conn:
+            rows = conn.execute(f"""
+                SELECT *, (summary IS NULL OR last_message > updated_at) AS stale FROM ({self._SUMMARY_STATE})
+                WHERE last_message IS NOT NULL AND (? IS NULL OR user_id = ?)
+                AND (summary IS NULL OR last_message > updated_at OR NOT has_vector)
+                ORDER BY last_message LIMIT ?
+            """, (user_id, user_id, -1 if limit is None else int(limit))).fetchall()
+            return [dict(row) for row in rows]
+
+    def summary_status(self) -> dict:
+        """hub management: how many conversations (with messages) are summarized, stale or without a vector"""
+        with self.get_connection() as conn:
+            row = conn.execute(f"""
+                SELECT COUNT(*) AS conversations, COUNT(summary) AS summarized,
+                    SUM(summary IS NULL) AS missing, SUM(summary IS NOT NULL AND last_message > updated_at) AS stale,
+                    SUM(summary IS NOT NULL AND NOT has_vector) AS without_vector, MAX(updated_at) AS last_update
+                FROM ({self._SUMMARY_STATE}) WHERE last_message IS NOT NULL
+            """).fetchone()
+            return {k: row[k] or 0 for k in row.keys()} | {"last_update": row["last_update"]}
+
+    def set_conversation_summary(self, conversation_id: int, summary: str, updated_at: str) -> bool:
+        """stores or replaces the summary. the old vector goes with it, set_conversation_embedding adds the new one"""
+        with self.get_connection() as conn:
+            conn.execute("DELETE FROM conversation_summary_vectors WHERE conversation_id = ?", (conversation_id,))
+            cursor = conn.execute("""
+                INSERT INTO conversation_summaries (conversation_id, summary, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(conversation_id) DO UPDATE SET summary = excluded.summary, updated_at = excluded.updated_at
+            """, (conversation_id, summary, updated_at))
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def set_conversation_embedding(self, conversation_id: int, embedding: list[float]) -> bool:
+        """stores or replaces the vector of a conversation's summary. False for unknown conversations or a wrong dimension"""
+        if len(embedding) != MEMORY_EMBEDDING_DIM:
+            logger.error(f"summary embedding not stored (dimension {len(embedding)} of {MEMORY_EMBEDDING_DIM})")
+            return False
+        with self.get_connection() as conn:
+            try:
+                # vec0 has no upsert, like set_memory_embedding
+                conn.execute("DELETE FROM conversation_summary_vectors WHERE conversation_id = ?", (conversation_id,))
+                cursor = conn.execute("""
+                    INSERT INTO conversation_summary_vectors (conversation_id, user_id, contact_id, embedding)
+                    SELECT id, user_id, contact_id, ? FROM conversations WHERE id = ?
+                """, (sqlite_vec.serialize_float32(embedding), conversation_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"failed storing summary embedding: {e}")
+        return False
+
+    def nearest_conversations(self, user_id: int, embedding: list[float], k: int = 5, contact_id: int | None = None,
+                              exclude_id: int | None = None) -> list[dict]:
+        """the k conversations of the user whose summaries are closest to embedding, closest first (cosine distance),
+        optionally only those with one contact and without one conversation (e.g. the current one)"""
+        if len(embedding) != MEMORY_EMBEDDING_DIM:
+            return []
+        contact_filter = "AND contact_id = ?" if contact_id is not None else ""
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute(f"""
+                    WITH knn AS (
+                        SELECT conversation_id, distance FROM conversation_summary_vectors
+                        WHERE embedding MATCH ? AND k = ? AND user_id = ? {contact_filter}
+                    )
+                    SELECT c.id, c.contact_id, ct.name AS contact, c.title, c.created_at, s.summary, s.updated_at, knn.distance
+                    FROM knn JOIN conversations c ON c.id = knn.conversation_id
+                    JOIN conversation_summaries s ON s.conversation_id = c.id
+                    JOIN contacts ct ON ct.id = c.contact_id
+                    WHERE c.user_id = ? AND c.id IS NOT ?
+                    ORDER BY knn.distance LIMIT ?
+                """, (sqlite_vec.serialize_float32(embedding), int(k) + 1, user_id,
+                      *([contact_id] if contact_id is not None else []), user_id, exclude_id, int(k))).fetchall()
+                return [dict(row) for row in rows]
+            except Exception as e:
+                logger.error(f"failed searching conversation summaries: {e}")
+        return []
+
     def get_message_count_by_conversation(self, conversation_id: int):
         with self.get_connection() as conn:
             try:
@@ -1240,7 +1357,7 @@ class ChatDB:
                 cursor.execute("""
                     SELECT *
                     FROM (
-                        SELECT id, role, name, content, timestamp
+                        SELECT id, role, name, content, timestamp, sources
                         FROM messages
                         WHERE conversation_id = ?
                         ORDER BY timestamp DESC
@@ -1249,7 +1366,10 @@ class ChatDB:
                     ORDER BY timestamp ASC;
                 """, (conversation_id, max_messages))
 
-                return [dict(row) for row in cursor.fetchall()]
+                messages = [dict(row) for row in cursor.fetchall()]
+                for message in messages:
+                    message["sources"] = json.loads(message["sources"]) if message["sources"] else []
+                return messages
             except Exception as e:
                 logger.error(f"failed returning messages: {e}")         
 
@@ -1320,6 +1440,17 @@ class ChatDB:
                 return cursor.rowcount > 0
             except Exception as e:
                 logger.error(f"deleting message: {e}")
+        return False
+
+    def set_message_sources(self, message_id: int, sources: list) -> bool:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE messages SET sources = ? WHERE id = ?", (json.dumps(sources), message_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"setting message sources: {e}")
         return False
 
     def add_attachment(self, message_id: int, file_name: str, file_url: str, file_type: str, file_size: int) -> int:

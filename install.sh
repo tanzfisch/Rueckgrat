@@ -62,6 +62,17 @@ read_tty() {
     REPLY="${var:-$default}"
 }
 
+# read_setting - read_tty with a default, asks again until the answer matches the pattern
+# Usage: read_setting "Prompt" default pattern   (result in REPLY)
+read_setting() {
+    local prompt="$1" default="$2" pattern="$3"
+    while true; do
+        read_tty "$prompt [$default]: " "$default" $YES
+        [[ "$REPLY" =~ $pattern ]] && return
+        echo -e "\e[1A\e[K     ⚠️ please answer like $default"
+    done
+}
+
 # read_tty_s - like read_tty but with hidden output. used for passwords
 # Usage: read_tty_s <prompt> [default]
 # Args:
@@ -612,7 +623,8 @@ setup() {
             fi
 
             if $INSTALL_STT; then
-                services_json=$(jq '. + [{type: "speech_to_text", name: "stt"}]' <<< "$services_json")
+                services_json=$(jq --arg workers "$STT_WORKERS" \
+                    '. + [{type: "speech_to_text", name: "stt", workers: ($workers | tonumber)}]' <<< "$services_json")
             fi
 
             if $INSTALL_EMBEDDING; then
@@ -633,7 +645,11 @@ setup() {
             # hub.secret_key signs the hub's login tokens, saved here like cloudflare.token (empty = not saved)
             host_json=$(jq --arg port "$HUB_PORT" --arg signup_mode "$SIGNUP_MODE" --arg secret_key "$HUB_SECRET_KEY" \
                 --arg fetch_allow "${HUB_FETCH_ALLOW:-}" \
-                '. + {hub: ({port: ($port | tonumber), signup_mode: $signup_mode}
+                --arg m_start "$HUB_MAINTENANCE_START" --arg m_end "$HUB_MAINTENANCE_END" --arg m_batch "$HUB_MAINTENANCE_BATCH" \
+                --arg m_interval "$HUB_MAINTENANCE_INTERVAL" --arg m_small "$HUB_MAINTENANCE_SMALL_BATCH" \
+                '. + {hub: ({port: ($port | tonumber), signup_mode: $signup_mode,
+                             maintenance: {start: $m_start, end: $m_end, batch: ($m_batch | tonumber),
+                                           interval: ($m_interval | tonumber), small_batch: ($m_small | tonumber)}}
                             + (if $secret_key == "" then {} else {secret_key: $secret_key} end)
                             + (if $fetch_allow == "" then {} else {fetch_allow: $fetch_allow} end))}' <<< "$host_json")
         fi
@@ -779,6 +795,28 @@ select_hub_secret() {
     fi
 }
 
+# select_maintenance - the hub's maintenance (conversation summaries): a nightly window with a big batch,
+# and small batches during the day. times are each user's local time
+# Sets: HUB_MAINTENANCE_START, HUB_MAINTENANCE_END, HUB_MAINTENANCE_BATCH, HUB_MAINTENANCE_INTERVAL, HUB_MAINTENANCE_SMALL_BATCH
+select_maintenance() {
+    local hhmm='^([01][0-9]|2[0-3]):[0-5][0-9]$' number='^[0-9]+$'
+    read_setting "Nightly maintenance from?" "$HUB_MAINTENANCE_START_DEFAULT" "$hhmm"
+    HUB_MAINTENANCE_START=$REPLY
+    echo -e "\e[1A\e[K     Maintenance from: $HUB_MAINTENANCE_START"
+    read_setting "Nightly maintenance until?" "$HUB_MAINTENANCE_END_DEFAULT" "$hhmm"
+    HUB_MAINTENANCE_END=$REPLY
+    echo -e "\e[1A\e[K     Maintenance until: $HUB_MAINTENANCE_END"
+    read_setting "Items per night?" "$HUB_MAINTENANCE_BATCH_DEFAULT" "$number"
+    HUB_MAINTENANCE_BATCH=$REPLY
+    echo -e "\e[1A\e[K     Items per night: $HUB_MAINTENANCE_BATCH"
+    read_setting "During the day, run every how many minutes (0 = never)?" "$HUB_MAINTENANCE_INTERVAL_DEFAULT" "$number"
+    HUB_MAINTENANCE_INTERVAL=$REPLY
+    echo -e "\e[1A\e[K     During the day every: $HUB_MAINTENANCE_INTERVAL min"
+    read_setting "Items per daytime run?" "$HUB_MAINTENANCE_SMALL_BATCH_DEFAULT" "$number"
+    HUB_MAINTENANCE_SMALL_BATCH=$REPLY
+    echo -e "\e[1A\e[K     Items per daytime run: $HUB_MAINTENANCE_SMALL_BATCH"
+}
+
 # select_tts_model - Ask which Chatterbox model the TTS node of this host uses.
 # Saved in the host's tts service as "model", so a reinstall from the config (-c) uses it again.
 # Configs from before this option have no "model" there -> chatterbox (English)
@@ -838,6 +876,7 @@ select_components() {
         done
         SIGNUP_MODE=$REPLY
         echo -e "\e[1A\e[K     Signup: $SIGNUP_MODE"
+        select_maintenance
         select_hub_secret
     fi
 
@@ -899,12 +938,17 @@ select_components() {
         read_tty "Install speech to text (faster-whisper) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_STT=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_STT == true ]] && echo '✅' || echo '⚫' )] STT"
+        if $INSTALL_STT; then
+            read_setting "STT workers (parallel transcriptions)?" "$STT_WORKERS_DEFAULT" '^[1-9][0-9]*$'
+            STT_WORKERS=$REPLY
+            echo -e "\e[1A\e[K         Workers: $STT_WORKERS"
+        fi
 
         read_tty "Install text embeddings (memory search) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_EMBEDDING=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_EMBEDDING == true ]] && echo '✅' || echo '⚫' )] Embedding"
 
-        read_tty "Install decision model (Laya, experimental, needs torch) on Node? (Y/n): " "Y"
+        read_tty "Install decision model (using Laya) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_DECISION=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_DECISION == true ]] && echo '✅' || echo '⚫' )] Decision"
     fi
@@ -918,9 +962,10 @@ _format_host_jq='
   "\nHost: \($h.addr)",
   "  "+(if $h.chat then "[✅]" else "[⚫]" end)+" Native Chat Client",
   "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub"+(if $h.hub.signup_mode then " (signup: \($h.hub.signup_mode))" else "" end)
-      +(if $h.hub and (($h.hub.secret_key // "") == "") then " ⚠️ no secret key, default token key" else "" end),
+      +(if $h.hub and (($h.hub.secret_key // "") == "") then " ⚠️ no secret key, default token key" else "" end)
+      +(if $h.hub.maintenance then " (maintenance \($h.hub.maintenance.start)-\($h.hub.maintenance.end))" else "" end),
   "  "+(if $h.node then "[✅]" else "[⚫]" end)+" Node",
-  "  "+($h.node.services[]? | "    [✅] \(.name)" + (if .name == "tts" then " (\(.model // "chatterbox"))" else "" end)),
+  "  "+($h.node.services[]? | "    [✅] \(.name)" + (if .name == "tts" then " (\(.model // "chatterbox"))" else "" end) + (if .workers then " (\(.workers) workers)" else "" end)),
   "  "+($h.node.modules[]? | "    [✅] \(.name)")
 '
 
@@ -994,7 +1039,16 @@ deploy_hub() {
         echo "   fetch allow  $HUB_FETCH_ALLOW"
     fi
 
+    set_env_value HUB_MAINTENANCE_START "${HUB_MAINTENANCE_START:-$HUB_MAINTENANCE_START_DEFAULT}"
+    set_env_value HUB_MAINTENANCE_END "${HUB_MAINTENANCE_END:-$HUB_MAINTENANCE_END_DEFAULT}"
+    set_env_value HUB_MAINTENANCE_BATCH "${HUB_MAINTENANCE_BATCH:-$HUB_MAINTENANCE_BATCH_DEFAULT}"
+    set_env_value HUB_MAINTENANCE_INTERVAL "${HUB_MAINTENANCE_INTERVAL:-$HUB_MAINTENANCE_INTERVAL_DEFAULT}"
+    set_env_value HUB_MAINTENANCE_SMALL_BATCH "${HUB_MAINTENANCE_SMALL_BATCH:-$HUB_MAINTENANCE_SMALL_BATCH_DEFAULT}"
+
     echo "   signup mode  ${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
+    echo "   maintenance  ${HUB_MAINTENANCE_START:-$HUB_MAINTENANCE_START_DEFAULT}-${HUB_MAINTENANCE_END:-$HUB_MAINTENANCE_END_DEFAULT}" \
+         "${HUB_MAINTENANCE_BATCH:-$HUB_MAINTENANCE_BATCH_DEFAULT} items, every ${HUB_MAINTENANCE_INTERVAL:-$HUB_MAINTENANCE_INTERVAL_DEFAULT} min" \
+         "${HUB_MAINTENANCE_SMALL_BATCH:-$HUB_MAINTENANCE_SMALL_BATCH_DEFAULT} items"
     echo "   port         ${HUB_PORT:-$HUB_PORT_DEFAULT}"
     echo "   secret key   $( [[ -n "${HUB_SECRET_KEY:-}" ]] && echo "from config (${#HUB_SECRET_KEY} characters)" || echo "not in config" )"
 
@@ -1078,6 +1132,7 @@ deploy_node() {
     set_env_value HOST_MODELS_DIR "$HOST_MODELS_DIR"
     set_env_value NODE_PORT "${NODE_PORT:-$NODE_PORT_DEFAULT}"
     set_env_value TTS_MODEL "${TTS_MODEL:-chatterbox}"
+    set_env_value STT_WORKERS "${STT_WORKERS:-$STT_WORKERS_DEFAULT}"
 
     BUILD_ARGS=()
     COMPOSE_FILES=(-f compose.yml)
@@ -1126,6 +1181,7 @@ deploy_node() {
 
     echo "   port        ${NODE_PORT:-$NODE_PORT_DEFAULT}"
     [ "$INSTALL_TTS" = true ] && echo "   tts_model   ${TTS_MODEL:-chatterbox}"
+    [ "$INSTALL_STT" = true ] && echo "   stt_workers ${STT_WORKERS:-$STT_WORKERS_DEFAULT}"
     echo "   vendor      ${GPU_VENDOR:-cpu}"
     echo "   backend     ${TORCH_BACKEND:-cpu}"
     echo "   cuda_index  ${TORCH_CUDA_INDEX:-n/a}"
@@ -1455,6 +1511,12 @@ parse_host_config() {
     SIGNUP_MODE=""
     HUB_SECRET_KEY=""
     HUB_FETCH_ALLOW=""
+    HUB_MAINTENANCE_START=""
+    HUB_MAINTENANCE_END=""
+    HUB_MAINTENANCE_BATCH=""
+    HUB_MAINTENANCE_INTERVAL=""
+    HUB_MAINTENANCE_SMALL_BATCH=""
+    STT_WORKERS=""
     NODE_PORT=""
     LLAMA_SERVER_PORT=""
     LLAMA_SERVER_MODEL=""
@@ -1471,6 +1533,12 @@ parse_host_config() {
         SIGNUP_MODE=$(echo "$host_config" | jq -r '.hub.signup_mode // empty')
         HUB_SECRET_KEY=$(echo "$host_config" | jq -r '.hub.secret_key // empty')
         HUB_FETCH_ALLOW=$(echo "$host_config" | jq -r '.hub.fetch_allow // empty')
+        # configs from before these options have no "maintenance" -> the defaults
+        HUB_MAINTENANCE_START=$(echo "$host_config" | jq -r '.hub.maintenance.start // empty')
+        HUB_MAINTENANCE_END=$(echo "$host_config" | jq -r '.hub.maintenance.end // empty')
+        HUB_MAINTENANCE_BATCH=$(echo "$host_config" | jq -r '.hub.maintenance.batch // empty')
+        HUB_MAINTENANCE_INTERVAL=$(echo "$host_config" | jq -r '.hub.maintenance.interval // empty')
+        HUB_MAINTENANCE_SMALL_BATCH=$(echo "$host_config" | jq -r '.hub.maintenance.small_batch // empty')
     fi
 
     if echo "$host_config" | jq -e '.chat' >/dev/null; then
@@ -1534,6 +1602,7 @@ parse_host_config() {
             fi
             if [[ "$type" == "speech_to_text" || "$name" == "stt" ]]; then
                 INSTALL_STT=true
+                STT_WORKERS=$(echo "$item" | jq -r '.workers // empty')
             fi
             if [[ "$type" == "text_to_embedding" ]]; then
                 INSTALL_EMBEDDING=true
@@ -2013,6 +2082,12 @@ readonly CONTAINER_MODELS_DIR="/models"
 readonly HUB_PORT_DEFAULT=14223
 readonly SIGNUP_MODE_DEFAULT="invite"                # open: anyone can sign up, invite: signup needs an invite token
 readonly NODE_PORT_DEFAULT=7346
+readonly HUB_MAINTENANCE_START_DEFAULT="02:00"   # nightly maintenance window, each user's local time
+readonly HUB_MAINTENANCE_END_DEFAULT="05:00"
+readonly HUB_MAINTENANCE_BATCH_DEFAULT=50        # items per task and user and night
+readonly HUB_MAINTENANCE_INTERVAL_DEFAULT=15     # minutes between daytime runs, 0 = off
+readonly HUB_MAINTENANCE_SMALL_BATCH_DEFAULT=10  # items per task and user and daytime run
+readonly STT_WORKERS_DEFAULT=4                   # parallel speech to text transcriptions
 readonly HOST_MODELS_DIR_DEFAULT="/var/lib/Rueckgrat/models"
 
 readonly LLAMA_SERVER_MAX_CONTEXT_DEFAULT=4096

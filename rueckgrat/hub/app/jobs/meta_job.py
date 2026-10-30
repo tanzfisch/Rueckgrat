@@ -62,6 +62,11 @@ class Turns:
         with self._lock:
             return conversation_id in self._running
 
+    def any_busy(self) -> bool:
+        """a reply is being made in any conversation"""
+        with self._lock:
+            return bool(self._running)
+
     def set_state(self, job, state: str) -> bool:
         """"images" (an image tool is queued) or "done" (the final goes out): from then on nothing merges into the job.
         False if the job was cancelled already"""
@@ -86,6 +91,7 @@ class MetaJob(Job):
         self.cancelled = threading.Event()  # set when a follow-up merged into this turn
         self.state = "running"  # "images" / "done", see Turns.set_state
         self.message_id = -1
+        self.sources = []   # pages the web tools used, shown as links under the answer
         self.done = False
 
     def _update_conversation_context(self):
@@ -122,7 +128,8 @@ class MetaJob(Job):
                 "role": "assistant",
                 "content": data["response"],
                 "tool_calls": [],
-                "message_id": self.message_id
+                "message_id": self.message_id,
+                "sources": self.sources
             }
             self.done = True
             
@@ -281,6 +288,10 @@ class MetaJob(Job):
                 tool_calls=parallel_tool_calls,
                 parallel=True
             )
+
+            self.sources = self.response.pop("sources", [])
+            if self.sources:
+                self.db.set_message_sources(self.message_id, self.sources)
 
             MessageQueue().send_status_message("finalize answer")
 

@@ -58,10 +58,6 @@ class MessageQueue:
     def send_data(self, data: dict, user_id=_UNSET):
         self._push(data, user_id)
 
-    def send_url(self, url: str, user_id=_UNSET):
-        logger.debug(f"sending url {url}")
-        self._push({"status": {"url": url}}, user_id)
-
     def pop_message(self, user_id: Optional[int] = None):
         """next message for this user (None = the shared queue)"""
         with self.lock:
