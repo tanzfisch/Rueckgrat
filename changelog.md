@@ -15,6 +15,15 @@ Changelog
 - #121 fixed display of source URLs. now part of the chat bubble
 - #147 nightly maintenance: conversation summaries with vectors to find old conversations by meaning
 - #149 improve conversations: supressing made-up facts, sources or shared memories, lasting user facts kept in the context, fewer *actions* and questions
+- #150 stability pass
+      image downloads: failed single attempts only logged at debug, one error once all retries gave up
+      image downloads: two downloads of the same file no longer share one .part file (FileNotFoundError on rename)
+      edit profile from the settings goes back to the settings (was the contact list), also after save
+      translate page follows the "Enter sends" setting like the chat (Enter always made a new line)
+      gallery dates shown in local time (were UTC, images from the morning showed the day before)
+      chat mic: if the mic can't start (no audio device) the button goes back to off instead of an unhandled traceback
+      chat input has the keyboard focus on opening a conversation also with "Enter sends" on (flet's focus() missed shift_enter fields)
+      no more flet deprecation warnings: text field and dropdown borders use border=OutlineInputBorder (field_border in theme.py), NoInputBorder instead of InputBorder.NONE
 
 0.22.0
 ------

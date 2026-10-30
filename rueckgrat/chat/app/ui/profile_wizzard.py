@@ -3,7 +3,7 @@ from enum import Enum
 import os
 import random
 import flet as ft
-from app.ui.theme import STYLES
+from app.ui.theme import STYLES, field_border
 
 from app.utils import Hub
 from app.ui import BasePage
@@ -159,9 +159,7 @@ class WizardProfilePage(ft.Column):
             on_focus=self.on_name_focus,
             filled=True,
             bgcolor="#2C2C2C",
-            border_radius=22,
-            border_color="transparent",
-            focused_border_color="#0D7377",
+            border=field_border(22, "#0D7377"),
             content_padding=ft.Padding.only(left=16, right=16, top=10, bottom=10),
             height=44,
         )
@@ -202,9 +200,7 @@ class WizardProfilePage(ft.Column):
             value=profile["backstory"] if profile else "",
             filled=True,
             bgcolor="#2C2C2C",
-            border_radius=16,
-            border_color="transparent",
-            focused_border_color="#0D7377",
+            border=field_border(16, "#0D7377"),
             content_padding=16,
         )
 
@@ -228,9 +224,7 @@ class WizardProfilePage(ft.Column):
             value="",
             filled=True,
             bgcolor="#2C2C2C",
-            border_radius=16,
-            border_color="transparent",
-            focused_border_color="#0D7377",
+            border=field_border(16, "#0D7377"),
             content_padding=16,
         )
         self.sfw_switch = ft.Switch(value=True, active_color="#0D7377")
@@ -412,7 +406,11 @@ class ProfileWizard(BasePage):
         ]
 
     def on_go_back(self, e=None):
-        self.navigator("contacts")
+        self.navigator(self._back_page())
+
+    def _back_page(self) -> str:
+        # editing the own profile was opened from the settings, so it goes back there
+        return "settings" if self.user_profile_mode == ProfileWizzardMode.UserChange else "contacts"
 
     def _show(self, content, button_text: str = None):
         # button_text None hides the button, e.g. while the character is generated
@@ -429,7 +427,7 @@ class ProfileWizard(BasePage):
         if self.user_profile_mode != ProfileWizzardMode.AIContact:
             # the entered name is stored in the "name" key of the profile json in user_data
             Hub.update_user_data({"profile": json.dumps(profile)})
-            self.navigator("contacts")
+            self.navigator(self._back_page())
             return
 
         # the hub infers role, personality and looks from the backstory
