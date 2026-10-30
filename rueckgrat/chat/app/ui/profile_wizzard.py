@@ -406,11 +406,9 @@ class ProfileWizard(BasePage):
         ]
 
     def on_go_back(self, e=None):
-        self.navigator(self._back_page())
-
-    def _back_page(self) -> str:
-        # editing the own profile was opened from the settings, so it goes back there
-        return "settings" if self.user_profile_mode == ProfileWizzardMode.UserChange else "contacts"
+        # the first setup after login (Skip) carries on to the contacts, the others go back to where they were opened
+        if self.user_profile_mode == ProfileWizzardMode.UserSetup or not self.navigator.back():
+            self.navigator("contacts")
 
     def _show(self, content, button_text: str = None):
         # button_text None hides the button, e.g. while the character is generated
@@ -427,7 +425,7 @@ class ProfileWizard(BasePage):
         if self.user_profile_mode != ProfileWizzardMode.AIContact:
             # the entered name is stored in the "name" key of the profile json in user_data
             Hub.update_user_data({"profile": json.dumps(profile)})
-            self.navigator(self._back_page())
+            self.on_go_back()
             return
 
         # the hub infers role, personality and looks from the backstory

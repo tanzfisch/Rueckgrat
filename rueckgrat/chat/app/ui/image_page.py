@@ -72,7 +72,7 @@ class ImagePage(BasePage):
         ]
 
     def on_go_back(self, e=None):
-        self.navigator("contacts")
+        self.navigator.back()
 
     def on_enter(self, **kwargs):
         self._active = True
