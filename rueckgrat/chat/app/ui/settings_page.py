@@ -17,7 +17,7 @@ TIMEZONES = [
 
 def _section(title: str, *controls) -> ft.Column:
     # same heading style as the sections of the contact profile page
-    heading = ft.Text(title, weight=ft.FontWeight.BOLD, size=16)
+    heading = ft.Text(title, style=STYLES["section_heading"])
     return ft.Column([heading, *controls], spacing=10, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
 
 
@@ -48,49 +48,18 @@ class NetworkSettingsPage(ft.Column):
             self.on_ok()
 
 
-class UserProfileSettingsPage(ft.Column):
+class ProfileSettingsPage(ft.Column):
+    """who the user is to the contacts: name, look and backstory"""
     def __init__(self, navigator):
         # scrolls, so small screens can reach every section. STRETCH gives fields and buttons the same width
         super().__init__(expand=True, spacing=28, scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
         self.navigator = navigator
-        # optional, the hub only checks the format
-        self.email_edit = ft.TextField(label="Email (optional)", value=Hub.get_email(), **STYLES["field"])
-        # the companions of all contacts plan their day and keep quiet hours in it
-        timezone = Hub.get_timezone()   # "" if the hub can't be reached, then nothing is selected
-        timezones = TIMEZONES if timezone in TIMEZONES or not timezone else [timezone, *TIMEZONES]
-        self.timezone_edit = ft.Dropdown(label="Timezone", value=timezone or None,
-                                         options=[ft.DropdownOption(key=tz, text=tz) for tz in timezones], **STYLES["field"])
-        self.current_pass_edit = ft.TextField(label="Current password", password=True, can_reveal_password=True, **STYLES["field"])
-        self.new_pass_edit = ft.TextField(label="New password", password=True, can_reveal_password=True, **STYLES["field"])
-        self.confirm_pass_edit = ft.TextField(label="Confirm new password", password=True, can_reveal_password=True, **STYLES["field"])
         self.controls = [
             _section(
                 "Profile",
                 *self._profile_summary(),
                 ft.Button("edit profile", on_click=self.on_click_user_profile, style=STYLES["button"]["style"]),
             ),
-            _section(
-                "Email",
-                self.email_edit,
-                ft.Button("save email", on_click=self.on_click_save_email, style=STYLES["button"]["style"]),
-            ),
-            _section(
-                "Timezone",
-                self.timezone_edit,
-                ft.Button("save timezone", on_click=self.on_click_save_timezone, style=STYLES["button"]["style"]),
-            ),
-            _section(
-                "Password",
-                self.current_pass_edit,
-                self.new_pass_edit,
-                self.confirm_pass_edit,
-                ft.Button("change password", on_click=self.on_click_change_password, style=STYLES["button"]["style"]),
-            ),
-            # the session action, kept apart from the account settings
-            ft.Column([
-                ft.Divider(color=SURFACE_3),
-                ft.Button("logout", on_click=self.on_click_logout, style=STYLES["button"]["style"]),
-            ], spacing=20, horizontal_alignment=ft.CrossAxisAlignment.STRETCH),
         ]
 
     @staticmethod
@@ -116,22 +85,48 @@ class UserProfileSettingsPage(ft.Column):
     def on_click_user_profile(self, e=None):
         self.navigator("profile_wizz", user_profile_mode=ProfileWizzardMode.UserChange)
 
+
+class AccountSettingsPage(ft.Column):
+    """login and the details the hub keeps: email, password, logout"""
+    def __init__(self, navigator):
+        # scrolls, so small screens can reach every section. STRETCH gives fields and buttons the same width
+        super().__init__(expand=True, spacing=28, scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+        self.navigator = navigator
+        # optional, the hub only checks the format
+        self.email_edit = ft.TextField(label="Email (optional)", value=Hub.get_email(), **STYLES["field"])
+        self.current_pass_edit = ft.TextField(label="Current password", password=True, can_reveal_password=True, **STYLES["field"])
+        self.new_pass_edit = ft.TextField(label="New password", password=True, can_reveal_password=True, **STYLES["field"])
+        self.confirm_pass_edit = ft.TextField(label="Confirm new password", password=True, can_reveal_password=True, **STYLES["field"])
+        self.controls = [
+            _section(
+                "User name",
+                ft.Text(Hub.get_user_name() or "unknown", weight=ft.FontWeight.BOLD),   # the login name, can't be changed
+            ),
+            _section(
+                "Email",
+                self.email_edit,
+                ft.Button("save email", on_click=self.on_click_save_email, style=STYLES["button"]["style"]),
+            ),
+            _section(
+                "Password",
+                self.current_pass_edit,
+                self.new_pass_edit,
+                self.confirm_pass_edit,
+                ft.Button("change password", on_click=self.on_click_change_password, style=STYLES["button"]["style"]),
+            ),
+            # the session action, kept apart from the account settings
+            ft.Column([
+                ft.Divider(color=SURFACE_3),
+                ft.Button("logout", on_click=self.on_click_logout, style=STYLES["button"]["style"]),
+            ], spacing=20, horizontal_alignment=ft.CrossAxisAlignment.STRETCH),
+        ]
+
     def on_click_save_email(self, e=None):
         error = Hub.set_email(self.email_edit.value or "")
         if error:
             MessageBox.error(self.page, error, title="Email not saved")
             return
         MessageBox.show(self.page, "your email has been saved", title="Email saved")
-
-    def on_click_save_timezone(self, e=None):
-        if not self.timezone_edit.value:
-            MessageBox.error(self.page, "please choose a timezone", title="Timezone not saved")
-            return
-        error = Hub.set_timezone(self.timezone_edit.value)
-        if error:
-            MessageBox.error(self.page, error, title="Timezone not saved")
-            return
-        MessageBox.show(self.page, "your timezone has been saved", title="Timezone saved")
 
     def on_click_change_password(self, e=None):
         if self.new_pass_edit.value != self.confirm_pass_edit.value:
@@ -154,6 +149,47 @@ class UserProfileSettingsPage(ft.Column):
         self.navigator("login")
 
 
+class PreferencesSettingsPage(ft.Column):
+    """how the app behaves for the user: timezone (on the hub), chat input (this device)"""
+    def __init__(self, navigator):
+        # scrolls, so small screens can reach every section. STRETCH gives fields and buttons the same width
+        super().__init__(expand=True, spacing=28, scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+        self.navigator = navigator
+        # the companions of all contacts plan their day and keep quiet hours in it
+        timezone = Hub.get_timezone()   # "" if the hub can't be reached, then nothing is selected
+        timezones = TIMEZONES if timezone in TIMEZONES or not timezone else [timezone, *TIMEZONES]
+        self.timezone_edit = ft.Dropdown(label="Timezone", value=timezone or None,
+                                         options=[ft.DropdownOption(key=tz, text=tz) for tz in timezones], **STYLES["field"])
+        # stored on this device only, saved on change
+        self.enter_sends_switch = ft.Switch(value=RueckgratConfig().enter_sends, on_change=self.on_enter_sends_changed)
+        self.controls = [
+            _section(
+                "Timezone",
+                self.timezone_edit,
+                ft.Button("save timezone", on_click=self.on_click_save_timezone, style=STYLES["button"]["style"]),
+            ),
+            _section(
+                "Chat",
+                ft.Text("when off, ctrl+enter sends", color=TEXT_DIM, size=12),
+                # a switch label doesn't wrap, a Text next to it does
+                ft.Row([self.enter_sends_switch, ft.Text("Enter sends the message (shift+enter for a new line)", expand=True)]),
+            ),
+        ]
+
+    def on_click_save_timezone(self, e=None):
+        if not self.timezone_edit.value:
+            MessageBox.error(self.page, "please choose a timezone", title="Timezone not saved")
+            return
+        error = Hub.set_timezone(self.timezone_edit.value)
+        if error:
+            MessageBox.error(self.page, error, title="Timezone not saved")
+            return
+        MessageBox.show(self.page, "your timezone has been saved", title="Timezone saved")
+
+    def on_enter_sends_changed(self, e=None):
+        RueckgratConfig().enter_sends = self.enter_sends_switch.value
+
+
 class SettingsPage(BasePage):
     def __init__(self, navigator):
         super().__init__(navigator)
@@ -162,13 +198,20 @@ class SettingsPage(BasePage):
         self.header.on_go_back = self.on_go_back
 
         logged_in = bool(Hub.access_token)
-        self.profile_page = UserProfileSettingsPage(self.navigator) if logged_in else None
-        self.network_page = NetworkSettingsPage()
-        if not logged_in:
-            self.network_page.on_ok = self.on_go_back
-        self.content_slot = ft.Container(content=self.profile_page or self.network_page, expand=True)
+        # before login only the hub connection can be set
+        self.pages = {"Network": NetworkSettingsPage()}
+        if logged_in:
+            self.pages = {
+                "Profile": ProfileSettingsPage(self.navigator),
+                "Account": AccountSettingsPage(self.navigator),
+                "Preferences": PreferencesSettingsPage(self.navigator),
+                **self.pages,
+            }
+        else:
+            self.pages["Network"].on_ok = self.on_go_back
+        tabs = list(self.pages)
+        self.content_slot = ft.Container(content=self.pages[tabs[0]], expand=True)
 
-        tabs = ["Profile", "Network"] if logged_in else ["Network"]
         self.page_selector = RowSelector(tabs, True, 1)
         self.page_selector.on_selection_changed = self.on_page_changed
         self.page_selector.select(tabs[0])
@@ -186,7 +229,7 @@ class SettingsPage(BasePage):
                             vertical_alignment=ft.CrossAxisAlignment.STRETCH,
                             controls=[
                                 ft.Container(
-                                    width=100,
+                                    width=120,   # fits "Preferences"
                                     content=ft.Column(
                                         controls=[
                                             self.page_selector,
@@ -206,6 +249,5 @@ class SettingsPage(BasePage):
         self.navigator("contacts" if Hub.access_token else "login")
 
     def on_page_changed(self, page_name: str):
-        pages = {"Profile": self.profile_page, "Network": self.network_page}
-        self.content_slot.content = pages[page_name]
+        self.content_slot.content = self.pages[page_name]
         self.content_slot.update() 

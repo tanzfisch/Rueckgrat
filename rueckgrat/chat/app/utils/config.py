@@ -121,6 +121,15 @@ class RueckgratConfig:
         return self._get("chat", "log_level", "ERROR")
 
     @property
+    def enter_sends(self) -> bool:
+        """enter sends a chat message (shift+enter is a new line). off: ctrl+enter sends"""
+        return self._get("chat", "enter_sends", "false") == "true"
+
+    @enter_sends.setter
+    def enter_sends(self, value: bool):
+        self._set("chat", "enter_sends", "true" if value else "false")
+
+    @property
     def refresh_token(self):
         """the stored session (stay logged in), "" when logged out"""
         return self._get("session", "refresh_token", "")

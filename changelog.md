@@ -14,6 +14,7 @@ Changelog
       README explains which users, sudo rights and ssh keys the installer needs
 - #121 fixed display of source URLs. now part of the chat bubble
 - #147 nightly maintenance: conversation summaries with vectors to find old conversations by meaning
+- #149 improve conversations: supressing made-up facts, sources or shared memories, lasting user facts kept in the context, fewer *actions* and questions
 
 0.22.0
 ------

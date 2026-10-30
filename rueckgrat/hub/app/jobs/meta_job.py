@@ -149,7 +149,7 @@ class MetaJob(Job):
 
         if websearch_response == "":
             return None
-        return f"\n\nWEBSEARCH_RESULT{websearch_response}\n"
+        return f"\n\nWEBSEARCH_RESULT{websearch_response}\nBase your answer on the WEBSEARCH_RESULT. Do not invent or add any information. Answer concisely.\n"
 
     def _format_conversion_results(self) -> Optional[str]:
         """removes the convert tool results from self.response, returns the CONVERSION_RESULT block or None"""
@@ -257,6 +257,8 @@ class MetaJob(Job):
             websearch_block = self._format_websearch_results()
             if websearch_block:
                 compiled_response += websearch_block
+            else:
+                compiled_response += "\n\nNo web search was done for this message. If you don't know current facts like opening hours, prices or news, say so.\n"
 
             conversion_block = self._format_conversion_results()
             if conversion_block:
@@ -292,6 +294,11 @@ class MetaJob(Job):
             self.sources = self.response.pop("sources", [])
             if self.sources:
                 self.db.set_message_sources(self.message_id, self.sources)
+
+            # the tools this answer used, so later turns know what was done. the memory tools run every turn, they'd only add noise
+            used_tools = list(dict.fromkeys(call["tool"] for call in tool_calls if call["tool"] not in ("remember", "search_memory")))
+            if used_tools:
+                self.db.set_message_tools(self.message_id, used_tools)
 
             MessageQueue().send_status_message("finalize answer")
 

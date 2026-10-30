@@ -23,7 +23,8 @@ class RememberTool(Tool):
 
     def execute(self) -> None:
         text = " ".join(str(self.tool_call.get("text") or "").split())
-        if not text or len(text) > MAX_MEMORY_LENGTH:
+        # a single word is a fragment, not a fact worth remembering
+        if len(text.split()) < 2 or len(text) > MAX_MEMORY_LENGTH:
             logger.error("invalid info to remember")
             self.response.setdefault("tool_results", []).append({"tool": self.name(), "error": "remembered nothing"})
             return
@@ -56,7 +57,7 @@ class RememberTool(Tool):
         return """
 REMEMBER:
 
-Store one durable fact about the user that will still be true later (identity, relationships, long-term history, location, job, lasting preferences). Skip temporary wants, current plans, or comments about media/videos.
+Whenever the user tells you a durable fact about themselves that will still be true later (name, identity, relationships, long-term history, location, job, health and allergies, pets, hobbies, lasting preferences, plans with a date), store it. Skip temporary wants or comments about media/videos.
 
 Write in third person. Max 200 characters. One fact only.
 
