@@ -168,7 +168,7 @@ class ChatPage(BasePage):
             self.input_box.update()
 
     def on_go_back(self, e=None):
-        self.navigator("conversations", contact_id=self.contact_id)
+        self.navigator.back()
 
     def clear_history(self):
         self.status_widget.clear_status()

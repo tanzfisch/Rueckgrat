@@ -24,6 +24,7 @@ Changelog
       chat mic: if the mic can't start (no audio device) the button goes back to off instead of an unhandled traceback
       chat input has the keyboard focus on opening a conversation also with "Enter sends" on (flet's focus() missed shift_enter fields)
       no more flet deprecation warnings: text field and dropdown borders use border=OutlineInputBorder (field_border in theme.py), NoInputBorder instead of InputBorder.NONE
+- #18 page navigation with a back stack: back (header, Android, browser) returns to the page you came from, login and contacts start the stack anew
 
 0.22.0
 ------

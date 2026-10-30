@@ -146,7 +146,7 @@ class TranslatePage(BasePage):
             self.send(self.active)
 
     def on_go_back(self, e=None):
-        self.navigator("contacts")
+        self.navigator.back()
 
     def on_enter(self, **kwargs):
         Hub.register_incomming_message(self.on_incomming_message)

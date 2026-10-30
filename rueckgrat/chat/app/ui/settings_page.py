@@ -246,7 +246,8 @@ class SettingsPage(BasePage):
         ]
 
     def on_go_back(self, e=None):
-        self.navigator("contacts" if Hub.access_token else "login")
+        if not self.navigator.back():
+            self.navigator("contacts" if Hub.access_token else "login")
 
     def on_page_changed(self, page_name: str):
         self.content_slot.content = self.pages[page_name]
