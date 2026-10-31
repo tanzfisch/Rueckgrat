@@ -1,4 +1,4 @@
-from .job_queue import Job
+from .task_queue import Task
 from typing import Dict, Any
 import re
 import random
@@ -7,7 +7,7 @@ from ..utils.prompt_compiler import PromptCompiler
 from app.common import get_logger, ChatRequest, Utils
 logger = get_logger()
 
-class UpdateContextJob(Job):
+class UpdateContextTask(Task):
     def __init__(self, request: ChatRequest, db, infrastructure):
         super().__init__()
         self.request = request

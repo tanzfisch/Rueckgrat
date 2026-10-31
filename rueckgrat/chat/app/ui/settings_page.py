@@ -1,5 +1,8 @@
+import os
+import re
+from pathlib import Path
 import flet as ft
-from app.ui.theme import STYLES, SURFACE_3, TEXT_DIM
+from app.ui import theme
 
 from app.ui import BasePage
 from app.ui.widgets import RowSelector, Header, MessageBox
@@ -15,9 +18,34 @@ TIMEZONES = [
 ]
 
 
+# Credits and Licenses show files from the project root. a source checkout reads them there,
+# the apk from assets/, where install.sh copies them before flet build
+ASSETS_DIR = os.getenv("FLET_ASSETS_DIR") or "assets"
+_HERE = Path(__file__).resolve()
+REPO_ROOT = _HERE.parents[4] if len(_HERE.parents) > 4 else None   # chat/app/ui/settings_page.py -> project root
+
+
+def _read_doc(name: str) -> str:
+    for folder in (REPO_ROOT, Path(ASSETS_DIR)):
+        if folder and (folder / name).is_file():
+            return (folder / name).read_text(encoding="utf-8")
+    return ""
+
+
+def _version() -> str:
+    # the newest release is the first "x.y.z" heading of changelog.md
+    match = re.search(r"^(\d+\.\d+\.\d+)\s*$", _read_doc("changelog.md"), re.M)
+    return match.group(1) if match else "unknown"
+
+
+async def _open_link(e):
+    if e.data:
+        await ft.UrlLauncher().launch_url(e.data)
+
+
 def _section(title: str, *controls) -> ft.Column:
     # same heading style as the sections of the contact profile page
-    heading = ft.Text(title, style=STYLES["section_heading"])
+    heading = ft.Text(title, style=theme.STYLES["section_heading"])
     return ft.Column([heading, *controls], spacing=10, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
 
 
@@ -28,16 +56,16 @@ class NetworkSettingsPage(ft.Column):
         self.on_ok = None
         self.config = RueckgratConfig()
 
-        self.host_input = ft.TextField(label="Host", value=self.config.host, **STYLES["field"])
-        self.port_input = ft.TextField(label="Port", value=self.config.port, **STYLES["field"])
+        self.host_input = ft.TextField(label="Host", value=self.config.host, **theme.STYLES["field"])
+        self.port_input = ft.TextField(label="Port", value=self.config.port, **theme.STYLES["field"])
 
         self.controls = [
             _section(
                 "Hub connection",
-                ft.Text("host name or IP address and port of your Rueckgrat hub", color=TEXT_DIM, size=12),
+                ft.Text("host name or IP address and port of your Rueckgrat hub", color=theme.TEXT_DIM, size=12),
                 self.host_input,
                 self.port_input,
-                ft.Button("Save", on_click=self._ok, style=STYLES["button"]["style"]),
+                ft.Button("Save", on_click=self._ok, style=theme.STYLES["button"]["style"]),
             ),
         ]
 
@@ -58,7 +86,7 @@ class ProfileSettingsPage(ft.Column):
             _section(
                 "Profile",
                 *self._profile_summary(),
-                ft.Button("edit profile", on_click=self.on_click_user_profile, style=STYLES["button"]["style"]),
+                ft.Button("edit profile", on_click=self.on_click_user_profile, style=theme.STYLES["button"]["style"]),
             ),
         ]
 
@@ -78,8 +106,8 @@ class ProfileSettingsPage(ft.Column):
         if attributes:
             texts.append(ft.Text(attributes))
         if backstory:
-            texts.append(ft.Text(backstory, color=TEXT_DIM, size=12, max_lines=3, overflow=ft.TextOverflow.ELLIPSIS))
-        return texts or [ft.Text("no profile yet", color=TEXT_DIM, size=12)]
+            texts.append(ft.Text(backstory, color=theme.TEXT_DIM, size=12, max_lines=3, overflow=ft.TextOverflow.ELLIPSIS))
+        return texts or [ft.Text("no profile yet", color=theme.TEXT_DIM, size=12)]
 
 
     def on_click_user_profile(self, e=None):
@@ -93,10 +121,10 @@ class AccountSettingsPage(ft.Column):
         super().__init__(expand=True, spacing=28, scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
         self.navigator = navigator
         # optional, the hub only checks the format
-        self.email_edit = ft.TextField(label="Email (optional)", value=Hub.get_email(), **STYLES["field"])
-        self.current_pass_edit = ft.TextField(label="Current password", password=True, can_reveal_password=True, **STYLES["field"])
-        self.new_pass_edit = ft.TextField(label="New password", password=True, can_reveal_password=True, **STYLES["field"])
-        self.confirm_pass_edit = ft.TextField(label="Confirm new password", password=True, can_reveal_password=True, **STYLES["field"])
+        self.email_edit = ft.TextField(label="Email (optional)", value=Hub.get_email(), **theme.STYLES["field"])
+        self.current_pass_edit = ft.TextField(label="Current password", password=True, can_reveal_password=True, **theme.STYLES["field"])
+        self.new_pass_edit = ft.TextField(label="New password", password=True, can_reveal_password=True, **theme.STYLES["field"])
+        self.confirm_pass_edit = ft.TextField(label="Confirm new password", password=True, can_reveal_password=True, **theme.STYLES["field"])
         self.controls = [
             _section(
                 "User name",
@@ -105,19 +133,19 @@ class AccountSettingsPage(ft.Column):
             _section(
                 "Email",
                 self.email_edit,
-                ft.Button("save email", on_click=self.on_click_save_email, style=STYLES["button"]["style"]),
+                ft.Button("save email", on_click=self.on_click_save_email, style=theme.STYLES["button"]["style"]),
             ),
             _section(
                 "Password",
                 self.current_pass_edit,
                 self.new_pass_edit,
                 self.confirm_pass_edit,
-                ft.Button("change password", on_click=self.on_click_change_password, style=STYLES["button"]["style"]),
+                ft.Button("change password", on_click=self.on_click_change_password, style=theme.STYLES["button"]["style"]),
             ),
             # the session action, kept apart from the account settings
             ft.Column([
-                ft.Divider(color=SURFACE_3),
-                ft.Button("logout", on_click=self.on_click_logout, style=STYLES["button"]["style"]),
+                ft.Divider(color=theme.SURFACE_3),
+                ft.Button("logout", on_click=self.on_click_logout, style=theme.STYLES["button"]["style"]),
             ], spacing=20, horizontal_alignment=ft.CrossAxisAlignment.STRETCH),
         ]
 
@@ -159,18 +187,18 @@ class PreferencesSettingsPage(ft.Column):
         timezone = Hub.get_timezone()   # "" if the hub can't be reached, then nothing is selected
         timezones = TIMEZONES if timezone in TIMEZONES or not timezone else [timezone, *TIMEZONES]
         self.timezone_edit = ft.Dropdown(label="Timezone", value=timezone or None,
-                                         options=[ft.DropdownOption(key=tz, text=tz) for tz in timezones], **STYLES["field"])
+                                         options=[ft.DropdownOption(key=tz, text=tz) for tz in timezones], **theme.STYLES["field"])
         # stored on this device only, saved on change
         self.enter_sends_switch = ft.Switch(value=RueckgratConfig().enter_sends, on_change=self.on_enter_sends_changed)
         self.controls = [
             _section(
                 "Timezone",
                 self.timezone_edit,
-                ft.Button("save timezone", on_click=self.on_click_save_timezone, style=STYLES["button"]["style"]),
+                ft.Button("save timezone", on_click=self.on_click_save_timezone, style=theme.STYLES["button"]["style"]),
             ),
             _section(
                 "Chat",
-                ft.Text("when off, ctrl+enter sends", color=TEXT_DIM, size=12),
+                ft.Text("when off, ctrl+enter sends", color=theme.TEXT_DIM, size=12),
                 # a switch label doesn't wrap, a Text next to it does
                 ft.Row([self.enter_sends_switch, ft.Text("Enter sends the message (shift+enter for a new line)", expand=True)]),
             ),
@@ -188,6 +216,46 @@ class PreferencesSettingsPage(ft.Column):
 
     def on_enter_sends_changed(self, e=None):
         RueckgratConfig().enter_sends = self.enter_sends_switch.value
+
+
+class AppearanceSettingsPage(ft.Column):
+    """light or dark mode, stored on this device (also used before login)"""
+    def __init__(self, on_mode_changed):
+        super().__init__(expand=True, spacing=28, scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+        self.on_mode_changed = on_mode_changed
+        self.dark_switch = ft.Switch(value=theme.is_dark(), on_change=self.on_dark_changed)
+        self.controls = [
+            _section(
+                "Mode",
+                ft.Text("stored on this device", color=theme.TEXT_DIM, size=12),
+                ft.Row([self.dark_switch, ft.Text("Dark mode", expand=True)]),
+            ),
+        ]
+
+    def on_dark_changed(self, e=None):
+        mode = theme.DARK if self.dark_switch.value else theme.LIGHT
+        RueckgratConfig().theme = mode
+        theme.apply_theme(self.page, mode)
+        self.on_mode_changed()
+
+
+class DocSettingsPage(ft.Column):
+    """a markdown file from the project root, e.g. CREDITS.md (with {version}) or THIRD_PARTY_LICENSES.md"""
+    def __init__(self, file_name: str):
+        super().__init__(expand=True, scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+        text = _read_doc(file_name)
+        if not text:
+            self.controls = [ft.Text(f"{file_name} not found", color=theme.TEXT_DIM, size=12)]
+            return
+        self.controls = [
+            ft.Markdown(
+                value=text.replace("{version}", _version()),
+                selectable=True,
+                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,   # includes tables
+                on_tap_link=_open_link,
+                md_style_sheet=theme.MARKDOWN_STYLE,
+            ),
+        ]
 
 
 class SettingsPage(BasePage):
@@ -209,6 +277,10 @@ class SettingsPage(BasePage):
             }
         else:
             self.pages["Network"].on_ok = self.on_go_back
+        # with or without login
+        self.pages["Appearance"] = AppearanceSettingsPage(self.on_mode_changed)
+        self.pages["Credits"] = DocSettingsPage("CREDITS.md")
+        self.pages["Licenses"] = DocSettingsPage("THIRD_PARTY_LICENSES.md")
         tabs = list(self.pages)
         self.content_slot = ft.Container(content=self.pages[tabs[0]], expand=True)
 
@@ -248,6 +320,15 @@ class SettingsPage(BasePage):
     def on_go_back(self, e=None):
         if not self.navigator.back():
             self.navigator("contacts" if Hub.access_token else "login")
+
+    def on_enter(self, tab: str | None = None, **kwargs):
+        if tab in self.pages:
+            self.page_selector.select(tab)
+            self.on_page_changed(tab)
+
+    def on_mode_changed(self):
+        # every page is built anew with the new colours, this one opens on the same tab again
+        self.navigator("settings", tab="Appearance")
 
     def on_page_changed(self, page_name: str):
         self.content_slot.content = self.pages[page_name]

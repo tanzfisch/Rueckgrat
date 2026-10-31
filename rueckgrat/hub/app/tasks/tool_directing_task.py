@@ -1,4 +1,4 @@
-from .job_queue import Job
+from .task_queue import Task
 from typing import Dict, Any, List
 import json
 import random
@@ -7,14 +7,14 @@ from ..utils.prompt_compiler import PromptCompiler
 from app.common import get_logger, ChatRequest, Utils
 logger = get_logger()
 
-# the tools are detected before (ToolDetectionJob), the model only writes their calls
+# the tools are detected before (ToolDetectionTask), the model only writes their calls
 INSTRUCTION = """
 THINKING ONLY. No final response.
 Output ONLY the JSON tool call line(s) for the query, one per line, exactly in the format of HOW TO CALL. Nothing else: no words, no analysis.
 """
 
-class ToolDirectingJob(Job):
-    """turns the tools detected by ToolDetectionJob into executable calls: the model writes their arguments"""
+class ToolDirectingTask(Task):
+    """turns the tools detected by ToolDetectionTask into executable calls: the model writes their arguments"""
     def __init__(self, request: ChatRequest, db, infrastructure, tool_registry, tool_names: List[str]):
         super().__init__()
         self.tool_names = tool_names  # the tools to call, the prompt gets their full instructions

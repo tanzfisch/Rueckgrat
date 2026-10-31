@@ -1,4 +1,4 @@
-from .job_queue import Job
+from .task_queue import Task
 from typing import Dict, Any, Optional
 import random
 
@@ -7,7 +7,7 @@ from app.common.languages import language_name
 logger = get_logger()
 
 
-class TranslateJob(Job):
+class TranslateTask(Task):
     """translates one message of the translator mode. stateless, nothing is stored.
     result() goes to the client as {"translate": {request_id, from_language, to_language, text, translation or error}}"""
     def __init__(self, infrastructure, from_language: str, to_language: str, text: str, request_id: str = "", user_id: int = None):

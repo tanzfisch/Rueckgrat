@@ -7,7 +7,7 @@ import threading
 from .logger import get_logger
 logger = get_logger()
 
-# the user the running code works for. the hub's JobQueue sets it while a job runs, so tools and
+# the user the running code works for. the hub's TaskQueue sets it while a job runs, so tools and
 # jobs can call MessageQueue().send_status_message("...") without passing the user along.
 # code that runs outside a job (node callbacks, the websocket loop) passes user_id= itself
 current_user_id: ContextVar[Optional[int]] = ContextVar("current_user_id", default=None)
@@ -54,6 +54,17 @@ class MessageQueue:
 
     def send_status_message(self, message: str, user_id=_UNSET):
         self._push({"status": {"message": message}}, user_id)
+
+    def send_job_progress(self, job_id: str, name: str, percent: int, state: str = "running",
+                          step: Optional[int] = None, total: Optional[int] = None, user_id=_UNSET):
+        """#152 a background job's progress, the StatusWidget shows a progress bar per running job (not the "status" line):
+        {"job_progress": {"job_id": str, "name": "a few words", "percent": 0-100, "state": "running"|"done"|"failed"|"cancelled",
+                          "step": int, "total": int}}
+        step / total are extras (the step that started, the steps of the plan, 0 while planning, total changes when the
+        job replans). done / failed / cancelled: the job is over, the client drops its row.
+        the client cancels a job with {"cancel_job": {"job_id": str}} on /ws"""
+        self._push({"job_progress": {"job_id": job_id, "name": name, "percent": max(0, min(100, int(percent))), "state": state,
+                                     "step": step, "total": total}}, user_id)
 
     def send_data(self, data: dict, user_id=_UNSET):
         self._push(data, user_id)

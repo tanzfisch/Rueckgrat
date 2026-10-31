@@ -2,11 +2,11 @@ import re
 import json
 import time
 import threading
-from .job_queue import Job
-from .chat_job import ChatJob
-from .tool_directing_job import ToolDirectingJob
-from .update_context_job import UpdateContextJob
-from .tool_detection_job import ToolDetectionJob
+from .task_queue import Task
+from .chat_task import ChatTask
+from .tool_directing_task import ToolDirectingTask
+from .update_context_task import UpdateContextTask
+from .tool_detection_task import ToolDetectionTask
 from typing import Dict, Any, List, Optional
 
 from app.common import get_logger, ChatRequest, Utils, MessageQueue
@@ -26,13 +26,13 @@ def is_trivial(text: str) -> bool:
     return len(words) < 2 or all(word in FILLERS for word in words)
 
 class Turns:
-    """the MetaJob answering each conversation. a new user message either merges into it
+    """the MetaTask answering each conversation. a new user message either merges into it
     (that job gets cancelled, the new one answers both) or is stored as a message of its own"""
 
     def __init__(self, db):
         self.db = db
         self._lock = threading.Lock()
-        self._running = {}  # conversation_id -> MetaJob
+        self._running = {}  # conversation_id -> MetaTask
 
     def start(self, job):
         """stores the job's user message, merged into the running turn's message while that can still be interrupted"""
@@ -78,7 +78,7 @@ class Turns:
                 del self._running[job.request.conversation_id]
             return True
 
-class MetaJob(Job):
+class MetaTask(Task):
     def __init__(self, user_id: int, request: ChatRequest, db, infrastructure, tool_registry, turns):
         super().__init__()
         self.user_id = user_id
@@ -95,7 +95,7 @@ class MetaJob(Job):
         self.done = False
 
     def _update_conversation_context(self):
-        udate_context_job = UpdateContextJob(self.request, self.db, self.infrastructure)
+        udate_context_job = UpdateContextTask(self.request, self.db, self.infrastructure)
         self.add_sub_job(udate_context_job)
         self.wait_for([udate_context_job])
         new_context = udate_context_job.result()
@@ -186,7 +186,7 @@ class MetaJob(Job):
 
     def _direct_tools(self, tool_names: List[str]) -> Dict[str, Any]:
         """one tool directing call as a sub job, with the full prompts of these tools. the model writes their calls"""
-        tool_directing_job = ToolDirectingJob(
+        tool_directing_job = ToolDirectingTask(
             request=self.request,
             db=self.db,
             infrastructure=self.infrastructure,
@@ -220,7 +220,7 @@ class MetaJob(Job):
             MessageQueue().send_status_message("update context")
 
         # run this in parallel to updateing the context
-        tool_detection_job = ToolDetectionJob(self.request.content, self.tool_registry, self.infrastructure)
+        tool_detection_job = ToolDetectionTask(self.request.content, self.tool_registry, self.infrastructure)
         self.add_sub_job(tool_detection_job)
 
         self._update_conversation_context() # update context after user message was added
@@ -302,7 +302,7 @@ class MetaJob(Job):
 
             MessageQueue().send_status_message("finalize answer")
 
-            chat_job = ChatJob(
+            chat_job = ChatTask(
                 request=self.request,
                 db=self.db,
                 infrastructure=self.infrastructure, 
@@ -331,7 +331,7 @@ class MetaJob(Job):
             MessageQueue().set_status("done")
 
         except Exception as e:
-            logger.error(f"failed to execute MetaJob {repr(e)}")
+            logger.error(f"failed to execute MetaTask {repr(e)}")
         finally:
             self.turns.set_state(self, "done")
 

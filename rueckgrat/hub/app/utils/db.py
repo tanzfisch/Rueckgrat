@@ -11,8 +11,10 @@ from app.common import get_logger
 logger = get_logger()
 
 # no embedding model yet: 384 fits the common small sentence embedders (all-MiniLM-L6-v2, bge-small, e5-small).
-# a different model with another size needs this changed and contact_memory_vectors dropped (CREATE ... IF NOT EXISTS keeps the old one)
+# a different model with another size needs this changed and SCHEMA_VERSION bumped
 MEMORY_EMBEDDING_DIM = 384
+# PRAGMA user_version of a db made by this hub. bump it on every schema change: until 1.0 an older db is wiped, never migrated
+SCHEMA_VERSION = 1
 
 class ChatDB:
     _read_only = False
@@ -31,6 +33,12 @@ class ChatDB:
         logger.debug(f"db path is: {db_path}")
         conn = self.get_connection()
         cursor = conn.cursor()
+
+        version = cursor.execute("PRAGMA user_version").fetchone()[0]
+        if version != SCHEMA_VERSION and (version or cursor.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()[0]):
+            conn.close()
+            raise RuntimeError(f"database {db_path} has schema version {version}, this hub needs {SCHEMA_VERSION}. "
+                               f"there is no migration before 1.0: wipe the database")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS contacts (
@@ -271,7 +279,7 @@ class ChatDB:
         )""")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_companion_due ON companion_calendar(status, due_at)")
 
-        # what each companion pass decided (json, see CompanionJob.log), the last COMPANION_LOG_KEEP per contact.
+        # what each companion pass decided (json, see CompanionTask.log), the last COMPANION_LOG_KEEP per contact.
         # at = the companion's clock (may be simulated), created_at = the wall clock. only for hub management
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS companion_log (
@@ -283,16 +291,28 @@ class ChatDB:
             FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
         )""")
 
-        # the db is opened once at hub start: no job survives a restart, so a row still pending was interrupted
-        cursor.execute("UPDATE generated_images SET status = 'failed' WHERE status = 'pending'")
-        if cursor.rowcount:
-            logger.warning(f"{cursor.rowcount} image generation(s) interrupted by the restart marked as failed")
+        # #152 background jobs started by the spawn_job tool. id is uuid4 hex, made by the tool. started_at / finished_at are UTC
+        # "YYYY-MM-DD HH:MM:SS" like CURRENT_TIMESTAMP. result is the report of what the job did, NULL until it finished.
+        # result is JSON text (sqlite has no JSON column type; stored with json.dumps like messages.sources):
+        # {"summary": str | null, "details": str | null}, more keys (e.g. file paths) can be added later without a migration
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'initializing' CHECK (status IN ('initializing', 'running', 'done', 'failed', 'cancelled')),
+            prompt TEXT NOT NULL,
+            result TEXT DEFAULT NULL CHECK (result IS NULL OR json_valid(result)),
+            conversation_id INTEGER DEFAULT NULL,
+            started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            finished_at TEXT DEFAULT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        )""")
 
         cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_voices_contact
             ON voices(contact_id) WHERE contact_id IS NOT NULL
         """)
 
+        cursor.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
         conn.close()
 
@@ -579,6 +599,41 @@ class ChatDB:
             except Exception as e:
                 logger.error(f"failed saving pending generated image: {e}")
         return 0
+
+    def add_job(self, job_id: str, prompt: str, conversation_id: int | None = None) -> bool:
+        """a job was started (status initializing, no result yet). conversation_id may be None"""
+        with self.get_connection() as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO jobs (id, status, prompt, conversation_id) VALUES (?, 'initializing', ?, ?)",
+                    (job_id, prompt, conversation_id))
+                conn.commit()
+                return True
+            except Exception as e:
+                logger.error(f"failed saving job {job_id}: {e}")
+        return False
+
+    def set_job(self, job_id: str, status: str, result: dict | None = None) -> bool:
+        """running, or done / failed / cancelled (sets finished_at). result: the report {"summary", "details"}, stored as json"""
+        finished_at = "CURRENT_TIMESTAMP" if status in ("done", "failed", "cancelled") else "NULL"
+        with self.get_connection() as conn:
+            try:
+                conn.execute(f"UPDATE jobs SET status = ?, result = ?, finished_at = {finished_at} WHERE id = ?",
+                             (status, json.dumps(result) if result is not None else None, job_id))
+                conn.commit()
+                return True
+            except Exception as e:
+                logger.error(f"failed setting job {job_id} to {status}: {e}")
+        return False
+
+    def fail_stale_jobs(self) -> int:
+        """at hub start: jobs still initializing or running lost their thread with the old hub, they are failed. returns how many"""
+        result = json.dumps({"error": "interrupted", "details": "hub restarted"})
+        with self.get_connection() as conn:
+            cursor = conn.execute("UPDATE jobs SET status = 'failed', result = ?, finished_at = CURRENT_TIMESTAMP WHERE status IN ('initializing', 'running')",
+                                  (result,))
+            conn.commit()
+            return cursor.rowcount
 
     def complete_generated_image(self, row_id: int, file_name: str) -> bool:
         return self._set_generated_image(row_id, "done", file_name)
@@ -1599,18 +1654,14 @@ class ChatDB:
                 logger.error(f"failed looking up voice {value} for user {user_id}: {e}")
         return None
 
-    def find_predefined_voice(self, user_id: int, predefined_id: str, content_hash: str) -> str | None:
-        """id of the user's stored copy of a predefined voice, or None.
-        old rows without origin (NULL) still match by hash, a row with the exact predefined id wins"""
+    def find_predefined_voice(self, user_id: int, predefined_id: str) -> str | None:
+        """id of the user's stored copy of a predefined voice, or None"""
         with self.get_connection() as conn:
             try:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id FROM voices
-                    WHERE user_id = ? AND (predefined_id = ? OR (predefined_id IS NULL AND content_hash = ?))
-                    ORDER BY predefined_id IS NULL
-                    LIMIT 1
-                """, (user_id, predefined_id, content_hash))
+                    SELECT id FROM voices WHERE user_id = ? AND predefined_id = ? LIMIT 1
+                """, (user_id, predefined_id))
                 row = cursor.fetchone()
                 return row["id"] if row else None
             except Exception as e:
@@ -1670,8 +1721,7 @@ class ChatDB:
         with self.get_connection() as conn:
             conn.execute(
                 "INSERT INTO invites (token_hash, created_by, email, expires_at, max_uses, nsfw_allowed) VALUES (?, ?, ?, ?, ?, ?)",
-                # "no name" instead of NULL: older databases still have created_by NOT NULL
-                (self._hash_token(token), created_by or "no name", email.lower() if email else None, expires_at, max_uses, 1 if nsfw_allowed else 0)
+                (self._hash_token(token), created_by, email.lower() if email else None, expires_at, max_uses, 1 if nsfw_allowed else 0)
             )
         logger.info(f"invite created by {created_by or 'no name'}")
         return token
@@ -1706,6 +1756,24 @@ class ChatDB:
         with self.get_connection() as conn:
             cursor = conn.execute("SELECT id, username, nsfw_allowed, created_at FROM users ORDER BY id")
             return [dict(row) for row in cursor.fetchall()]
+
+    def hub_stats(self, active_minutes: int = 10) -> dict:
+        """counts for the hub management tool: running agent jobs, users, users active in the last active_minutes.
+        active = wrote a message, logged in or refreshed their login in that time (an open app that only reads is not seen)"""
+        since = datetime.now(timezone.utc) - timedelta(minutes=active_minutes)
+        since_message = since.strftime("%Y-%m-%d %H:%M:%S")       # messages.timestamp: CURRENT_TIMESTAMP format
+        since_token = since.isoformat(timespec="seconds")          # refresh_tokens: isoformat with +00:00
+        with self.get_connection() as conn:
+            agents = conn.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('initializing', 'running')").fetchone()[0]
+            users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            active = conn.execute("""
+                SELECT COUNT(*) FROM users u WHERE EXISTS (
+                    SELECT 1 FROM messages m JOIN conversations c ON c.id = m.conversation_id
+                    WHERE c.user_id = u.id AND m.role = 'user' AND m.timestamp >= ?
+                ) OR EXISTS (
+                    SELECT 1 FROM refresh_tokens t WHERE t.user_id = u.id AND (t.created_at >= ? OR t.last_used_at >= ?)
+                )""", (since_message, since_token, since_token)).fetchone()[0]
+        return {"running_agent_jobs": agents, "users": users, f"active_last_{active_minutes}min": active}
 
     def create_user_with_invite(self, username: str, passwd: str, token: str, email: str | None = None) -> tuple[int | None, str | None]:
         """

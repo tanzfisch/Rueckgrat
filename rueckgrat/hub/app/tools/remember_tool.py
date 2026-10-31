@@ -12,7 +12,7 @@ DUPLICATE_DISTANCE = 0.05
 class RememberTool(Tool):
     category = ToolCategory.MEMORY
     description = "save one short fact to remember in later conversations (about the user, their life, plans, preferences or your relationship)"
-    question = ""
+    question = []
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)

@@ -130,6 +130,15 @@ class RueckgratConfig:
         self._set("chat", "enter_sends", "true" if value else "false")
 
     @property
+    def theme(self) -> str:
+        """"dark" (default) or "light", this device only"""
+        return self._get("chat", "theme", "dark")
+
+    @theme.setter
+    def theme(self, value: str):
+        self._set("chat", "theme", value)
+
+    @property
     def refresh_token(self):
         """the stored session (stay logged in), "" when logged out"""
         return self._get("session", "refresh_token", "")

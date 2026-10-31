@@ -1,6 +1,6 @@
 from typing import Dict,  Any
 from .tool import Tool, ToolCategory
-from app.jobs.requested_image_job import RequestedImageJob
+from app.tasks.requested_image_task import RequestedImageTask
 
 from app.common import get_logger, MessageQueue, Utils
 logger = get_logger()
@@ -8,7 +8,11 @@ logger = get_logger()
 class ImageGenTool(Tool):
     category = ToolCategory.MEDIA
     description = "generates a picture from a description when the user asks for an image"
-    question = "Does the user want a picture made?"
+    question = [
+        "Does the user want a picture made?",
+        "Does the user want a picture or drawing made?",
+        "Does the user want a picture, drawing, logo or wallpaper made?"
+    ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
@@ -18,12 +22,12 @@ class ImageGenTool(Tool):
         return "generate_image"
 
     def create_image_job(self):
-        """the RequestedImageJob for this tool call (not started), None if the call is invalid.
+        """the RequestedImageTask for this tool call (not started), None if the call is invalid.
         execute() attaches its planned file name before the image is generated"""
         if not "positive_prompt" in self.tool_call:
             logger.error("invalid generate_image")
             return None
-        return RequestedImageJob(self.tool_call["positive_prompt"], self.contact_id, self.db, self.infrastructure,
+        return RequestedImageTask(self.tool_call["positive_prompt"], self.contact_id, self.db, self.infrastructure,
                                  conversation_id=self.conversation_id)
 
     def attach_planned_image(self, image_job) -> None:

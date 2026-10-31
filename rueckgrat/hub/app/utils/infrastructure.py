@@ -11,7 +11,7 @@ from requests.models import Response
 from pathlib import Path
 from typing import Optional, Dict, Callable
 from dataclasses import dataclass
-from ..jobs.image_job import ImageRequest
+from ..tasks.image_task import ImageRequest
 from .tts_cache import TtsCache
 
 from app.common import get_logger, ChatRequestLlama, DownloadQueue, Utils, WebSocketClient
@@ -423,6 +423,9 @@ class Infrastructure:
             
                 if response.status_code == 200:
                     data = response.json()
+                    if data.get("role") == "error":     # the node's llama call failed, content is the error, not a reply
+                        logger.error(f"chat failed on the node: {data.get('content')}")
+                        return None
                     return data.get("content", "")
 
         except Exception as e:

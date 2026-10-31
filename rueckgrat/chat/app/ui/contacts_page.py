@@ -1,7 +1,7 @@
 import json
 import flet as ft
 from pathlib import Path
-from app.ui.theme import STYLES
+from app.ui import theme
 
 from app.ui import BasePage
 from app.ui.widgets import OneLineBubble, ContactCard, ContactInfo, Header, MessageBox
@@ -114,21 +114,21 @@ class ContactsPage(BasePage):
                                     width=40,
                                     height=40,
                                     on_click=lambda e, c=contact: ContactInfo.show(self.page, c),
-                                    style=STYLES["icon_button"]["style"],
+                                    style=theme.STYLES["icon_button"]["style"],
                                 ),
                                 ft.IconButton(
                                     icon=ft.Icons.EDIT,
                                     width=40,
                                     height=40,
                                     on_click=lambda e, i=cid: self.edit_contact(i),
-                                    style=STYLES["icon_button"]["style"],
+                                    style=theme.STYLES["icon_button"]["style"],
                                 ),
                                 ft.IconButton(
                                     icon=ft.Icons.DELETE,
                                     width=40,
                                     height=40,
                                     on_click=lambda e, i=cid: self.delete_contact(i),
-                                    style=STYLES["icon_button"]["style"],
+                                    style=theme.STYLES["icon_button"]["style"],
                                 ),
                             ],
                         ),

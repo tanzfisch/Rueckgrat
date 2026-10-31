@@ -1,9 +1,6 @@
-import os
 import flet as ft
-from app.ui.theme import STYLES, RADIUS, SURFACE_3, TEXT
+from app.ui import theme
 from app.utils import Contact, Hub, Paths
-
-ASSETS_DIR = os.getenv("FLET_ASSETS_DIR") or "assets"
 
 # the app level views, in the order of the tools grid: (route, icon, label)
 TOOLS = [
@@ -31,7 +28,7 @@ class Header(ft.Row):
 
         self.back_btn = ft.IconButton(
             icon=ft.Image(
-                src=f"{ASSETS_DIR}/icons/back_light.png",
+                src=theme.icon("back"),
                 width=24,
                 height=24,
                 fit=ft.BoxFit.CONTAIN,
@@ -39,11 +36,11 @@ class Header(ft.Row):
             width=40,
             height=40,
             on_click=self.handle_go_back,
-            style=STYLES["icon_button"]["style"],
+            style=theme.STYLES["icon_button"]["style"],
         )
 
         self.profile_label = ft.Image(
-            src=f"{ASSETS_DIR}/icons/profile_light.png",
+            src=theme.icon("profile"),
             width=40,
             height=40,
             fit=ft.BoxFit.COVER,
@@ -53,7 +50,7 @@ class Header(ft.Row):
 
         self.menu_btn = ft.IconButton(
             icon=ft.Image(
-                src=f"{ASSETS_DIR}/icons/menu_light.png",
+                src=theme.icon("menu"),
                 width=24,
                 height=24,
                 fit=ft.BoxFit.CONTAIN,
@@ -61,7 +58,7 @@ class Header(ft.Row):
             width=40,
             height=40,
             on_click=self.handle_open_menu,
-            style=STYLES["icon_button"]["style"],
+            style=theme.STYLES["icon_button"]["style"],
         )
 
         controls = []
@@ -96,25 +93,26 @@ class Header(ft.Row):
             tooltip="tools",
             width=40,
             height=40,
-            style=STYLES["icon_button"]["style"],
+            style=theme.STYLES["icon_button"]["style"],
             on_click=self._open_tools,
         )
 
     def _open_tools(self, e):
         """the app level views as a grid of tiles (icon + label), a tap switches to it"""
+        page = self.page    # the header can be rebuilt while the dialog is open, keep the page
         def pick(route: str):
-            self.page.pop_dialog()
+            page.pop_dialog()
             self.navigator(route)
 
         tiles = [
             ft.Container(
-                bgcolor=SURFACE_3,
-                border_radius=RADIUS,
+                bgcolor=theme.SURFACE_3,
+                border_radius=theme.RADIUS,
                 padding=8,
                 ink=True,
                 on_click=lambda e, r=route: pick(r),
                 content=ft.Column(
-                    [ft.Icon(icon, size=32), ft.Text(label, text_align=ft.TextAlign.CENTER, color=TEXT)],
+                    [ft.Icon(icon, size=32), ft.Text(label, text_align=ft.TextAlign.CENTER, color=theme.TEXT)],
                     alignment=ft.MainAxisAlignment.CENTER,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     spacing=6,

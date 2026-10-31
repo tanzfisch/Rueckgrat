@@ -1,13 +1,13 @@
-from .job_queue import Job
+from .task_queue import Task
 from pathlib import Path
-from .image_job import ImageJob, ImageRequest
+from .image_task import ImageTask, ImageRequest
 from ..utils.contact_image_prompt_compiler import ContactImagePromptCompiler, ImageType
 from typing import Dict, Any
 
 from app.common import get_logger, Utils
 logger = get_logger()
 
-class AssistantImageJob(Job):
+class AssistantImageTask(Task):
     def __init__(self, user_id: int, contact_id: int, db, infrastructure, width: int = 720, height: int = 1280, conversation_id: int = None, show_assistant: bool = True, show_user: bool = False, image_type: ImageType = ImageType.FullBody, store_image_as: str = "conversation_images"):
         super().__init__()
         self.user_id = user_id
@@ -25,7 +25,7 @@ class AssistantImageJob(Job):
 
     def build_request(self) -> ImageRequest:
         """builds the image request from the db (contact, user, conversation context), output stays "".
-        no side effects, so MetaJob can call it too and gets the same request and hash as execute()"""
+        no side effects, so MetaTask can call it too and gets the same request and hash as execute()"""
         contact_data = self.db.get_contact_by_id(self.contact_id)
         user_data = self.db.get_user_data(self.user_id)
         image_parameters = contact_data["profile"]["image_parameters"]
@@ -82,12 +82,12 @@ class AssistantImageJob(Job):
         # skip generation if it already exists
         downloaded_file = Path(f"/hub/images/{self.output_file}")
         if not downloaded_file.exists():
-            image_job = ImageJob(image_request, self.infrastructure, self.db)
+            image_job = ImageTask(image_request, self.infrastructure, self.db)
             self.add_sub_job(image_job)
             self.wait_for([image_job])
             self.response = image_job.result()
         else:
-            # same response ImageJob gives for an image that is already there
+            # same response ImageTask gives for an image that is already there
             self.response = {"image": {"filename": self.output_file, "image_path": f"images/{self.output_file}"}}
 
     def result(self) -> Dict[str, Any]:

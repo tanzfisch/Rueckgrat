@@ -211,6 +211,9 @@ models
 logs
 chat-temp
 rueckgrat/chat/assets/rueckgrat-caddy.cert
+rueckgrat/chat/assets/CREDITS.md
+rueckgrat/chat/assets/THIRD_PARTY_LICENSES.md
+rueckgrat/chat/assets/changelog.md
 rueckgrat/chat/pubspec.lock
 rueckgrat/config
 rueckgrat/caddy/*.cert
