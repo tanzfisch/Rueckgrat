@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.24.0
+------
+
+- #151 shut off thinking step for thinking models
+
 0.23.0
 ------
 
