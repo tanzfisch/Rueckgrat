@@ -1139,6 +1139,28 @@
     "install_path": "llm/DeepSeek-V4.1-Flash-1017-abliterated-Mix-256G"
   },
 
+  "GLM-5.3-Flash-Uncensored-Q2_K_M": {
+    "description": "",
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested, gated repo (needs Hugging Face login)",
+    "files": [
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q2_K/GLM-5.3-Flash-Uncensored-Q2_K-00001-of-00003.gguf", "path": "" },
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q2_K/GLM-5.3-Flash-Uncensored-Q2_K-00002-of-00003.gguf", "path": "" },
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q2_K/GLM-5.3-Flash-Uncensored-Q2_K-00003-of-00003.gguf", "path": "" }
+    ],
+    "llama": {
+      "model_file": "GLM-5.3-Flash-Uncensored-Q2_K-00001-of-00003.gguf",
+      "max_context": 8192,
+      "gpu_layers": 99,
+      "flash_attn": "on",
+      "temp": 0.7,
+      "n_parallel": 1,
+      "extra_args": ""
+    },
+    "install_path": "llm/GLM-5.3-Flash-Uncensored-Q2_K_M"
+  },
+
   "GLM-5.3-Flash-Uncensored-Q3_K_M": {
     "description": "",
     "type": "llm",
@@ -1160,7 +1182,7 @@
       "extra_args": ""
     },
     "install_path": "llm/GLM-5.3-Flash-Uncensored-Q3_K_M"
-  },
+  },  
 
   "GLM-5.3-Flash-Uncensored-Q4_K_M": {
     "description": "",
