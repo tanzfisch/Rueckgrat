@@ -42,7 +42,9 @@ class LLamaCppInterface:
             "temperature": request.temperature,
             "seed": request.seed,
             "max_tokens": request.max_new_tokens,
-            "stream": request.stream
+            "stream": request.stream,
+            # thinking off on every call (Qwen's template reads this, other templates ignore it)
+            "chat_template_kwargs": {"enable_thinking": False}
         }
 
     def _check_finish_reason(self, finish_reason):
