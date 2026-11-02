@@ -2,7 +2,7 @@ import asyncio
 import random
 import re
 import flet as ft
-from app.ui.theme import STYLES, TEXT
+from app.ui import theme
 from pathlib import Path
 
 from app.ui import BasePage
@@ -37,7 +37,7 @@ class ChatPage(BasePage):
         self.header.on_go_back = self.on_go_back
 
         self.history = ft.ListView(expand=True, spacing=10, padding=0, auto_scroll=True)
-        self.status_widget = StatusWidget()
+        self.status_widget = StatusWidget(on_cancel_job=Hub.cancel_job)
         self.status_row = ft.Row(controls=[self.status_widget])   # always the last row, messages go above it
 
         self._input_focused = False
@@ -94,7 +94,7 @@ class ChatPage(BasePage):
 
         self.bubble = ft.Container(
             border_radius=20,
-            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
+            bgcolor=theme.INPUT_BAR,
             padding=ft.Padding(left=8, top=8, right=8, bottom=8),
             content=ft.Row(
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -314,10 +314,10 @@ class ChatPage(BasePage):
                 bubble.action_row.set_sources(sources)
 
             style = {
-                "user": STYLES["chat_user"],
-                "assistant": STYLES["chat_assistant"],
-                "error": STYLES["chat_error"],
-            }.get(role, STYLES["chat_assistant"])
+                "user": theme.STYLES["chat_user"],
+                "assistant": theme.STYLES["chat_assistant"],
+                "error": theme.STYLES["chat_error"],
+            }.get(role, theme.STYLES["chat_assistant"])
 
             # the bubble with its button row under it
             bubble_slot = ft.Column(
@@ -370,7 +370,7 @@ class ChatPage(BasePage):
         """the scrolling bars overlay, put into a Stack on top of a button"""
         bars = [
             ft.Container(
-                width=4, height=0, border_radius=2, bgcolor=TEXT,
+                width=4, height=0, border_radius=2, bgcolor=theme.TEXT,
                 animate=ft.Animation(150, ft.AnimationCurve.EASE_IN_OUT),
             )
             for _ in range(5)
@@ -505,6 +505,9 @@ class ChatPage(BasePage):
         try:
             if "status" in message:
                 self.status_widget.on_status_message(message["status"])
+
+            if "job_progress" in message:     # #152 background jobs, shown whatever conversation is open
+                self.status_widget.on_job_progress(message["job_progress"])
 
             if "delta" in message and message["conversation_id"] == self.conversation_id:
                 message_id = message.get("message_id")

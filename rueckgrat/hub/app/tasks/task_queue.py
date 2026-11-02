@@ -7,24 +7,24 @@ from abc import ABC, abstractmethod
 from app.common import get_logger, current_user_id
 logger = get_logger()
 
-class Job(ABC):
+class Task(ABC):
     def __init__(self):
-        self._dependencies: List["Job"] = []
-        self._queue: Optional["JobQueue"] = None
+        self._dependencies: List["Task"] = []
+        self._queue: Optional["TaskQueue"] = None
         self._done_event = threading.Event()
         # the user the job works for: its messages and its result go only to this user's websockets.
         # subclasses set it after super().__init__(), sub jobs inherit it from their parent (add_sub_job)
         if not hasattr(self, "user_id"):
             self.user_id: Optional[int] = None
 
-    def depends_on(self) -> List["Job"]:
+    def depends_on(self) -> List["Task"]:
         return self._dependencies
     
-    def add_dependency(self, dep: "Job"):
+    def add_dependency(self, dep: "Task"):
         if dep not in self._dependencies:
             self._dependencies.append(dep)
 
-    def add_sub_job(self, new_job: "Job"):
+    def add_sub_job(self, new_job: "Task"):
         if self._queue is None:
             raise RuntimeError("queue no available")
         if getattr(new_job, "user_id", None) is None:
@@ -32,7 +32,7 @@ class Job(ABC):
         self._queue.add(new_job)
         self.add_dependency(new_job)
 
-    def wait_for(self, jobs: List["Job"], timeout: Optional[float] = None) -> bool:
+    def wait_for(self, jobs: List["Task"], timeout: Optional[float] = None) -> bool:
         if not jobs:
             return True
         for job in jobs:
@@ -49,22 +49,22 @@ class Job(ABC):
     @abstractmethod
     def result(self) -> Dict[str, Any]: ...
 
-class JobQueue:
+class TaskQueue:
     def __init__(self, max_parallel: int = 4):
-        self.queue: Queue[Job] = Queue()
-        self._done_queues: Dict[int, Queue[Job]] = {}   # user_id -> finished jobs with a response for that user
+        self.queue: Queue[Task] = Queue()
+        self._done_queues: Dict[int, Queue[Task]] = {}   # user_id -> finished jobs with a response for that user
         self._done_lock = threading.Lock()
-        self._completed: Set[Job] = set()
+        self._completed: Set[Task] = set()
 
         self.executor = ThreadPoolExecutor(max_workers=max_parallel)
         self._stop = threading.Event()
         threading.Thread(target=self._run, daemon=True).start()
 
-    def add(self, job: Job):
+    def add(self, job: Task):
         job._queue = self
         self.queue.put(job)
 
-    def run(self, job: Job) -> bool:
+    def run(self, job: Task) -> bool:
         job._queue = self
         try:
             self._execute_job(job)
@@ -81,11 +81,11 @@ class JobQueue:
                 self.queue.put(job)  # requeue
             self.queue.task_done()
 
-    def _done_queue(self, user_id: int) -> "Queue[Job]":
+    def _done_queue(self, user_id: int) -> "Queue[Task]":
         with self._done_lock:
             return self._done_queues.setdefault(user_id, Queue())
 
-    def _execute_job(self, job: Job):
+    def _execute_job(self, job: Task):
         # status messages of the job (and the tools it runs) go to its user. a job without a user
         # (run() on the thread of its caller) keeps the caller's user
         token = current_user_id.set(job.user_id) if job.user_id is not None else None
@@ -105,14 +105,14 @@ class JobQueue:
                 current_user_id.reset(token)
             job._done_event.set()
 
-    def get_done(self, user_id: int, timeout: Optional[float] = None) -> Optional[Job]:
+    def get_done(self, user_id: int, timeout: Optional[float] = None) -> Optional[Task]:
         """next finished job with a response for this user"""
         try:
             return self._done_queue(user_id).get(timeout=timeout)
         except Empty:
             return None
 
-    def get_done_nowait(self, user_id: int) -> Optional[Job]:
+    def get_done_nowait(self, user_id: int) -> Optional[Task]:
         try:
             return self._done_queue(user_id).get_nowait()
         except Empty:

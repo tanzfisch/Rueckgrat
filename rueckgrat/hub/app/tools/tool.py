@@ -1,4 +1,4 @@
-from app.jobs.job_queue import Job
+from app.tasks.task_queue import Task
 from typing import Dict,  Any
 from abc import abstractmethod
 import json
@@ -16,10 +16,10 @@ class ToolCategory:
     MEMORY = "memory"      # what a contact keeps from the conversations
     GENERAL = "general"    # default for tools that don't set a category
 
-class Tool(Job):
+class Tool(Task):
     category = ToolCategory.GENERAL
     description = ""    # one line for the tool index, every tool sets its own
-    question = ""       # yes/no decision question: does the request involve this tool's purpose
+    question = []       # yes/no decision questions: does the request involve this tool's purpose. the tool counts with its most likely question
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__()

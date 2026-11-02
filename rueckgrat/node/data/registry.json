@@ -1,73 +1,4 @@
 {
-  "en_US-libritts_r-medium": {
-    "description": "",
-    "type": "tts",
-    "compatibility": ["piper-tts"],
-    "comment": "acceptable quality at high speed",
-    "files": [
-      {
-        "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx",
-        "path": ""
-      },
-      {
-        "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx.json",
-        "path": ""
-      }
-    ],
-    "install_path": "voices/en_US-libritts_r-medium"
-  },
-  "en_US-amy-medium": {
-    "description": "",
-    "type": "tts",
-    "compatibility": ["piper-tts"],
-    "comment": "acceptable quality at high speed",
-    "files": [
-      {
-        "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx",
-        "path": ""
-      },
-      {
-        "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json",
-        "path": ""
-      }
-    ],
-    "install_path": "voices/en_US-amy-medium"
-  },
-  "en_US-hfc_male-medium": {
-    "description": "",
-    "type": "tts",
-    "compatibility": ["piper-tts"],
-    "comment": "acceptable quality at high speed",
-    "files": [
-      {
-        "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx",
-        "path": ""
-      },
-      {
-        "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json",
-        "path": ""
-      }
-    ],
-    "install_path": "voices/en_US-hfc_male-medium"
-  },
-  "en_US-hfc_female-medium": {
-    "description": "",
-    "type": "tts",
-    "compatibility": ["piper-tts"],
-    "comment": "acceptable quality at high speed",
-    "files": [
-      {
-        "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx",
-        "path": ""
-      },
-      {
-        "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx.json",
-        "path": ""
-      }
-    ],
-    "install_path": "voices/en_US-hfc_female-medium"
-  },  
-
   "chatterbox": {
     "description": "Resemble AI Chatterbox, English zero-shot voice cloning",
     "type": "tts",
@@ -564,7 +495,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -586,7 +517,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -607,7 +538,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -628,7 +559,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -650,7 +581,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -671,7 +602,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -692,7 +623,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -715,7 +646,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -737,7 +668,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -759,7 +690,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -781,7 +712,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -803,7 +734,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -824,7 +755,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -846,7 +777,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -867,7 +798,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -888,7 +819,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -910,7 +841,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -931,7 +862,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -952,7 +883,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -974,7 +905,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -1000,7 +931,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
@@ -1027,7 +958,7 @@
     "llama": {
       "model_file": "IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S-00001-of-00002.gguf",
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 2,
@@ -1036,57 +967,123 @@
     "install_path": "llm/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S"
   },
 
-  "Kimi-K3-Uncensored-GGUF": {
+  "DeepSeek-V4.1-Flash-1017-abliterated-Mix-128G": {
     "description": "",
     "type": "llm",
     "compatibility": ["llama.cpp"],
-    "comment": "not tested",
+    "comment": "not tested, gated repo (needs Hugging Face login)",
     "files": [
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00001-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00002-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00003-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00004-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00005-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00006-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00007-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00008-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00009-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00010-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00011-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00012-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00013-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00014-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00015-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00016-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00017-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00018-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00019-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00020-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00021-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00022-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00023-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00024-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00025-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00026-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00027-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00028-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00029-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00030-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00031-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00032-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00033-of-00034.gguf", "path": "" },
-      { "source": "https://huggingface.co/Ryanchen911/Kimi-K3-Uncensored-GGUF/resolve/main/Kimi-K3-abliterated-IQ1_S-XS-00034-of-00034.gguf", "path": "" }
+      { "source": "https://huggingface.co/orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF/resolve/main/Mix-128G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-128G-00001-of-00005.gguf", "path": "Mix-128G" },
+      { "source": "https://huggingface.co/orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF/resolve/main/Mix-128G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-128G-00002-of-00005.gguf", "path": "Mix-128G" },
+      { "source": "https://huggingface.co/orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF/resolve/main/Mix-128G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-128G-00003-of-00005.gguf", "path": "Mix-128G" },
+      { "source": "https://huggingface.co/orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF/resolve/main/Mix-128G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-128G-00004-of-00005.gguf", "path": "Mix-128G" },
+      { "source": "https://huggingface.co/orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF/resolve/main/Mix-128G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-128G-00005-of-00005.gguf", "path": "Mix-128G" }
     ],
     "llama": {
-      "model_file": "Kimi-K3-abliterated-IQ1_S-XS-00001-of-00034.gguf",
+      "model_file": "Mix-128G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-128G-00001-of-00005.gguf",
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
+      "flash_attn": "on",
+      "temp": 0.7,
+      "n_parallel": 1,
+      "extra_args": "--n-cpu-moe 35 --cache-type-k q8_0 --cache-type-v q8_0 --no-warmup"
+    },
+    "install_path": "llm/DeepSeek-V4.1-Flash-1017-abliterated-Mix-128G"
+  },
+
+  "DeepSeek-V4.1-Flash-1017-abliterated-Mix-256G": {
+    "description": "",
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested, gated repo (needs Hugging Face login)",
+    "files": [
+      { "source": "https://huggingface.co/orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF/resolve/main/Mix-256G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-256G-00001-of-00007.gguf", "path": "Mix-256G" },
+      { "source": "https://huggingface.co/orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF/resolve/main/Mix-256G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-256G-00002-of-00007.gguf", "path": "Mix-256G" },
+      { "source": "https://huggingface.co/orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF/resolve/main/Mix-256G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-256G-00003-of-00007.gguf", "path": "Mix-256G" },
+      { "source": "https://huggingface.co/orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF/resolve/main/Mix-256G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-256G-00004-of-00007.gguf", "path": "Mix-256G" },
+      { "source": "https://huggingface.co/orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF/resolve/main/Mix-256G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-256G-00005-of-00007.gguf", "path": "Mix-256G" },
+      { "source": "https://huggingface.co/orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF/resolve/main/Mix-256G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-256G-00006-of-00007.gguf", "path": "Mix-256G" },
+      { "source": "https://huggingface.co/orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF/resolve/main/Mix-256G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-256G-00007-of-00007.gguf", "path": "Mix-256G" }
+    ],
+    "llama": {
+      "model_file": "Mix-256G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-256G-00001-of-00007.gguf",
+      "max_context": 8192,
+      "gpu_layers": -1,
+      "flash_attn": "on",
+      "temp": 0.7,
+      "n_parallel": 1,
+      "extra_args": "--n-cpu-moe 34 --cache-type-k q8_0 --cache-type-v q8_0 --no-warmup"
+    },
+    "install_path": "llm/DeepSeek-V4.1-Flash-1017-abliterated-Mix-256G"
+  },
+
+  "GLM-5.3-Flash-Uncensored-Q2_K_M": {
+    "description": "",
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested, gated repo (needs Hugging Face login)",
+    "files": [
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q2_K/GLM-5.3-Flash-Uncensored-Q2_K-00001-of-00003.gguf", "path": "Q2_K" },
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q2_K/GLM-5.3-Flash-Uncensored-Q2_K-00002-of-00003.gguf", "path": "Q2_K" },
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q2_K/GLM-5.3-Flash-Uncensored-Q2_K-00003-of-00003.gguf", "path": "Q2_K" }
+    ],
+    "llama": {
+      "model_file": "Q2_K/GLM-5.3-Flash-Uncensored-Q2_K-00001-of-00003.gguf",
+      "max_context": 8192,
+      "gpu_layers": -1,
+      "flash_attn": "on",
+      "temp": 0.7,
+      "n_parallel": 1,
+      "extra_args": "--n-cpu-moe 34 --cache-type-k q8_0 --cache-type-v q8_0 --no-warmup"
+    },
+    "install_path": "llm/GLM-5.3-Flash-Uncensored-Q2_K_M"
+  },
+
+  "GLM-5.3-Flash-Uncensored-Q3_K_M": {
+    "description": "",
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested, gated repo (needs Hugging Face login)",
+    "files": [
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q3_K_M/GLM-5.3-Flash-Uncensored-Q3_K_M-00001-of-00004.gguf", "path": "Q3_K_M" },
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q3_K_M/GLM-5.3-Flash-Uncensored-Q3_K_M-00002-of-00004.gguf", "path": "Q3_K_M" },
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q3_K_M/GLM-5.3-Flash-Uncensored-Q3_K_M-00003-of-00004.gguf", "path": "Q3_K_M" },
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q3_K_M/GLM-5.3-Flash-Uncensored-Q3_K_M-00004-of-00004.gguf", "path": "Q3_K_M" }
+    ],
+    "llama": {
+      "model_file": "Q3_K_M/GLM-5.3-Flash-Uncensored-Q3_K_M-00001-of-00004.gguf",
+      "max_context": 8192,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 1,
       "extra_args": ""
     },
-    "install_path": "llm/Kimi-K3-Uncensored-GGUF"
+    "install_path": "llm/GLM-5.3-Flash-Uncensored-Q3_K_M"
+  },  
+
+  "GLM-5.3-Flash-Uncensored-Q4_K_M": {
+    "description": "",
+    "type": "llm",
+    "compatibility": ["llama.cpp"],
+    "comment": "not tested, gated repo (needs Hugging Face login)",
+    "files": [
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q4_K_M/GLM-5.3-Flash-Uncensored-Q4_K_M-00001-of-00005.gguf", "path": "Q4_K_M" },
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q4_K_M/GLM-5.3-Flash-Uncensored-Q4_K_M-00002-of-00005.gguf", "path": "Q4_K_M" },
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q4_K_M/GLM-5.3-Flash-Uncensored-Q4_K_M-00003-of-00005.gguf", "path": "Q4_K_M" },
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q4_K_M/GLM-5.3-Flash-Uncensored-Q4_K_M-00004-of-00005.gguf", "path": "Q4_K_M" },
+      { "source": "https://huggingface.co/orcarouter/GLM-5.3-Flash-Uncensored-GGUF/resolve/main/Q4_K_M/GLM-5.3-Flash-Uncensored-Q4_K_M-00005-of-00005.gguf", "path": "Q4_K_M" }
+    ],
+    "llama": {
+      "model_file": "Q4_K_M/GLM-5.3-Flash-Uncensored-Q4_K_M-00001-of-00005.gguf",
+      "max_context": 8192,
+      "gpu_layers": -1,
+      "flash_attn": "on",
+      "temp": 0.7,
+      "n_parallel": 1,
+      "extra_args": ""
+    },
+    "install_path": "llm/GLM-5.3-Flash-Uncensored-Q4_K_M"
   },
 
   "laya-F16": {
@@ -1099,7 +1096,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 2,
@@ -1117,7 +1114,7 @@
     ],
     "llama": {
       "max_context": 8192,
-      "gpu_layers": 99,
+      "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 2,

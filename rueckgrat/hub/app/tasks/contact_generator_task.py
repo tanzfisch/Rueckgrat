@@ -1,15 +1,15 @@
-from .job_queue import Job
+from .task_queue import Task
 import json
 import re
 import random
 from typing import Dict, Any
-from .assistant_image_job import AssistantImageJob
+from .assistant_image_task import AssistantImageTask
 from ..utils.contact_image_prompt_compiler import ImageType, IMAGE_STYLES
 
 from app.common import get_logger, Utils, IMAGE_STYLE_OPTIONS, DEFAULT_IMAGE_STYLE
 logger = get_logger()
 
-class ContactGeneratorJob(Job):
+class ContactGeneratorTask(Task):
     def __init__(self, user_input: Dict[str, Any], user_id: int, db, infrastructure):
         super().__init__()
         self.user_input = user_input
@@ -28,7 +28,7 @@ class ContactGeneratorJob(Job):
             contact_id = self.db.create_contact(self.user_id, name)
             self.db.update_contact(self.user_id, contact_id, new_contact)
 
-            assistant_image_job = AssistantImageJob(
+            assistant_image_job = AssistantImageTask(
                 user_id = self.user_id,
                 contact_id = contact_id,
                 db = self.db, 
@@ -47,7 +47,7 @@ class ContactGeneratorJob(Job):
                 }
             }
         except Exception as e:
-            logger.error(f"failed to execute ContactGeneratorJob {repr(e)}")                    
+            logger.error(f"failed to execute ContactGeneratorTask {repr(e)}")                    
 
     def result(self) -> Dict[str, Any]:
         return self.response

@@ -1,4 +1,4 @@
-from .job_queue import Job
+from .task_queue import Task
 from ..utils.prompt_compiler import PromptCompiler
 from typing import Dict, Any
 import json
@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from app.common import get_logger, ChatRequest
 logger = get_logger()
 
-class ChatJob(Job):
+class ChatTask(Task):
     def __init__(self, request: ChatRequest, db, infrastructure, callback=None, thinking_response = None):
         super().__init__()
         self.request = request

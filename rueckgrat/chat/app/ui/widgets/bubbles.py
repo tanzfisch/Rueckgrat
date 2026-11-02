@@ -1,7 +1,7 @@
 import re
 import flet as ft
 from urllib.parse import urlparse
-from app.ui.theme import STYLES, MARKDOWN_STYLE
+from app.ui import theme
 from app.ui.widgets.image import Image
 
 from app.common import get_logger
@@ -111,10 +111,10 @@ class ChatBubble(ft.Container):
             value=value,
             selectable=True,
             extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-            code_theme=ft.MarkdownCodeTheme.ATOM_ONE_DARK,
+            code_theme=theme.CODE_THEME,
             on_tap_link=_open_link,
             shrink_wrap=True,
-            md_style_sheet=None if code else MARKDOWN_STYLE,
+            md_style_sheet=None if code else theme.MARKDOWN_STYLE,
         )
 
     def _add_code(self, content: str):
@@ -181,7 +181,7 @@ class OneLineBubble(ft.Container):
             alignment=ft.Alignment.CENTER,
             on_click=self._on_click,
             data=data,
-            **STYLES["one_line_bubble"],
+            **theme.STYLES["one_line_bubble"],
             **kwargs,
         )
 

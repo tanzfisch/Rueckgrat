@@ -2,7 +2,7 @@ from typing import Dict, Any, Optional
 import re
 import json
 from .tool import Tool, ToolCategory
-from app.jobs.find_answer_job import FindAnswerJob
+from app.tasks.find_answer_task import FindAnswerTask
 import requests
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
@@ -19,7 +19,15 @@ logger = get_logger()
 class WebsearchTool(Tool):
     category = ToolCategory.WEB
     description = "searches the web for current, factual or local information (news, events, prices, stocks, opening hours)"
-    question = "Does the user want current information from the web?"
+    question = [
+        "Does the user ask about recent news, like an election, protests, a disaster or a new product?",
+        "Did the user ask who won last night's or this week's game?",
+        "Does the user want to find a shop, restaurant or business in a town?",
+        "Does the user ask about the opening hours of a shop, museum or supermarket?",
+        "Does the user ask the live market price of a stock or a crypto coin like bitcoin?",
+        "Does the user ask who is currently the leader or head of a country or company?",
+        "Does the user ask what events, games or concerts are coming up somewhere?",
+    ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
@@ -257,7 +265,7 @@ class WebsearchTool(Tool):
                 resp.raise_for_status()
                 content_type = resp.headers.get("Content-Type", "").lower()
                 if content_type and "html" not in content_type and "xml" not in content_type:
-                    logger.warning(f"not reading {url}, it is {content_type}")
+                    logger.debug(f"not reading {url}, it is {content_type}")
                     return None
                 page = self._parse_html(resp.content, resp.url)
                 try_browser = len(page["text"]) < self.THIN_PAGE_CHARS
@@ -276,7 +284,7 @@ class WebsearchTool(Tool):
                     page = rendered_page
 
         if not page or len(page["text"]) < self.MIN_PAGE_CHARS:
-            logger.warning(f"was not able to get text from {url}")
+            logger.debug(f"was not able to get text from {url}")    # usual, the snippet is used then
             return None
         if len(page["text"]) < self.THIN_PAGE_CHARS * 2 and self.CHALLENGE.search(page["text"]):
             logger.warning(f"{url} is behind a bot wall")
@@ -286,8 +294,10 @@ class WebsearchTool(Tool):
     # all ddgs 9.16.0 text engines, best first (results of higher engines come first). every engine runs in its
     # own thread with its own try/except: ddgs' own multi-backend search drops good results when another engine
     # fails first (ddgs issue #427)
-    # (backend, attempts)   status measured from this network on 2026-10-17
+    # (backend, attempts)   status measured from this network on 2026-10-17, yandex and bing on 2026-11-02 (ddgs 9.16.0 and 9.16.1)
     SEARCH_BACKENDS = [
+        ("yandex", 1),      # 7-10 results in 5 of 5 calls
+        ("bing", 1),        # 7 results in 4 of 5 calls
         ("yahoo", 3),       # works, ~7 results, but empty in ~40% of calls -> retries
         ("duckduckgo", 1),  # mostly blocked (HTTP 202 bot challenge), 10 results when it gets through
         ("wikipedia", 1),   # 1 article, only for single-topic queries
@@ -308,7 +318,7 @@ class WebsearchTool(Tool):
             try:
                 return DDGS(timeout=min(10, int(remaining))).text(query, max_results=max_results, backend=backend)
             except Exception as e:
-                logger.warning(f"websearch {backend} attempt {attempt}/{attempts} failed {repr(e)}")
+                logger.debug(f"websearch {backend} attempt {attempt}/{attempts} failed {repr(e)}")   # usual, some engine always fails
                 if attempt < attempts:
                     time.sleep(min(1, max(0, deadline - time.monotonic())))
         return []
@@ -324,8 +334,10 @@ class WebsearchTool(Tool):
             for backend, _ in self.SEARCH_BACKENDS:
                 added = 0
                 for hit in hits_by_backend.get(backend, []):
-                    url = hit.get("href") or ""
-                    if url and url not in seen and len(results) < num_results:
+                    # "+" opening the path is a duckduckgo artifact (rbnz.govt.nz/+statistics next to /statistics), a "+"
+                    # deeper in the path is real (launchpad.net/ubuntu/+source). ads (bing.com/aclick) are no results
+                    url = re.sub(r"^(https?://[^/]+/)\+", r"\1", hit.get("href") or "")
+                    if url and url not in seen and "bing.com/aclick" not in url and len(results) < num_results:
                         seen.add(url)
                         results.append({
                             'title': hit.get("title", ""),
@@ -403,7 +415,7 @@ class WebsearchTool(Tool):
                         continue
                     seen_urls.add(result["url"])
 
-                    job = FindAnswerJob(question=query, information=information, infrastructure=self.infrastructure)
+                    job = FindAnswerTask(question=query, information=information, infrastructure=self.infrastructure)
                     self.add_sub_job(job)
                     batch_jobs.append((result, job))
                     jobs.append((result, job))

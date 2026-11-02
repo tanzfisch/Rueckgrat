@@ -1,14 +1,14 @@
 import hashlib
 import json
-from .job_queue import Job
-from .image_job import ImageJob, ImageRequest
+from .task_queue import Task
+from .image_task import ImageTask, ImageRequest
 from ..utils.generic_image_prompt_compiler import GenericImagePromptCompiler
 from typing import Dict, Any
 
 from app.common import get_logger, ChatRequest, Utils
 logger = get_logger()
 
-class RequestedImageJob(Job):
+class RequestedImageTask(Task):
     def __init__(self, prompt: str, contact_id: int, db, infrastructure, conversation_id: int = None):
         super().__init__()
         self.prompt = prompt
@@ -52,7 +52,7 @@ class RequestedImageJob(Job):
             self.db.add_contact_image(self.contact_id, self.output_file, "conversation_images")
             image_request.output = self.output_file
 
-            image_job = ImageJob(image_request, self.infrastructure, self.db)
+            image_job = ImageTask(image_request, self.infrastructure, self.db)
             self.add_sub_job(image_job)
             self.wait_for([image_job])
 

@@ -2,7 +2,7 @@ import json
 import random
 from datetime import datetime, timedelta, timezone
 
-from app.jobs.job_queue import Job
+from app.tasks.task_queue import Task
 from app.utils.prompt_compiler import PromptCompiler
 from . import prompts
 from .clock import to_db, from_db, local_day, at_local, parse_hhmm
@@ -49,7 +49,7 @@ def since_text(minutes: float | None) -> str:
         return f"{int(minutes // 60)} hours ago"
     return f"{int(minutes // (24 * 60))} days ago"
 
-class CompanionJob(Job):
+class CompanionTask(Task):
     """one pass of a companion: a calendar row fired. one decision call, at most one lookup and one more call,
     then the answer is applied: calendar rows, maybe a message. the scheduler re-arms or closes the row"""
 

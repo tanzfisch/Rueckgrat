@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 import flet as ft
-from app.ui.theme import TEXT_DIM
+from app.ui import theme
 
 from app.ui import BasePage
 from app.ui.widgets import Header, Image
@@ -36,7 +36,7 @@ async def broken_image_fallback(slot: ft.Container, image_path, is_active=lambda
     the hub lost and can't generate again) warn instead"""
     await asyncio.sleep(IMAGE_TIMEOUT)
     if is_active() and not image_path.exists():
-        slot.content = ft.Icon(ft.Icons.BROKEN_IMAGE, color=ft.Colors.ERROR, tooltip="image could not be loaded")
+        slot.content = ft.Icon(ft.Icons.BROKEN_IMAGE, color=theme.ERROR, tooltip="image could not be loaded")
         _update(slot)
 
 
@@ -56,7 +56,7 @@ class GalleryPage(BasePage):
         self._loading_page = False
         self._next_offset: int | None = 0
         self._shown: set[str] = set()
-        self.status = ft.Text("loading...", color=TEXT_DIM)
+        self.status = ft.Text("loading...", color=theme.TEXT_DIM)
         self.grid = ft.GridView(
             expand=True,
             max_extent=THUMB_SIZE,
@@ -101,7 +101,7 @@ class GalleryPage(BasePage):
                     return
                 if result is None:
                     self.status.value = "⚠ could not load the images"
-                    self.status.color = ft.Colors.ERROR
+                    self.status.color = theme.ERROR
                     self.status.visible = True
                     _update(self.status)
                     return  # _next_offset stays, the next scroll tries again
@@ -110,7 +110,7 @@ class GalleryPage(BasePage):
             self.grid.controls += tiles
             self.status.visible = not self.grid.controls
             self.status.value = "no images yet"
-            self.status.color = TEXT_DIM
+            self.status.color = theme.TEXT_DIM
             _update(self.status)
             _update(self.grid)
         except Exception as e:
@@ -137,5 +137,5 @@ class GalleryPage(BasePage):
         label = f"{item.get('contact_name') or 'image tool'} · {_local_date(item.get('created_at'))}"
         return ft.Column(
             spacing=2,
-            controls=[slot, ft.Text(label, size=11, color=TEXT_DIM, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS)],
+            controls=[slot, ft.Text(label, size=11, color=theme.TEXT_DIM, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS)],
         )

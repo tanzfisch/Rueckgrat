@@ -4,7 +4,7 @@ from pathlib import Path
 from app.common import get_logger, ImageRequest
 logger = get_logger()
 
-# one lock per image file, shared by everything that generates images (ImageJob and ImageStore.ensure),
+# one lock per image file, shared by everything that generates images (ImageTask and ImageStore.ensure),
 # so the same file is never generated twice at the same time
 _file_locks: dict[str, threading.Lock] = {}
 _file_locks_guard = threading.Lock()
@@ -46,7 +46,7 @@ def _unlink(image_dir: Path, file_key: str) -> bool:
 
 
 def discard_if_released(file_key: str, db, image_dir: str = "/hub/images") -> bool:
-    """called by ImageJob when it is done, while it still holds the file lock. if the conversation of the image
+    """called by ImageTask when it is done, while it still holds the file lock. if the conversation of the image
     was deleted meanwhile, the rows the job wrote and the file go again, unless the image got used again
     (attachment, profile). True if the image was dropped"""
     with _file_locks_guard:
@@ -76,7 +76,7 @@ class ImageStore:
         return self.image_dir / file_key
 
     def _lock_for(self, file_key: str) -> threading.Lock:
-        # one lock per image, shared with ImageJob, so a missing image is generated only once
+        # one lock per image, shared with ImageTask, so a missing image is generated only once
         return file_lock(file_key)
 
     @staticmethod
@@ -125,7 +125,7 @@ class ImageStore:
             logger.warning(f"refusing to remove invalid image key {file_key!r}")
             return False
 
-        # same lock as ensure() and ImageJob. if the image is being generated right now we don't wait,
+        # same lock as ensure() and ImageTask. if the image is being generated right now we don't wait,
         # that could block the caller for minutes. release() marked it, so the job removes it when done
         lock = self._lock_for(file_key)
         if not lock.acquire(blocking=False):

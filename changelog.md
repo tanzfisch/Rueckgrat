@@ -1,6 +1,15 @@
 Changelog
 =========
 
+0.24.0
+------
+
+- #151 shut off thinking step for thinking models
+- #152 introducing agents
+- #153 added credits and licenses to chat app
+- #154 added wallpaper to login screen
+- #7 light and dark mode switch
+
 0.23.0
 ------
 

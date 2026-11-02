@@ -1,6 +1,6 @@
 from typing import Dict,  Any, Optional
 from .tool import Tool, ToolCategory
-from app.jobs.assistant_image_job import AssistantImageJob
+from app.tasks.assistant_image_task import AssistantImageTask
 
 from app.common import get_logger, MessageQueue, Utils
 logger = get_logger()
@@ -8,7 +8,7 @@ logger = get_logger()
 class TakePhotoTool(Tool):
     category = ToolCategory.MEDIA
     description = "takes a photo of yourself, the user or both in the current situation"
-    question = ""
+    question = []
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
@@ -17,8 +17,8 @@ class TakePhotoTool(Tool):
     def name(cls) -> str:
         return "take_photo"
 
-    def create_image_job(self) -> Optional[AssistantImageJob]:
-        """the AssistantImageJob for this tool call (not started), None if the call is invalid.
+    def create_image_job(self) -> Optional[AssistantImageTask]:
+        """the AssistantImageTask for this tool call (not started), None if the call is invalid.
         execute() attaches its planned file name before the photo is taken"""
         if not "subject" in self.tool_call:
             logger.error("invalid take_photo")
@@ -40,7 +40,7 @@ class TakePhotoTool(Tool):
             width = height
             height = temp
 
-        assistant_image_job = AssistantImageJob(
+        assistant_image_job = AssistantImageTask(
             user_id = self.user_id,
             contact_id = self.contact_id,
             conversation_id = self.conversation_id, 

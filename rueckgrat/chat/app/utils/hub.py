@@ -235,6 +235,12 @@ class Hub:
         return cls.websocket_client.send_message(json.dumps(payload))
 
     @classmethod
+    def cancel_job(cls, job_id: str) -> bool:
+        """#152 the cancel button of a background job: the hub stops it and answers with job_progress state cancelled"""
+        payload = {"cancel_job": {"job_id": job_id}}
+        return cls.websocket_client.send_message(json.dumps(payload))
+
+    @classmethod
     def generate(cls, prompt: dict) -> bool:
         payload = {"generate": prompt}
         return cls.websocket_client.send_message(json.dumps(payload))    

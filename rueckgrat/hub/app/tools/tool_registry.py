@@ -13,6 +13,7 @@ from .weather_tool import WeatherTool
 from .fetch_url_tool import FetchUrlTool
 from .remember_tool import RememberTool
 from .search_memory_tool import SearchMemoryTool
+from .spawn_agent_job_tool import SpawnAgentJobTool
 
 from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
@@ -20,10 +21,10 @@ logger = get_logger()
 class ToolRegistry:
     PROMPT_TOOLS = ["remember", "search_memory", "take_photo"]
 
-    def __init__(self, db, infrastructure, job_queue):
+    def __init__(self, db, infrastructure, task_queue):
         self.db = db
         self.infrastructure = infrastructure     
-        self.job_queue = job_queue
+        self.task_queue = task_queue
 
         self.tools: Dict[str, type[Tool]] = {}
         self.parallel: Dict[str, bool] = {}  # tool name -> runs in parallel (True) or synchronous (False)
@@ -39,6 +40,7 @@ class ToolRegistry:
         self._register_tool(FetchUrlTool)
         self._register_tool(RememberTool)
         self._register_tool(SearchMemoryTool)
+        self._register_tool(SpawnAgentJobTool)
 
         temp = ", ".join(self.tools)
         logger.debug(f"registered tools: {temp}")
@@ -50,7 +52,7 @@ class ToolRegistry:
 
     def execute(self, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_calls: List[Dict[str, Any]], parallel: bool = False) -> None:
         """runs the tool calls in list order. synchronous tools (parallel=False) run one after another
-        on this thread (job_queue.run), parallel tools are queued (job_queue.add) and run concurrently.
+        on this thread (task_queue.run), parallel tools are queued (task_queue.add) and run concurrently.
         parallel selects which tools run: None = all (default), False = only synchronous, True = only parallel"""
         for tool_call in tool_calls:
             tool_name = tool_call["tool"]
@@ -73,9 +75,9 @@ class ToolRegistry:
                 tool_call=tool_call
             )
             if self.parallel[tool_name]:
-                self.job_queue.add(tool_job)
+                self.task_queue.add(tool_job)
             else:
-                self.job_queue.run(tool_job)
+                self.task_queue.run(tool_job)
 
     def get_tools_prompt(self, skill_names: Optional[List[str]] = None) -> str:
         if not skill_names:

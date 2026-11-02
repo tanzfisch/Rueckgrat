@@ -23,9 +23,9 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from app.utils import ChatDB, Infrastructure, ImageType, ImageStore
-from app.tools import ToolRegistry
-from app.jobs import JobQueue, MetaJob, AssistantImageJob, ContactGeneratorJob, TranslateJob, GenerateImageJob
-from app.jobs.meta_job import Turns
+from app.tools import ToolRegistry, SpawnAgentJobTool
+from app.tasks import TaskQueue, MetaTask, AssistantImageTask, ContactGeneratorTask, TranslateTask, GenerateImageTask
+from app.tasks.meta_task import Turns
 from app.utils.tts_stream import TtsStreams
 from app.companion import CompanionScheduler, DEFAULT_TIMEZONE
 from app.maintenance import MaintenanceSweeper, maintenance_tasks
@@ -51,26 +51,33 @@ async def lifespan(app: FastAPI):
     logger.info("loading db")
     db_path = "/hub/db/chat.db"
     app.state.db = ChatDB(db_path)
+    stale_jobs = app.state.db.fail_stale_jobs()     # their threads died with the last hub, before any new job can start
+    if stale_jobs:
+        logger.info(f"{stale_jobs} interrupted job(s) set to failed")
     app.state.image_store = ImageStore(app.state.db, app.state.infrastructure)
-    app.state.job_queue = JobQueue(max_parallel = 10)
+    app.state.task_queue = TaskQueue(max_parallel = 10)
     app.state.turns = Turns(app.state.db)
 
     logger.info("loading tool registry")
     app.state.tool_registry = ToolRegistry(
         infrastructure=app.state.infrastructure,
         db=app.state.db,
-        job_queue=app.state.job_queue
+        task_queue=app.state.task_queue
     )
 
     # proactive companions: pushes only to users with an open /ws, the message is in the db anyway
     app.state.connections = Counter()   # user_id -> open /ws connections
-    app.state.companion = CompanionScheduler(app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.job_queue,
+    app.state.companion = CompanionScheduler(app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.task_queue,
                                              app.state.turns, is_connected=lambda user_id: app.state.connections[user_id] > 0)
     app.state.companion.start()
 
+    # the spawn_job tool reports a finished job like a companion message: not while a reply is made, pushed only to an open /ws
+    SpawnAgentJobTool.turns, SpawnAgentJobTool.connections = app.state.turns, app.state.connections
+    SpawnAgentJobTool.tool_registry = app.state.tool_registry    # the job's workers use the tools like a chat reply
+
     # nightly maintenance in each user's quiet hours (HUB_MAINTENANCE_START/END), waits while a reply is being made
-    app.state.maintenance = MaintenanceSweeper(app.state.db, app.state.job_queue, maintenance_tasks(app.state.db, app.state.infrastructure),
-                                               is_busy=lambda: app.state.turns.any_busy() or not app.state.job_queue.queue.empty())
+    app.state.maintenance = MaintenanceSweeper(app.state.db, app.state.task_queue, maintenance_tasks(app.state.db, app.state.infrastructure),
+                                               is_busy=lambda: app.state.turns.any_busy() or not app.state.task_queue.queue.empty())
     app.state.maintenance.start()
 
     logger.info("loading vad")
@@ -88,7 +95,7 @@ async def lifespan(app: FastAPI):
 
     app.state.companion.stop()
     app.state.maintenance.stop()
-    app.state.job_queue.stop()
+    app.state.task_queue.stop()
 
     logger.info("hub shut down")
 
@@ -245,7 +252,7 @@ def add_default_contact(user_id: int):
     resolve_contact_voice(user_id, character)
     contact_id = app.state.db.create_contact(user_id, character["identity"]["name"])
     if contact_id > 0 and app.state.db.update_contact(user_id, contact_id, character):
-        app.state.job_queue.add(AssistantImageJob(
+        app.state.task_queue.add(AssistantImageTask(
             user_id = user_id,
             contact_id = contact_id,
             db = app.state.db,
@@ -466,7 +473,7 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
         raise HTTPException(status_code=404, detail="contact not found")
     resolve_contact_voice(user_id, request.contact_data)
 
-    job = AssistantImageJob(
+    job = AssistantImageTask(
         user_id = user_id,
         contact_id = contact_id,
         db = app.state.db, 
@@ -481,11 +488,11 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
 
     # an unchanged look keeps the current profile image, e.g. one the user uploaded or picked from the gallery
     if image_before is None or profile_image_hash(job) != image_before or not app.state.db.get_current_profile_image_key(contact_id):
-        app.state.job_queue.add(job)
+        app.state.task_queue.add(job)
 
     return {"status": "ok"}
 
-def profile_image_hash(job: AssistantImageJob) -> str | None:
+def profile_image_hash(job: AssistantImageTask) -> str | None:
     """hash (= file name) of the profile image the contact's data asks for, None if the data can't make one yet"""
     try:
         return Utils.hash_image_request(job.build_request())
@@ -782,11 +789,7 @@ async def upload_voice(request: Request, username: str = Depends(get_current_use
 
 def find_stored_predefined_voice(user_id: int, entry: dict) -> str:
     """uuid of the user's stored copy of a predefined voice, "" if not stored yet. uploads never match"""
-    try:
-        content_hash = hashlib.sha256((PREDEFINED_VOICES_DIR / entry["file"]).read_bytes()).hexdigest()
-    except Exception:
-        content_hash = ""
-    return app.state.db.find_predefined_voice(user_id, entry["id"], content_hash) or ""
+    return app.state.db.find_predefined_voice(user_id, entry["id"]) or ""
 
 def resolve_voice_id(user_id: int, value: str) -> str:
     """
@@ -972,7 +975,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
     def pump_done_jobs():
         # wakes up to notice the close: a thread still waiting after it would take the next done job and drop it
         while not closed.is_set():
-            job = app.state.job_queue.get_done(user_id, timeout=0.5)   # only this user's finished jobs
+            job = app.state.task_queue.get_done(user_id, timeout=0.5)   # only this user's finished jobs
             if job:
                 loop.call_soon_threadsafe(done_queue.put_nowait, job)
 
@@ -1006,17 +1009,22 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                             }
                         }, user_id=user_id)
                     else:
-                        job = MetaJob(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.turns)
+                        # #152 a job running in this conversation gets the message too, its review after the current step decides
+                        SpawnAgentJobTool.add_message(user_id, chat_request.conversation_id, chat_request.content)
+                        job = MetaTask(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.turns)
                         app.state.turns.start(job)  # stores the user message, or merges it into the reply still being made
-                        app.state.job_queue.add(job)
+                        app.state.task_queue.add(job)
+                elif "cancel_job" in data:
+                    # #152 the cancel button of a job's progress row, only the job's own user can cancel it
+                    SpawnAgentJobTool.cancel(user_id, str((data["cancel_job"] or {}).get("job_id") or ""))
                 elif "generate" in data:
                     generate = data["generate"]
                     if "generate_profile" in generate:
                         user_input = generate["generate_profile"]
                         if "voice_id" in user_input:
                             user_input["voice_id"] = resolve_voice_id(user_id, user_input["voice_id"])
-                        job = ContactGeneratorJob(user_input, user_id, app.state.db, app.state.infrastructure)
-                        app.state.job_queue.add(job)
+                        job = ContactGeneratorTask(user_input, user_id, app.state.db, app.state.infrastructure)
+                        app.state.task_queue.add(job)
                     else:
                         logger.error(f"unknown generation request")
                         await websocket.send_text(
@@ -1024,13 +1032,13 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                         )
                 elif "translate" in data:
                     translate = data["translate"]   # translator mode, the result goes back as {"translate": ...}
-                    job = TranslateJob(app.state.infrastructure, translate["from_language"], translate["to_language"],
+                    job = TranslateTask(app.state.infrastructure, translate["from_language"], translate["to_language"],
                                        translate["text"], translate.get("request_id", ""), user_id=user_id)
-                    app.state.job_queue.add(job)
+                    app.state.task_queue.add(job)
                 elif "generate_image" in data:
                     generate_image = data["generate_image"]   # image tool, the result goes back as {"generated_image": ...}
-                    job = GenerateImageJob(user_id, generate_image["prompt"], app.state.db, app.state.infrastructure, generate_image.get("request_id", ""))
-                    app.state.job_queue.add(job)
+                    job = GenerateImageTask(user_id, generate_image["prompt"], app.state.db, app.state.infrastructure, generate_image.get("request_id", ""))
+                    app.state.task_queue.add(job)
                 else:                    
                     logger.error(f"unknown request {data}")
                     await websocket.send_text(

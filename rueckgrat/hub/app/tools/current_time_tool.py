@@ -112,7 +112,11 @@ def format_time(now: datetime) -> str:
 class CurrentTimeTool(Tool):
     category = ToolCategory.TIME
     description = "current date, time and weekday in a city or time zone"
-    question = "Does the user want to know the current time or date somewhere?"
+    question = [
+        "Does the user want to know the current time or date somewhere?",
+        "Does the user want the local time of day in a city or country?",
+        "Does the user ask what time it is at a place, a region or a coast?"
+    ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)

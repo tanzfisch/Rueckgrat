@@ -2,7 +2,7 @@ import random
 import re
 from datetime import datetime, timezone
 
-from app.jobs.job_queue import Job
+from app.tasks.task_queue import Task
 from app.utils.embeddings import embed_text
 from app.companion.clock import to_db
 from .sweeper import MaintenanceTask
@@ -14,7 +14,7 @@ MAX_MESSAGES = 60           # the latest messages a summary is made from, older 
 MAX_MESSAGE_CHARS = 500
 MAX_WORDS = 120             # bge-small reads 512 tokens, a longer summary would be cut for the vector
 
-class ConversationSummaryTask(MaintenanceTask):
+class ConversationSummaryMaintenanceTask(MaintenanceTask):
     """a summary and its vector per conversation, for finding old conversations by meaning (search_memory).
     pending: no summary yet (the backfill), messages newer than the summary, or no vector (the embedding node was away)"""
     name = "summaries"
@@ -27,12 +27,18 @@ class ConversationSummaryTask(MaintenanceTask):
         return self.db.conversations_to_summarize(user_id, limit)
 
     def job(self, item):
-        return ConversationSummaryJob(item, self.db, self.infrastructure)
+        return ConversationSummaryTask(item, self.db, self.infrastructure)
 
     def status(self):
         return self.db.summary_status()
 
-class ConversationSummaryJob(Job):
+def maintenance_tasks(db, infrastructure) -> list[MaintenanceTask]:
+    """the hub's maintenance tasks in run order, for the nightly sweeper and hub management. a new task goes here"""
+    return [
+        ConversationSummaryMaintenanceTask(db, infrastructure),
+    ]
+
+class ConversationSummaryTask(Task):
     """(re)makes the summary of one conversation if it is stale, then embeds it. result() is a short outcome"""
 
     def __init__(self, item: dict, db, infrastructure):

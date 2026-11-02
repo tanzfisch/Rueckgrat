@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 import flet as ft
-from app.ui.theme import STYLES, RADIUS, TEAL_BRIGHT
+from app.ui import theme
 
 from app.ui import BasePage
 from app.ui.widgets import ChatBubble, Header, LanguagePicker, flag_text
@@ -27,7 +27,7 @@ class MessageRow(ft.Row):
         self.language = language
         self.bubble = ChatBubble("user" if own else "assistant", "")
         self.play_btn = ft.IconButton(icon=ft.Icons.PLAY_ARROW, icon_size=20, on_click=lambda e: on_play(self))
-        slot = ft.Container(content=self.bubble, expand=85, **STYLES["chat_user" if own else "chat_assistant"])
+        slot = ft.Container(content=self.bubble, expand=85, **theme.STYLES["chat_user" if own else "chat_assistant"])
         spacer = ft.Container(expand=15)
         super().__init__(
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -74,7 +74,7 @@ class TranslateHalf(ft.Container):
         self.send_btn = ft.IconButton(icon=ft.Icons.SEND, icon_size=24, on_click=lambda e: owner.send(self))
         bar = ft.Container(
             border_radius=20,
-            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
+            bgcolor=theme.INPUT_BAR,
             padding=ft.Padding(left=8, top=8, right=8, bottom=8),
             content=ft.Column(
                 spacing=0,
@@ -87,13 +87,13 @@ class TranslateHalf(ft.Container):
         super().__init__(
             expand=True,
             padding=8,
-            border_radius=RADIUS,
+            border_radius=theme.RADIUS,
             on_click=lambda e: owner.set_active(self),
             content=ft.Column(expand=True, controls=[self.history, bar]),
         )
 
     def set_active(self, active: bool):
-        self.border = ft.Border.all(2, TEAL_BRIGHT) if active else None
+        self.border = ft.Border.all(2, theme.TEAL_BRIGHT) if active else None
         _update(self)
 
     def set_language(self, code: str):
