@@ -9,7 +9,7 @@ MAX_QUERY_LENGTH = 200
 MAX_RESULTS = 5
 MAX_CONVERSATIONS = 3     # earlier conversations, from the summaries of the nightly maintenance (app/maintenance)
 SNIPPET_CHARS = 300
-# the vector search only ranks: every candidate conversation gets a yes/no check with laya (like ToolDetectionJob), the no's are dropped
+# the vector search only ranks: every candidate conversation gets a yes/no check with laya (like ToolDetectionTask), the no's are dropped
 CONVERSATION_QUESTION = "Is this earlier conversation about the user's question? Summary of the conversation: {summary}"
 CONVERSATION_THRESHOLD = 0.5   # relevant above this P(true). a guess, like TOOL_THRESHOLD
 
@@ -17,7 +17,7 @@ class SearchMemoryTool(Tool):
     category = ToolCategory.MEMORY
     description = ("what the user told you before (name, where they live, family, work, plans, preferences, etc) and what you talked about in earlier conversations. "
                    "Use for any personal question about the user, e.g. \"do you know where I was born?\", even without \"remember\"")
-    question = ""
+    question = []
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)

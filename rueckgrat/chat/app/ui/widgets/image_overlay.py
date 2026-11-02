@@ -4,6 +4,8 @@ import asyncio
 import mimetypes
 import flet as ft
 
+from app.ui import theme
+
 from app.common import get_logger
 from app.utils import Paths
 logger = get_logger()
@@ -47,8 +49,8 @@ class ImageOverlay(ft.Container):
                 content=ft.Row(
                     tight=True,
                     controls=[
-                        ft.IconButton(ft.Icons.DOWNLOAD, icon_color=ft.Colors.WHITE, tooltip="save", on_click=self._on_save),
-                        ft.IconButton(ft.Icons.SHARE, icon_color=ft.Colors.WHITE, tooltip="share", on_click=self._on_share, visible=can_share),
+                        ft.IconButton(ft.Icons.DOWNLOAD, icon_color=theme.ON_SCRIM, tooltip="save", on_click=self._on_save),
+                        ft.IconButton(ft.Icons.SHARE, icon_color=theme.ON_SCRIM, tooltip="share", on_click=self._on_share, visible=can_share),
                     ],
                 ),
             ),
@@ -58,7 +60,7 @@ class ImageOverlay(ft.Container):
             top=0,
             width=page.width,
             height=page.height,
-            bgcolor=ft.Colors.with_opacity(0.85, ft.Colors.BLACK),
+            bgcolor=theme.SCRIM,
             alignment=ft.Alignment.CENTER,
             on_click=self._close,
             content=ft.Stack([self.viewer, self.tools]),

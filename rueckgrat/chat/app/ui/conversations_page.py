@@ -1,5 +1,5 @@
 import flet as ft
-from app.ui.theme import STYLES
+from app.ui import theme
 
 from app.ui import BasePage
 from app.ui.widgets import OneLineBubble, Header
@@ -60,8 +60,8 @@ class ConversationsPage(BasePage):
                 title=ft.Text("Delete conversation"),
                 content=ft.Text("Are you sure you want to delete this conversation?"),
                 actions=[
-                    ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog(), style=STYLES["button"]["style"]),
-                    ft.TextButton("Delete", on_click=confirm, style=STYLES["button"]["style"]),
+                    ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog(), style=theme.STYLES["button"]["style"]),
+                    ft.TextButton("Delete", on_click=confirm, style=theme.STYLES["button"]["style"]),
                 ],
             )
         )

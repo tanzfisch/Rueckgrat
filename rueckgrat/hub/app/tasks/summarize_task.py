@@ -1,4 +1,4 @@
-from .job_queue import Job
+from .task_queue import Task
 from typing import Optional
 import random
 
@@ -8,7 +8,7 @@ logger = get_logger()
 
 MIN_CONTENT_LENGTH = 200    # less than this after cleanup is not worth a summary (empty or JS only page)
 
-class SummarizeJob(Job):
+class SummarizeTask(Task):
     """condenses one page into a short plain text summary. give it the page text or the raw html (html wins),
     the content filter strips the noise (menus, ads, cookie banners) before the llm sees it. result() is the summary or None"""
     def __init__(self, infrastructure, text: Optional[str] = None, html: Optional[str] = None,

@@ -3,7 +3,7 @@ from enum import Enum
 import os
 import random
 import flet as ft
-from app.ui.theme import STYLES, field_border
+from app.ui import theme
 
 from app.utils import Hub
 from app.ui import BasePage
@@ -83,20 +83,21 @@ class WizardProfilePage(ft.Column):
         "Obioma", "Chinwe", "Adanna", "Ebele", "Uduak", "Yewande", "Funmi",
     ]
 
-    male_ages = {
-        "18": f"{ASSETS_DIR}/icons/male_teen_light.png",
-        "22": f"{ASSETS_DIR}/icons/male_20s_light.png",
-        "27": f"{ASSETS_DIR}/icons/male_30s_light.png",
-        "45": f"{ASSETS_DIR}/icons/male_40s_light.png",
-        "60": f"{ASSETS_DIR}/icons/male_old_light.png",
+    # icon names, theme.icon() picks the light or dark drawing when the page is built
+    _male_age_icons = {
+        "18": "male_teen",
+        "22": "male_20s",
+        "27": "male_30s",
+        "45": "male_40s",
+        "60": "male_old",
     }
 
-    female_ages = {
-        "18": f"{ASSETS_DIR}/icons/female_teen_light.png",
-        "22": f"{ASSETS_DIR}/icons/female_20s_light.png",
-        "27": f"{ASSETS_DIR}/icons/female_30s_light.png",
-        "45": f"{ASSETS_DIR}/icons/female_40s_light.png",
-        "60": f"{ASSETS_DIR}/icons/female_old_light.png",
+    _female_age_icons = {
+        "18": "female_teen",
+        "22": "female_20s",
+        "27": "female_30s",
+        "45": "female_40s",
+        "60": "female_old",
     }
 
     hair_color = {
@@ -131,12 +132,12 @@ class WizardProfilePage(ft.Column):
         "Oceanian": "",
     }
 
-    body_type = {
-        "underweight": f"{ASSETS_DIR}/icons/body_underweight_light.png",
-        "athletic": f"{ASSETS_DIR}/icons/body_normal_light.png",
-        "curvy": f"{ASSETS_DIR}/icons/body_overweight_light.png",
-        "overweight": f"{ASSETS_DIR}/icons/body_obese_light.png",
-        "obese": f"{ASSETS_DIR}/icons/body_morbidly_obese_light.png",
+    _body_type_icons = {
+        "underweight": "body_underweight",
+        "athletic": "body_normal",
+        "curvy": "body_overweight",
+        "overweight": "body_obese",
+        "obese": "body_morbidly_obese",
     }
 
     def __init__(self, profile: dict = None, simple: bool = False, user_profile: bool = False):
@@ -144,6 +145,9 @@ class WizardProfilePage(ft.Column):
         self.profile = profile
         self.simple = simple
         self.user_profile = user_profile
+        self.male_ages = {k: theme.icon(v) for k, v in self._male_age_icons.items()}
+        self.female_ages = {k: theme.icon(v) for k, v in self._female_age_icons.items()}
+        self.body_type = {k: theme.icon(v) for k, v in self._body_type_icons.items()}
 
         if user_profile:
             name_value = ((profile or {}).get("name") or "").strip()
@@ -158,13 +162,13 @@ class WizardProfilePage(ft.Column):
             on_change=self.on_name_changed,
             on_focus=self.on_name_focus,
             filled=True,
-            bgcolor="#2C2C2C",
-            border=field_border(22, "#0D7377"),
+            bgcolor=theme.SURFACE_FIELD,
+            border=theme.field_border(22, theme.ACCENT),
             content_padding=ft.Padding.only(left=16, right=16, top=10, bottom=10),
             height=44,
         )
 
-        self.gender = RowSelector({"male": f"{ASSETS_DIR}/icons/male_light.png", "female": f"{ASSETS_DIR}/icons/female_light.png"})
+        self.gender = RowSelector({"male": theme.icon("male"), "female": theme.icon("female")})
         self.gender.on_selection_changed = self.on_gender_changed
         self.gender.select(profile["gender"] if profile else "male")
 
@@ -199,8 +203,8 @@ class WizardProfilePage(ft.Column):
             max_lines=8,
             value=profile["backstory"] if profile else "",
             filled=True,
-            bgcolor="#2C2C2C",
-            border=field_border(16, "#0D7377"),
+            bgcolor=theme.SURFACE_FIELD,
+            border=theme.field_border(16, theme.ACCENT),
             content_padding=16,
         )
 
@@ -223,11 +227,11 @@ class WizardProfilePage(ft.Column):
             max_lines=20,
             value="",
             filled=True,
-            bgcolor="#2C2C2C",
-            border=field_border(16, "#0D7377"),
+            bgcolor=theme.SURFACE_FIELD,
+            border=theme.field_border(16, theme.ACCENT),
             content_padding=16,
         )
-        self.sfw_switch = ft.Switch(value=True, active_color="#0D7377")
+        self.sfw_switch = ft.Switch(value=True, active_color=theme.ACCENT)
         self.voice_selector = VoiceSelector()
 
         self.image_style = ft.Dropdown(
@@ -245,7 +249,7 @@ class WizardProfilePage(ft.Column):
             value=DEFAULT_IMAGE_STYLE,
             expand=True,
             filled=True,
-            fill_color="#2C2C2C",
+            fill_color=theme.SURFACE_FIELD,
         )
 
         self.controls = [
@@ -262,7 +266,7 @@ class WizardProfilePage(ft.Column):
         return ft.Row(
             [
                 ft.Container(
-                    content=ft.Text(label, color="#C8C8C8"),
+                    content=ft.Text(label, color=theme.TEXT_LABEL),
                     width=LABEL_WIDTH,
                     padding=ft.Padding.only(top=12) if top else None,
                     alignment=ft.Alignment.TOP_LEFT if top else ft.Alignment.CENTER_LEFT,
@@ -355,7 +359,7 @@ class ProgressPage(ft.Column):
                                 ft.Text(
                                     "This may take a moment",
                                     size=13,
-                                    color=ft.Colors.ON_SURFACE_VARIANT,
+                                    color=theme.TEXT_VARIANT,
                                 ),
                             ],
                             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -363,7 +367,7 @@ class ProgressPage(ft.Column):
                         ),
                         padding=40,
                         border_radius=16,
-                        bgcolor=ft.Colors.SURFACE_CONTAINER,
+                        bgcolor=theme.CARD,
                     )
                 ],
             )
@@ -387,8 +391,8 @@ class ProfileWizard(BasePage):
         self.header = Header(navigator, False)
         self.header.on_go_back = self.on_go_back
         self.content_slot = ft.Container(expand=True)
-        self.submit_btn = ft.Button("...", on_click=self.on_submit, expand=True, **STYLES["button"])
-        self.cancel_btn = ft.Button("Cancel", on_click=self.on_go_back, expand=True, visible=False, **STYLES["button"])
+        self.submit_btn = ft.Button("...", on_click=self.on_submit, expand=True, **theme.STYLES["button"])
+        self.cancel_btn = ft.Button("Cancel", on_click=self.on_go_back, expand=True, visible=False, **theme.STYLES["button"])
 
         self.controls = [
             ft.Container(

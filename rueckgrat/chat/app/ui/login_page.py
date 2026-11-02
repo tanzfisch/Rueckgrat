@@ -4,7 +4,7 @@ from app.ui import BasePage
 from app.ui.widgets import OneLineBubble, Header
 from app.utils import Hub
 from app.common import get_logger
-from app.ui.theme import STYLES, ERROR
+from app.ui import theme
 from app.ui.profile_wizzard import ProfileWizzardMode
 
 logger = get_logger()
@@ -37,7 +37,7 @@ class UserSelectionPage(ft.Column):
                 content=ft.Button(
                     "Add User",
                     on_click=lambda e: goto_create(),
-                    **STYLES["button"],
+                    **theme.STYLES["button"],
                 ),
             )
         ]
@@ -53,7 +53,7 @@ class PasswordPage(ft.Container):
             visible=ask_name,
             autofocus=ask_name,
             text_align=ft.TextAlign.CENTER,
-            **STYLES["field"],
+            **theme.STYLES["field"],
         )
         self.password_edit = ft.TextField(
             label="Password" if ask_name else None,
@@ -62,9 +62,9 @@ class PasswordPage(ft.Container):
             text_align=ft.TextAlign.CENTER,
             autofocus=not ask_name,
             on_submit=lambda e: check_login(),
-            **STYLES["field"],
+            **theme.STYLES["field"],
         )
-        self.error_text = ft.Text("", color=ERROR, visible=False, text_align=ft.TextAlign.CENTER)
+        self.error_text = ft.Text("", color=theme.ERROR, visible=False, text_align=ft.TextAlign.CENTER)
         super().__init__(
             expand=True,
             margin=20,
@@ -81,8 +81,8 @@ class PasswordPage(ft.Container):
                     ft.Container(expand=True),
                     ft.Row(
                         controls=[
-                            ft.Button("Sign Up" if ask_name else "Change User", expand=True, on_click=lambda e: goto_select(), **STYLES["button"]),
-                            ft.Button("Login", expand=True, on_click=lambda e: check_login(), **STYLES["button"]),
+                            ft.Button("Sign Up" if ask_name else "Change User", expand=True, on_click=lambda e: goto_select(), **theme.STYLES["button"]),
+                            ft.Button("Login", expand=True, on_click=lambda e: check_login(), **theme.STYLES["button"]),
                         ]
                     ),
                 ],
@@ -97,12 +97,12 @@ class PasswordPage(ft.Container):
 class AddUserPage(ft.Column):
     def __init__(self, create_user, goto_select, invite_required=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH):
         super().__init__(expand=True, spacing=8)
-        self.name_edit = ft.TextField(label="Name", expand=True, **STYLES["field"])
-        self.pass_edit = ft.TextField(label="Password", password=True, can_reveal_password=True, expand=True, **STYLES["field"])
+        self.name_edit = ft.TextField(label="Name", expand=True, **theme.STYLES["field"])
+        self.pass_edit = ft.TextField(label="Password", password=True, can_reveal_password=True, expand=True, **theme.STYLES["field"])
         # only shown when the hub runs in invite mode
-        self.invite_edit = ft.TextField(label="Invite code", visible=invite_required, expand=True, **STYLES["field"])
-        self.email_edit = ft.TextField(label="Email (if the invite is for one)", visible=invite_required, expand=True, **STYLES["field"])
-        self.error_text = ft.Text("", color=ERROR, visible=False, text_align=ft.TextAlign.CENTER)
+        self.invite_edit = ft.TextField(label="Invite code", visible=invite_required, expand=True, **theme.STYLES["field"])
+        self.email_edit = ft.TextField(label="Email (if the invite is for one)", visible=invite_required, expand=True, **theme.STYLES["field"])
+        self.error_text = ft.Text("", color=theme.ERROR, visible=False, text_align=ft.TextAlign.CENTER)
 
         self.controls = [
             ft.Container(
@@ -127,8 +127,8 @@ class AddUserPage(ft.Column):
                 margin=10,
                 content=ft.Row(
                     controls=[
-                        ft.Button("Cancel", expand=True, on_click=lambda e: goto_select(), **STYLES["button"]),
-                        ft.Button("Create", expand=True, on_click=lambda e: create_user(), **STYLES["button"]),
+                        ft.Button("Cancel", expand=True, on_click=lambda e: goto_select(), **theme.STYLES["button"]),
+                        ft.Button("Create", expand=True, on_click=lambda e: create_user(), **theme.STYLES["button"]),
                     ]
                 ),                
             )
@@ -175,9 +175,20 @@ class LoginPage(BasePage):
         # only the menu button, so the network settings can be changed before logging in
         self.header = Header(navigator, False, False)
         self.slot = ft.Container(expand=True, content=start)
+        # the wallpaper fills the page behind the form, dark or bright with the mode
         self.controls = [
-            ft.Container(padding=ft.Padding.only(left=20, top=20, right=20), content=self.header),
-            self.slot,
+            ft.Container(
+                expand=True,
+                image=ft.DecorationImage(src=theme.wallpaper(), fit=ft.BoxFit.COVER),
+                content=ft.Column(
+                    expand=True,
+                    spacing=0,
+                    controls=[
+                        ft.Container(padding=ft.Padding.only(left=20, top=20, right=20), content=self.header),
+                        self.slot,
+                    ],
+                ),
+            )
         ]
 
     def _show(self, widget):

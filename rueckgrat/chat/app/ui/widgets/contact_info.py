@@ -1,5 +1,5 @@
 import flet as ft
-from app.ui.theme import STYLES, TEXT_DIM
+from app.ui import theme
 from app.utils import Contact, Hub
 from app.common import Utils
 from app.ui.widgets.message_box import MessageBox
@@ -9,7 +9,7 @@ def _field(label: str, value) -> ft.Control | None:
     if not value:
         return None
     return ft.Column(
-        [ft.Text(label, color=TEXT_DIM, size=12), ft.Text(str(value), no_wrap=False, selectable=True)],
+        [ft.Text(label, color=theme.TEXT_DIM, size=12), ft.Text(str(value), no_wrap=False, selectable=True)],
         spacing=2,
         tight=True,
     )
@@ -44,7 +44,7 @@ class ContactInfo:
                     memory_list.controls.remove(row)
                     memory_tab.label = f"Memories ({len(memory_list.controls)})"
                     if not memory_list.controls:
-                        memory_list.controls.append(ft.Text("Nothing remembered yet", color=TEXT_DIM))
+                        memory_list.controls.append(ft.Text("Nothing remembered yet", color=theme.TEXT_DIM))
                     memory_tab.update()
                     memory_list.update()
                 else:
@@ -56,7 +56,7 @@ class ContactInfo:
                                title="Delete memory", ok_text="Delete")
 
         def memory_row(m: dict) -> ft.Row:
-            button = ft.IconButton(icon=ft.Icons.DELETE, width=40, height=40, style=STYLES["icon_button"]["style"])
+            button = ft.IconButton(icon=ft.Icons.DELETE, width=40, height=40, style=theme.STYLES["icon_button"]["style"])
             row = ft.Row(
                 vertical_alignment=ft.CrossAxisAlignment.START,
                 controls=[
@@ -68,9 +68,9 @@ class ContactInfo:
             return row
 
         if memories is None:
-            memory_list.controls = [ft.Text("Could not load memories", color=TEXT_DIM)]
+            memory_list.controls = [ft.Text("Could not load memories", color=theme.TEXT_DIM)]
         elif not memories:
-            memory_list.controls = [ft.Text("Nothing remembered yet", color=TEXT_DIM)]
+            memory_list.controls = [ft.Text("Nothing remembered yet", color=theme.TEXT_DIM)]
         else:
             memory_list.controls = [memory_row(m) for m in memories]
 
@@ -97,6 +97,6 @@ class ContactInfo:
                 modal=False,
                 title=ft.Text(contact.get_name()),
                 content=ft.Container(width=400, height=480, content=content),
-                actions=[ft.TextButton("Close", on_click=lambda e: page.pop_dialog(), style=STYLES["button"]["style"])],
+                actions=[ft.TextButton("Close", on_click=lambda e: page.pop_dialog(), style=theme.STYLES["button"]["style"])],
             )
         )

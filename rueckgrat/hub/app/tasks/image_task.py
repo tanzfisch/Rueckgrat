@@ -1,13 +1,13 @@
 from contextlib import nullcontext
 from pathlib import Path
-from .job_queue import Job
+from .task_queue import Task
 from ..utils.image_store import file_lock, discard_if_released
 from typing import Dict, Any
 
 from app.common import get_logger, ImageRequest
 logger = get_logger()
 
-class ImageJob(Job):
+class ImageTask(Task):
     def __init__(self, request: ImageRequest, infrastructure, db=None):
         super().__init__()
         self.request = request
@@ -57,7 +57,7 @@ class ImageJob(Job):
                     }
                 }
         except Exception as e:
-            logger.error(f"failed to execute ImageJob {repr(e)}")                    
+            logger.error(f"failed to execute ImageTask {repr(e)}")                    
 
     def result(self) -> Dict[str, Any]:
         return self.response

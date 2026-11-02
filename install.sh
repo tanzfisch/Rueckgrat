@@ -1410,6 +1410,10 @@ build_chat_apk() {
         echo "   The normal install generates it. Without it the APK will not trust the hub."
     fi
 
+    # the Credits and Licenses settings pages read these, the apk has no project root
+    cp -f "$WORKING_DIR/CREDITS.md" "$WORKING_DIR/THIRD_PARTY_LICENSES.md" "$WORKING_DIR/changelog.md" assets/ \
+        || echo "⚠️ Warning: could not copy the credits/license files, the app will show them as not found"
+
     # same venv as the native chat client; requirements_desktop.txt brings the flet CLI
     [ -x .venv/bin/python ] || { rm -rf .venv; python3 -m venv .venv; }
     if ! .venv/bin/python -m pip install -r requirements_desktop.txt; then

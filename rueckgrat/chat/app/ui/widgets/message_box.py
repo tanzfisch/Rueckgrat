@@ -1,7 +1,7 @@
 import asyncio
 import flet as ft
 
-from app.ui.theme import STYLES, ERROR
+from app.ui import theme
 from app.common import get_logger
 
 logger = get_logger()
@@ -10,9 +10,10 @@ logger = get_logger()
 class MessageBox:
     # builds a plain ft.AlertDialog, the same pattern as the delete contact dialog
     # kind: "question" (ok + cancel), "info", "warning" or "error" (ok only)
+    # kind: (icon, name of its theme colour)
     ICONS = {
-        "error": (ft.Icons.ERROR_OUTLINE, ERROR),
-        "warning": (ft.Icons.WARNING_AMBER, ft.Colors.AMBER),
+        "error": (ft.Icons.ERROR_OUTLINE, "ERROR"),
+        "warning": (ft.Icons.WARNING_AMBER, "WARNING"),
         "info": (ft.Icons.INFO_OUTLINE, None),
     }
 
@@ -25,10 +26,11 @@ class MessageBox:
 
         actions = []
         if kind == "question":
-            actions.append(ft.TextButton("Cancel", on_click=lambda e: close(False), style=STYLES["button"]["style"]))
-        actions.append(ft.TextButton(ok_text, on_click=lambda e: close(True), style=STYLES["button"]["style"]))
+            actions.append(ft.TextButton("Cancel", on_click=lambda e: close(False), style=theme.STYLES["button"]["style"]))
+        actions.append(ft.TextButton(ok_text, on_click=lambda e: close(True), style=theme.STYLES["button"]["style"]))
 
         icon, color = cls.ICONS.get(kind, (None, None))
+        color = color and getattr(theme, color)
         if not icon:
             return ft.AlertDialog(
                 modal=True,

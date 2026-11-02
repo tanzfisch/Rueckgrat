@@ -1,6 +1,6 @@
 import random
-from .job_queue import Job
-from .image_job import ImageJob, ImageRequest
+from .task_queue import Task
+from .image_task import ImageTask, ImageRequest
 from ..utils.generic_image_prompt_compiler import GenericImagePromptCompiler
 from typing import Dict, Any
 
@@ -10,7 +10,7 @@ logger = get_logger()
 MODEL = "DreamShaperXL_Turbo_V2-SFW"    # the sfw default of the other image jobs
 
 
-class GenerateImageJob(Job):
+class GenerateImageTask(Task):
     """image generation tool: one image from a free text prompt. no contact, no conversation.
     the png stays in /hub/images, the client fetches it from /downloads/images/<filename> like chat images.
     the job is remembered for its user in the generated_images table (GET /generated-images): a pending row when the job is
@@ -51,7 +51,7 @@ class GenerateImageJob(Job):
         try:
             # run inline, not as a sub job: a sub job would send its own {"image": ...} to the client
             # with the db, the generation parameters are stored too, so a lost file can be generated again (ImageStore)
-            image_job = ImageJob(self.build_request(), self.infrastructure, self.db)
+            image_job = ImageTask(self.build_request(), self.infrastructure, self.db)
             image_job.execute()
             self.image = image_job.result().get("image") or {}
         except Exception as e:

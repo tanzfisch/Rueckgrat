@@ -20,6 +20,7 @@ Hub management tool (signup invites and users), run inside the hub container:
     docker exec -it rueckgrat_hub python -m app.hub_management maintenance status
     docker exec -it rueckgrat_hub python -m app.hub_management maintenance run
     docker exec -it rueckgrat_hub python -m app.hub_management maintenance run --job summaries --all
+    docker exec -it rueckgrat_hub python -m app.hub_management stats
 
 Whoever can run docker on the host is trusted as admin.
 """
@@ -94,7 +95,7 @@ def companion_now(db):
 
 def companion_status(db, contact, log_entries):
     """everything about one companion as a dict, times in the user's timezone"""
-    from app.companion import clock, companion_job as cj
+    from app.companion import clock, companion_task as cj
     from app.companion.scheduler import CompanionScheduler
     contact_id = contact["id"]
     tz = clock.user_timezone(db, contact["user_id"])
@@ -159,7 +160,7 @@ def maintenance_run(db, args):
     """runs the pending maintenance now, outside the window, one item at a time on this process.
     it does not see the hub's chats: it does not wait for replies being made"""
     import asyncio
-    from app.jobs import JobQueue
+    from app.tasks import TaskQueue
     from app.utils import Infrastructure
     from app.maintenance import MaintenanceSweeper, maintenance_tasks, sweeper
     infrastructure = Infrastructure()
@@ -174,7 +175,7 @@ def maintenance_run(db, args):
         if user_id is None:
             print("user not found")
             return
-    MaintenanceSweeper(db, JobQueue(max_parallel=1), tasks).sweep(user_id, None if args.all else sweeper.BATCH, [args.job] if args.job else None)
+    MaintenanceSweeper(db, TaskQueue(max_parallel=1), tasks).sweep(user_id, None if args.all else sweeper.BATCH, [args.job] if args.job else None)
     maintenance_status(db)
 
 
@@ -231,7 +232,11 @@ def main():
                   run the waiting maintenance now instead of at night (one item at a time, uses the llm)
       --job       only this job (e.g. summaries), default all
       --all       everything that waits, e.g. the first backfill, default at most one night's batch
-      --user      only this user's items""",
+      --user      only this user's items
+
+  stats [--minutes N]
+                  running agent jobs, users, and users active in the last N minutes (default 10). read only
+                  active = wrote a message, logged in or refreshed their login in that time""",
     )
     # two levels of subcommands: first the noun (invite/user), then the action
     nouns = parser.add_subparsers(dest="noun", required=True)
@@ -289,7 +294,17 @@ def main():
     run.add_argument("--all", action="store_true", help="everything that waits, not just one night's batch")
     run.add_argument("--user", default=None, help="user name as shown by user list")
 
+    # --- stats (read only) ---
+    stats = nouns.add_parser("stats", help="running agent jobs, users and active users, read only")
+    stats.add_argument("--minutes", type=int, default=10, help="active in the last N minutes (default 10)")
+
     args = parser.parse_args()
+    if args.noun == "stats":
+        s = ChatDB.read_only(DB_PATH).hub_stats(args.minutes)
+        print(f"\n{'running agent jobs':<24} {s['running_agent_jobs']}")
+        print(f"{'users':<24} {s['users']}")
+        print(f"{f'active last {args.minutes} min':<24} {s[f'active_last_{args.minutes}min']}")
+        return
     if args.noun == "maintenance" and args.action == "status":
         maintenance_status(ChatDB.read_only(DB_PATH))
         return

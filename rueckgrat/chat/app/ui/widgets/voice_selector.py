@@ -1,6 +1,7 @@
 import io
 import wave
 import flet as ft
+from app.ui import theme
 
 from app.utils import Hub
 from app.audio import Text_To_Speech
@@ -36,12 +37,12 @@ class VoiceSelector(ft.Column):
             on_select=self.on_voice_selected,
             expand=True,
             filled=True,
-            fill_color="#2C2C2C",
+            fill_color=theme.SURFACE_FIELD,
             menu_height=400,
         )
 
         self.voice_upload_btn = OneLineBubble("upload voice (wav)", on_clicked=lambda text, data: self.page.run_task(self.on_pick_voice), height=48, expand=True)
-        self.voice_name_text = ft.Text("", color="#C8C8C8", visible=False)
+        self.voice_name_text = ft.Text("", color=theme.TEXT_LABEL, visible=False)
         self.voice_clear_btn = ft.IconButton(icon=ft.Icons.CLOSE, tooltip="Remove voice", on_click=self.on_clear_voice, visible=False)
         # only shown while "upload own voice" is selected
         self.voice_upload_row = ft.Row([self.voice_upload_btn, self.voice_name_text, self.voice_clear_btn], spacing=8, visible=False)

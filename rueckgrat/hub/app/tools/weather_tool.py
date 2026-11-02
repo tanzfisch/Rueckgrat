@@ -65,7 +65,13 @@ def get_weather(location: str) -> str:
 class WeatherTool(Tool):
     category = ToolCategory.WEB
     description = "current weather and 3 day forecast for a place"
-    question = "Does the user want to know about the weather?"
+    question = [
+        "Does the user want the weather or forecast somewhere, like rain, sun or wind?",
+        "Does the user ask if they need an umbrella, a jacket or sunscreen?",
+        "Does the user ask how hot, cold, rainy or windy a day will be?",
+        "Does the user ask whether a day will be good weather for going out?",
+        "Does the user ask about the temperature outside right now?"
+    ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)

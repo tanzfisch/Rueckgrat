@@ -3,7 +3,7 @@ import copy
 import json
 from pathlib import Path
 import flet as ft
-from app.ui.theme import STYLES
+from app.ui import theme
 
 from app.ui import BasePage
 from app.ui.gallery_page import GalleryPage, broken_image_fallback
@@ -88,7 +88,7 @@ def _select_field(label: str, path: list[str]) -> ft.Dropdown:
         ],
         expand=True,
         filled=True,
-        fill_color="#2C2C2C",
+        fill_color=theme.SURFACE_FIELD,
     )
 
 
@@ -147,7 +147,7 @@ class ProfilePage(BasePage):
         self.age = _text_field("Age", "text")
         self.voice_selector = VoiceSelector()
         # a pending choice, Save Profile sends it. hidden for a new contact
-        self.companion_switch = ft.Switch(label="Companion (plans its own day, may write first)", active_color="#0D7377", visible=False)
+        self.companion_switch = ft.Switch(label="Companion (plans its own day, may write first)", active_color=theme.ACCENT, visible=False)
         self.companion_loaded = False   # the hub's state, a different switch value is sent on save
 
         # original profile dict, so fields without a form entry survive a save
@@ -155,7 +155,7 @@ class ProfilePage(BasePage):
         self.profile_fields = []  # (key path, kind, TextField)
         profile_controls = []
         for section, fields in PROFILE_SECTIONS:
-            profile_controls.append(ft.Text(section, style=STYLES["section_heading"]))
+            profile_controls.append(ft.Text(section, style=theme.STYLES["section_heading"]))
             for label, path, kind in fields:
                 field = _select_field(label, path) if kind == "select" else _text_field(label, kind)
                 self.profile_fields.append((path, kind, field))
@@ -184,7 +184,7 @@ class ProfilePage(BasePage):
                             right=0,
                             bottom=0,
                             border_radius=20,
-                            bgcolor=ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
+                            bgcolor=theme.SCRIM_SOFT,
                             content=ft.IconButton(ft.Icons.EDIT, icon_size=18, tooltip="Change image", on_click=self._on_edit_image),
                         ),
                     ],
@@ -231,12 +231,12 @@ class ProfilePage(BasePage):
                         ft.Column(
                             tight=True,
                             controls=[
-                                ft.Button("Load", width=float("inf"), on_click=self._on_load, style=STYLES["button"]["style"]),
-                                ft.Button("Export", width=float("inf"), on_click=self._on_export, style=STYLES["button"]["style"]),
+                                ft.Button("Load", width=float("inf"), on_click=self._on_load, style=theme.STYLES["button"]["style"]),
+                                ft.Button("Export", width=float("inf"), on_click=self._on_export, style=theme.STYLES["button"]["style"]),
                                 ft.Row(
                                     controls=[
-                                        ft.Button("Cancel", expand=True, on_click=self._on_cancel, style=STYLES["button"]["style"]),
-                                        ft.Button("Save Profile", expand=True, on_click=self._on_save, style=STYLES["button"]["style"]),
+                                        ft.Button("Cancel", expand=True, on_click=self._on_cancel, style=theme.STYLES["button"]["style"]),
+                                        ft.Button("Save Profile", expand=True, on_click=self._on_save, style=theme.STYLES["button"]["style"]),
                                     ]
                                 ),
                             ],
@@ -321,9 +321,9 @@ class ProfilePage(BasePage):
             ft.AlertDialog(
                 title=ft.Text("Contact image"),
                 actions=[
-                    ft.TextButton("Upload image", on_click=self._on_upload_image, style=STYLES["button"]["style"]),
-                    ft.TextButton("Choose from gallery", on_click=self._on_choose_from_gallery, style=STYLES["button"]["style"]),
-                    ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog(), style=STYLES["button"]["style"]),
+                    ft.TextButton("Upload image", on_click=self._on_upload_image, style=theme.STYLES["button"]["style"]),
+                    ft.TextButton("Choose from gallery", on_click=self._on_choose_from_gallery, style=theme.STYLES["button"]["style"]),
+                    ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog(), style=theme.STYLES["button"]["style"]),
                 ],
             )
         )
@@ -366,7 +366,7 @@ class ProfilePage(BasePage):
             ft.AlertDialog(
                 title=ft.Text("Choose from gallery"),
                 content=ft.Container(width=500, height=600, content=gallery),
-                actions=[ft.TextButton("Cancel", on_click=close, style=STYLES["button"]["style"])],
+                actions=[ft.TextButton("Cancel", on_click=close, style=theme.STYLES["button"]["style"])],
                 on_dismiss=lambda e: gallery.on_leave(),
             )
         )

@@ -21,7 +21,7 @@ from app.ui import (
     ImagePage,
     GalleryPage,
 )
-from app.ui.theme import apply_theme
+from app.ui import theme
 from app.ui.widgets import ImageOverlay, MessageBox, ConnectionBanner
 
 from app.utils import Paths, Notifier
@@ -286,7 +286,7 @@ def main():
     Hub.register_incomming_message(on_incomming_message)
 
     def flet_main(page: ft.Page):
-        apply_theme(page)
+        theme.apply_theme(page, config.theme)   # dark unless light was chosen in the settings
         Text_To_Speech.attach(page)
         Notifier.attach(page)
         page.padding = 0

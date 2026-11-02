@@ -78,7 +78,12 @@ def calculate(expression: str) -> str:
 class CalculatorTool(Tool):
     category = ToolCategory.MATH
     description = "exact arithmetic and math (sums, percentages, tips, powers, roots, trigonometry)"
-    question = "Does the user want something calculated?"
+    question = [
+        "Does the user want you to do some math with numbers they gave?",
+        "Does the user ask for a math result, like a sum, a split, a percentage, sin or cos?",
+        "Does the user ask a word problem, like how many are left or how many there are now?",
+        "Does the user ask how many someone has left after giving some away?"
+    ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)

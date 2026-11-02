@@ -1,7 +1,7 @@
 import asyncio
 import flet as ft
 
-from app.ui.theme import ERROR, TEAL_FILL, TEXT
+from app.ui import theme
 
 
 class ConnectionBanner(ft.SafeArea):
@@ -14,8 +14,8 @@ class ConnectionBanner(ft.SafeArea):
         self._lost = False
         self._gen = 0  # bumped on every state change, so older timers can't override a newer state
         self._page = None
-        self.icon = ft.Icon(ft.Icons.CLOUD_OFF, color=TEXT, size=18)
-        self.text = ft.Text("", color=TEXT)
+        self.icon = ft.Icon(ft.Icons.CLOUD_OFF, color=theme.ON_ACCENT, size=18)
+        self.text = ft.Text("", color=theme.ON_ACCENT)
         self.strip = ft.Container(
             padding=8,
             content=ft.Row([self.icon, self.text], alignment=ft.MainAxisAlignment.CENTER, spacing=8),
@@ -31,7 +31,7 @@ class ConnectionBanner(ft.SafeArea):
             page.run_task(self._show_lost, self._gen)
         elif state == "reconnected" and was_visible:
             # the red strip goes away right now, the green one only stays for HIDE_AFTER
-            self._set(True, ft.Icons.CLOUD_DONE, "reconnected", TEAL_FILL)
+            self._set(True, ft.Icons.CLOUD_DONE, "reconnected", theme.TEAL_FILL)
             page.run_task(self._hide_later, self._gen)
         else:
             self._set(False)
@@ -39,7 +39,7 @@ class ConnectionBanner(ft.SafeArea):
     async def _show_lost(self, gen: int):
         await asyncio.sleep(self.SHOW_AFTER)
         if gen == self._gen:
-            self._set(True, ft.Icons.CLOUD_OFF, "connection lost, reconnecting…", ERROR)
+            self._set(True, ft.Icons.CLOUD_OFF, "connection lost, reconnecting…", theme.ERROR)
 
     async def _hide_later(self, gen: int):
         await asyncio.sleep(self.HIDE_AFTER)
@@ -52,6 +52,7 @@ class ConnectionBanner(ft.SafeArea):
             self.icon.icon = icon
             self.text.value = text
             self.strip.bgcolor = color
+            self.icon.color = self.text.color = theme.ON_ACCENT   # the mode may have changed since start
         try:
             self.update()
         except RuntimeError:

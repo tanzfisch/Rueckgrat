@@ -54,7 +54,13 @@ def wikipedia_summary(query: str, lang: str = "en") -> Dict[str, str]:
 class WikipediaTool(Tool):
     category = ToolCategory.WEB
     description = "encyclopedic summary of a well known person, place, thing, concept or historic event"
-    question = "Does the user want to know about a well known topic?"
+    question = [
+        "Does the user ask who a famous person from history was?",
+        "Does the user ask to have a science theory or natural process explained?",
+        "Does the user ask what a science term means, like photosynthesis or a black hole?",
+        "Does the user ask about a famous landmark, country, empire or historic event?",
+        "Does the user ask about a famous treaty, war, empire or monument?",
+    ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)

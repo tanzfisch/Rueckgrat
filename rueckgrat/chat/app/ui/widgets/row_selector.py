@@ -3,7 +3,7 @@ from typing import Dict, Any, Union, List
 import flet as ft
 
 from app.common import get_logger
-from app.ui.theme import SURFACE_3, TEAL_FILL, TEXT
+from app.ui import theme
 
 logger = get_logger()
 
@@ -54,11 +54,11 @@ class RowSelector(ft.Column):
                 alignment=ft.MainAxisAlignment.CENTER,
                 controls=[
                     ft.Image(src=image, width=36, height=36, fit=ft.BoxFit.CONTAIN),
-                    ft.Text(name, color=TEXT),
+                    ft.Text(name, color=theme.TEXT),
                 ],
             )
         else:
-            content = ft.Text(name, color=TEXT, text_align=ft.TextAlign.CENTER)
+            content = ft.Text(name, color=theme.TEXT, text_align=ft.TextAlign.CENTER)
 
         return ft.Container(
             content=content,
@@ -68,8 +68,8 @@ class RowSelector(ft.Column):
             expand=True,
             alignment=ft.Alignment.CENTER,
             border_radius=12,
-            bgcolor=SURFACE_3,
-            border=ft.Border.all(2, ft.Colors.TRANSPARENT),
+            bgcolor=theme.SURFACE_3,
+            border=ft.Border.all(2, theme.TRANSPARENT),
             on_click=self._on_click,
         )
 
@@ -81,8 +81,8 @@ class RowSelector(ft.Column):
     def _refresh(self):
         for btn in self.buttons:
             on = btn.data == self.selected
-            btn.bgcolor = TEAL_FILL if on else SURFACE_3
-            btn.border = ft.Border.all(2, TEAL_FILL if on else ft.Colors.TRANSPARENT)
+            btn.bgcolor = theme.TEAL_FILL if on else theme.SURFACE_3
+            btn.border = ft.Border.all(2, theme.TEAL_FILL if on else theme.TRANSPARENT)
             text = btn.content if isinstance(btn.content, ft.Text) else None
             if text is None and isinstance(btn.content, ft.Row):
                 for c in btn.content.controls:
@@ -90,7 +90,7 @@ class RowSelector(ft.Column):
                         text = c
                         break
             if text:
-                text.color = TEXT
+                text.color = theme.ON_ACCENT if on else theme.TEXT   # the same in dark mode
         if self.parent:
             self.update()
 

@@ -2,7 +2,7 @@ import os
 import threading
 from datetime import datetime
 
-from app.jobs.job_queue import Job
+from app.tasks.task_queue import Task
 from app.companion import clock
 from app.companion.clock import user_timezone, parse_hhmm
 
@@ -27,7 +27,7 @@ class MaintenanceTask:
         """the work waiting for this user (None = all users), at most limit items (None = all)"""
         raise NotImplementedError
 
-    def job(self, item: dict) -> Job:
+    def job(self, item: dict) -> Task:
         """the job for one item, its result() is a short outcome for the log"""
         raise NotImplementedError
 
@@ -43,12 +43,12 @@ def in_window(local: datetime, start=QUIET_START, end=QUIET_END) -> bool:
 class MaintenanceSweeper:
     """one thread: once a day, in each user's quiet window, runs the pending items of all tasks for that user.
     outside the window a small batch runs every INTERVAL_MINUTES.
-    one item at a time on this thread (job_queue.run), no JobQueue worker is held. while the hub is busy
+    one item at a time on this thread (task_queue.run), no TaskQueue worker is held. while the hub is busy
     (is_busy, e.g. a reply is being made) it waits, when the window closes it stops, the rest comes the next night"""
 
-    def __init__(self, db, job_queue, tasks: list[MaintenanceTask], is_busy=None):
+    def __init__(self, db, task_queue, tasks: list[MaintenanceTask], is_busy=None):
         self.db = db
-        self.job_queue = job_queue
+        self.task_queue = task_queue
         self.tasks = tasks
         self.is_busy = is_busy or (lambda: False)
         self._done = {}   # user_id -> local date of the last finished sweep. a restart in the window sweeps again, nothing is stale then
@@ -104,7 +104,7 @@ class MaintenanceSweeper:
                     logger.info(f"maintenance {task.name}: window closed, the rest waits for the next night")
                     return False
                 job = task.job(item)
-                self.job_queue.run(job)
+                self.task_queue.run(job)
                 logger.info(f"maintenance {task.name}: {job.result()}")
         return True
 

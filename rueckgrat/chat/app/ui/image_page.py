@@ -2,7 +2,7 @@ import asyncio
 import os
 import uuid
 import flet as ft
-from app.ui.theme import STYLES
+from app.ui import theme
 
 from app.ui import BasePage
 from app.ui.widgets import ChatBubble, Header, Image
@@ -59,7 +59,7 @@ class ImagePage(BasePage):
         self.send_btn = ft.IconButton(icon=ft.Icons.SEND, icon_size=24, on_click=self.send)
         bar = ft.Container(
             border_radius=20,
-            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
+            bgcolor=theme.INPUT_BAR,
             padding=8,
             content=ft.Row(controls=[self.prompt_box, self.send_btn]),
         )
@@ -88,14 +88,14 @@ class ImagePage(BasePage):
         if not self._active or self._loading not in self.results.controls:
             return
         if images is None:
-            self._loading.content = ft.Text("⚠ could not load earlier images", color=ft.Colors.ERROR)
+            self._loading.content = ft.Text("⚠ could not load earlier images", color=theme.ERROR)
             _update(self._loading)
             return
         try:
             rows = self._history_rows(images)
         except Exception as e:      # e.g. rows in a shape this page does not know: a warning, never the loader forever
             logger.error(f"failed to show generated images {repr(e)}")
-            self._loading.content = ft.Text("⚠ could not show earlier images", color=ft.Colors.ERROR)
+            self._loading.content = ft.Text("⚠ could not show earlier images", color=theme.ERROR)
             _update(self._loading)
             return
         # the history goes where the loading text was, in front of what was sent or arrived meanwhile
@@ -125,7 +125,7 @@ class ImagePage(BasePage):
 
     @staticmethod
     def _rows(prompt: str, slot: ft.Container) -> list[ft.Control]:
-        prompt_row = ft.Row(controls=[ft.Container(expand=15), ft.Container(content=ChatBubble("user", prompt), expand=85, **STYLES["chat_user"])])
+        prompt_row = ft.Row(controls=[ft.Container(expand=15), ft.Container(content=ChatBubble("user", prompt), expand=85, **theme.STYLES["chat_user"])])
         return [prompt_row, slot]
 
     def _image_slot(self, filename: str) -> ft.Container:
@@ -156,7 +156,7 @@ class ImagePage(BasePage):
 
     @staticmethod
     def _error_slot(error: str) -> ft.Container:
-        return ft.Container(alignment=ft.Alignment.CENTER, content=ft.Text(f"⚠ {error}", color=ft.Colors.ERROR))
+        return ft.Container(alignment=ft.Alignment.CENTER, content=ft.Text(f"⚠ {error}", color=theme.ERROR))
 
     def _add(self, rows: list[ft.Control]):
         self.results.controls += rows
