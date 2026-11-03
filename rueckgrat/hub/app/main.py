@@ -24,10 +24,12 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from app.utils import ChatDB, Infrastructure, ImageType, ImageStore
 from app.tools import ToolRegistry, SpawnAgentJobTool
+from app.agent_jobs import AgentJob
 from app.tasks import TaskQueue, MetaTask, AssistantImageTask, ContactGeneratorTask, TranslateTask, GenerateImageTask
 from app.tasks.meta_task import Turns
 from app.utils.tts_stream import TtsStreams
-from app.companion import CompanionScheduler, DEFAULT_TIMEZONE
+from app.companion import CompanionScheduler
+from app.utils.clock import DEFAULT_TIMEZONE
 from app.maintenance import MaintenanceSweeper, maintenance_tasks
 from collections import Counter
 from zoneinfo import ZoneInfo
@@ -65,15 +67,15 @@ async def lifespan(app: FastAPI):
         task_queue=app.state.task_queue
     )
 
-    # proactive companions: pushes only to users with an open /ws, the message is in the db anyway
+    # agent jobs (spawned jobs and companions) write into conversations: not while a reply is made, pushed only to an open /ws,
+    # the message is in the db anyway
     app.state.connections = Counter()   # user_id -> open /ws connections
-    app.state.companion = CompanionScheduler(app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.task_queue,
-                                             app.state.turns, is_connected=lambda user_id: app.state.connections[user_id] > 0)
-    app.state.companion.start()
-
-    # the spawn_job tool reports a finished job like a companion message: not while a reply is made, pushed only to an open /ws
-    SpawnAgentJobTool.turns, SpawnAgentJobTool.connections = app.state.turns, app.state.connections
+    AgentJob.turns, AgentJob.connections = app.state.turns, app.state.connections
     SpawnAgentJobTool.tool_registry = app.state.tool_registry    # the job's workers use the tools like a chat reply
+
+    # proactive companions: a CompanionJob per due row of their calendars
+    app.state.companion = CompanionScheduler(app.state.db, app.state.infrastructure, app.state.tool_registry)
+    app.state.companion.start()
 
     # nightly maintenance in each user's quiet hours (HUB_MAINTENANCE_START/END), waits while a reply is being made
     app.state.maintenance = MaintenanceSweeper(app.state.db, app.state.task_queue, maintenance_tasks(app.state.db, app.state.infrastructure),

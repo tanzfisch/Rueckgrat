@@ -89,13 +89,14 @@ def print_users(users):
 
 def companion_now(db):
     """the hub's companion clock, real time"""
-    from app.companion import clock
+    from app.utils import clock
     return clock.now(), "real time"
 
 
 def companion_status(db, contact, log_entries):
     """everything about one companion as a dict, times in the user's timezone"""
-    from app.companion import clock, companion_task as cj
+    from app.utils import clock
+    from app.companion import companion_job as cj
     from app.companion.scheduler import CompanionScheduler
     contact_id = contact["id"]
     tz = clock.user_timezone(db, contact["user_id"])
@@ -108,7 +109,7 @@ def companion_status(db, contact, log_entries):
         "contact_id": contact_id, "name": contact["name"], "user": contact["username"], "companion": bool(contact["companion"]),
         "timezone": str(tz), "now": now.astimezone(tz).strftime("%a %Y-%m-%d %H:%M") if now else None, "clock": clock_text,
         "last_run": local(last_run),
-        "cutoff": CompanionScheduler(db, None, None, None).cutoff(contact_id, tz, now).astimezone(tz).strftime("%a %d %H:%M") if now else None,
+        "cutoff": CompanionScheduler(db, None, None).cutoff(contact_id, tz, now).astimezone(tz).strftime("%a %d %H:%M") if now else None,
         "messages_today": db.count_companion_messages(contact_id, clock.local_day(now.astimezone(tz))[0]) if now else None,
         "limits": f"{cj.MAX_MESSAGES_PER_DAY}/day, {cj.MIN_HOURS_BETWEEN_MESSAGES}h apart, quiet {cj.QUIET_HOURS[0]}-{cj.QUIET_HOURS[1]}h, "
                   f"not within {cj.USER_ACTIVE_MINUTES} min of the user writing",

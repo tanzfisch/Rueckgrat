@@ -5,6 +5,9 @@ Changelog
 ------
 
 - #125 added polling tool
+- #158 refactored companion code to run now as AgentJob
+- #165 added persistent companion option to wizzard
+- #160 fixed issue with voice id exporting cintacts
 
 0.24.0
 ------

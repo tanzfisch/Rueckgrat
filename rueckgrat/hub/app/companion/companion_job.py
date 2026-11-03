@@ -1,17 +1,16 @@
 import json
-import random
 from datetime import datetime, timedelta, timezone
 
-from app.tasks.task_queue import Task
-from app.utils.prompt_compiler import PromptCompiler
+from app.agent_jobs.agent_job import AgentJob
 from . import prompts
-from .clock import to_db, from_db, local_day, at_local, parse_hhmm
+from app.utils.clock import to_db, from_db, local_day, at_local, parse_hhmm
 
-from app.common import get_logger, Utils, MessageQueue
+from app.common import get_logger, Utils
 logger = get_logger()
 
-# the lookups a pass may do, one per pass at most
-ALLOWED_TOOLS = ["search_memory", "websearch", "wikipedia", "weather"]
+# the tools a pass of this kind always has in its tool directing, besides the detected ones and PROMPT_TOOLS (like
+# WORKER_TOOLS): laya's websearch questions are about chat messages, a news scan needs its websearch
+ALWAYS_TOOLS = {"news": ["websearch"]}
 
 # guardrails, enforced here whatever the model answers
 MAX_MESSAGES_PER_DAY = 3
@@ -49,34 +48,30 @@ def since_text(minutes: float | None) -> str:
         return f"{int(minutes // 60)} hours ago"
     return f"{int(minutes // (24 * 60))} days ago"
 
-class CompanionTask(Task):
-    """one pass of a companion: a calendar row fired. one decision call, at most one lookup and one more call,
-    then the answer is applied: calendar rows, maybe a message. the scheduler re-arms or closes the row"""
+class CompanionJob(AgentJob):
+    """one pass of a companion as an agent job: a calendar row fired. its one step: the lookups on the workers' tool path
+    (find_tools), one decision call with their results, then the answer is applied: calendar rows, maybe a message.
+    the scheduler runs it on its own thread (run()) and re-arms or closes the row"""
 
-    def __init__(self, row: dict, db, infrastructure, tool_registry, tz, now: datetime, turns=None, is_connected=None):
-        super().__init__()
+    def __init__(self, row: dict, db, infrastructure, tool_registry, tz, now: datetime):
+        super().__init__("companion", row["kind"], infrastructure=infrastructure)
         self.row = row
         self.user_id = row["user_id"]   # status messages of its tool lookups and the push go to the contact's owner only
         self.db = db
-        self.infrastructure = infrastructure
         self.tool_registry = tool_registry
         self.tz = tz
         self.now = now
-        self.turns = turns
-        self.is_connected = is_connected or (lambda user_id: False)
         self.tool_calls = 0
         self.outcome = None
         self.log = {}   # what this pass decided, short texts. the scheduler keeps it in companion_log (hub management)
 
-    def execute(self) -> None:
+    def step(self) -> bool:
         try:
-            self.outcome = self._pass()
+            self.outcome = self.result = self._pass()
         except Exception as e:
             self.log["error"] = short(repr(e), 300)
             raise
-
-    def result(self):
-        return self.outcome
+        return True
 
     def _pass(self) -> dict:
         row, kind = self.row, self.row["kind"]
@@ -85,8 +80,10 @@ class CompanionTask(Task):
 
         contact = self.db.get_contact_by_id(contact_id)
         name = Utils.get_nested_value(contact, ["identity", "name"], "")
-        user_name = self._user_name(user_id)
+        user_name = self.user_name(self.db, user_id)
         conversation = self._conversation(user_id, contact_id)
+        self.tool_context = {"tool_registry": self.tool_registry, "db": self.db, "user_id": user_id, "contact_id": contact_id,
+                             "conversation_id": conversation["id"], "user_name": user_name}
         day_start, day_end = local_day(local)
 
         last_user = self.db.last_user_message_time(contact_id)
@@ -111,26 +108,11 @@ class CompanionTask(Task):
         }
         if kind == "planning":
             self.log["reflection"] = short(values["last_reflection"])
-        tools = self._tools_offer()
-        system_prompt, _ = PromptCompiler(contact=contact, conversation=conversation, user_role_name=user_name).build_prompt()
-        messages = [
-            {"role": "developer", "content": system_prompt},
-            {"role": "user", "content": prompts.task_prompt(kind, values, tools)},
-        ]
+        found = self._lookup(kind, values) if self.tool_registry else ""
+        messages = self.persona_messages(contact, conversation, user_name, prompts.task_prompt(kind, values, found))
         logger.info(f"companion pass {kind} contact {contact_id} prompt v{prompts.PROMPT_VERSION}")
 
         reply = self._ask(messages)
-        tool_call = (reply or {}).get("tool_call")
-        if tools and isinstance(tool_call, dict) and tool_call.get("tool") in ALLOWED_TOOLS:
-            self.tool_calls += 1
-            found = self._lookup(tool_call, user_id, contact_id, conversation["id"])
-            query = {k: v for k, v in tool_call.items() if k != "tool"}
-            self.log["lookup"] = f"{tool_call['tool']} {short(json.dumps(query, ensure_ascii=False), 150)} -> {len(found)} chars"
-            messages.append({"role": "assistant", "content": json.dumps({"tool_call": tool_call})})
-            messages.append({"role": "user", "content": prompts.lookup_result_prompt(found)})
-            reply = self._ask(messages)   # the final answer, a second tool call in it is ignored
-        elif isinstance(tool_call, dict):
-            self.log["lookup"] = f"{short(tool_call.get('tool'), 40)} not allowed, ignored"
         if reply is None:
             self.log["error"] = "no usable answer from the model"
         reply = reply or {}
@@ -149,17 +131,9 @@ class CompanionTask(Task):
         return {"result": result, "message_id": message_id, "reason": reason, "added": added}
 
     def _ask(self, messages: list) -> dict | None:
-        content = self.infrastructure.chat(messages=messages, temperature=0.7, seed=random.randint(0, 100000))
+        content = self.chat(messages, 0.7)
         data = Utils.json_loads(content) if content else None
         return data if isinstance(data, dict) else None
-
-    def _user_name(self, user_id: int) -> str:
-        user_data = self.db.get_user_data(user_id) or {}
-        try:
-            name = json.loads(user_data.get("profile") or "{}").get("name")
-        except Exception:
-            name = None
-        return name or "the user"
 
     def _conversation(self, user_id: int, contact_id: int) -> dict:
         """the latest conversation with the contact, a new one if there is none"""
@@ -182,17 +156,21 @@ class CompanionTask(Task):
             lines.append(f"{at} {r['kind']}{note}{outcome}")
         return "\n".join(lines)
 
-    def _tools_offer(self) -> str:
-        tools = self.tool_registry.tools
-        return "\n".join(f"- {tools[n].name()}: {tools[n].get_description()}\n  {tools[n].example()}" for n in ALLOWED_TOOLS if n in tools)
-
-    def _lookup(self, tool_call: dict, user_id: int, contact_id: int, conversation_id: int) -> str:
-        response = {}
-        self.tool_registry.execute(user_id=user_id, contact_id=contact_id, conversation_id=conversation_id,
-                                   response=response, tool_calls=[tool_call], parallel=False)
-        lines = [f"{r.get('title', '')} - {r.get('answer', '')} - source {r.get('source', '')}" for r in response.get("websearch_results", [])]
-        lines += [f"{r.get('tool')}: {r.get('text') or 'failed - ' + str(r.get('error'))}" for r in response.get("tool_results", [])]
-        return "\n".join(lines) or "nothing found"
+    def _lookup(self, kind: str, values: dict) -> str:
+        """the pass's tools like a worker's (find_tools: laya and tool directing on the pass's intent, no spawn_job, polls,
+        images or memory writes), their results in MetaTask's format. "" without results, a failed tool is in them"""
+        query = prompts.intent(kind, values)
+        directed = self.find_tools(query, query, ALWAYS_TOOLS.get(kind, []))
+        if not directed:
+            self.log["lookup"] = "tool directing failed, no lookup"
+            return ""
+        calls = directed["tool_calls"]
+        self.tool_calls = len(calls)
+        found = self.tool_results_text().strip()
+        if calls:
+            done = "; ".join(f"{c['tool']} {short(json.dumps({k: v for k, v in c.items() if k != 'tool'}, ensure_ascii=False), 150)}" for c in calls)
+            self.log["lookup"] = f"{done} -> {len(found)} chars"
+        return found
 
     def _add_calendar(self, items, contact_id: int) -> list[int]:
         """valid new rows only: ROW_KINDS, later today or tomorrow (max 36h ahead), no duplicates, capped"""
@@ -248,15 +226,6 @@ class CompanionTask(Task):
             self.log["message"] = f"quiet: {reason}, wanted to say {short(text)!r}"
             return None, reason
 
-        message_id = self.db.add_message(conversation_id, "assistant", text, name)
-        pushed = self.is_connected(user_id)
+        message_id, pushed = self.post_message(self.db, user_id, conversation_id, text, name)
         self.log["message"] = f"sent #{message_id}, {'pushed' if pushed else 'stored (user not connected)'}: {short(text)!r}"
-        if pushed:
-            MessageQueue().send_data({"chat": {
-                "conversation_id": conversation_id,
-                "role": "assistant",
-                "content": text,
-                "tool_calls": [],
-                "message_id": message_id
-            }}, user_id=user_id)   # only the contact's owner
         return message_id, "sent"

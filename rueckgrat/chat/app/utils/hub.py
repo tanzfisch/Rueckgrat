@@ -244,7 +244,7 @@ class Hub:
     @classmethod
     def generate(cls, prompt: dict) -> bool:
         payload = {"generate": prompt}
-        return cls.websocket_client.send_message(json.dumps(payload))    
+        return cls.websocket_client.send_message(json.dumps(payload))
 
     @classmethod
     def check_health(cls):

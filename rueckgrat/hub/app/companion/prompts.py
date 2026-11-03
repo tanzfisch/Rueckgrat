@@ -7,7 +7,8 @@ a news scan or an evening reflection if they fit the persona, or nothing at all.
 a pass (one firing of a row of the companion's private calendar) sends:
   developer: the contact's persona (PromptCompiler, same as chat)
   user:      task_prompt(kind, values) = TASKS[kind] + STATE + CALENDAR_DECISION + SURFACE_DECISION + OUTPUT_FORMAT
-             (+ LOOKUP_OFFER when tools are allowed, the reply may then be one tool call answered with LOOKUP_RESULT)
+             (+ LOOKUP_RESULT when the pass looked something up before: the workers' tool path, laya and tool directing
+             on intent(kind, values), the first part of TASKS[kind] up to INSTRUCTIONS)
 
 placeholders, all plain strings (str.format, so literal JSON braces are doubled):
   name            the companion's name
@@ -23,13 +24,12 @@ placeholders, all plain strings (str.format, so literal JSON braces are doubled)
   summary         the conversation's running summary (context), may be empty
   last_reflection the last evening reflection, may be empty
   note            the note of the firing row, may be empty
-  tools           the lookups on offer (LOOKUP_OFFER only)
-  result          the lookup result (LOOKUP_RESULT only)
+  result          the lookup results (LOOKUP_RESULT only)
 
 change the wording together and bump PROMPT_VERSION, it is logged with every pass so replies can be traced to a version.
 """
 
-PROMPT_VERSION = "2"
+PROMPT_VERSION = "3"
 
 # ---------------------------------------------------------------- the shared state of every pass
 STATE = """
@@ -73,7 +73,7 @@ INSTRUCTIONS:
 You are {name}. You are going through the news: {note}
 
 INSTRUCTIONS:
-- if no news are given yet, look them up: one websearch for today's news on topics you or {user_name} care about
+- the news are in LOOKUP_RESULT, if there are none say so in thoughts
 - from the news pick at most 3 items that matter to you or to {user_name}, ignore the rest
 - thoughts = the picked items, each with one sentence on why it matters and to whom
 - only message {user_name} about an item that really concerns them, in your own voice, not as a news digest
@@ -142,29 +142,21 @@ Return ONLY valid JSON in this format:
 }}
 """
 
-# ---------------------------------------------------------------- the single optional tool round
-LOOKUP_OFFER = """
-LOOKUP:
-Before answering you may do ONE lookup:
-{tools}
-If you need it return ONLY {{"tool_call": <one call exactly in the format above>}}. Otherwise answer right away.
-"""
-
+# ---------------------------------------------------------------- what the pass looked up before
 LOOKUP_RESULT = """
-LOOKUP_RESULT:
+LOOKUP_RESULT (what you looked up just now):
 {result}
-
-No more lookups. Answer now in the OUTPUT format.
 """
 
 
-def task_prompt(kind: str, values: dict, tools: str = "") -> str:
+def task_prompt(kind: str, values: dict, result: str = "") -> str:
     """the user prompt of a pass of this calendar kind. KeyError for an unknown kind or a missing placeholder"""
     prompt = TASKS[kind] + STATE + CALENDAR_DECISION + SURFACE_DECISION + OUTPUT_FORMAT
-    if tools:
-        prompt += LOOKUP_OFFER
-    return prompt.format(**values, tools=tools).strip()
+    if result:
+        prompt += LOOKUP_RESULT
+    return prompt.format(**values, result=result).strip()
 
 
-def lookup_result_prompt(result: str) -> str:
-    return LOOKUP_RESULT.format(result=result).strip()
+def intent(kind: str, values: dict) -> str:
+    """what the pass is about, without its instructions: the input of its tool detection and directing"""
+    return TASKS[kind].split("INSTRUCTIONS:")[0].format(**values).strip()
