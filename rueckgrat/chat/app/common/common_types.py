@@ -8,6 +8,7 @@ class ChatRequest(BaseModel):
     name: str
     content: str
     temperature: float
+    poll_answer: Optional[dict] = None   # {"message_id", "chosen": [options]}: the content answers that message's poll
 
 class ChatResponse(BaseModel):
     role: str

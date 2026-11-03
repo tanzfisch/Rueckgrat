@@ -106,7 +106,7 @@ class TakePhotoTool(Tool):
     def prompt(cls) -> str: 
         return """
 TAKE PHOTO:
-Use sparingly, only when you genuinely want to take a photo of yourself, the user, or both in the current situation. Do not use for every request. Also use when the user explicitly asks for one.
+Use sparingly, only when you genuinely want to take a photo of yourself, the user, or both in the current situation. Do not use for every request. Also use when the user explicitly asks for one or if you want to demonstrate something to the user.
 
 Parameters:
 - subject (string, required): "self", "user", or "both"

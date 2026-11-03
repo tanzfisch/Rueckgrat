@@ -999,6 +999,15 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                         await websocket.send_text(json.dumps({"error": "conversation not found"}))
                         continue
 
+                    if chat_request.poll_answer:   # the poll is locked with the choice, the content is the answer for the model
+                        answer = chat_request.poll_answer
+                        try:
+                            chosen = app.state.db.answer_poll(int(answer.get("message_id")), chat_request.conversation_id, list(answer.get("chosen") or []))
+                        except (TypeError, ValueError):
+                            chosen = None
+                        if chosen is None:
+                            logger.warning(f"user {user_id}: poll answer for message {answer.get('message_id')} not stored, no open poll or invalid choice")
+
                     if chat_request.content == "ping":
                         MessageQueue().send_data({ 
                             "chat": {

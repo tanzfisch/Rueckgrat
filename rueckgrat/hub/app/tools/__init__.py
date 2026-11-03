@@ -13,6 +13,7 @@ from .fetch_url_tool import FetchUrlTool
 from .remember_tool import RememberTool
 from .search_memory_tool import SearchMemoryTool
 from .spawn_agent_job_tool import SpawnAgentJobTool
+from .poll_tool import PollTool
 
 __all__ = [
     "ToolRegistry",
@@ -30,5 +31,6 @@ __all__ = [
     "FetchUrlTool",
     "RememberTool",
     "SearchMemoryTool",
-    "SpawnAgentJobTool"
+    "SpawnAgentJobTool",
+    "PollTool"
 ]
