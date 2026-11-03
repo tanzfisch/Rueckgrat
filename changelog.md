@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.25.0
+------
+
+- #125 added polling tool
+
 0.24.0
 ------
 

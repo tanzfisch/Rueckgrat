@@ -14,7 +14,7 @@ logger = get_logger()
 # a different model with another size needs this changed and SCHEMA_VERSION bumped
 MEMORY_EMBEDDING_DIM = 384
 # PRAGMA user_version of a db made by this hub. bump it on every schema change: until 1.0 an older db is wiped, never migrated
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 class ChatDB:
     _read_only = False
@@ -37,6 +37,8 @@ class ChatDB:
         version = cursor.execute("PRAGMA user_version").fetchone()[0]
         if version != SCHEMA_VERSION and (version or cursor.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()[0]):
             conn.close()
+            logger.error(f"database {db_path} has schema version {version}, this hub needs {SCHEMA_VERSION}. "
+                               f"There is no migration before 1.0: wipe the database")
             raise RuntimeError(f"database {db_path} has schema version {version}, this hub needs {SCHEMA_VERSION}. "
                                f"there is no migration before 1.0: wipe the database")
 
@@ -88,6 +90,7 @@ class ChatDB:
             timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
             sources TEXT,
             tools TEXT,
+            poll TEXT,      -- json {question, options, mode, chosen}, see PollTool
 
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         )""")
@@ -552,8 +555,8 @@ class ChatDB:
                 cursor = conn.cursor()
 
                 cursor.execute("""
-                    INSERT INTO contacts (user_id, name)
-                    VALUES (?, ?)
+                    INSERT INTO contacts (user_id, name, profile)
+                    VALUES (?, ?, '{}')
                 """, (user_id, contact_name))
 
                 conn.commit()
@@ -888,7 +891,7 @@ class ChatDB:
                         "role": contact["role"],
                         "personality": contact["personality"]
                     },
-                    "profile": json.loads(contact["profile"])
+                    "profile": json.loads(contact["profile"] or "{}")
                 }
 
             except Exception as e:
@@ -1413,7 +1416,7 @@ class ChatDB:
                 cursor.execute("""
                     SELECT *
                     FROM (
-                        SELECT id, role, name, content, timestamp, sources, tools
+                        SELECT id, role, name, content, timestamp, sources, tools, poll
                         FROM messages
                         WHERE conversation_id = ?
                         ORDER BY timestamp DESC
@@ -1426,6 +1429,7 @@ class ChatDB:
                 for message in messages:
                     message["sources"] = json.loads(message["sources"]) if message["sources"] else []
                     message["tools"] = json.loads(message["tools"]) if message["tools"] else []
+                    message["poll"] = json.loads(message["poll"]) if message["poll"] else None
                 return messages
             except Exception as e:
                 logger.error(f"failed returning messages: {e}")         
@@ -1520,6 +1524,38 @@ class ChatDB:
             except Exception as e:
                 logger.error(f"setting message tools: {e}")
         return False
+
+    def set_message_poll(self, message_id: int, poll: dict) -> bool:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE messages SET poll = ? WHERE id = ?", (json.dumps(poll), message_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"setting message poll: {e}")
+        return False
+
+    def answer_poll(self, message_id: int, conversation_id: int, chosen: list) -> list | None:
+        """stores the user's choice in the open poll of message_id (in conversation_id). the valid choices in option order,
+        None if there is no open poll or no valid choice (single mode: exactly one)"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                row = cursor.execute("SELECT poll FROM messages WHERE id = ? AND conversation_id = ?", (message_id, conversation_id)).fetchone()
+                poll = json.loads(row[0]) if row and row[0] else None
+                if not poll or poll.get("chosen"):
+                    return None
+                chosen = [option for option in poll["options"] if option in chosen]
+                if not chosen or (poll["mode"] == "single" and len(chosen) != 1):
+                    return None
+                poll["chosen"] = chosen
+                cursor.execute("UPDATE messages SET poll = ? WHERE id = ?", (json.dumps(poll), message_id))
+                conn.commit()
+                return chosen
+            except Exception as e:
+                logger.error(f"answering poll: {e}")
+        return None
 
     def add_attachment(self, message_id: int, file_name: str, file_url: str, file_type: str, file_size: int) -> int:
         with self.get_connection() as conn:

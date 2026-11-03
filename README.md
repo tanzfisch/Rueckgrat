@@ -60,6 +60,10 @@ Some screenhots of the app ...
 
 <img src="docs/screenshots/contact_list.png" width="200" alt="contact list"> <img src="docs/screenshots/chat_image.png" width="200" alt="image gen in chat"> <img src="docs/screenshots/chat_foto.png" width="200" alt="self image in chat"> <img src="docs/screenshots/translate.png" width="200" alt="code in chat">
 
+generated promo video ...
+
+[![Rueckgrat promo](https://img.youtube.com/vi/uEq7prKKw6c/0.jpg)](https://www.youtube.com/shorts/uEq7prKKw6c)
+
 # Getting started
 
 ## Linux
