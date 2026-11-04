@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from app.utils import ChatDB, Infrastructure, ImageType, ImageStore
 from app.tools import ToolRegistry, SpawnAgentJobTool
+from app.tools.map_tool import get_tile
 from app.agent_jobs import AgentJob
 from app.tasks import TaskQueue, MetaTask, AssistantImageTask, ContactGeneratorTask, TranslateTask, GenerateImageTask
 from app.tasks.meta_task import Turns
@@ -918,6 +919,16 @@ def get_model_url(model_name: str, username: str = Depends(get_current_user)):
     return GetModelURLResponse(
         model_urls=sources
     )
+
+########### map tiles
+@app.get("/map/tiles/{z}/{x}/{y}")
+async def get_map_tile(z: int, x: int, y: int, username: str = Depends(get_current_user)):
+    """one openstreetmap tile for a map bubble. the hub fetches it with its own user agent and caches it (tile policy),
+    so the client talks to no one but its hub"""
+    tile = await run_in_threadpool(get_tile, z, x, y)
+    if tile is None:
+        raise HTTPException(status_code=404, detail="tile not available")
+    return Response(content=tile, media_type="image/png", headers={"Cache-Control": "max-age=604800"})
 
 ########### downloads
 @app.get("/downloads/{file_path:path}")

@@ -12,8 +12,8 @@ DEFAULT_TIME_LIMIT = 1800     # seconds, backstop: an agent that never ends its 
 
 MAX_TOOL_CHARS = 12000     # the tool results in the worker's prompt
 # not for workers and companions: they don't spawn agents, don't write the user's memories (their prompt is the planner's
-# or the companion's, not the user's words) and make no images or polls (those belong to a chat message)
-WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "generate_image", "take_photo", "poll")
+# or the companion's, not the user's words) and make no images, polls or maps (those belong to a chat message)
+WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "generate_image", "take_photo", "poll", "show_map")
 # always in a worker's tool directing prompt, like PROMPT_TOOLS: the websearch questions of the detection are about chat
 # messages (news, games, shops, opening hours), a planner's "research ..." task scores 0.0. tool directing decides the call
 WORKER_TOOLS = ["websearch"]

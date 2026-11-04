@@ -93,6 +93,7 @@ class MetaTask(Task):
         self.message_id = -1
         self.sources = []   # pages the web tools used, shown as links under the answer
         self.poll = None    # the poll tool's poll, shown as a bubble under the answer
+        self.map = None     # the show_map tool's place, shown as a map under the answer
         self.done = False
 
     def _update_conversation_context(self):
@@ -131,7 +132,8 @@ class MetaTask(Task):
                 "tool_calls": [],
                 "message_id": self.message_id,
                 "sources": self.sources,
-                "poll": self.poll
+                "poll": self.poll,
+                "map": self.map
             }
             self.done = True
             
@@ -296,6 +298,9 @@ class MetaTask(Task):
             self.poll = self.response.pop("poll", None)
             if self.poll:
                 self.db.set_message_poll(self.message_id, self.poll)
+            self.map = self.response.pop("map", None)
+            if self.map:
+                self.db.set_message_map(self.message_id, self.map)
 
             self.sources = self.response.pop("sources", [])
             if self.sources:

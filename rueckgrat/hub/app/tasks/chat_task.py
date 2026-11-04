@@ -46,7 +46,8 @@ class ChatTask(Task):
                 if message["role"] == "assistant":
                     note = (self._tools_line(message.get("tools"))
                             + self._sources_line(message.get("sources"))
-                            + self._poll_line(message.get("poll"))).strip()
+                            + self._poll_line(message.get("poll"))
+                            + self._map_line(message.get("map"))).strip()
                 elif message["role"] == "user" and note:
                     content = f"{note}\n\n{content}"
                     note = ""
@@ -88,6 +89,13 @@ class ChatTask(Task):
         if not question:
             return f"\nYou asked the user a poll with these options: {options}. {answer}"
         return f"\nYou asked the user in a poll: {question} The options were: {options}. {answer}"
+
+    @staticmethod
+    def _map_line(place) -> str:
+        """one short line with the place a past answer showed on a map"""
+        if not isinstance(place, dict) or not place.get("display_name"):
+            return ""
+        return f"\nYou showed the user a map of {place['display_name']}."
 
     @staticmethod
     def _sources_line(sources) -> str:

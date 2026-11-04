@@ -15,6 +15,7 @@ from .remember_tool import RememberTool
 from .search_memory_tool import SearchMemoryTool
 from .spawn_agent_job_tool import SpawnAgentJobTool
 from .poll_tool import PollTool
+from .map_tool import MapTool
 
 from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
@@ -43,6 +44,7 @@ class ToolRegistry:
         self._register_tool(SearchMemoryTool)
         self._register_tool(SpawnAgentJobTool)
         self._register_tool(PollTool)
+        self._register_tool(MapTool)
 
         temp = ", ".join(self.tools)
         logger.debug(f"registered tools: {temp}")

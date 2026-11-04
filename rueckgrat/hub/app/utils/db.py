@@ -14,7 +14,7 @@ logger = get_logger()
 # a different model with another size needs this changed and SCHEMA_VERSION bumped
 MEMORY_EMBEDDING_DIM = 384
 # PRAGMA user_version of a db made by this hub. bump it on every schema change: until 1.0 an older db is wiped, never migrated
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 class ChatDB:
     _read_only = False
@@ -91,6 +91,7 @@ class ChatDB:
             sources TEXT,
             tools TEXT,
             poll TEXT,      -- json {question, options, mode, chosen}, see PollTool
+            map TEXT,       -- json {query, label, lat, lon, display_name, zoom}, see MapTool
 
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         )""")
@@ -1416,7 +1417,7 @@ class ChatDB:
                 cursor.execute("""
                     SELECT *
                     FROM (
-                        SELECT id, role, name, content, timestamp, sources, tools, poll
+                        SELECT id, role, name, content, timestamp, sources, tools, poll, map
                         FROM messages
                         WHERE conversation_id = ?
                         ORDER BY timestamp DESC
@@ -1430,6 +1431,7 @@ class ChatDB:
                     message["sources"] = json.loads(message["sources"]) if message["sources"] else []
                     message["tools"] = json.loads(message["tools"]) if message["tools"] else []
                     message["poll"] = json.loads(message["poll"]) if message["poll"] else None
+                    message["map"] = json.loads(message["map"]) if message["map"] else None
                 return messages
             except Exception as e:
                 logger.error(f"failed returning messages: {e}")         
@@ -1534,6 +1536,17 @@ class ChatDB:
                 return cursor.rowcount > 0
             except Exception as e:
                 logger.error(f"setting message poll: {e}")
+        return False
+
+    def set_message_map(self, message_id: int, place: dict) -> bool:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE messages SET map = ? WHERE id = ?", (json.dumps(place), message_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"setting message map: {e}")
         return False
 
     def answer_poll(self, message_id: int, conversation_id: int, chosen: list) -> list | None:

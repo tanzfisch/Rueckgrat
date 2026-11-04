@@ -6,7 +6,7 @@ from app.ui import theme
 from pathlib import Path
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView
+from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView
 from app.audio import Text_To_Speech
 from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig
 from app.common import get_logger, Utils
@@ -30,14 +30,14 @@ class ChatPage(BasePage):
         self._stream_message_id = None
         self._finished_message_ids = set()
         self._bubbles: dict[int, ChatBubble] = {}       # message id -> its bubble in the history
-        self._slots: dict[int, ft.Column] = {}          # message id -> the column of its bubble and button row, a poll goes in between
+        self._slots: dict[int, ft.Column] = {}          # message id -> the column of its bubble and button row, a poll or map goes in between
         self._pending_images: dict[int, str] = {}       # message id -> image file name that came before its bubble
         self.user_role_name = ""   # set from the user's own character profile in on_enter
 
         self.header = Header(navigator)
         self.header.on_go_back = self.on_go_back
 
-        self.history = ft.ListView(expand=True, spacing=10, padding=0, auto_scroll=True)
+        self.history = ft.ListView(expand=True, spacing=4, padding=0, auto_scroll=True)
         self.status_widget = StatusWidget(on_cancel_job=Hub.cancel_job)
         self.status_row = ft.Row(controls=[self.status_widget])   # always the last row, messages go above it
 
@@ -214,9 +214,9 @@ class ChatPage(BasePage):
             attachments = message.get("attachments", [])
             if attachments:
                 image_path = self._get_image(attachments[0]["file_name"])
-                self._append_history(message["role"], message["content"], image_path, message_id=message["id"], sources=message.get("sources"), poll=message.get("poll"))
+                self._append_history(message["role"], message["content"], image_path, message_id=message["id"], sources=message.get("sources"), poll=message.get("poll"), place=message.get("map"))
             else:
-                self._append_history(message["role"], message["content"], message_id=message["id"], sources=message.get("sources"), poll=message.get("poll"))
+                self._append_history(message["role"], message["content"], message_id=message["id"], sources=message.get("sources"), poll=message.get("poll"), place=message.get("map"))
         # a reply still being made is already loaded with its text so far: skip its deltas, the final "chat" fills it
         self._finished_message_ids.update(self._bubbles)
 
@@ -320,7 +320,7 @@ class ChatPage(BasePage):
             await self.audio_streamer.stop()
             self.audio_streamer = None
 
-    def _append_history(self, role: str, content: str, image_filepath: str = None, message_id: int = None, sources: list | None = None, poll: dict | None = None) -> ChatBubble | None:
+    def _append_history(self, role: str, content: str, image_filepath: str = None, message_id: int = None, sources: list | None = None, poll: dict | None = None, place: dict | None = None) -> ChatBubble | None:
         try:
             bubble = ChatBubble(role, content, image_filepath)
             if message_id is not None:
@@ -355,6 +355,8 @@ class ChatPage(BasePage):
                 self._slots[message_id] = bubble_slot
                 if poll:
                     self._set_poll(message_id, poll)
+                if place:
+                    self._set_map(message_id, place)
             self.history.update()
             return bubble
         except Exception as e:
@@ -368,6 +370,13 @@ class ChatPage(BasePage):
             return
         view = PollView(poll, on_submit=lambda chosen, m=message_id: self._submit_poll(m, chosen))
         slot.controls.insert(1, ft.Container(content=view, margin=ft.Margin(left=0, top=8, right=0, bottom=0), **theme.STYLES["chat_assistant"]))
+
+    def _set_map(self, message_id: int, place: dict):
+        """the map bubble between the message's bubble (and its poll) and its button row, once per message. the caller updates the history"""
+        slot = self._slots.get(message_id)
+        if slot is None or any(isinstance(c.content, MapView) for c in slot.controls if isinstance(c, ft.Container)):
+            return
+        slot.controls.insert(len(slot.controls) - 1, ft.Container(content=MapView(place), margin=ft.Margin(left=0, top=8, right=0, bottom=0), **theme.STYLES["chat_assistant"]))
 
     def _submit_poll(self, message_id: int, chosen: list[str]) -> bool:
         """the poll's choice goes to the hub as the user's next message, the hub locks the poll with it"""
@@ -585,6 +594,7 @@ class ChatPage(BasePage):
                     image_path = self._get_image(image_filename) if image_filename else None
                     sources = chat.get("sources") or []
                     poll = chat.get("poll")
+                    place = chat.get("map")
                     bubble = self._bubbles.get(message_id)
                     if bubble:  # streamed, or loaded from history in on_enter: the final text replaces what it has
                         bubble.clear_content()
@@ -598,8 +608,11 @@ class ChatPage(BasePage):
                         if poll:
                             self._set_poll(message_id, poll)
                             self.history.update()
+                        if place:
+                            self._set_map(message_id, place)
+                            self.history.update()
                     else:
-                        self._append_history(role, content, image_path, message_id=message_id, sources=sources, poll=poll)
+                        self._append_history(role, content, image_path, message_id=message_id, sources=sources, poll=poll, place=place)
 
                     if self.mute_btn.selected:
                         self._speak(content, message_id)
