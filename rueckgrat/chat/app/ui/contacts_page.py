@@ -69,6 +69,9 @@ class ContactsPage(BasePage):
                 data = json.load(file)
             contact_id = Hub.create_contact()
             Hub.update_contact(contact_id, data)
+            # the hub ignores profile.companion in an update, only its endpoint starts the companion
+            if Utils.get_nested_value(data, ["profile", "companion"], False):
+                Hub.set_contact_companion(contact_id, True)
             self.load_contacts()
         except Exception as ex:
             logger.error(f"failed to load profile: {repr(ex)}")        
