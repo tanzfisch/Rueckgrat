@@ -6,7 +6,8 @@ from .chat_page import ChatPage
 from .profile_page import ProfilePage
 from .initial_settings_page import InitialSettingsPage
 from .settings_page import SettingsPage
-from .profile_wizzard import ProfileWizard
+from .contact_wizzard import ContactWizard
+from .user_profile_wizzard import UserProfileWizard
 from .translate_page import TranslatePage
 from .image_page import ImagePage
 from .gallery_page import GalleryPage
@@ -21,7 +22,8 @@ __all__ = [
     "ProfilePage", 
     "InitialSettingsPage"
     "SettingsPage",
-    "ProfileWizard",
+    "ContactWizard",
+    "UserProfileWizard",
     "TranslatePage",
     "ImagePage",
     "GalleryPage",

@@ -171,6 +171,24 @@ class ChatPage(BasePage):
     def on_go_back(self, e=None):
         self.navigator.back()
 
+    def on_system_back(self) -> bool:
+        """android back with the keyboard open only hides it, the next back leaves. True if it did"""
+        # the focus, not page.media: flet measures view_insets inside the Scaffold body, there the keyboard is always 0
+        logger.info(f"TEMP system back: input focused {self._input_focused}, insets {self.page.media.view_insets.bottom}")
+        if not self._input_focused:
+            return False
+        self._input_focused = False   # on_blur follows, the next back leaves even if it is late
+        self.page.run_task(self._hide_keyboard)
+        return True
+
+    async def _hide_keyboard(self):
+        # flet 1.0.4 has no blur(): a field that can't take focus gives it up and the keyboard closes
+        self.input_box.can_request_focus = False
+        self.input_box.update()
+        await asyncio.sleep(0.3)
+        self.input_box.can_request_focus = True   # a tap opens it again
+        self.input_box.update()
+
     def clear_history(self):
         self.status_widget.clear_status()
         self._stream_message_id = None

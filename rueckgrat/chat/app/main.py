@@ -15,7 +15,8 @@ from app.ui import (
     ChatPage,
     ProfilePage,
     InitialSettingsPage,
-    ProfileWizard,
+    ContactWizard,
+    UserProfileWizard,
     SettingsPage,
     TranslatePage,
     ImagePage,
@@ -39,7 +40,8 @@ PAGES = {
     "conversations": ConversationsPage,
     "chat": ChatPage,
     "profile": ProfilePage,
-    "profile_wizz": ProfileWizard,
+    "contact_wizz": ContactWizard,
+    "user_profile_wizz": UserProfileWizard,
     "settings": SettingsPage,
     "initial_settings": InitialSettingsPage,
     "translate": TranslatePage,
@@ -176,8 +178,14 @@ class App:
 
     async def _on_system_back(self, e):
         view = e.control
+        logger.info(f"TEMP system back on {self._current_name}")
         # back closes the full screen image first, then goes back a page
         if ImageOverlay.close_open(self.page):
+            await view.confirm_pop(False)
+            return
+        # a page can take the back itself first (chat: hides the keyboard)
+        on_system_back = getattr(self.current_page, "on_system_back", None)
+        if on_system_back and on_system_back():
             await view.confirm_pop(False)
             return
         go_back = self._header_go_back()

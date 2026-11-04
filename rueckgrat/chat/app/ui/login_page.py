@@ -5,7 +5,6 @@ from app.ui.widgets import OneLineBubble, Header
 from app.utils import Hub
 from app.common import get_logger
 from app.ui import theme
-from app.ui.profile_wizzard import ProfileWizzardMode
 
 logger = get_logger()
 
@@ -246,6 +245,6 @@ class LoginPage(BasePage):
 
     def on_successful_login(self):
         if not Hub.get_user_data():
-            self.navigator("profile_wizz", user_profile_mode=ProfileWizzardMode.UserSetup)
+            self.navigator("user_profile_wizz", first_setup=True)
         else:
             self.navigator("contacts")
