@@ -295,7 +295,7 @@ class ProfilePage(BasePage):
             return
         contact = Hub.get_contact(self.contact_id)
         self.fill_form(contact)
-        # only the hub sets the flag (PUT /contacts/{id}/companion), so it is read here and not in fill_form: Load must not change it
+        # only the hub sets the flag (PUT /contacts/{id}/companion), so it is read here and not in fill_form: _on_load only sets the switch
         self.companion_loaded = bool(Utils.get_nested_value(contact, ["profile", "companion"], False))
         self.companion_switch.value = self.companion_loaded
         self.companion_switch.update()
@@ -385,7 +385,11 @@ class ProfilePage(BasePage):
         if not files or not files[0].path:
             return
         with open(files[0].path, "r") as file:
-            self.fill_form(json.load(file))
+            data = json.load(file)
+        self.fill_form(data)
+        # only the switch, Save sends a changed value through PUT /contacts/{id}/companion
+        self.companion_switch.value = bool(Utils.get_nested_value(data, ["profile", "companion"], False))
+        self.companion_switch.update()
 
     async def _on_export(self, e=None):
         path = await self.file_picker.save_file(dialog_title="Export Profile")
@@ -396,6 +400,7 @@ class ProfilePage(BasePage):
         if voice and "predefined_id" in voice:
             # the voices.json id instead of the uuid, the uuid differs between hubs. the hub resolves it on import
             _set_nested_value(data["profile"], ["tts_parameters", "voice_id"], voice["predefined_id"])
+        data["profile"]["companion"] = bool(self.companion_switch.value)
         with open(path, "w") as file:
             json.dump(data, file, indent=4)
 
