@@ -1,11 +1,11 @@
 import threading
 from datetime import datetime, time, timedelta
 
-from .companion_task import CompanionTask, short
-from . import clock
-from .clock import to_db, from_db, user_timezone, next_daily, last_occurrence, at_local
+from .companion_job import CompanionJob, short
+from app.utils import clock
+from app.utils.clock import to_db, from_db, user_timezone, next_daily, last_occurrence, at_local
 
-from app.common import get_logger
+from app.common import get_logger, user_scope
 logger = get_logger()
 
 MAX_SLEEP = 60                  # wall clock seconds, also picks up new companions and rows added by other paths
@@ -13,20 +13,17 @@ MIN_SLEEP = 1
 PLANNING_TIME = time(0, 5)      # the only always-on row: the night planning, local time. it schedules everything else
 
 class CompanionScheduler:
-    """one thread sleeping until the next due row of the companion calendars, then running the passes one by one
-    on this thread (task_queue.run): no TaskQueue worker is held, chats are never starved by companions.
+    """one thread sleeping until the next due row of the companion calendars, then running the passes (CompanionJob,
+    an agent job) one by one on this thread: no TaskQueue worker is held, chats are never starved by companions.
 
     catch-up after downtime: a due row fires once if its (latest) occurrence is at or after the cutoff
     max(the last local midnight, the companion's last run), older ones are marked missed without a pass.
     a daily row always re-arms to its next future occurrence, missed days are never replayed"""
 
-    def __init__(self, db, infrastructure, tool_registry, task_queue, turns=None, is_connected=None):
+    def __init__(self, db, infrastructure, tool_registry):
         self.db = db
         self.infrastructure = infrastructure
         self.tool_registry = tool_registry
-        self.task_queue = task_queue
-        self.turns = turns
-        self.is_connected = is_connected
         self._stop = threading.Event()
         self._wake = threading.Event()
 
@@ -106,8 +103,12 @@ class CompanionScheduler:
             self.db.add_companion_log(row["contact_id"], to_db(now), {**record, "missed": f"before the cutoff {to_db(cutoff)}"})
             return {"row": row["id"], "skipped": "missed"}
 
-        job = CompanionTask(row, self.db, self.infrastructure, self.tool_registry, tz, now, self.turns, self.is_connected)
-        self.task_queue.run(job)
+        job = CompanionJob(row, self.db, self.infrastructure, self.tool_registry, tz, now)
+        try:
+            with user_scope(row["user_id"]):    # status messages of its tool lookups go to the contact's owner only
+                job.run()
+        except Exception as e:
+            logger.error(f"companion pass {row['kind']} contact {row['contact_id']} failed {repr(e)}")
         outcome = job.outcome or {}   # a failed pass still closes / re-arms the row, it never fires in a loop
         self.db.finish_companion_row(row["id"], "done", to_db(now), outcome.get("result", ""), outcome.get("message_id"), next_due)
         if job.outcome is None:

@@ -28,6 +28,10 @@ class ContactGeneratorTask(Task):
             contact_id = self.db.create_contact(self.user_id, name)
             self.db.update_contact(self.user_id, contact_id, new_contact)
 
+            profile = new_contact["profile"]
+            persistent = profile["persistent"]
+            self.db.set_contact_companion(self.user_id, contact_id, persistent)
+
             assistant_image_job = AssistantImageTask(
                 user_id = self.user_id,
                 contact_id = contact_id,
@@ -64,6 +68,7 @@ class ContactGeneratorTask(Task):
             gender = profile_input.get("gender", "")
             backstory = profile_input.get("backstory", "")
             sfw_value = profile_input.get("sfw") or "SFW"
+            persistent = profile_input.get("persistent")
             image_style = str(profile_input.get("image_style") or "").strip().lower()
             if image_style not in IMAGE_STYLES:
                 logger.debug(f"unknown image style '{image_style}', using {DEFAULT_IMAGE_STYLE}")
@@ -173,7 +178,7 @@ OUTPUT:
         role = Utils.get_nested_value(reply, ["role"], "Assistant")
         age = Utils.get_nested_value(reply, ["age"], "young adult")
         personality = Utils.get_nested_value(reply, ["personality"], "")
-        objective = Utils.get_nested_value(reply, ["primary_objective"], "be helpful")
+        objective = Utils.get_nested_value(reply, ["primary_objective"], "be helpful")        
 
         # making sure we can guarantee a valid json structure
         new_contact = {
@@ -191,6 +196,7 @@ OUTPUT:
                 "body_language": Utils.get_nested_value(reply, ["body_language"], ""),
                 "style": Utils.get_nested_value(reply, ["style"], ""),
                 "sfw": sfw_value,
+                "persistent": persistent,
 
                 "appearance": {
                     "image_style": image_style,

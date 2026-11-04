@@ -3,8 +3,8 @@ import threading
 from datetime import datetime
 
 from app.tasks.task_queue import Task
-from app.companion import clock
-from app.companion.clock import user_timezone, parse_hhmm
+from app.utils import clock
+from app.utils.clock import user_timezone, parse_hhmm
 
 from app.common import get_logger
 logger = get_logger()

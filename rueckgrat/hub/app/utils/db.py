@@ -282,7 +282,7 @@ class ChatDB:
         )""")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_companion_due ON companion_calendar(status, due_at)")
 
-        # what each companion pass decided (json, see CompanionTask.log), the last COMPANION_LOG_KEEP per contact.
+        # what each companion pass decided (json, see CompanionJob.log), the last COMPANION_LOG_KEEP per contact.
         # at = the companion's clock (may be simulated), created_at = the wall clock. only for hub management
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS companion_log (

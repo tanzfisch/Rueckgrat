@@ -171,13 +171,13 @@ Invites and users are managed with the hub management tool. Run the hub containe
 
 ```bash
 docker exec -it rueckgrat_hub python -m app.hub_management --help
-docker exec -it rueckgrat_hub python -m app.hub_management invite create
 docker exec -it rueckgrat_hub python -m app.hub_management invite create --email [e-mail]
+docker exec -it rueckgrat_hub python -m app.hub_management invite list
 docker exec -it rueckgrat_hub python -m app.hub_management user create [user_name]
 docker exec -it rueckgrat_hub python -m app.hub_management user list
-docker exec -it rueckgrat_hub python -m app.hub_management invite list
-docker exec -it rueckgrat_hub python -m app.hub_management companion list
 docker exec -it rueckgrat_hub python -m app.hub_management companion status [contact_id]
+docker exec -it rueckgrat_hub python -m app.hub_management maintenance status
+docker exec -it rueckgrat_hub python -m app.hub_management stats
 ```
 
 **Note: The invite token is printed only once, copy it immediately.**

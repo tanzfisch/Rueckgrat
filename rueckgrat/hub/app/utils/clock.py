@@ -12,7 +12,7 @@ DEFAULT_TIMEZONE = os.environ.get("DEFAULT_TIMEZONE", "UTC")
 DB_FORMAT = "%Y-%m-%d %H:%M:%S"   # like sqlite's CURRENT_TIMESTAMP, UTC
 
 def now() -> datetime:
-    """the companion's now, UTC"""
+    """the hub's now, UTC"""
     return datetime.now(timezone.utc)
 
 def to_db(dt: datetime) -> str:

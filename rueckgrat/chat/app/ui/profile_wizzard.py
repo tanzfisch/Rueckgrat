@@ -6,6 +6,7 @@ import flet as ft
 from app.ui import theme
 
 from app.utils import Hub
+from app.audio import Text_To_Speech
 from app.ui import BasePage
 from app.ui.widgets import Header, RowSelector, VoiceSelector
 from app.common import get_logger, IMAGE_STYLE_OPTIONS, DEFAULT_IMAGE_STYLE, IMAGE_STYLE_ICONS
@@ -231,8 +232,9 @@ class WizardProfilePage(ft.Column):
             border=theme.field_border(16, theme.ACCENT),
             content_padding=16,
         )
-        self.sfw_switch = ft.Switch(value=True, active_color=theme.ACCENT)
-        self.voice_selector = VoiceSelector()
+        self.nsfw_switch = ft.Switch(value=False, active_color=theme.ACCENT)
+        self.persistent_switch = ft.Switch(value=False, active_color=theme.ACCENT)
+        self.voice_selector = VoiceSelector(Hub.get_predefined_voices(), on_play_sample=Text_To_Speech.play_voice_sample)
 
         self.image_style = ft.Dropdown(
             options=[
@@ -256,26 +258,46 @@ class WizardProfilePage(ft.Column):
             self._row("Name", self.name_input),
             self._row("Gender", self.gender),
             self._row("Voice", self.voice_selector),
-            self._row("Backstory", self.backstory, top=True),
+            self._row("Backstory", self.backstory),
             self._row("Style", self.image_style),
+            self._row(label = "Persistent", 
+                      control = self.persistent_switch,
+                      description = "Running as persistant Companion with it's own shedule."),
         ]
         if Hub.nsfw_allowed:
-            self.controls.append(self._row("SFW", self.sfw_switch))
+            self.controls.append(
+                self._row(
+                    label = "NSFW", 
+                    control = self.nsfw_switch, 
+                    description = "18+ experience"
+                ))
 
-    def _row(self, label, control, top=False):
-        return ft.Row(
+    def _row(self, label, control, description: str = None):
+        row = ft.Row(
             [
                 ft.Container(
                     content=ft.Text(label, color=theme.TEXT_LABEL),
                     width=LABEL_WIDTH,
-                    padding=ft.Padding.only(top=12) if top else None,
-                    alignment=ft.Alignment.TOP_LEFT if top else ft.Alignment.CENTER_LEFT,
+                    padding=ft.Padding.only(top=12),
+                    alignment=ft.Alignment.TOP_LEFT,
                 ),
-                ft.Container(content=control, expand=True),
+                ft.Container(
+                    content=control, 
+                    expand=False if description else True,
+                ),
             ],
-            vertical_alignment=ft.CrossAxisAlignment.START if top else ft.CrossAxisAlignment.CENTER,
+            vertical_alignment=ft.CrossAxisAlignment.START,
             spacing=12,
         )
+
+        if description:
+            row.controls.append(ft.Container(
+                                content=ft.Text(description, color=theme.TEXT_LABEL),
+                                expand=True,
+                                alignment=ft.Alignment.TOP_LEFT,
+                            ))
+
+        return row
 
     def get_voice(self):
         # kept out of get_values() because those values are json encoded and sent to the hub
@@ -325,7 +347,8 @@ class WizardProfilePage(ft.Column):
                 "name": self.name_input.value or "",
                 "gender": self.gender.get_selected(),
                 "backstory": self.backstory.value or "",
-                "sfw": "SFW" if self.sfw_switch.value else "NSFW",
+                "sfw": "NSFW" if self.nsfw_switch.value else "SFW",
+                "persistent": self.persistent_switch.value or False,
                 "image_style": self.image_style.value or DEFAULT_IMAGE_STYLE,
             }
         return {
@@ -425,23 +448,32 @@ class ProfileWizard(BasePage):
     def on_submit(self, e=None):
         if self.user_profile_mode != ProfileWizzardMode.AIContact and not self.profile_page.validate_name():
             return
+        
         profile = self.profile_page.get_values()
         if self.user_profile_mode != ProfileWizzardMode.AIContact:
-            # the entered name is stored in the "name" key of the profile json in user_data
             Hub.update_user_data({"profile": json.dumps(profile)})
             self.on_go_back()
             return
 
-        # the hub infers role, personality and looks from the backstory
         generate_profile = {"profile": profile}
-        # blocking call, the hub answers with the uuid of the stored voice
-        voice_id = self.profile_page.voice_selector.store_on_hub(profile.get("gender", ""))
+        voice_id = self._store_voice(profile.get("gender", ""))
         if voice_id:
             generate_profile["voice_id"] = voice_id
 
         if not Hub.generate({"generate_profile": generate_profile}):
             return
         self._show(ProgressPage())
+
+    def _store_voice(self, gender: str) -> str | None:
+        """stores the selected voice on the hub (blocking), returns its uuid or None"""
+        voice = self.profile_page.get_voice()
+        if not voice:
+            return None
+        if "voice_id" in voice:
+            return voice["voice_id"]
+        if "predefined_id" in voice:
+            return Hub.use_predefined_voice(voice["predefined_id"])
+        return Hub.upload_voice(voice["bytes"], gender)
 
     def on_enter(self, **kwargs):
         self.user_profile_mode = kwargs.get("user_profile_mode", ProfileWizzardMode.AIContact)
