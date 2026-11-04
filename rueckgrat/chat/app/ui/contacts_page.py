@@ -50,7 +50,7 @@ class ContactsPage(BasePage):
         Hub.unregister_incomming_message(self.on_incomming_message)
 
     def _on_add_contact(self, text=None, data=None):
-        self.navigator("profile_wizz")
+        self.navigator("contact_wizz")
 
     def _on_import_contact(self, text=None, data=None):
         self.page.run_task(self._pick_import)

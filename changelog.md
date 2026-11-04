@@ -9,6 +9,7 @@ Changelog
 - #165 added persistent companion option to wizzard
 - #160 fixed issue with voice id exporting contacts
 - #168 save / load compation flag for ocntacts
+- #166 ask user for settings after first login
 
 0.24.0
 ------
