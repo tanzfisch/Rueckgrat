@@ -23,7 +23,7 @@ PALETTES = {
         SURFACE_FIELD="#2C2C2C",       # filled fields of the profile pages and the voice selector
         PRESSED="#777777",
         CODE_BORDER="#8D8D8D",
-        TEAL="#00424c",                # user bubbles, one line bubbles, dialogs
+        TEAL="#37474F",                # bluish grey, was #00424c. user bubbles, one line bubbles, dialogs
         TEAL_FILL="#0b6b78",           # primary colour, selected tabs, "reconnected" strip
         TEAL_BRIGHT="#5aa2ac",         # active translate panel
         TEAL_HANDLE="#06424a",
@@ -167,7 +167,7 @@ def _styles() -> dict:
         "code": dict(bgcolor=SURFACE_2, border_radius=RADIUS, padding=16, border=ft.Border.all(2, CODE_BORDER)),
         "text": dict(bgcolor=TRANSPARENT, padding=0),
         "chat_user": dict(bgcolor=TEAL, border_radius=RADIUS, padding=10),
-        "chat_assistant": dict(bgcolor=SURFACE_4, border_radius=RADIUS, padding=10),
+        "chat_assistant": dict(bgcolor=BACKGROUND, border_radius=RADIUS, padding=ft.Padding(left=10, top=4, right=10, bottom=4)),   # page background so the bubble blends in; was SURFACE_4
         "chat_error": dict(bgcolor=SURFACE, border_radius=RADIUS, padding=10),
         "input_container": dict(bgcolor=SURFACE, border_radius=RADIUS, padding=0),
         "flat_button": dict(bgcolor=TRANSPARENT),

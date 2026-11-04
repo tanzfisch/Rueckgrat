@@ -843,6 +843,23 @@ class Hub:
         return []
 
     @classmethod
+    def get_map_tile(cls, z: int, x: int, y: int) -> bytes | None:
+        """png bytes of one openstreetmap tile, the hub fetches and caches them. None if it has none"""
+        try:
+            response = requests.get(
+                f"{cls.url}/map/tiles/{z}/{x}/{y}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=15,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.content
+            logger.error(f"get map tile - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_map_tile {repr(e)}")
+        return None
+
+    @classmethod
     def get_email(cls) -> str:
         """the user's optional email, "" if none is set or the hub can't be reached"""
         try:
