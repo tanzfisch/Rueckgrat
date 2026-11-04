@@ -210,14 +210,15 @@ class Hub:
         cls.websocket_client.register_incomming_message(callback)
 
     @classmethod
-    def chat(cls, contact_id: int, conversation_id: int, role: str, user_role_name: str, content: str, temperature: float) -> bool:
+    def chat(cls, contact_id: int, conversation_id: int, role: str, user_role_name: str, content: str, temperature: float, poll_answer: dict | None = None) -> bool:
         chat_request = ChatRequest(
             contact_id=contact_id,
             conversation_id=conversation_id,
             role=role,
             name=user_role_name,
             content=content,
-            temperature=temperature
+            temperature=temperature,
+            poll_answer=poll_answer
         )
         payload = {"chat": chat_request.model_dump()}
         return cls.websocket_client.send_message(json.dumps(payload))
@@ -243,7 +244,7 @@ class Hub:
     @classmethod
     def generate(cls, prompt: dict) -> bool:
         payload = {"generate": prompt}
-        return cls.websocket_client.send_message(json.dumps(payload))    
+        return cls.websocket_client.send_message(json.dumps(payload))
 
     @classmethod
     def check_health(cls):
@@ -840,6 +841,23 @@ class Hub:
             logger.error(f"failed to get attachments {repr(e)}")
 
         return []
+
+    @classmethod
+    def get_map_tile(cls, z: int, x: int, y: int) -> bytes | None:
+        """png bytes of one openstreetmap tile, the hub fetches and caches them. None if it has none"""
+        try:
+            response = requests.get(
+                f"{cls.url}/map/tiles/{z}/{x}/{y}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=15,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.content
+            logger.error(f"get map tile - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_map_tile {repr(e)}")
+        return None
 
     @classmethod
     def get_email(cls) -> str:

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from app.tasks.task_queue import Task
 from app.utils.embeddings import embed_text
-from app.companion.clock import to_db
+from app.utils.clock import to_db
 from .sweeper import MaintenanceTask
 
 from app.common import get_logger

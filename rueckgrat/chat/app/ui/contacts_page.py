@@ -50,7 +50,7 @@ class ContactsPage(BasePage):
         Hub.unregister_incomming_message(self.on_incomming_message)
 
     def _on_add_contact(self, text=None, data=None):
-        self.navigator("profile_wizz")
+        self.navigator("contact_wizz")
 
     def _on_import_contact(self, text=None, data=None):
         self.page.run_task(self._pick_import)
@@ -69,6 +69,9 @@ class ContactsPage(BasePage):
                 data = json.load(file)
             contact_id = Hub.create_contact()
             Hub.update_contact(contact_id, data)
+            # the hub ignores profile.companion in an update, only its endpoint starts the companion
+            if Utils.get_nested_value(data, ["profile", "companion"], False):
+                Hub.set_contact_companion(contact_id, True)
             self.load_contacts()
         except Exception as ex:
             logger.error(f"failed to load profile: {repr(ex)}")        

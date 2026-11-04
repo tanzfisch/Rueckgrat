@@ -43,6 +43,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **date_calc** — date calculations
     - **fetch_url** — fetch content for given URL
     - **weather** — weather forcast for given location
+    - **show_map** — show a place on an OpenStreetMap map in the chat, tapping it opens the maps app
 
 ## Frontend Tools
 
@@ -59,6 +60,10 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
 Some screenhots of the app ...
 
 <img src="docs/screenshots/contact_list.png" width="200" alt="contact list"> <img src="docs/screenshots/chat_image.png" width="200" alt="image gen in chat"> <img src="docs/screenshots/chat_foto.png" width="200" alt="self image in chat"> <img src="docs/screenshots/translate.png" width="200" alt="code in chat">
+
+generated promo video ...
+
+[![Rueckgrat promo](https://img.youtube.com/vi/uEq7prKKw6c/0.jpg)](https://www.youtube.com/shorts/uEq7prKKw6c)
 
 # Getting started
 
@@ -167,13 +172,13 @@ Invites and users are managed with the hub management tool. Run the hub containe
 
 ```bash
 docker exec -it rueckgrat_hub python -m app.hub_management --help
-docker exec -it rueckgrat_hub python -m app.hub_management invite create
 docker exec -it rueckgrat_hub python -m app.hub_management invite create --email [e-mail]
+docker exec -it rueckgrat_hub python -m app.hub_management invite list
 docker exec -it rueckgrat_hub python -m app.hub_management user create [user_name]
 docker exec -it rueckgrat_hub python -m app.hub_management user list
-docker exec -it rueckgrat_hub python -m app.hub_management invite list
-docker exec -it rueckgrat_hub python -m app.hub_management companion list
 docker exec -it rueckgrat_hub python -m app.hub_management companion status [contact_id]
+docker exec -it rueckgrat_hub python -m app.hub_management maintenance status
+docker exec -it rueckgrat_hub python -m app.hub_management stats
 ```
 
 **Note: The invite token is printed only once, copy it immediately.**

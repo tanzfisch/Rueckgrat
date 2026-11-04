@@ -12,6 +12,8 @@ from .status_widget import StatusWidget
 from .voice_selector import VoiceSelector
 from .connection_banner import ConnectionBanner
 from .language_picker import LanguagePicker, flag_text
+from .poll import PollView
+from .map_view import MapView
 
 __all__ = [
     "MessageBox", 
@@ -30,4 +32,6 @@ __all__ = [
     "ConnectionBanner",
     "LanguagePicker",
     "flag_text",
+    "PollView",
+    "MapView",
 ]

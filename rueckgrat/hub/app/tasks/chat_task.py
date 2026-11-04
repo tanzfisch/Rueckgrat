@@ -38,14 +38,22 @@ class ChatTask(Task):
                 messages.append({"role": "developer", "content": context_prompt})
             
             history = self.db.get_messages_by_conversation(self.request.conversation_id, 10)
+            note = ""   # what the last answer used, put before the next user turn so the model does not copy it
             for message in history:
                 content = message['content']
                 if not content:
                     continue    # skip if empty to not confuse ai
                 if message["role"] == "assistant":
-                    content += self._tools_line(message.get("tools"))
-                    content += self._sources_line(message.get("sources"))
+                    note = (self._tools_line(message.get("tools"))
+                            + self._sources_line(message.get("sources"))
+                            + self._poll_line(message.get("poll"))
+                            + self._map_line(message.get("map"))).strip()
+                elif message["role"] == "user" and note:
+                    content = f"{note}\n\n{content}"
+                    note = ""
                 messages.append({"role": message["role"], "content": content})
+            if note:
+                messages.append({"role": "developer", "content": note})
 
             if self.thinking_response:
                 logger.debug("adding tool outputs to chat query")
@@ -65,7 +73,29 @@ class ChatTask(Task):
     def _tools_line(tools) -> str:
         """one short line naming the tools a past answer used, so the model knows what it did"""
         names = [tool for tool in tools if isinstance(tool, str)] if isinstance(tools, list) else []
-        return f"\n(tools used: {', '.join(names)})" if names else ""
+        return f"\nYou used these tools for this answer: {', '.join(names)}." if names else ""
+
+    @staticmethod
+    def _poll_line(poll) -> str:
+        """one short line with the poll a past answer showed and what the user chose"""
+        if not isinstance(poll, dict) or not poll.get("options"):
+            return ""
+        question = (poll.get("question") or "").strip()
+        if question and question[-1] not in ".?!":
+            question += "."
+        chosen = ", ".join(poll.get("chosen") or [])
+        answer = f"The user chose: {chosen}." if chosen else "The user has not answered yet."
+        options = ", ".join(poll["options"])
+        if not question:
+            return f"\nYou asked the user a poll with these options: {options}. {answer}"
+        return f"\nYou asked the user in a poll: {question} The options were: {options}. {answer}"
+
+    @staticmethod
+    def _map_line(place) -> str:
+        """one short line with the place a past answer showed on a map"""
+        if not isinstance(place, dict) or not place.get("display_name"):
+            return ""
+        return f"\nYou showed the user a map of {place['display_name']}."
 
     @staticmethod
     def _sources_line(sources) -> str:
@@ -76,7 +106,7 @@ class ChatTask(Task):
             domain = urlparse(url).netloc.lower().removeprefix("www.") if isinstance(url, str) else ""
             if domain and domain not in domains:
                 domains.append(domain)
-        return f"\n(sources: {', '.join(domains)})" if domains else ""
+        return f"\nYou looked up these sources for this answer: {', '.join(domains)}." if domains else ""
 
     def result(self) -> Dict[str, Any]:
         return None

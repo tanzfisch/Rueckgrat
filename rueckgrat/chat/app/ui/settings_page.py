@@ -7,7 +7,6 @@ from app.ui import theme
 from app.ui import BasePage
 from app.ui.widgets import RowSelector, Header, MessageBox
 from app.utils import RueckgratConfig, Hub
-from app.ui.profile_wizzard import ProfileWizzardMode
 
 # common IANA zones, east to west. the hub accepts any IANA name, one not listed here is added when it is the stored one
 TIMEZONES = [
@@ -16,6 +15,12 @@ TIMEZONES = [
     "Europe/London", "UTC", "America/Sao_Paulo", "America/New_York", "America/Chicago", "America/Denver",
     "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu",
 ]
+
+
+def timezone_options(timezone: str) -> list:
+    # the stored zone is added in front when it is not one of the common ones
+    timezones = TIMEZONES if timezone in TIMEZONES or not timezone else [timezone, *TIMEZONES]
+    return [ft.DropdownOption(key=tz, text=tz) for tz in timezones]
 
 
 # Credits and Licenses show files from the project root. a source checkout reads them there,
@@ -111,7 +116,7 @@ class ProfileSettingsPage(ft.Column):
 
 
     def on_click_user_profile(self, e=None):
-        self.navigator("profile_wizz", user_profile_mode=ProfileWizzardMode.UserChange)
+        self.navigator("user_profile_wizz")
 
 
 class AccountSettingsPage(ft.Column):
@@ -185,9 +190,8 @@ class PreferencesSettingsPage(ft.Column):
         self.navigator = navigator
         # the companions of all contacts plan their day and keep quiet hours in it
         timezone = Hub.get_timezone()   # "" if the hub can't be reached, then nothing is selected
-        timezones = TIMEZONES if timezone in TIMEZONES or not timezone else [timezone, *TIMEZONES]
         self.timezone_edit = ft.Dropdown(label="Timezone", value=timezone or None,
-                                         options=[ft.DropdownOption(key=tz, text=tz) for tz in timezones], **theme.STYLES["field"])
+                                         options=timezone_options(timezone), **theme.STYLES["field"])
         # stored on this device only, saved on change
         self.enter_sends_switch = ft.Switch(value=RueckgratConfig().enter_sends, on_change=self.on_enter_sends_changed)
         self.controls = [

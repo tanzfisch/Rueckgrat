@@ -3,8 +3,6 @@ import wave
 import flet as ft
 from app.ui import theme
 
-from app.utils import Hub
-from app.audio import Text_To_Speech
 from app.ui.widgets.bubbles import OneLineBubble
 from app.ui.widgets.message_box import MessageBox
 from app.common import get_logger
@@ -13,7 +11,8 @@ logger = get_logger()
 
 
 class VoiceSelector(ft.Column):
-    """optional reference voice for tts: a predefined voice from the hub or an own wav, kept in local state only"""
+    """optional reference voice for tts: a predefined voice or an own wav, kept in local state only.
+    pure ui, the owner passes the predefined voices in, plays samples via on_play_sample and stores get_voice() on the hub"""
 
     # keys of the two extra entries in the voice select, predefined voices use their id as key
     NO_VOICE_KEY = "__no_voice__"
@@ -21,7 +20,7 @@ class VoiceSelector(ft.Column):
     # only present when editing a contact that already has a voice, its value is the stored hub uuid
     CURRENT_VOICE_KEY = "__current_voice__"
 
-    def __init__(self):
+    def __init__(self, voices: list = None, on_play_sample=None):
         super().__init__(spacing=8)
         self.voice_file_name = None
         self.voice_file_path = None
@@ -29,7 +28,8 @@ class VoiceSelector(ft.Column):
         self.file_picker = None
         self.current_voice_id = ""
 
-        self.predefined_voices = Hub.get_predefined_voices()
+        self.predefined_voices = voices or []
+        self.on_play_sample = on_play_sample   # called with the predefined id, no play button without it
 
         self.voice_select = ft.Dropdown(
             options=self._build_options(),
@@ -64,25 +64,28 @@ class VoiceSelector(ft.Column):
         options.append(ft.DropdownOption(key=self.UPLOAD_VOICE_KEY, text="upload own voice (wav)…"))
         return options
 
-    @staticmethod
-    def _sample_button(predefined_id: str) -> ft.IconButton:
+    def _sample_button(self, predefined_id: str) -> ft.IconButton | None:
+        if not self.on_play_sample:
+            return None
         # the button takes the tap, so the option is not selected and the menu stays open
         return ft.IconButton(
             icon=ft.Icons.PLAY_ARROW,
             tooltip="Play sample",
-            on_click=lambda e: Text_To_Speech.play_voice_sample(predefined_id),
+            on_click=lambda e: self.on_play_sample(predefined_id),
         )
 
-    def set_current_voice(self, voice_id: str):
-        """pre-selects the voice a contact already has, an empty id resets the select to "default voice" """
+    def set_current_voice(self, voice_id: str, voices: list = None):
+        """pre-selects the voice a contact already has, an empty id resets the select to "default voice".
+        voices replaces the predefined voices, the owner passes a fresh list from the hub"""
+        if voices is not None:
+            self.predefined_voices = voices
         self.current_voice_id = voice_id or ""
         if not self.current_voice_id:
             self.voice_select.options = self._build_options()
             self.voice_select.value = self.NO_VOICE_KEY
         else:
-            # fetch again, the user may have stored more predefined voices since this widget was built
-            self.predefined_voices = Hub.get_predefined_voices()
-            predefined = next((v for v in self.predefined_voices if v.get("voice_id") == self.current_voice_id), None)
+            # a stored uuid, or the voices.json id of an imported profile
+            predefined = next((v for v in self.predefined_voices if self.current_voice_id in (v.get("voice_id"), v["id"])), None)
             if predefined:
                 # select the predefined entry itself, saving maps it back to the same uuid on the hub
                 self.voice_select.options = self._build_options()
@@ -171,14 +174,3 @@ class VoiceSelector(ft.Column):
         if selected and selected != self.NO_VOICE_KEY:
             return {"predefined_id": selected}
         return None
-
-    def store_on_hub(self, gender: str = "") -> str | None:
-        """sends the selection to the hub (blocking), returns the uuid of the stored voice or None"""
-        voice = self.get_voice()
-        if not voice:
-            return None
-        if "voice_id" in voice:
-            return voice["voice_id"]
-        if "predefined_id" in voice:
-            return Hub.use_predefined_voice(voice["predefined_id"])
-        return Hub.upload_voice(voice["bytes"], gender)

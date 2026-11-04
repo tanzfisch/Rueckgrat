@@ -1,6 +1,5 @@
 import json
 import queue
-import random
 from typing import Optional, Dict, Any, List, Type, Callable
 from uuid import uuid4
 
@@ -180,11 +179,11 @@ class Controller(AgentJob):
             if new:
                 logger.info(f"controller {self.job_id}: {len(new)} user message(s) not used, the plan was changed {self.replans} times")
             return
-        reply = self.infrastructure.chat(messages=[{"role": "user", "content": REVIEW_PROMPT.format(
+        reply = self.chat([{"role": "user", "content": REVIEW_PROMPT.format(
             prompt=self.prompt, done=len(self.done_steps), total=len(self.plan), results=self._results_text(),
             messages="\n".join(f"- {message}" for message in self.messages) or "none",
             remaining=json.dumps(remaining, ensure_ascii=False) if remaining else "none, the job is merged into a report next",
-            max_steps=MAX_STEPS, max_workers=MAX_WORKERS_PER_STEP)}], temperature=0.2, seed=random.randint(0, 100000))
+            max_steps=MAX_STEPS, max_workers=MAX_WORKERS_PER_STEP)}], 0.2)
         data = Utils.json_loads(reply) if reply else None
         action = data.get("action") if isinstance(data, dict) else None
         if isinstance(data, dict) and str(data.get("name") or "").strip():
@@ -204,11 +203,9 @@ class Controller(AgentJob):
 
     def make_plan(self) -> List[List[Dict[str, str]]]:
         """the steps from one llm call. no usable plan: one step, one worker does the whole job"""
-        if self.infrastructure is None:
-            raise RuntimeError("controller has no llm (infrastructure)")
         fallback = [[{"role": "worker", "prompt": self.prompt}]]
-        reply = self.infrastructure.chat(messages=[{"role": "user", "content": PLAN_PROMPT.format(
-            prompt=self.prompt, max_steps=MAX_STEPS, max_workers=MAX_WORKERS_PER_STEP)}], temperature=0.2, seed=random.randint(0, 100000))
+        reply = self.chat([{"role": "user", "content": PLAN_PROMPT.format(
+            prompt=self.prompt, max_steps=MAX_STEPS, max_workers=MAX_WORKERS_PER_STEP)}], 0.2)
         data = Utils.json_loads(reply) if reply else None
         plan = self._valid_plan(data)
         name = str(data.get("name") or "").strip() if isinstance(data, dict) else ""
@@ -273,8 +270,7 @@ class Controller(AgentJob):
         if len(results) == 1:
             return results[0]
         text = self._results_text()
-        reply = self.infrastructure.chat(messages=[{"role": "user", "content": MERGE_PROMPT.format(prompt=self.prompt, results=text)}],
-                                         temperature=0.2, seed=random.randint(0, 100000))
+        reply = self.chat([{"role": "user", "content": MERGE_PROMPT.format(prompt=self.prompt, results=text)}], 0.2)
         merged = Utils.json_loads(reply) if reply else None
         if isinstance(merged, dict) and merged.get("summary"):
             return {"summary": str(merged["summary"]), "details": str(merged.get("details") or "")}

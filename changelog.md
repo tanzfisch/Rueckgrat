@@ -1,6 +1,17 @@
 Changelog
 =========
 
+0.25.0
+------
+
+- #125 added polling tool
+- #158 refactored companion code to run now as AgentJob
+- #165 added persistent companion option to wizzard
+- #160 fixed issue with voice id exporting contacts
+- #168 save / load compation flag for ocntacts
+- #166 ask user for settings after first login
+- #159 display maps of addresses in chat when the AI thinks it helps the context
+
 0.24.0
 ------
 

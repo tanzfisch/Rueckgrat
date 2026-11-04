@@ -9,6 +9,7 @@ from app.ui import BasePage
 from app.ui.gallery_page import GalleryPage, broken_image_fallback
 from app.ui.widgets import Header, Image, VoiceSelector
 from app.utils import Contact, Hub, Paths
+from app.audio import Text_To_Speech
 from app.common import get_logger, Utils, IMAGE_STYLE_OPTIONS, IMAGE_STYLE_ICONS
 
 logger = get_logger()
@@ -145,9 +146,8 @@ class ProfilePage(BasePage):
         self.role = _text_field("Role", "text")
         self.personality = _text_field("Persona", "text")
         self.age = _text_field("Age", "text")
-        self.voice_selector = VoiceSelector()
-        # a pending choice, Save Profile sends it. hidden for a new contact
-        self.companion_switch = ft.Switch(label="Companion (plans its own day, may write first)", active_color=theme.ACCENT, visible=False)
+        self.voice_selector = VoiceSelector(Hub.get_predefined_voices(), on_play_sample=Text_To_Speech.play_voice_sample)
+        self.companion_switch = ft.Switch(label="Companion (plans its own day, may write first)", active_color=theme.ACCENT)
         self.companion_loaded = False   # the hub's state, a different switch value is sent on save
 
         # original profile dict, so fields without a form entry survive a save
@@ -264,7 +264,6 @@ class ProfilePage(BasePage):
         self.set_gender("male")
         self.voice_selector.set_current_voice("")
         self.image_row.visible = False
-        self.companion_switch.visible = False
         self.companion_switch.value = self.companion_loaded = False
         self.update()
 
@@ -285,7 +284,9 @@ class ProfilePage(BasePage):
             if kind == "list":
                 value = "\n".join(str(v) for v in value) if isinstance(value, list) else str(value or "")
             field.value = value if isinstance(value, str) else json.dumps(value)
-        self.voice_selector.set_current_voice(Utils.get_nested_value(profile, ["tts_parameters", "voice_id"], ""))
+        voice_id = Utils.get_nested_value(profile, ["tts_parameters", "voice_id"], "")
+        # fetch again, the user may have stored more predefined voices since the selector was built
+        self.voice_selector.set_current_voice(voice_id, Hub.get_predefined_voices() if voice_id else None)
         self.update()
 
     def load_profile(self):
@@ -294,10 +295,9 @@ class ProfilePage(BasePage):
             return
         contact = Hub.get_contact(self.contact_id)
         self.fill_form(contact)
-        # only the hub sets the flag (PUT /contacts/{id}/companion), so it is read here and not in fill_form: Load must not change it
+        # only the hub sets the flag (PUT /contacts/{id}/companion), so it is read here and not in fill_form: _on_load only sets the switch
         self.companion_loaded = bool(Utils.get_nested_value(contact, ["profile", "companion"], False))
         self.companion_switch.value = self.companion_loaded
-        self.companion_switch.visible = True
         self.companion_switch.update()
         self.image_row.visible = True
         self._show_image(Contact(contact or {}).get_latest_profile_image_name())
@@ -385,14 +385,24 @@ class ProfilePage(BasePage):
         if not files or not files[0].path:
             return
         with open(files[0].path, "r") as file:
-            self.fill_form(json.load(file))
+            data = json.load(file)
+        self.fill_form(data)
+        # only the switch, Save sends a changed value through PUT /contacts/{id}/companion
+        self.companion_switch.value = bool(Utils.get_nested_value(data, ["profile", "companion"], False))
+        self.companion_switch.update()
 
     async def _on_export(self, e=None):
         path = await self.file_picker.save_file(dialog_title="Export Profile")
         if not path:
             return
+        data = self.get_data()
+        voice = self.voice_selector.get_voice()
+        if voice and "predefined_id" in voice:
+            # the voices.json id instead of the uuid, the uuid differs between hubs. the hub resolves it on import
+            _set_nested_value(data["profile"], ["tts_parameters", "voice_id"], voice["predefined_id"])
+        data["profile"]["companion"] = bool(self.companion_switch.value)
         with open(path, "w") as file:
-            json.dump(self.get_data(), file, indent=4)
+            json.dump(data, file, indent=4)
 
     def _on_cancel(self, e=None):
         self.navigator.back()
@@ -414,9 +424,15 @@ class ProfilePage(BasePage):
 
     def _resolve_voice_id(self) -> str:
         # "" means the default voice. if the hub call fails keep the voice the contact had instead of wiping it
-        if self.voice_selector.get_voice() is None:
+        voice = self.voice_selector.get_voice()
+        if voice is None:
             return ""
-        voice_id = self.voice_selector.store_on_hub(self.gender_group.value or "")
+        if "voice_id" in voice:
+            voice_id = voice["voice_id"]
+        elif "predefined_id" in voice:
+            voice_id = Hub.use_predefined_voice(voice["predefined_id"])
+        else:
+            voice_id = Hub.upload_voice(voice["bytes"], self.gender_group.value or "")
         if not voice_id:
             logger.error("storing the voice failed, keeping the current voice")
             return self.voice_selector.current_voice_id

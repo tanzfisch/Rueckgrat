@@ -163,6 +163,17 @@ this project (AGPL) and not third-party.
 | NVIDIA Container Toolkit | - | Apache-2.0 | https://github.com/NVIDIA/nvidia-container-toolkit | install.sh (NVIDIA only) |
 | git, curl, rsync, jq, alsa-utils, portaudio, python3 venv | distro packages | mixed (GPL-2.0, MIT/curl, GPL-3.0, MIT, LGPL, MIT, PSF-2.0) | your Linux distribution | install.sh, on the host only |
 
+## Map data (`show_map` tool)
+
+The hub looks places up and fetches the map tiles online, nothing is shipped. The map bubble
+shows "© OpenStreetMap contributors" with a link to https://www.openstreetmap.org/copyright.
+
+| Service | Used for | License / terms |
+|---|---|---|
+| OpenStreetMap data | places and the map | ODbL 1.0, © OpenStreetMap contributors, https://www.openstreetmap.org/copyright |
+| Nominatim (nominatim.openstreetmap.org) | address -> coordinates | https://operations.osmfoundation.org/policies/nominatim/ (1 request per second, identifying user agent) |
+| OSM standard tiles (tile.openstreetmap.org) | map images, fetched and cached by the hub | CC BY-SA 2.0 tiles, https://operations.osmfoundation.org/policies/tiles/ (identifying user agent, cached 7 days) |
+
 ## Models
 
 Models are **not shipped** with Rückgrat. `rueckgrat/node/data/registry.json` only points to

@@ -1,10 +1,9 @@
-import json
-import random
 import threading
 import time
 from typing import Dict, Any
 from uuid import uuid4
 from .tool import Tool, ToolCategory
+from app.agent_jobs.agent_job import AgentJob
 from app.agent_jobs.controller import Controller, short_name
 
 from app.common import get_logger, Utils, MessageQueue
@@ -35,16 +34,15 @@ class SpawnAgentJobTool(Tool):
     the contact then tells the user about the result in a new message of the same conversation"""
     category = ToolCategory.GENERAL
     description = "hands a task to a background job: long or multi-step work, research with its own analysis, watching something, or repeating on a schedule and reporting back later"
+    # the user tells the ai to do it, not talks about background jobs, agents or tools (scored on laya, /tmp/rg_spawnq)
     question = [
-        "Does the user ask for something that runs in the background, on a schedule, or needs research and its own analysis, and alerts or reports back later?",
-        "Does the user ask for something that runs in the background or on a schedule and alerts or reports back later?",
-        "Does the user ask you to research something, gather data and make an estimate?"
+        "Is the user commanding you to put a task in the background?",
+        "Is the user asking you to research something on your own and report back later?",
+        "Is the user telling you to monitor something and alert them when it changes?"
     ]
 
-    # set at hub start (main.py), like a companion message: the report waits while a reply is being made
-    # and is pushed only to a user with an open /ws (it is in the db anyway)
-    turns = None
-    connections = None      # user_id -> open /ws connections
+    # set at hub start (main.py). the report waits while a reply is being made (AgentJob.turns)
+    # and is pushed only to a user with an open /ws (AgentJob.connections), it is in the db anyway
     tool_registry = None    # the workers' tools
     running: Dict[str, "SpawnAgentJobTool"] = {}    # job_id -> the tool of a running job: cancel, the user's messages
     running_lock = threading.Lock()
@@ -70,7 +68,7 @@ class SpawnAgentJobTool(Tool):
                 if saved:
                     self.job_id, self.cancelled = job_id, False
                     tool_context = {"tool_registry": self.tool_registry, "db": self.db, "user_id": self.user_id, "contact_id": self.contact_id,
-                                    "conversation_id": self.conversation_id, "user_name": self._user_name()} if self.tool_registry else None
+                                    "conversation_id": self.conversation_id, "user_name": AgentJob.user_name(self.db, self.user_id)} if self.tool_registry else None
                     self.controller = Controller(prompt, job_id, infrastructure=self.infrastructure, progress=self._progress, tool_context=tool_context)
                     self.running[job_id] = self
         if current is not None:
@@ -162,46 +160,24 @@ class SpawnAgentJobTool(Tool):
         a reply is being made. only to a user with an open /ws, a closed one would pile up in its queue. at the end also
         the "done" status, but not while a reply is being made (it would end the reply's status)"""
         self._job.update(changes)
-        if self.connections is None or self.connections[self.user_id] <= 0:
+        if not AgentJob.user_connected(self.user_id):
             return
         MessageQueue().send_job_progress(self._job["job_id"], self._job["name"], self._job["percent"], state,
                                          self._job["step"], self._job["total"], user_id=self.user_id)
-        if state != "running" and not (self.turns and self.turns.busy(self.conversation_id)):
+        if state != "running" and not (AgentJob.turns and AgentJob.turns.busy(self.conversation_id)):
             MessageQueue().set_status("done", user_id=self.user_id)    # stops the spinner of the workers' tool status messages
-
-    def _user_name(self) -> str:
-        try:
-            user_name = json.loads((self.db.get_user_data(self.user_id) or {}).get("profile") or "{}").get("name")
-        except Exception:
-            user_name = None
-        return user_name or "the user"
 
     def _report(self, task: str, fallback: str):
         """the contact tells the user what the job found or that it was cancelled (task: REPORT_PROMPT / CANCEL_PROMPT):
-        a new assistant message, stored and pushed like a companion message, so later replies see it in the history"""
-        from app.utils.prompt_compiler import PromptCompiler
+        a new assistant message, stored and pushed like a companion message (AgentJob.post_message)"""
         contact = self.db.get_contact_by_id(self.contact_id)
         name = Utils.get_nested_value(contact, ["identity", "name"], "")
-        system_prompt, _ = PromptCompiler(contact=contact, conversation=self.db.get_conversation(self.conversation_id),
-                                          user_role_name=self._user_name()).build_prompt()
-        messages = [
-            {"role": "developer", "content": system_prompt},
-            {"role": "user", "content": task},
-        ]
-        text = (self.infrastructure.chat(messages=messages, temperature=0.7, seed=random.randint(0, 100000)) or "").strip()
-        text = text or fallback
+        messages = AgentJob.persona_messages(contact, self.db.get_conversation(self.conversation_id), AgentJob.user_name(self.db, self.user_id), task)
+        text = self.controller.chat(messages, 0.7).strip() or fallback
 
-        while self.turns and self.turns.busy(self.conversation_id):
+        while AgentJob.turns and AgentJob.turns.busy(self.conversation_id):
             time.sleep(1)   # a reply is being made, the report comes after it
-        message_id = self.db.add_message(self.conversation_id, "assistant", text, name)
-        if self.connections is not None and self.connections[self.user_id] > 0:
-            MessageQueue().send_data({"chat": {
-                "conversation_id": self.conversation_id,
-                "role": "assistant",
-                "content": text,
-                "tool_calls": [],
-                "message_id": message_id
-            }}, user_id=self.user_id)   # only the conversation's owner
+        message_id, _ = AgentJob.post_message(self.db, self.user_id, self.conversation_id, text, name)
         logger.info(f"job report sent as message {message_id}, conversation {self.conversation_id}")
 
     @classmethod
