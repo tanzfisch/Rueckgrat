@@ -381,8 +381,9 @@ class Infrastructure:
         if node and node.is_connected():
             node.send_message(json.dumps({"cancel": stream_id}))
 
-    def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 1024, context_size: int=8192) -> str:
-        """stream: returns the stream id at once, the reply goes to callback. otherwise returns the reply"""
+    def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 1024, context_size: int=8192, timeout: Optional[float] = None) -> str:
+        """stream: returns the stream id at once, the reply goes to callback. otherwise returns the reply.
+        timeout: seconds for the node's llama call (jobs), the hub waits a bit longer. None = 240 like before"""
         try:
             chat_request = ChatRequestLlama(
                 messages=messages,
@@ -392,7 +393,8 @@ class Infrastructure:
                 context_size=context_size,
                 stream=stream,
                 conversation_id=conversation_id,
-                stream_id=uuid.uuid4().hex if stream else None  # own routing key per stream
+                stream_id=uuid.uuid4().hex if stream else None,  # own routing key per stream
+                timeout=timeout
             )
 
             #logger.debug(f"sending query to llm:\n{Utils.pretty_print(chat_request.model_dump())}")
@@ -418,7 +420,7 @@ class Infrastructure:
                 response = requests.post(
                     url,
                     json=chat_request.model_dump(),
-                    timeout=240,
+                    timeout=240 if timeout is None else timeout + 15,     # the node times out first and says so
                 )
             
                 if response.status_code == 200:

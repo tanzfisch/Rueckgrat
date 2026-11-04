@@ -428,7 +428,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -450,7 +450,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -472,7 +472,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -494,7 +494,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -516,7 +516,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -537,7 +537,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -558,7 +558,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -580,7 +580,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -601,7 +601,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -622,7 +622,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -645,7 +645,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -667,7 +667,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -689,7 +689,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -711,7 +711,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -733,7 +733,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -754,7 +754,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -776,7 +776,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -797,7 +797,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -818,7 +818,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -840,7 +840,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -861,7 +861,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -882,7 +882,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -904,7 +904,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -930,7 +930,7 @@
       }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -957,7 +957,7 @@
     ],
     "llama": {
       "model_file": "IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S-00001-of-00002.gguf",
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -981,7 +981,7 @@
     ],
     "llama": {
       "model_file": "Mix-128G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-128G-00001-of-00005.gguf",
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -1007,7 +1007,7 @@
     ],
     "llama": {
       "model_file": "Mix-256G/DeepSeek-V4.1-Flash-1017-abliterated-Mix-256G-00001-of-00007.gguf",
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -1029,7 +1029,7 @@
     ],
     "llama": {
       "model_file": "Q2_K/GLM-5.3-Flash-Uncensored-Q2_K-00001-of-00003.gguf",
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -1052,7 +1052,7 @@
     ],
     "llama": {
       "model_file": "Q3_K_M/GLM-5.3-Flash-Uncensored-Q3_K_M-00001-of-00004.gguf",
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -1076,7 +1076,7 @@
     ],
     "llama": {
       "model_file": "Q4_K_M/GLM-5.3-Flash-Uncensored-Q4_K_M-00001-of-00005.gguf",
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -1095,7 +1095,7 @@
       { "source": "https://huggingface.co/fr0stbit3/laya-gguf/resolve/main/laya-F16.gguf", "path": "" }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
@@ -1113,7 +1113,7 @@
       { "source": "https://huggingface.co/fr0stbit3/laya-gguf/resolve/main/laya-Q8_0.gguf", "path": "" }
     ],
     "llama": {
-      "max_context": 8192,
+      "max_context": 16384,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
