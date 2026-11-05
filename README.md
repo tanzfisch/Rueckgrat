@@ -44,6 +44,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **fetch_url** — fetch content for given URL
     - **weather** — weather forcast for given location
     - **show_map** — show a place on an OpenStreetMap map in the chat, tapping it opens the maps app
+    - **run_code** — write a small program and run it in a fresh sandbox container (Python, JavaScript, C++, Java, Go)
 
 ## Frontend Tools
 

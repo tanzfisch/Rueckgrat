@@ -40,6 +40,8 @@ Docker image based on `python:3.11-slim`. Files: `requirements.txt`, `requiremen
 | silero-vad[onnx-cpu] | 6.2.3 (installed) | MIT | https://github.com/snakers4/silero-vad |
 | ddgs | ==9.16.0 | MIT | https://github.com/deedy5/ddgs |
 | sqlite-vec | ==0.1.9 | MIT OR Apache-2.0 (dual) | https://github.com/asg017/sqlite-vec |
+| llm-sandbox[docker] | ==0.3.46 | MIT | https://github.com/vndee/llm-sandbox |
+| docker (Docker SDK for Python, comes in through llm-sandbox) | 7.2.0 (latest) | Apache-2.0 | https://github.com/docker/docker-py |
 | playwright | 1.64.1 (installed) | Apache-2.0 | https://github.com/microsoft/playwright-python |
 | certifi (used directly in code, comes in through requests) | 2026.10.23 (installed) | MPL-2.0 | https://github.com/certifi/python-certifi |
 
@@ -50,6 +52,7 @@ Downloaded by `playwright install --with-deps --only-shell chromium` while the i
 | Chromium headless shell | build 1248 | BSD-3-Clause, plus many bundled third-party licenses | https://www.chromium.org/ |
 | ffmpeg (Playwright build) | build 1013 | LGPL (unverified, see below) | https://github.com/microsoft/playwright |
 | System libraries and fonts from apt (`--with-deps`) | Debian | mixed (GPL, LGPL, MIT, font licenses) | https://www.debian.org/ |
+| LLM Sandbox images `ghcr.io/vndee/sandbox-*` (run_code, pulled on first use, not in the hub image) | python 3.11, node 22, cpp 11, java 11, go 1.23 on Debian bullseye | Debian and language runtimes, mixed (unverified) | https://github.com/vndee/llm-sandbox |
 
 ## Node (`rueckgrat/node`)
 

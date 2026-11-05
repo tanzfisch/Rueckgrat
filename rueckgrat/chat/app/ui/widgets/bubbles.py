@@ -1,4 +1,5 @@
 import re
+import asyncio
 import flet as ft
 from urllib.parse import urlparse
 from app.ui import theme
@@ -15,6 +16,13 @@ async def _open_link(e):
 
 
 FAVICON_SIZE = 20   # source buttons: the favicon and its fallback icon
+CODE_RADIUS = theme.RADIUS - 4   # #173 code block corners, a bit smaller than the bubble's so they fit inside it
+
+
+def code_text(block: str) -> str:
+    """#173 the code of a fenced block, without the ``` lines and the language tag"""
+    m = re.fullmatch(r"\s*```[^\n]*\n(.*?)\n?```\s*", block, re.DOTALL)
+    return m.group(1) if m else block
 
 
 class BubbleActions(ft.Row):
@@ -118,13 +126,29 @@ class ChatBubble(ft.Container):
         )
 
     def _add_code(self, content: str):
+        code = code_text(content)
+
+        async def copy(e):   # #173 copies the block's code, the icon shows a check for a moment
+            await ft.Clipboard().set(code)
+            e.control.icon = ft.Icons.CHECK
+            e.control.update()
+            await asyncio.sleep(1.5)
+            e.control.icon = ft.Icons.CONTENT_COPY
+            e.control.update()
+
         self.body.controls.append(
             ft.Container(
-                content=ft.Row(
-                    [self._md(content, code=True)],
-                    scroll=ft.ScrollMode.AUTO,
-                    wrap=False,
-                ),
+                content=ft.Stack([
+                    ft.Row(
+                        [self._md(content, code=True)],
+                        scroll=ft.ScrollMode.AUTO,
+                        wrap=False,
+                    ),
+                    ft.IconButton(icon=ft.Icons.CONTENT_COPY, icon_size=16, icon_color=theme.TEXT, tooltip="Copy",
+                                  top=0, right=0, on_click=copy),
+                ]),
+                border_radius=CODE_RADIUS,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,   # the code background keeps the rounded corners
                 data={"id": "code"},
             )
         )

@@ -24,6 +24,7 @@ class ChatRequestLlama(BaseModel):
     stream: bool = False
     conversation_id: int = -1
     stream_id: str | None = None
+    timeout: float | None = None     # seconds the node waits for llama.cpp, None = its default (240)
 
 class ImageRequest(BaseModel):
     positive_prompt: str

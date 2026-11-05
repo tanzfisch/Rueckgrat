@@ -545,6 +545,15 @@ class ChatPage(BasePage):
         previous.append_content(content)
         self.history.update()
 
+    def _replace_user_message(self, content: str):
+        """the hub fenced code in the user message: the last user bubble shows the stored text"""
+        rows = [row for row in self.history.controls if isinstance(row.data, ChatBubble) and row.data.role == "user"]
+        if not rows:
+            return
+        rows[-1].data.clear_content()
+        rows[-1].data.append_content(content)
+        self.history.update()
+
     def on_incomming_message(self, message: dict):
         #if not "delta" in message:
             #logger.debug(f"incomming message:\n{Utils.pretty_print(message)}")
@@ -570,6 +579,9 @@ class ChatPage(BasePage):
 
             if "cancelled" in message and message["cancelled"]["conversation_id"] == self.conversation_id:
                 self._drop_stream(message["cancelled"].get("message_id"))
+
+            if "fenced" in message and message["fenced"]["conversation_id"] == self.conversation_id:
+                self._replace_user_message(message["fenced"]["content"])
 
             if "merged" in message and message["merged"]["conversation_id"] == self.conversation_id:
                 self._merge_user_message(message["merged"]["content"])

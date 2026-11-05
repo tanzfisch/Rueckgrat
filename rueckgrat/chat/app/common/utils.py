@@ -56,6 +56,18 @@ class Utils:
         return json.dumps(data, indent=4).replace('\\n', '\n')
 
     @classmethod
+    def pretty_scores(cls, data: dict[str, float], bar_width: int = 20) -> str:
+        if not data:
+            return "(empty)"
+        max_key = max(len(k) for k in data)
+        lines = []
+        for k, v in data.items():
+            filled = int(v * bar_width)
+            bar = "█" * filled + "░" * (bar_width - filled)
+            lines.append(f"{k:<{max_key}}  {v:7.4f}  {bar}")
+        return "\n".join(lines)    
+
+    @classmethod
     def shorten(cls, s: str, max_len: int = 40) -> str:
         if len(s) <= max_len:
             return s

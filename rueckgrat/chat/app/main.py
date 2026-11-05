@@ -178,7 +178,6 @@ class App:
 
     async def _on_system_back(self, e):
         view = e.control
-        logger.info(f"TEMP system back on {self._current_name}")
         # back closes the full screen image first, then goes back a page
         if ImageOverlay.close_open(self.page):
             await view.confirm_pop(False)

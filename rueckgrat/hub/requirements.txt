@@ -18,3 +18,4 @@ numpy
 silero-vad[onnx-cpu]
 ddgs==9.16.0
 sqlite-vec==0.1.9
+llm-sandbox[docker]==0.3.46

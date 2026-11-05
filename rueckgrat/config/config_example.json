@@ -10,13 +10,7 @@
             "type": "text_to_text",
             "name": "llama_server",
             "port": 8080,
-            "model": "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L",
-            "max_context": 8192,
-            "gpu_layers": -1,
-            "flash_attn": "on",
-            "temp": 0.7,
-            "n_parallel": 2,
-            "extra_args": ""
+            "model": "cognitivecomputations_Dolphin-Mistral-24B-Venice-Edition-Q6_K_L"
           },
           {
             "type": "speech_to_text",

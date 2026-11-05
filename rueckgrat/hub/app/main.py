@@ -22,7 +22,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from app.utils import ChatDB, Infrastructure, ImageType, ImageStore
+from app.utils import ChatDB, Infrastructure, ImageType, ImageStore, fence_code
 from app.tools import ToolRegistry, SpawnAgentJobTool
 from app.tools.map_tool import get_tile
 from app.agent_jobs import AgentJob
@@ -57,6 +57,9 @@ async def lifespan(app: FastAPI):
     stale_jobs = app.state.db.fail_stale_jobs()     # their threads died with the last hub, before any new job can start
     if stale_jobs:
         logger.info(f"{stale_jobs} interrupted job(s) set to failed")
+    old_protocols = app.state.db.prune_protocols()     # #174 job protocols older than PROTOCOL_RETENTION_HOURS
+    if old_protocols:
+        logger.info(f"{old_protocols} old job protocol(s) deleted")
     app.state.image_store = ImageStore(app.state.db, app.state.infrastructure)
     app.state.task_queue = TaskQueue(max_parallel = 10)
     app.state.turns = Turns(app.state.db)
@@ -1031,7 +1034,12 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                             }
                         }, user_id=user_id)
                     else:
-                        # #152 a job running in this conversation gets the message too, its review after the current step decides
+                        # unfenced code gets ``` fences 
+                        fenced = chat_request.content if chat_request.poll_answer else fence_code(chat_request.content)
+                        if fenced != chat_request.content:
+                            chat_request.content = fenced
+                            MessageQueue().send_data({"fenced": {"conversation_id": chat_request.conversation_id, "content": fenced}}, user_id=user_id)
+                        
                         SpawnAgentJobTool.add_message(user_id, chat_request.conversation_id, chat_request.content)
                         job = MetaTask(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.turns)
                         app.state.turns.start(job)  # stores the user message, or merges it into the reply still being made

@@ -6,9 +6,14 @@ from typing import Optional, Dict, Any
 from uuid import uuid4
 
 from app.common import get_logger, ChatRequest, MessageQueue
+from .protocol import ms_since
 logger = get_logger()
 
-DEFAULT_TIME_LIMIT = 1800     # seconds, backstop: an agent that never ends its work is stopped after this
+DEFAULT_TIME_LIMIT = 5400     # seconds, backstop: an agent that never ends its work is stopped after this
+# a job's llm calls (plan, review, merge, retry, worker answers, run_code's code) may be slow and long, nobody waits for
+# them like for a chat reply. chat and companions keep 240 s and their own token limits
+JOB_LLM_TIMEOUT = 900         # seconds per llm call
+JOB_MAX_TOKENS = 4096         # per reply. the llama.cpp slot's context (prompt + reply) may end it earlier
 
 MAX_TOOL_CHARS = 12000     # the tool results in the worker's prompt
 # not for workers and companions: they don't spawn agents, don't write the user's memories (their prompt is the planner's
@@ -54,6 +59,16 @@ class AgentJob:
         self.infrastructure = infrastructure    # the llm, the Controller hands its own to its workers
         # the tools, like MetaTask: {tool_registry, db, user_id, contact_id, conversation_id, user_name} of the job's conversation. None: no tools
         self.tool_context = tool_context
+        self.protocol = None    # #174 the job's Protocol, the Controller makes it and hands it to its workers. None: no trace
+        self.plan_step, self.plan_task = None, None   # a worker's step and task id in the plan, set by Controller.spawn
+        self.attempt = 1        # a retried task's worker: 2, ... (Controller._retry)
+
+    def trace(self, action: str, ok=None, step=None, task=None, **data):
+        """#174 one line of this agent in the job's protocol, by default in its own step and task"""
+        if self.protocol is not None:
+            if self.attempt > 1:
+                data.setdefault("attempt", self.attempt)
+            self.protocol.add(self.role, self.job_id, action, self.plan_step if step is None else step, self.plan_task if task is None else task, ok, **data)
 
     @property
     def role(self) -> str:
@@ -66,6 +81,7 @@ class AgentJob:
                 self.timed_out = True
                 self.result = {"error": "timed_out", "details": f"{self.role} agent stopped after its time limit of {self.time_limit}s"}
                 logger.warning(f"agent {self.role} {self.job_id} timed out after {self.time_limit}s")
+                self.trace("timed_out", ok=False, limit=self.time_limit)
                 self.stop()
                 break
             if self.step():
@@ -81,6 +97,7 @@ class AgentJob:
             self.result = {"error": text or "no reply from the llm"}
         else:
             self.result = {"summary": text, "details": ""}
+        self.trace("done", ok="error" not in self.result, **({"error": text or "no reply"} if "error" in self.result else {"summary": text}))
         return True
 
     def _use_tools(self) -> str:
@@ -115,10 +132,11 @@ class AgentJob:
         from app.tasks import ToolDetectionTask, ToolDirectingTask     # here: app.tasks imports the tools package, that imports this one
         context = self.tool_context
         registry = context["tool_registry"]
-        detection = ToolDetectionTask(detect, registry, self.infrastructure)
+        detection = ToolDetectionTask(detect, registry, self.infrastructure, excluded=WORKER_EXCLUDED_TOOLS)
         registry.task_queue.run(detection)
         tool_names = [name for name in dict.fromkeys((detection.result() or []) + always + registry.PROMPT_TOOLS) if name not in WORKER_EXCLUDED_TOOLS]
         logger.info(f"agent {self.role} {self.job_id}: tools {tool_names}")
+        self.trace("tools", tools=tool_names)
 
         request = ChatRequest(contact_id=context["contact_id"], conversation_id=context["conversation_id"], role="user",
                               name=context["user_name"], content=query, temperature=0.3)
@@ -126,6 +144,7 @@ class AgentJob:
         registry.task_queue.run(directing)
         directed = directing.result()
         if not directed:
+            self.trace("tool_directing", ok=False, error="no tool calls written")
             return None
         directed["tool_calls"] = [call for call in directed["tool_calls"] or [] if call["tool"] not in WORKER_EXCLUDED_TOOLS]
         self.run_tools(directed["tool_calls"])
@@ -141,15 +160,25 @@ class AgentJob:
         """one llm call, "" without a reply"""
         if self.infrastructure is None:
             raise RuntimeError(f"{self.role} agent has no llm (infrastructure)")
-        return self.infrastructure.chat(messages=messages, temperature=temperature, seed=random.randint(0, 100000)) or ""
+        return self.infrastructure.chat(messages=messages, temperature=temperature, seed=random.randint(0, 100000),
+                                        max_new_tokens=JOB_MAX_TOKENS, timeout=JOB_LLM_TIMEOUT) or ""
 
     def run_tools(self, tool_calls: list) -> Dict[str, Any]:
         """the synchronous tools of the calls on this thread, for the job's conversation (tool_context).
         they write their results into self.response, like into MetaTask.response"""
         context = self.tool_context
         self.response = {}
-        context["tool_registry"].execute(user_id=context["user_id"], contact_id=context["contact_id"], conversation_id=context["conversation_id"],
-                                         response=self.response, tool_calls=tool_calls, parallel=False)
+        for call in tool_calls:     # one by one: #174 each call's duration and result in the protocol
+            results, start = len(self.response.get("tool_results", [])), time.monotonic()
+            context["tool_registry"].execute(user_id=context["user_id"], contact_id=context["contact_id"], conversation_id=context["conversation_id"],
+                                             response=self.response, tool_calls=[dict(call, llm_timeout=JOB_LLM_TIMEOUT)], parallel=False)    # run_code writes code with it
+            if self.protocol is not None:   # a call failed when its tool reported an error, a websearch without results too
+                errors = [str(r["error"]) for r in self.response.get("tool_results", [])[results:] if "error" in r]
+                if call.get("tool") == "websearch" and not self.response.get("websearch_results"):
+                    errors.append("no results")
+                self.protocol.tool_call(self.role, self.job_id, self.plan_step, self.plan_task, call.get("tool"),
+                                        json.dumps({k: v for k, v in call.items() if k != "tool"}, ensure_ascii=False, default=str),
+                                        not errors, "; ".join(errors) or None, ms_since(start), self.attempt if self.attempt > 1 else None)
         return self.response
 
     @staticmethod
@@ -211,3 +240,4 @@ class AgentJob:
         except Exception as e:
             logger.error(f"agent {self.role} {self.job_id} failed {repr(e)}")
             self.result = {"error": repr(e)}
+            self.trace("failed", ok=False, error=repr(e))

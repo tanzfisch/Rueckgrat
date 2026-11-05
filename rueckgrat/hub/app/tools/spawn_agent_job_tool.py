@@ -29,6 +29,18 @@ JOB_PROMPT:
 Tell the user in one or two short sentences that the job "{name}" is stopped, and react to the cancel as it fits the conversation. Reply with the message only.
 """
 
+FAIL_PROMPT = """A background job you started for the user has failed, it stopped before it was finished.
+
+JOB_PROMPT:
+{prompt}
+
+WHY IT FAILED:
+{reason}
+
+Tell the user in one or two short sentences that the job "{name}" failed and why, in plain words. Reply with the message only.
+"""
+FAIL_REASON_CHARS = 300     # the failure as the contact gets it, the full one is in the protocol
+
 class SpawnAgentJobTool(Tool):
     """#152 starts a background job: a Controller agent plans it and runs its workers (app.agent_jobs).
     the contact then tells the user about the result in a new message of the same conversation"""
@@ -67,6 +79,7 @@ class SpawnAgentJobTool(Tool):
                     logger.error(f"spawn_job: job {job_id} not saved {repr(e)}")
                 if saved:
                     self.job_id, self.cancelled = job_id, False
+                    self.message_id = self._message_id()    # #174 the protocol's key: the user message that started the job
                     tool_context = {"tool_registry": self.tool_registry, "db": self.db, "user_id": self.user_id, "contact_id": self.contact_id,
                                     "conversation_id": self.conversation_id, "user_name": AgentJob.user_name(self.db, self.user_id)} if self.tool_registry else None
                     self.controller = Controller(prompt, job_id, infrastructure=self.infrastructure, progress=self._progress, tool_context=tool_context)
@@ -87,6 +100,7 @@ class SpawnAgentJobTool(Tool):
 
     def _run(self, job_id: str, prompt: str):
         self._job = {"job_id": job_id, "name": short_name(prompt), "percent": 0, "step": 0, "total": 0}    # the last progress sent
+        failure = None
         try:
             self.db.set_job(job_id, "running")
             try:
@@ -100,15 +114,22 @@ class SpawnAgentJobTool(Tool):
                 if not self.db.set_job(job_id, "done", result):
                     raise RuntimeError("result not saved")
                 logger.info(f"job {job_id} done")
+                self._save_protocol("done")
         except Exception as e:
             if not self.cancelled:     # a cancel can also end in an error, e.g. of a stopped worker
                 logger.error(f"job {job_id} failed {repr(e)}")
                 self.db.set_job(job_id, "failed")
+                self._save_protocol("failed", repr(e))
                 self._send_progress(state="failed")
-                return
-        if self.cancelled:
+                failure = " ".join(str(e).split())
+        if failure is not None:     # the contact tells the user, like a done or cancelled job
+            name = self.controller.name
+            reason = failure if len(failure) <= FAIL_REASON_CHARS else failure[:FAIL_REASON_CHARS - 1] + "…"
+            task, fallback = FAIL_PROMPT.format(prompt=prompt, name=name, reason=reason), f'The background job "{name}" failed: {reason}'
+        elif self.cancelled:
             logger.info(f"job {job_id} cancelled by the user")
             self.db.set_job(job_id, "cancelled", {"error": "cancelled", "details": "cancelled by the user"})
+            self._save_protocol("cancelled")
             self._send_progress(state="cancelled")
             name = self.controller.name
             task, fallback = CANCEL_PROMPT.format(prompt=prompt, name=name), f'The background job "{name}" is cancelled.'
@@ -120,6 +141,30 @@ class SpawnAgentJobTool(Tool):
             self._report(task, fallback)
         except Exception as e:
             logger.error(f"job {job_id}: report failed {repr(e)}")
+
+    def _message_id(self):
+        """the conversation's last user message when the job starts (it is stored before the tools run), None if not found"""
+        try:
+            return self.db.last_user_message_id(self.conversation_id)
+        except Exception as e:
+            logger.error(f"spawn_job: no user message for the protocol {repr(e)}")
+            return None
+
+    def _save_protocol(self, status: str, error: str = None):
+        """#174 the job's decision trace into the db (job_protocols), keyed by the conversation and the user message that
+        started the job. it never fails the job"""
+        try:
+            controller = self.controller
+            controller.trace("job_finished", ok=status == "done", status=status, name=controller.name,
+                             **controller.protocol.counts(controller.job_id), error=error)
+            if controller.protocol.plan:
+                controller.protocol.plan["name"] = controller.name     # a review may have renamed the job
+            if self.message_id is None:
+                logger.warning(f"job {self.job_id}: protocol not saved, no user message")
+                return
+            self.db.save_protocol(self.conversation_id, self.message_id, self.job_id, controller.protocol.export())
+        except Exception as e:
+            logger.error(f"job {self.job_id}: protocol not saved {repr(e)}")
 
     @classmethod
     def _running_in(cls, user_id: int, conversation_id: int):
@@ -146,6 +191,7 @@ class SpawnAgentJobTool(Tool):
                 (logger.warning if tool else logger.debug)(f"user {user_id}: no cancel of {'foreign' if tool else 'unknown or finished'} job {job_id}")
                 return False
             tool.cancelled = True
+            tool.controller.trace("cancelled")
             tool.controller.stop()
         logger.info(f"job {job_id}: cancel by user {user_id}")
         return True
@@ -168,7 +214,7 @@ class SpawnAgentJobTool(Tool):
             MessageQueue().set_status("done", user_id=self.user_id)    # stops the spinner of the workers' tool status messages
 
     def _report(self, task: str, fallback: str):
-        """the contact tells the user what the job found or that it was cancelled (task: REPORT_PROMPT / CANCEL_PROMPT):
+        """the contact tells the user what the job found, that it failed or was cancelled (task: REPORT_PROMPT / FAIL_PROMPT / CANCEL_PROMPT):
         a new assistant message, stored and pushed like a companion message (AgentJob.post_message)"""
         contact = self.db.get_contact_by_id(self.contact_id)
         name = Utils.get_nested_value(contact, ["identity", "name"], "")

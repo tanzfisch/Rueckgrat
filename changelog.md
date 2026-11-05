@@ -1,6 +1,14 @@
 Changelog
 =========
 
+0.26.0
+------
+
+- #156 added code execution tool using llm-sandbox
+- #172 auto code fencing
+- #173 added copy button to code blocks in chat
+- #174 agent protocols for better insight of the work of agents
+
 0.25.0
 ------
 
