@@ -4,7 +4,7 @@ import time
 import threading
 from .task_queue import Task
 from .chat_task import ChatTask
-from .tool_directing_task import ToolDirectingTask
+from .tool_directing_task import ToolDirectingTask, run_tool_sequence
 from .update_context_task import UpdateContextTask
 from .tool_detection_task import ToolDetectionTask
 from typing import Dict, Any, List, Optional
@@ -188,18 +188,71 @@ class MetaTask(Task):
             return None
         return f"\n\nTOOL_RESULT{tool_response}\n"
 
-    def _direct_tools(self, tool_names: List[str]) -> Dict[str, Any]:
-        """one tool directing call as a sub job, with the full prompts of these tools. the model writes their calls"""
+    def _direct_tools(self, tool_names: List[str], detected_tool_names: Optional[List[str]] = None, results: str = "") -> Dict[str, Any]:
+        """one directing call for these tools (one tool). detected_tool_names are the laya tools that must be called.
+        results are the tool results so far, for this call's arguments"""
         tool_directing_job = ToolDirectingTask(
             request=self.request,
             db=self.db,
             infrastructure=self.infrastructure,
             tool_registry=self.tool_registry,
-            tool_names=tool_names
+            tool_names=tool_names,
+            detected_tool_names=detected_tool_names,
+            results=results
         )
         self.add_sub_job(tool_directing_job)
         self.wait_for([tool_directing_job])
         return tool_directing_job.result()
+
+    def _results_text(self) -> str:
+        """the tool results so far as the answer sees them, without taking them out of self.response"""
+        response, self.response = self.response, dict(self.response)     # the formatters pop from the copy
+        try:
+            return (self._format_websearch_results() or "") + (self._format_conversion_results() or "") + (self._format_tool_results() or "")
+        finally:
+            self.response = response
+
+    def _apply_tools(self, detected: List[str]):
+        """laya-detected tools are requested one at a time, in TOOL_ORDER, each result carried into the next request.
+        PROMPT_TOOLS are then one combined optional request. the final answer starts only after both return"""
+        tool_names = list(dict.fromkeys(list(detected) + self.tool_registry.PROMPT_TOOLS))
+        steps = self.tool_registry.tool_steps(tool_names, detected)
+        mandatory = [name for name, required in steps if required]
+        optional = [name for name, required in steps if not required]
+        logger.info(f"tool sequence: mandatory {mandatory}, optional {optional}")
+        contents = []
+
+        def accept(directed):
+            if directed and directed.get("content"):
+                contents.append(directed["content"])
+            return directed
+
+        def direct(name, required, results):
+            return accept(self._direct_tools([name], detected_tool_names=[name] if required else None, results=results))
+
+        def direct_optional(names, results):
+            return accept(self._direct_tools(list(names), detected_tool_names=None, results=results))
+
+        def execute(calls):
+            self.tool_registry.execute(
+                user_id=self.user_id,
+                contact_id=self.request.contact_id,
+                conversation_id=self.request.conversation_id,
+                response=self.response,
+                tool_calls=calls,
+                parallel=False
+            )
+
+        def on_failure(name, error):
+            logger.warning(f"mandatory tool {name} was not called: {error}")
+            self.response.setdefault("tool_results", []).append({"tool": name, "error": error})
+
+        sync, parallel, interrupted = run_tool_sequence(
+            steps, direct, execute, self._results_text, on_failure,
+            lambda name: bool(self.tool_registry.parallel.get(name)),
+            lambda: self.cancelled.is_set(), direct_optional=direct_optional
+        )
+        return sync, parallel, interrupted, "\n".join(contents)
 
     def _interrupted(self) -> bool:
         """True once a follow-up was merged into this turn: drops the partial reply, the merged job answers instead"""
@@ -234,27 +287,18 @@ class MetaTask(Task):
         try:
             MessageQueue().send_status_message("thinking")
             self.wait_for([tool_detection_job])
-            tool_names = tool_detection_job.result()
-            logger.info(f"tools detected: {tool_names}")
-            
-            tool_names = (tool_names or []) + self.tool_registry.PROMPT_TOOLS
+            detected = tool_detection_job.result() or []
+            logger.info(f"tools detected: {detected}")
             contact = self.db.get_contact_by_id(self.request.contact_id)
 
-            tool_calls, compiled_response = [], ""
-            if tool_names:
-                tool_response = self._direct_tools(tool_names)
-                tool_calls, compiled_response = tool_response["tool_calls"], tool_response["content"]
-            if self._interrupted():
+            # #176 laya tools: one request each, in TOOL_ORDER, after the previous result. optional tools: one combined
+            # request after that. the answer is finalized only after both have returned
+            sync_calls, parallel_calls, interrupted, compiled_response = self._apply_tools(detected)
+            if interrupted or self.cancelled.is_set():
+                self._interrupted()
                 return
-
-            self.tool_registry.execute(
-                user_id=self.user_id,
-                contact_id=self.request.contact_id,
-                conversation_id=self.request.conversation_id,
-                response=self.response,
-                tool_calls=tool_calls,
-                parallel=False
-            )
+            # image tools were only requested above; they run once the reply message exists
+            tool_calls = sync_calls + parallel_calls
 
             MessageQueue().send_status_message("compile response")
 

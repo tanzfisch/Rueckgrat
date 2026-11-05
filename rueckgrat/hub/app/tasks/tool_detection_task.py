@@ -13,8 +13,9 @@ EXCLUSIVE_TOOLS = [                  # only the more likely tool of each group i
 # when spawn_job is detected it is the only detected tool: the agents do the work (search, code, ...), other tools on the
 # same message (e.g. run_code) would start a second, half done answer to it. PROMPT_TOOLS are added after and stay
 PRIORITY_TOOL = "spawn_job"
-# a link in the message selects fetch_url without laya. a bare host needs a known TLD, file extensions
-# that are also ccTLDs (main.py, README.md, run.sh) don't count, emails, versions and decimals don't match
+# fetch_url is not a laya question. a link in the message selects it. a bare host needs a known TLD or a
+# two-letter code; file extensions that are also ccTLDs (main.py, README.md, run.sh) don't count.
+# emails, versions and decimals don't match. "correct.btw" does not: btw is not a listed TLD and not two letters
 TLDS = r"com|org|net|edu|gov|mil|int|info|biz|io|ai|app|dev|xyz|online|site|tech|blog|news|shop|store|cloud|page|link|live|media|tv"
 NOT_TLDS = r"py|md|sh|rs|pl|cc|cs|so|ps|hs|ml|mk|tf|pm|gz|js|ts|rb|kt|go|db"
 URL_PATTERN = re.compile(rf"""
@@ -51,8 +52,8 @@ class ToolDetectionTask(Task):
         """one laya question per id "<tool>__<i>", a tool without questions gets one from its description"""
         questions = {}
         for name, cls in self.tool_registry.tools.items():
-            if name in self.tool_registry.PROMPT_TOOLS or name in self.excluded:   # PROMPT_TOOLS: always in the tool directing prompt
-                continue
+            if name in self.tool_registry.PROMPT_TOOLS or name in self.excluded or name == "fetch_url":
+                continue    # PROMPT_TOOLS stay optional. fetch_url is URL_PATTERN, never a laya score
             tool_questions = cls.question or [f"Does answering the user's latest message need the tool '{name}': {cls.get_description()}?"]
             for i, question in enumerate(tool_questions):
                 questions[f"{name}__{i}"] = {
@@ -64,20 +65,28 @@ class ToolDetectionTask(Task):
             questions = dict(list(questions.items())[:MAX_QUESTIONS])
         return questions
 
+    def _linked_tools(self) -> List[str]:
+        """fetch_url when the message itself has a url. laya is not asked"""
+        if "fetch_url" in self.excluded or "fetch_url" not in self.tool_registry.tools:
+            return []
+        if URL_PATTERN.search(self.prompt or ""):
+            return ["fetch_url"]
+        return []
+
     def _detect(self) -> Optional[List[str]]:
+        linked = self._linked_tools()
         if not (self.prompt or "").strip():
             return []
         answers = self.infrastructure.decide(self.prompt, self._questions())
         if answers is None:
-            return None
+            return linked or None    # a link still selects fetch_url when laya is down; otherwise the caller falls back
 
-        probabilities = {}    # a tool counts with its most likely question
+        probabilities = {}    # a tool counts with its most likely question. fetch_url is never one of these
         for key, answer in answers.items():
             name = key.rsplit("__", 1)[0]
+            if name == "fetch_url":
+                continue
             probabilities[name] = max(probabilities.get(name, 0.0), answer.get("noul", 0.0))
-
-        if URL_PATTERN.search(self.prompt) and "fetch_url" in self.tool_registry.tools:
-            probabilities["fetch_url"] = 1.0
 
         logger.debug(f"tool probabilities:\n{Utils.pretty_scores(probabilities)}")
         tool_names = [name for name, p in probabilities.items() if p >= TOOL_THRESHOLD]
@@ -87,6 +96,9 @@ class ToolDetectionTask(Task):
             if len(selected) > 1:
                 keep = max(selected, key=lambda name: probabilities[name])
                 tool_names = [name for name in tool_names if name not in group or name == keep]
+        for name in linked:
+            if name not in tool_names:
+                tool_names.append(name)
         if PRIORITY_TOOL in tool_names:
             tool_names = [PRIORITY_TOOL]
         return tool_names

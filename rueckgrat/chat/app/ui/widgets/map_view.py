@@ -12,8 +12,6 @@ MAP_HEIGHT = 180
 PIN_SIZE = 36
 ATTRIBUTION = "© OpenStreetMap contributors"
 COPYRIGHT_URL = "https://www.openstreetmap.org/copyright"
-# dark mode: the light osm tiles inverted (and dimmed a bit), close to a dark map style without a second tile source
-DARK_FILTER = {"color": ft.Colors.WHITE, "color_blend_mode": ft.BlendMode.DIFFERENCE}
 MAX_CACHED_TILES = 64
 _tiles: dict[tuple, bytes] = {}     # (z, x, y) -> png, the tiles of the maps shown in this session
 
@@ -54,7 +52,6 @@ class MapView(ft.Column):
             on_size_change=self._on_size,
             controls=[
                 self.tile_layer,
-                ft.Container(expand=True, bgcolor=ft.Colors.with_opacity(0.3, theme.SURFACE), visible=theme.is_dark()),   # softens the inverted tiles
                 self.pin,
                 ft.Container(
                     right=0, bottom=0, padding=ft.Padding(6, 2, 6, 2),
@@ -95,7 +92,7 @@ class MapView(ft.Column):
                 if key not in _tiles:
                     continue    # not loaded yet, the background shows
                 image = ft.Image(src=_tiles[key], width=TILE_SIZE, height=TILE_SIZE, gapless_playback=True,
-                                 error_content=ft.Container(), **(DARK_FILTER if theme.is_dark() else {}))
+                                 error_content=ft.Container())
                 self.images[key] = image
             image.left = x * TILE_SIZE - cx + self.width_px / 2
             image.top = y * TILE_SIZE - cy + MAP_HEIGHT / 2
