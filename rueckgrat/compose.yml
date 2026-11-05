@@ -31,6 +31,8 @@ services:
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
       - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/hub/models
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add: ["989"]
     environment:
       SIGNUP_MODE: ${SIGNUP_MODE:-open}
       HUB_PORT: ${HUB_PORT}

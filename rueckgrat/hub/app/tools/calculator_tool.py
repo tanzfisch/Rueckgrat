@@ -78,11 +78,17 @@ def calculate(expression: str) -> str:
 class CalculatorTool(Tool):
     category = ToolCategory.MATH
     description = "exact arithmetic and math (sums, percentages, tips, powers, roots, trigonometry)"
+    # laya scores pasted code (C++, python, "why doesn't this compile") as "math with numbers", so the questions
+    # ask about everyday maths (money, percentages, word problems, sin/cos) instead of numbers in general.
+    # probe at TOOL_THRESHOLD 0.5, 30 maths questions / 16 code posts / 30 others (chit-chat, news, facts, run_code, "write a function"):
+    #   old questions: 23/30 hits, 15/16 code posts, 2/30 others
+    #   new questions: 23/30 hits,  4/16 code posts, 0/30 others
+    # still missed: bare expressions like "square root of 2", "9 squared", "144 divided by 12" (laya rates them like code)
     question = [
-        "Does the user want you to do some math with numbers they gave?",
-        "Does the user ask for a math result, like a sum, a split, a percentage, sin or cos?",
-        "Does the user ask a word problem, like how many are left or how many there are now?",
-        "Does the user ask how many someone has left after giving some away?"
+        "Does the user ask about money, prices, tax, tips, percentages or splitting a bill?",
+        "Does the user ask how much they pay, save, owe or get, or what a percentage of an amount is?",
+        "Does the user ask how many things are left or how many there are after some are added or taken away?",
+        "Does the user ask what sin, cos or tan of some degrees is?"
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):

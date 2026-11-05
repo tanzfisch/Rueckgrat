@@ -2,7 +2,7 @@ import re
 from .task_queue import Task
 from typing import List, Optional
 
-from app.common import get_logger
+from app.common import get_logger, Utils
 logger = get_logger()
 
 MAX_QUESTIONS = 64      # the node's limit per request, a tool may have several questions
@@ -10,6 +10,9 @@ TOOL_THRESHOLD = 0.5    # a tool is needed above this P(true). a guess: the base
 EXCLUSIVE_TOOLS = [                  # only the more likely tool of each group is kept
     ("generate_image", "take_photo")  # we reply with one image at a time
 ]
+# when spawn_job is detected it is the only detected tool: the agents do the work (search, code, ...), other tools on the
+# same message (e.g. run_code) would start a second, half done answer to it. PROMPT_TOOLS are added after and stay
+PRIORITY_TOOL = "spawn_job"
 # a link in the message selects fetch_url without laya. a bare host needs a known TLD, file extensions
 # that are also ccTLDs (main.py, README.md, run.sh) don't count, emails, versions and decimals don't match
 TLDS = r"com|org|net|edu|gov|mil|int|info|biz|io|ai|app|dev|xyz|online|site|tech|blog|news|shop|store|cloud|page|link|live|media|tv"
@@ -27,9 +30,10 @@ URL_PATTERN = re.compile(rf"""
 class ToolDetectionTask(Task):
     """detects all tools a prompt needs with the decision node (laya), yes/no questions per registered tool, one forward pass.
     result(): the needed tool names (may be empty), or None if decisions are not available, the caller falls back then"""
-    def __init__(self, prompt: str, tool_registry, infrastructure):
+    def __init__(self, prompt: str, tool_registry, infrastructure, excluded: tuple = ()):
         super().__init__()
         self.prompt = prompt
+        self.excluded = excluded    # tools not asked about (workers: WORKER_EXCLUDED_TOOLS, they never get spawn_job)
         self.tool_registry = tool_registry
         self.infrastructure = infrastructure
         self.tool_names = None
@@ -47,7 +51,7 @@ class ToolDetectionTask(Task):
         """one laya question per id "<tool>__<i>", a tool without questions gets one from its description"""
         questions = {}
         for name, cls in self.tool_registry.tools.items():
-            if name in self.tool_registry.PROMPT_TOOLS:   # not detected, always in the tool directing prompt
+            if name in self.tool_registry.PROMPT_TOOLS or name in self.excluded:   # PROMPT_TOOLS: always in the tool directing prompt
                 continue
             tool_questions = cls.question or [f"Does answering the user's latest message need the tool '{name}': {cls.get_description()}?"]
             for i, question in enumerate(tool_questions):
@@ -71,9 +75,11 @@ class ToolDetectionTask(Task):
         for key, answer in answers.items():
             name = key.rsplit("__", 1)[0]
             probabilities[name] = max(probabilities.get(name, 0.0), answer.get("noul", 0.0))
+
         if URL_PATTERN.search(self.prompt) and "fetch_url" in self.tool_registry.tools:
-            probabilities["fetch_url"] = 1.0    # laya misses links when the message asks about the page's content
-        logger.debug(f"tool probabilities: {probabilities}")
+            probabilities["fetch_url"] = 1.0
+
+        logger.debug(f"tool probabilities:\n{Utils.pretty_scores(probabilities)}")
         tool_names = [name for name, p in probabilities.items() if p >= TOOL_THRESHOLD]
 
         for group in EXCLUSIVE_TOOLS:
@@ -81,4 +87,6 @@ class ToolDetectionTask(Task):
             if len(selected) > 1:
                 keep = max(selected, key=lambda name: probabilities[name])
                 tool_names = [name for name in tool_names if name not in group or name == keep]
+        if PRIORITY_TOOL in tool_names:
+            tool_names = [PRIORITY_TOOL]
         return tool_names

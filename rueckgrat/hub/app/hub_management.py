@@ -21,35 +21,50 @@ Hub management tool (signup invites and users), run inside the hub container:
     docker exec -it rueckgrat_hub python -m app.hub_management maintenance run
     docker exec -it rueckgrat_hub python -m app.hub_management maintenance run --job summaries --all
     docker exec -it rueckgrat_hub python -m app.hub_management stats
+    docker exec -it rueckgrat_hub python -m app.hub_management protocol list
+    docker exec -it rueckgrat_hub python -m app.hub_management protocol show 12
+    docker exec -it rueckgrat_hub python -m app.hub_management protocol show 12 --json
+    docker exec -it rueckgrat_hub python -m app.hub_management protocol tools
 
 Whoever can run docker on the host is trusted as admin.
 """
 import argparse
 import json
+import shutil
+import textwrap
 from datetime import datetime, timezone
 
 from argon2 import PasswordHasher
 
 from app.utils.db import ChatDB
+from app.common.logger import RED
 
 DB_PATH = "/hub/db/chat.db"
 # placeholder until the real domain is known
 SIGNUP_URL = "https://rickratz.com/?invite={token}"
 
+# the row colours of the registry CLI (node/app/registry_manager.py, print_list / print_nodes), copied: hub and node are separate images
+GRAY_BG = "\033[48;5;236m"
+RESET = "\033[0m"
+
+def print_table(header, rows, width=100, empty=None):
+    """a list view like the registry's: the header on gray, then every second row gray. a row is a line or a list of
+    lines (one block, one colour). no header: no blank line before it. empty: printed instead of no rows"""
+    if header is not None:
+        print()
+        print(f"{GRAY_BG}{header:<{width}}{RESET}")
+    if not rows and empty:
+        print(empty)
+    for i, row in enumerate(rows):
+        for line in [row] if isinstance(row, str) else row:
+            print(f"{GRAY_BG if i % 2 else ''}{line:<{width}}{RESET}")
+
+
 def print_invites(invites):
-    GRAY_BG = "\033[48;5;236m"
-    RESET = "\033[0m"
-
     header = f"{'ID':<5} {'BY':<12} {'EMAIL':<28} {'USES':<6} {'EXPIRES (UTC)':<17} {'CONTENT':<8} {'STATUS'}"
-    print()
-    print(f"{GRAY_BG}{header:<100}{RESET}")
-
-    if not invites:
-        print("No invites")
-        return
-
+    lines = []
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    for i, invite in enumerate(invites):
+    for invite in invites:
         expires_at = invite["expires_at"]
         if invite["uses"] >= invite["max_uses"]:
             status = "used"
@@ -62,29 +77,18 @@ def print_invites(invites):
         email = invite["email"] or "-"
         uses = f"{invite['uses']}/{invite['max_uses']}"
         content = "NSFW" if invite["nsfw_allowed"] else "SFW"
-        bg = GRAY_BG if i % 2 else ""
-        line = f"{str(invite['id']):<5} {invite['created_by'] or '-':<12} {email:<28} {uses:<6} {expires:<17} {content:<8} {status}"
-        print(f"{bg}{line:<100}{RESET}")
+        lines.append(f"{str(invite['id']):<5} {invite['created_by'] or '-':<12} {email:<28} {uses:<6} {expires:<17} {content:<8} {status}")
+    print_table(header, lines, empty="No invites")
 
 
 def print_users(users):
-    GRAY_BG = "\033[48;5;236m"
-    RESET = "\033[0m"
-
     header = f"{'ID':<5} {'USER':<20} {'CONTENT':<8} {'CREATED (UTC)'}"
-    print()
-    print(f"{GRAY_BG}{header:<100}{RESET}")
-
-    if not users:
-        print("No users")
-        return
-
-    for i, user in enumerate(users):
+    lines = []
+    for user in users:
         content = "NSFW" if user["nsfw_allowed"] else "SFW"
         created = (user["created_at"] or "")[:16]
-        bg = GRAY_BG if i % 2 else ""
-        line = f"{str(user['id']):<5} {user['username']:<20} {content:<8} {created}"
-        print(f"{bg}{line:<100}{RESET}")
+        lines.append(f"{str(user['id']):<5} {user['username']:<20} {content:<8} {created}")
+    print_table(header, lines, empty="No users")
 
 
 def companion_now(db):
@@ -129,18 +133,21 @@ def print_companion_status(s):
     print(f"  messages   {s['messages_today'] if s['messages_today'] is not None else '?'} today, limits {s['limits']}")
     print(f"  next wake  {s['calendar'][0]['due'] if s['calendar'] else '-'} (hub: {s['hub_next_wake'] or '-'})")
     print("  calendar")
-    for r in s["calendar"] or [{"due": "", "kind": "nothing pending", "note": "", "daily": False}]:
-        print(f"    {r['due']:<12} {r['kind']:<10} {'daily' if r['daily'] else '':<6}{r['note']}")
+    print_table(None, [f"    {r['due']:<12} {r['kind']:<10} {'daily' if r['daily'] else '':<6}{r['note']}"
+                       for r in s["calendar"] or [{"due": "", "kind": "nothing pending", "note": "", "daily": False}]])
     print(f"  last {len(s['log'])} pass{'' if len(s['log']) == 1 else 'es'}")
+    passes = []     # one colour per pass, with its detail lines
     for e in s["log"]:
         due = f" (due {e['occurrence']})" if e["occurrence"] != e["at"] else ""
-        print(f"    {e['at']} {e['kind']} #{e['row']} {e['note']!r}{due}")
+        block = [f"    {e['at']} {e['kind']} #{e['row']} {e['note']!r}{due}"]
         for key in ("missed", "reflection", "lookup", "plan", "thoughts", "message", "error"):
             if key == "plan" and (e.get("plan") or (e["kind"] == "planning" and "plan" in e)):
                 for line in e["plan"] or ["empty plan"]:
-                    print(f"        {'plan':<10} {line}")
+                    block.append(f"        {'plan':<10} {line}")
             elif e.get(key):
-                print(f"        {key:<10} {e[key]}")
+                block.append(f"        {key:<10} {e[key]}")
+        passes.append(block)
+    print_table(None, passes)
 
 
 def maintenance_status(db):
@@ -153,8 +160,7 @@ def maintenance_status(db):
         print("no runs during the day (HUB_MAINTENANCE_INTERVAL=0)")
     for task in maintenance_tasks(db, None):
         print(f"  {task.name}")
-        for key, value in task.status().items():
-            print(f"    {key:<16} {value if value is not None else '-'}")
+        print_table(None, [f"    {key:<16} {value if value is not None else '-'}" for key, value in task.status().items()])
 
 
 def maintenance_run(db, args):
@@ -237,7 +243,16 @@ def main():
 
   stats [--minutes N]
                   running agent jobs, users, and users active in the last N minutes (default 10). read only
-                  active = wrote a message, logged in or refreshed their login in that time""",
+                  active = wrote a message, logged in or refreshed their login in that time
+
+  protocol list [--limit N]
+                  the agent jobs' protocols (decision traces) of about the last day, newest first (default 20). read only
+  protocol show PROTOCOL_ID [--json] [--full]
+                  one protocol (see protocol list): its plan and lines, times in UTC. long texts clipped to 3 lines,
+                  --full: in full. --json: plan, lines, tool calls and outputs. read only
+  protocol tools  the tool calls of the stored protocols per tool: calls, failures, durations, last error. read only
+                  grouped by step, workers indented, long values wrapped and clipped to a few lines
+      --full      long values in full""",
     )
     # two levels of subcommands: first the noun (invite/user), then the action
     nouns = parser.add_subparsers(dest="noun", required=True)
@@ -299,12 +314,25 @@ def main():
     stats = nouns.add_parser("stats", help="running agent jobs, users and active users, read only")
     stats.add_argument("--minutes", type=int, default=10, help="active in the last N minutes (default 10)")
 
+    # --- protocol (read only) ---
+    protocol = nouns.add_parser("protocol", help="the agent jobs' decision traces, read only")
+    protocol_actions = protocol.add_subparsers(dest="action", required=True)
+    protocol_list = protocol_actions.add_parser("list", help="the protocols of about the last day, newest first")
+    protocol_list.add_argument("--limit", type=int, default=20, help="at most N protocols (default 20)")
+    protocol_show = protocol_actions.add_parser("show", help="all lines of one protocol")
+    protocol_show.add_argument("protocol_id", type=int, help="protocol id as shown by protocol list")
+    protocol_show.add_argument("--json", action="store_true", help="the lines as json")
+    protocol_show.add_argument("--full", action="store_true", help="long texts in full, not clipped to a few lines")
+    protocol_actions.add_parser("tools", help="failures and durations per tool over the stored protocols")
+
     args = parser.parse_args()
+    if args.noun == "protocol":
+        print_protocols(ChatDB.read_only(DB_PATH), args)
+        return
     if args.noun == "stats":
         s = ChatDB.read_only(DB_PATH).hub_stats(args.minutes)
-        print(f"\n{'running agent jobs':<24} {s['running_agent_jobs']}")
-        print(f"{'users':<24} {s['users']}")
-        print(f"{f'active last {args.minutes} min':<24} {s[f'active_last_{args.minutes}min']}")
+        print_table(f"{'STAT':<24} VALUE", [f"{'running agent jobs':<24} {s['running_agent_jobs']}", f"{'users':<24} {s['users']}",
+                                             f"{f'active last {args.minutes} min':<24} {s[f'active_last_{args.minutes}min']}"])
         return
     if args.noun == "maintenance" and args.action == "status":
         maintenance_status(ChatDB.read_only(DB_PATH))
@@ -313,11 +341,9 @@ def main():
         db = ChatDB.read_only(DB_PATH)
         if args.action == "list":
             rows = db.companion_contacts(user_name=args.user)
-            print(f"\n{'ID':<5} {'USER':<16} {'CONTACT':<20} {'COMPANION':<10} {'PENDING':<8} LAST PASS (UTC)")
-            for r in rows:
-                print(f"{r['id']:<5} {r['username']:<16} {r['name'][:20]:<20} {'on' if r['companion'] else 'off':<10} {r['pending']:<8} {r['last_pass'] or '-'}")
-            if not rows:
-                print("No companions")
+            print_table(f"{'ID':<5} {'USER':<16} {'CONTACT':<20} {'COMPANION':<10} {'PENDING':<8} LAST PASS (UTC)",
+                        [f"{r['id']:<5} {r['username']:<16} {r['name'][:20]:<20} {'on' if r['companion'] else 'off':<10} {r['pending']:<8} {r['last_pass'] or '-'}"
+                         for r in rows], empty="No companions")
         else:
             contacts = db.companion_contacts(contact_id=args.contact_id)
             if not contacts:
@@ -363,6 +389,102 @@ def main():
             nsfw = resolve_nsfw(args.nsfw)
             ok = db.set_user_nsfw(args.name, nsfw)
             print(f"{args.name}: {'NSFW' if nsfw else 'SFW'} (on their next login)" if ok else "not found")
+
+def print_protocols(db, args):
+    """#174 protocol list / show / tools"""
+    if args.action == "list":
+        rows = db.get_protocols(args.limit)
+        print_table(f"{'ID':<5} {'CREATED (UTC)':<20} {'CONV':<6} {'MSG':<7} {'STATUS':<10} {'LINES':<6} {'TOOLS':<6} {'FAILED':<7} JOB",
+                    [f"{r['id']:<5} {r['created_at']:<20} {r['conversation_id']:<6} {r['message_id']:<7} {r['status'] or '-':<10} "
+                     f"{r['lines']:<6} {r['tool_calls']:<6} {r['failed_calls']:<7} {r['name']}" for r in rows], empty="No protocols")
+        return
+    if args.action == "tools":
+        rows = db.protocol_tool_stats()
+        print_table(f"{'TOOL':<22} {'CALLS':>6} {'FAILED':>7} {'FAIL%':>6} {'AVG MS':>8} {'MAX MS':>8}  LAST ERROR",
+                    [f"{r['tool'][:22]:<22} {r['calls']:>6} {r['failed']:>7} {100 * r['failed'] // r['calls']:>5}% {r['avg_ms'] or 0:>8} "
+                     f"{r['max_ms'] or 0:>8}  {' '.join(str(r['last_error'] or '-').split())[:37]}" for r in rows], empty="No tool calls")
+        return
+    protocol = db.get_protocol(args.protocol_id)
+    if protocol is None:
+        print("not found")
+        return
+    if args.json:
+        print(json.dumps(protocol, indent=2, ensure_ascii=False))
+        return
+    print_protocol(protocol, args.full)
+
+
+CLIPPED_LINES = 3       # protocol show: a long text is clipped to this many lines (--full: not clipped)
+
+def wrap_text(text, width, full, indent):
+    """a long text for protocol show: its own line breaks kept, wrapped to the width, clipped to CLIPPED_LINES"""
+    rows = [row for part in str(text).splitlines() for row in (textwrap.wrap(part, width - len(indent) - 2, subsequent_indent="  ") or [""])]
+    if not full and len(rows) > CLIPPED_LINES:
+        rows = rows[:CLIPPED_LINES] + [f"… {len(rows) - CLIPPED_LINES} more lines (--full)"]
+    return [indent + row for row in rows]
+
+def short_value(value):
+    """a line's data value on the action's line: [{task, role}] as "t5 analyst", lists joined, bools as true / false"""
+    if isinstance(value, list):
+        return ", ".join(f"{v.get('task')} {v.get('role')}" if isinstance(v, dict) else str(v) for v in value) or "-"
+    return json.dumps(value) if isinstance(value, bool) else " ".join(str(value).split())
+
+def print_protocol(protocol, full=False, width=None):
+    """protocol show: the current plan, then a table of the lines, striped like print_table: time, step, task, agent,
+    ok, action and the short data. the long texts (outputs, a tool call's args) follow indented with their line breaks,
+    clipped. a heading per step of the plan, workers indented under the controller, failures red"""
+    width = (width or shutil.get_terminal_size((120, 24)).columns) - 1     # not up to the edge: the terminal would wrap the padding
+    outputs = {ref: o["text"] for ref, o in protocol.get("outputs", {}).items()}
+    calls = {c["call"]: c for c in protocol.get("tool_calls", [])}
+    print()
+    print("\n".join(textwrap.wrap(f"protocol {protocol['id']}: conversation {protocol['conversation_id']}, message {protocol['message_id']}, "
+                                   f"job {protocol['job_id']}, created {protocol['created_at']} UTC", width, subsequent_indent="  ")))
+    plan = protocol.get("plan")
+    if plan:
+        print(f"plan revision {plan['revision']}: {plan['name']}")
+        for i, step in enumerate(plan["steps"], 1):
+            for task in step:
+                prompt = task.get("prompt", outputs.get((task.get("out") or {}).get("prompt"), ""))
+                print(f"  step {i}  {task['task']:<4} {task['role']}")
+                print("\n".join(wrap_text(prompt, width, full, " " * 13)))
+    print(f"{GRAY_BG}{'TIME (UTC)   STEP TASK AGENT                    OK ACTION        DETAILS':<{width}}{RESET}")
+    if not protocol["lines"]:
+        print("no lines")
+    stripe = 0
+    for line in protocol["lines"]:
+        data = dict(line.get("data") or {})
+        if line["action"] == "step_started":
+            heading = f"── step {line['step']}/{data.get('total')}: {short_value(data.get('roles') or [])} "
+            print(f"{heading:─<{width}}")
+            continue
+        if line["action"] == "retry":
+            heading = f"── step {line['step']}: retry {line['task'] or ''} {data.get('role', '')}, attempt {data.get('attempt')} "
+            print(f"{heading:─<{width}}")
+        worker = line["agent"] != "controller"
+        indent = "    " if worker else ""
+        agent = f"{line['agent'][:14]} {line['agent_id'][-8:]}" if worker else "controller"
+        ok = {True: "✓", False: "✗"}.get(line["ok"], "")
+        refs = data.pop("out", {})
+        short = "  ".join(f"{k}={short_value(v)}" for k, v in data.items())
+        head = (f"{line['at'][11:23]} {line['step'] if line['step'] is not None else '':<4} {line['task'] or '':<4} "
+                f"{indent}{agent:<{24 - len(indent)}} {ok:<2} {line['action']:<13} {short}")
+        pad = " " * 23 + indent + "  "
+        rows = textwrap.wrap(head, width, subsequent_indent=pad) or [head]
+        call = calls.get(data.get("call")) if line["action"] == "tool_call" else None
+        if call and call["args"]:       # each argument on its own, a code's line breaks kept
+            try:
+                args = json.loads(call["args"])
+            except ValueError:
+                args = {"args": call["args"]}
+            for key, value in (args.items() if isinstance(args, dict) else [("args", args)]):
+                rows += wrap_text(f"{key}: {value}", width, full, pad)
+        for key, ref in refs.items():
+            rows += wrap_text(f"{key}: {outputs.get(ref, f'({ref} missing)')}", width, full, pad)
+        failed = line["ok"] is False or line["action"] in ("failed", "timed_out") or data.get("status") == "failed"
+        bg = GRAY_BG if stripe % 2 else ""
+        for row in rows:
+            print(f"{bg}{RED if failed else ''}{row:<{width}}{RESET}")
+        stripe += 1
 
 if __name__ == "__main__":
     main()

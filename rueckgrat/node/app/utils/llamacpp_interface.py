@@ -5,6 +5,8 @@ import json
 from app.common import get_logger, ChatRequestLlama, ChatResponse
 logger = get_logger()
 
+LLAMA_TIMEOUT = 240     # seconds, when the request has no timeout (chat). jobs send a longer one
+
 class LLamaCppInterface:
     def __init__(self, host: str, port: int):
         self.url = f"http://{host}:{port}/v1/chat/completions"
@@ -70,7 +72,7 @@ class LLamaCppInterface:
 
                 full_content = ""
                 full_reasoning = ""
-                with requests.post(self.url, json=payload, headers=headers, stream=True, timeout=240) as http_response:
+                with requests.post(self.url, json=payload, headers=headers, stream=True, timeout=request.timeout or LLAMA_TIMEOUT) as http_response:
                     http_response.raise_for_status()
                     for line in http_response.iter_lines():
                         if request.stream_id in self._cancelled:
@@ -123,7 +125,7 @@ class LLamaCppInterface:
                     self.url,
                     json=payload,
                     headers=headers,
-                    timeout=240
+                    timeout=request.timeout or LLAMA_TIMEOUT
                 )
                 http_response.raise_for_status()
 

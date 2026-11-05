@@ -4,6 +4,7 @@ from .prompt_compiler import PromptCompiler
 from .contact_image_prompt_compiler import ContactImagePromptCompiler, ImageType
 from .generic_image_prompt_compiler import GenericImagePromptCompiler
 from .image_store import ImageStore
+from .code_fence import fence_code
 
 __all__ = [
     "ChatDB", 
@@ -13,5 +14,6 @@ __all__ = [
     "ContactImagePromptCompiler", 
     "ImageType", 
     "GenericImagePromptCompiler",
-    "ImageStore"
+    "ImageStore",
+    "fence_code"
 ]

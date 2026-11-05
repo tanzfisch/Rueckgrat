@@ -15,6 +15,7 @@ from .search_memory_tool import SearchMemoryTool
 from .spawn_agent_job_tool import SpawnAgentJobTool
 from .poll_tool import PollTool
 from .map_tool import MapTool
+from .code_tool import RunCodeTool
 
 __all__ = [
     "ToolRegistry",
@@ -34,5 +35,6 @@ __all__ = [
     "SearchMemoryTool",
     "SpawnAgentJobTool",
     "PollTool",
-    "MapTool"
+    "MapTool",
+    "RunCodeTool"
 ]
