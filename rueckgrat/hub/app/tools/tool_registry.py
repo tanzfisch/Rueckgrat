@@ -17,6 +17,7 @@ from .spawn_agent_job_tool import SpawnAgentJobTool
 from .poll_tool import PollTool
 from .map_tool import MapTool
 from .code_tool import RunCodeTool
+from .write_file_tool import WriteFileTool
 
 from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
@@ -32,12 +33,45 @@ TOOL_ORDER = [
     "convert",          # converts the values the lookups found (e.g. a price in another currency)
     "calculate",        # computes with converted values, convert before calculate
     "run_code",         # the slowest and broadest check, after the quick lookups and math
+    "write_file",       # files for the user, after the lookups they may quote, before the bubbles
     "show_map",         # bubbles under the answer: the map first
     "poll",             # then the poll
     "spawn_job",        # starts a background job after the reply's own tools, so its llm calls don't compete with theirs
     "remember",         # last: a new memory must not change this message's lookups
 ]
 TOOL_RANK = {name: rank for rank, entry in enumerate(TOOL_ORDER) for name in ((entry,) if isinstance(entry, str) else entry)}
+
+
+def _json_objects(text: str):
+    """each {...} in text, with braces inside strings left alone"""
+    i, n = 0, len(text or "")
+    while i < n:
+        if text[i] != "{":
+            i += 1
+            continue
+        depth, in_str, esc, start = 0, False, False, i
+        for j in range(i, n):
+            char = text[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif char == "\\":
+                    esc = True
+                elif char == '"':
+                    in_str = False
+                continue
+            if char == '"':
+                in_str = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    yield text[start:j + 1]
+                    i = j + 1
+                    break
+        else:
+            break
 
 class ToolRegistry:
     PROMPT_TOOLS = ["remember", "search_memory", "take_photo"]
@@ -65,6 +99,7 @@ class ToolRegistry:
         self._register_tool(PollTool)
         self._register_tool(MapTool)
         self._register_tool(RunCodeTool)
+        self._register_tool(WriteFileTool)
 
         temp = ", ".join(self.tools)
         logger.debug(f"registered tools: {temp}")
@@ -201,26 +236,22 @@ Writing about a call does nothing, only a JSON line runs the tool. Do not descri
 """
 
     def extract_tool_calls(self, text: str) -> tuple[List[Dict], str]:
-            tool_calls = []
-            cleaned_text = text
+        """json objects that name a registered tool. braces inside strings count, so a file can contain code"""
+        tool_calls = []
+        cleaned_text = text or ""
+        for match in _json_objects(cleaned_text):
+            if '"tool"' not in match:
+                continue
+            try:
+                data = Utils.json_loads(match)
+            except Exception as e:
+                logger.error(f"failed to extract tool calls {repr(e)}")
+                return None, None
+            if data and data.get("tool") in self.tools:
+                tool_calls.append(data)
+                cleaned_text = cleaned_text.replace(match, "").strip()
 
-            json_pattern = r'\{[^{}]*"tool"\s*:\s*"[^"]+"[^{}]*\}'
-            matches = re.findall(json_pattern, text, re.DOTALL)
-            
-            for match in matches:
-                try:
-                    data = Utils.json_loads(match)
-                    if data and "tool" in data:
-                        if data["tool"] in self.tools:
-                            tool_calls.append(data)
-                            cleaned_text = cleaned_text.replace(match, "").strip()
-                except Exception as e:
-                    logger.error(f"failed to extract tool calls {repr(e)}")
-                    return None, None
-                
-            # remove json artifacts
-            cleaned_text = re.sub(r'```(?:json)?\s*\{[\s\S]*?\}\s*```', '', cleaned_text, flags=re.IGNORECASE).strip()
-            cleaned_text = re.sub(r"```.*?```", "", cleaned_text, flags=re.DOTALL)
-            cleaned_text = re.sub(r"`.*?`", "", cleaned_text)
-            
-            return tool_calls, cleaned_text
+        cleaned_text = re.sub(r'```(?:json)?\s*\{[\s\S]*?\}\s*```', '', cleaned_text, flags=re.IGNORECASE).strip()
+        cleaned_text = re.sub(r"```.*?```", "", cleaned_text, flags=re.DOTALL)
+        cleaned_text = re.sub(r"`.*?`", "", cleaned_text)
+        return tool_calls, cleaned_text

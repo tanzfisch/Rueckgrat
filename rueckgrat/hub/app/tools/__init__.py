@@ -16,6 +16,7 @@ from .spawn_agent_job_tool import SpawnAgentJobTool
 from .poll_tool import PollTool
 from .map_tool import MapTool
 from .code_tool import RunCodeTool
+from .write_file_tool import WriteFileTool
 
 __all__ = [
     "ToolRegistry",
@@ -36,5 +37,6 @@ __all__ = [
     "SpawnAgentJobTool",
     "PollTool",
     "MapTool",
-    "RunCodeTool"
+    "RunCodeTool",
+    "WriteFileTool",
 ]

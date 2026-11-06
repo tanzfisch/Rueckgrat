@@ -636,6 +636,8 @@ def delete_conversation(conversation_id: int, username: str = Depends(get_curren
     image_keys = app.state.db.get_conversation_image_keys(conversation_id)
     if app.state.db.delete_conversation(conversation_id):
         released_images = app.state.image_store.release(image_keys)
+        from app.utils.text_files import remove_conversation_files
+        remove_conversation_files(user_id, conversation_id)
         return {"status": "ok", "released_images": released_images}
     else:
         return {"status": "failed to delete conversation"}
@@ -647,8 +649,12 @@ def get_messages(conversation_id: int, request: GetMessagesRequest, username: st
         raise HTTPException(status_code=404, detail="conversation not found")
     messages = app.state.db.get_messages_by_conversation(conversation_id, request.max_messages) or []
     attachments = app.state.db.get_attachments_for_messages([message["id"] for message in messages])
+    from app.utils.text_files import payloads_for_messages
+    text_files = payloads_for_messages(app.state.db, [message["id"] for message in messages])
     for message in messages:
         message["attachments"] = attachments.get(message["id"], [])
+        if message["id"] in text_files:
+            message["text_files"] = text_files[message["id"]]
     return {"messages": messages}
 
 @app.get("/messages/{message_id}/attachments")
@@ -932,6 +938,24 @@ async def get_map_tile(z: int, x: int, y: int, username: str = Depends(get_curre
     if tile is None:
         raise HTTPException(status_code=404, detail="tile not available")
     return Response(content=tile, media_type="image/png", headers={"Cache-Control": "max-age=604800"})
+
+@app.get("/messages/{message_id}/files/{stored_name}")
+def download_message_file(message_id: int, stored_name: str, username: str = Depends(get_current_user)):
+    """the text file or zip attached to a message, saved under the AI's real name"""
+    from urllib.parse import quote
+    from app.utils.text_files import FILES_ROOT, _STORED, message_dir
+    user_id = app.state.db.get_user_id(username)
+    if not _STORED.fullmatch(stored_name) or not app.state.db.owns_message(user_id, message_id):
+        raise HTTPException(status_code=404, detail="file not found")
+    row = app.state.db.get_message_file(message_id, stored_name)
+    if row is None or row["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="file not found")
+    path = message_dir(row["user_id"], row["conversation_id"], row["message_id"], FILES_ROOT) / stored_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    download_name = row["real_name"].rsplit("/", 1)[-1] or "file"
+    return Response(content=path.read_bytes(), media_type=row["file_type"],
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(download_name)}"})
 
 ########### downloads
 @app.get("/downloads/{file_path:path}")

@@ -13,22 +13,7 @@ from app.common import get_logger, ChatRequest, Utils, MessageQueue
 from app.utils.tts_stream import TtsStreams
 logger = get_logger()
 
-FILLERS = {
-    "uh", "uhm", "um", "umm", "hm", "hmm", "mhm", "mm", "mmm", "ah", "oh", "eh", "er", "erm", "huh", "uh-huh", "aha",
-    "ok", "okay", "yeah", "yea", "yep", "yup", "nope", "nah", "right", "sure", "cool", "nice", "wow", "alright",
-    "thanks", "thank", "you", "thx",  # "you" only for "thank you"
-    "cough", "coughs", "coughing", "sniff", "sniffs", "laughs", "laughing", "sigh", "sighs",
-}
-
-def is_trivial(text: str) -> bool:
-    """a single word or only fillers (a cough, "hmm"): not worth interrupting the reply for"""
-    words = re.findall(r"\w+", text.lower())
-    return len(words) < 2 or all(word in FILLERS for word in words)
-
 class Turns:
-    """the MetaTask answering each conversation. a new user message either merges into it
-    (that job gets cancelled, the new one answers both) or is stored as a message of its own"""
-
     def __init__(self, db):
         self.db = db
         self._lock = threading.Lock()
@@ -40,7 +25,7 @@ class Turns:
         with self._lock:
             previous = self._running.get(request.conversation_id)
             mergeable = previous is not None and previous.state == "running"
-            merge = mergeable and not is_trivial(request.content)
+            merge = mergeable and not self._is_trivial(request.content)
             if merge:
                 previous.cancelled.set()
                 request.content = f"{previous.request.content} … {request.content}"
@@ -77,6 +62,15 @@ class Turns:
             if state == "done" and self._running.get(job.request.conversation_id) is job:
                 del self._running[job.request.conversation_id]
             return True
+
+    def _is_trivial(self, text: str) -> bool:
+        FILLERS = {
+            "uh", "uhm", "um", "umm", "hm", "hmm", "mhm", "mm", "mmm", "ah", "oh", "eh", "er", "erm", "huh", "uh-huh", "aha",
+            "ok", "okay", "yeah", "yea", "yep", "yup", "nope", "nah", "right", "sure", "cool", "nice", "wow", "alright",
+            "thanks", "thank", "you", "thx", "cough", "coughs", "coughing", "sniff", "sniffs", "laughs", "laughing", "sigh", "sighs",
+        }
+        words = re.findall(r"\w+", text.lower())
+        return len(words) < 2 or all(word in FILLERS for word in words)
 
 class MetaTask(Task):
     def __init__(self, user_id: int, request: ChatRequest, db, infrastructure, tool_registry, turns):
@@ -254,6 +248,25 @@ class MetaTask(Task):
         )
         return sync, parallel, interrupted, "\n".join(contents)
 
+    def _attach_text_files(self) -> str:
+        """one file stays a file; several become one zip. nothing is written before self.message_id exists"""
+        pending = self.response.pop("text_files", None) or []
+        if not pending:
+            return ""
+        from app.utils.text_files import attach_message_files
+        try:
+            payload = attach_message_files(self.db, self.user_id, self.request.conversation_id, self.message_id, pending)
+        except Exception as e:
+            logger.error(f"failed to attach text files {repr(e)}")
+            return f"\n\nTOOL_RESULT\nwrite_file: failed - {e}\n"
+        MessageQueue().send_data({"text_files": {
+            "conversation_id": self.request.conversation_id,
+            "message_id": self.message_id,
+            **payload,
+        }}, user_id=self.user_id)
+        names = ", ".join(member["real_name"] for member in payload["members"])
+        return f"\n\nTOOL_RESULT\nwrite_file: attached {names}\n"
+
     def _interrupted(self) -> bool:
         """True once a follow-up was merged into this turn: drops the partial reply, the merged job answers instead"""
         if not self.cancelled.is_set():
@@ -261,6 +274,8 @@ class MetaTask(Task):
         if self.message_id != -1:
             self.db.delete_message(self.message_id)
             TtsStreams.drop_message(self.message_id)
+            from app.utils.text_files import remove_message_files
+            remove_message_files(self.user_id, self.request.conversation_id, self.message_id)
         MessageQueue().send_data({"cancelled": {
             "conversation_id": self.request.conversation_id,
             "message_id": self.message_id if self.message_id != -1 else None
@@ -322,6 +337,9 @@ class MetaTask(Task):
 
             contact_name = Utils.get_nested_value(contact, ["identity", "name"])
             self.message_id = self.db.add_message(self.request.conversation_id, "assistant", "", contact_name)
+            # write_file ran before this row existed, so the folder can use the real message id. same moment
+            # the image tools learn theirs, but the bytes are ready now and go out before the answer streams
+            compiled_response += self._attach_text_files()
 
             # once an image is queued the reply can't be interrupted anymore, a follow-up is a new message then
             if any(self.tool_registry.parallel.get(call["tool"]) for call in tool_calls) and not self.turns.set_state(self, "images"):

@@ -7,6 +7,7 @@ Changelog
 - #176 ordering tool calls: laya-detected tools one at a time, then one optional request for the rest
 -     fetch_url is selected by a url in the message, not by laya
 - maps don't try to simulate dark mode anymore. it was too ugly
+- #175 the assistant can attach text files: one file as itself, several files of one message as a single zip
 
 0.26.0
 ------
