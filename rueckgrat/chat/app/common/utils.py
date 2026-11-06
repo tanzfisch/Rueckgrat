@@ -63,7 +63,9 @@ class Utils:
         lines = []
         for k, v in data.items():
             filled = int(v * bar_width)
-            bar = "█" * filled + "░" * (bar_width - filled)
+            red_unfilled = "░" * max(0, bar_width // 2 - filled)
+            green_unfilled = "░" * (bar_width - max(filled, bar_width // 2))
+            bar = "█" * filled + (f"\033[31m{red_unfilled}\033[0m" if red_unfilled else "") + (f"\033[32m{green_unfilled}\033[0m" if green_unfilled else "")
             lines.append(f"{k:<{max_key}}  {v:7.4f}  {bar}")
         return "\n".join(lines)    
 

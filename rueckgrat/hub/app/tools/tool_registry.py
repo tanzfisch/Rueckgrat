@@ -21,6 +21,24 @@ from .code_tool import RunCodeTool
 from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
 
+# #176 the order the tools of one message are asked for and run in. one tool is requested at a time, after the
+# previous tool's result. a tuple shares one rank and is asked in the tuple's order. unlisted tools are last, in the
+# order they were given. calls the model wrote for one tool keep that written order
+TOOL_ORDER = [
+    "current_time",     # the time and date other tools and the answer may build on
+    "date_calc",        # date math, after the current date is known
+    "search_memory",    # what the user told before, before any lookup or job that may need it
+    ("wikipedia", "websearch", "fetch_url", "weather"),     # outside lookups, independent of each other
+    "convert",          # converts the values the lookups found (e.g. a price in another currency)
+    "calculate",        # computes with converted values, convert before calculate
+    "run_code",         # the slowest and broadest check, after the quick lookups and math
+    "show_map",         # bubbles under the answer: the map first
+    "poll",             # then the poll
+    "spawn_job",        # starts a background job after the reply's own tools, so its llm calls don't compete with theirs
+    "remember",         # last: a new memory must not change this message's lookups
+]
+TOOL_RANK = {name: rank for rank, entry in enumerate(TOOL_ORDER) for name in ((entry,) if isinstance(entry, str) else entry)}
+
 class ToolRegistry:
     PROMPT_TOOLS = ["remember", "search_memory", "take_photo"]
 
@@ -56,11 +74,52 @@ class ToolRegistry:
         self.tools[cls.name()] = cls
         self.parallel[cls.name()] = parallel
 
+    @staticmethod
+    def sort_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """a new list of the calls in TOOL_ORDER, stable: unlisted tools last, equal ranks keep their order"""
+        return sorted(tool_calls, key=lambda call: TOOL_RANK.get(call.get("tool"), len(TOOL_ORDER)))
+
+    @staticmethod
+    def ordered_names(names: List[str]) -> List[str]:
+        """unique names in TOOL_ORDER. a shared rank keeps the tuple's order, unlisted names stay last in input order"""
+        unique = list(dict.fromkeys(names))
+
+        def key(name: str):
+            rank = TOOL_RANK.get(name, len(TOOL_ORDER))
+            if rank < len(TOOL_ORDER):
+                entry = TOOL_ORDER[rank]
+                sub = entry.index(name) if isinstance(entry, tuple) else 0
+            else:
+                sub = unique.index(name)
+            return (rank, sub)
+
+        return sorted(unique, key=key)
+
+    def tool_steps(self, tool_names: List[str], detected_tool_names: Optional[List[str]] = None) -> List[tuple]:
+        """(name, required) in TOOL_ORDER. required means laya detected the tool (ToolDetectionTask). PROMPT_TOOLS and
+        any other name laya did not detect stay optional: they are asked together once, after the required tools.
+        unknown names are dropped"""
+        detected = set(detected_tool_names or [])
+        return [(name, name in detected and name not in self.PROMPT_TOOLS)
+                for name in self.ordered_names(tool_names) if name in self.tools]
+
+    @staticmethod
+    def group_calls(tool_calls: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+        """the sorted calls in groups of one rank (e.g. the lookups, or two calculate calls).
+        directing does not batch a rank: tool_steps asks for one tool at a time"""
+        groups = []
+        for call in ToolRegistry.sort_calls(tool_calls):
+            if groups and TOOL_RANK.get(groups[-1][0].get("tool")) == TOOL_RANK.get(call.get("tool")):
+                groups[-1].append(call)
+            else:
+                groups.append([call])
+        return groups
+
     def execute(self, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_calls: List[Dict[str, Any]], parallel: bool = False) -> None:
-        """runs the tool calls in list order. synchronous tools (parallel=False) run one after another
+        """runs the tool calls in TOOL_ORDER (sort_calls). synchronous tools (parallel=False) run one after another
         on this thread (task_queue.run), parallel tools are queued (task_queue.add) and run concurrently.
         parallel selects which tools run: None = all (default), False = only synchronous, True = only parallel"""
-        for tool_call in tool_calls:
+        for tool_call in self.sort_calls(tool_calls):
             tool_name = tool_call["tool"]
             if not tool_name in self.tools:
                 logger.warning(f"unknown tool: {tool_name}")
@@ -97,19 +156,47 @@ class ToolRegistry:
         
         return result
     
-    def get_tools_hydrated(self, tool_names: List[str]) -> str:
+    def get_tools_hydrated(self, tool_names: List[str], detected_tool_names: Optional[List[str]] = None) -> str:
         """tool directing prompt: the full prompt() of exactly these tools plus a strict JSON-only call rule.
-        tool_names must not be empty (get_tools_prompt() would return all tools)"""
+        tool_names must not be empty (get_tools_prompt() would return all tools).
+        laya-detected names (detected_tool_names, except PROMPT_TOOLS) must be called. every other tool stays optional"""
         tools = self.get_tools_prompt(tool_names)
-        examples = "\n".join(self.tools[name].example() for name in tool_names if name in self.tools)
+        known = [name for name in tool_names if name in self.tools]
+        required = [name for name in dict.fromkeys(detected_tool_names or []) if name in known and name not in self.PROMPT_TOOLS]
+        prioritize = ("Prioritize tools over your own knowledge: whenever an available tool can handle part of the query, "
+                      "call it for that part even if you are confident you already know the answer.")
+        if len(required) == 1 and len(known) == 1:
+            tools_intro = "Full instructions for the tool to call:"
+            call_guidance = ("This tool was detected as necessary for this query. You must call it. Output its JSON line. Do not skip it.\n"
+                             + prioritize)
+        elif required:
+            tools_intro = "Full instructions for the available tools:"
+            call_guidance = (f"These tools were detected as necessary and must be called: {', '.join(required)}.\n"
+                             "Output the JSON call for each of them. Do not skip them.")
+            if len(required) < len(known):
+                call_guidance += ("\nFor the other tools, call only those the query really needs. "
+                                  "If none of them are needed, output nothing for them.")
+            call_guidance += "\n" + prioritize
+        else:
+            # one combined request for every tool laya did not require. nothing is a valid answer
+            return f"""TOOLS:
+
+These tools are optional. Their full instructions:
+{tools}
+
+HOW TO CALL:
+Call a tool only if the query really needs it. If the query needs none of them, output nothing. Outputting nothing is the correct answer when the query needs none of them.
+If you do call a tool, write ONE line of JSON per call, exactly in the format shown above, with the values for the query filled in.
+Writing about a call does nothing, only a JSON line runs the tool. Do not describe the call in words, no headings like "TOOL CALL:", no analysis.
+"""
         return f"""TOOLS:
 
-The query may need these tools. Their full instructions:
+{tools_intro}
 {tools}
 
 HOW TO CALL:
 Your answer MUST be the tool call as ONE line of JSON per call, exactly in the format shown above, with the values for the query filled in.
-Call only the tools the query really needs. If it needs none, output nothing.
+{call_guidance}
 Writing about a call does nothing, only a JSON line runs the tool. Do not describe the call in words, no headings like "TOOL CALL:", no analysis.
 """
 

@@ -366,7 +366,10 @@ class ConversionTool(Tool):
         "Does the user want an amount in another unit or currency, like ml to cups, kg to pounds or euros to dollars?",
         "Does the user give a height, length or weight and want it in other units?",
         "Does the user ask the money value of an amount of gold, silver, bitcoin or dollars?",
-        "Does the user ask how many centimeters, inches, grams or ounces are in an amount?"
+        "Does the user ask how many centimeters, inches, grams or ounces are in an amount?",
+        "Does the message have money in two different currencies, not just one currency?",
+        "Is one amount given in a metric unit and another in an imperial unit?",
+        "Does the message give speeds or temperatures in different units, like km/h and mph or Celsius and Fahrenheit?"
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):

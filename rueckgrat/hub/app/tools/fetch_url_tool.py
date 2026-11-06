@@ -22,7 +22,7 @@ class FetchUrlTool(WebsearchTool):
     """subclass of WebsearchTool only to reuse _extract_page and _get_org_name, everything else is its own"""
     category = ToolCategory.WEB
     description = "reads a web page the user gives a link to and returns a condensed summary of it"
-    question = ["Does the user's message contain a web page address, and do they want you to read that page?"]
+    question = []    # not a laya question: ToolDetectionTask selects it from URL_PATTERN in the message
     PAGE_TIMEOUT = 20           # one page the user is waiting for, not a batch
     BROWSER_FALLBACK = True     # the user asked for this page, worth a headless browser if plain http comes back thin
 

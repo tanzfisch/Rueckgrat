@@ -125,36 +125,76 @@ class AgentJob:
         return compiled[:MAX_TOOL_CHARS]
 
     def find_tools(self, detect: str, query: str, always: list) -> Optional[Dict[str, Any]]:
-        """the tool part of MetaTask.execute on this thread: tool detection (laya) on detect, tool directing (the llm writes
-        the calls for query) with the detected tools, always and PROMPT_TOOLS, never WORKER_EXCLUDED_TOOLS. then the
-        synchronous tools run (run_tools, their sub jobs, e.g. FindAnswerTask, go to the TaskQueue).
-        returns the directing's {content, tool_calls}, None if the directing failed (no tools ran then)"""
+        """the tool part of MetaTask.execute on this thread: laya detects tools on detect. each laya tool is requested
+        on its own, in TOOL_ORDER, and a synchronous tool runs before the next request (run_tools; its sub jobs, e.g.
+        FindAnswerTask, go to the TaskQueue). tools only offered alongside them (always, PROMPT_TOOLS, never
+        WORKER_EXCLUDED_TOOLS) are one combined request after that, and may be skipped.
+        returns {content, tool_calls} of what ran, None when directing produced no answer and nothing ran"""
         from app.tasks import ToolDetectionTask, ToolDirectingTask     # here: app.tasks imports the tools package, that imports this one
+        from app.tasks.tool_directing_task import run_tool_sequence
         context = self.tool_context
         registry = context["tool_registry"]
         detection = ToolDetectionTask(detect, registry, self.infrastructure, excluded=WORKER_EXCLUDED_TOOLS)
         registry.task_queue.run(detection)
-        tool_names = [name for name in dict.fromkeys((detection.result() or []) + always + registry.PROMPT_TOOLS) if name not in WORKER_EXCLUDED_TOOLS]
-        logger.info(f"agent {self.role} {self.job_id}: tools {tool_names}")
-        self.trace("tools", tools=tool_names)
+        detected = detection.result() or []
+        tool_names = [name for name in dict.fromkeys(detected + always + registry.PROMPT_TOOLS) if name not in WORKER_EXCLUDED_TOOLS]
+        steps = registry.tool_steps(tool_names, detected)
+        required = [name for name, must in steps if must]
+        optional = [name for name, must in steps if not must]
+        logger.info(f"agent {self.role} {self.job_id}: tools {tool_names}, required {required}, optional {optional}")
+        self.trace("tools", tools=tool_names, required=required, optional=optional)
+        self.response, self.executed_calls = {}, []
+        if not steps:
+            return {"content": "", "tool_calls": []}
 
         request = ChatRequest(contact_id=context["contact_id"], conversation_id=context["conversation_id"], role="user",
                               name=context["user_name"], content=query, temperature=0.3)
-        directing = ToolDirectingTask(request=request, db=context["db"], infrastructure=self.infrastructure, tool_registry=registry, tool_names=tool_names)
-        registry.task_queue.run(directing)
-        directed = directing.result()
-        if not directed:
-            self.trace("tool_directing", ok=False, error="no tool calls written")
-            return None
-        directed["tool_calls"] = [call for call in directed["tool_calls"] or [] if call["tool"] not in WORKER_EXCLUDED_TOOLS]
-        self.run_tools(directed["tool_calls"])
-        return directed
+        contents, answered = [], False
 
-    def tool_results_text(self, no_websearch: str = "") -> str:
-        """MetaTask's formatting of the results in self.response (it only reads and pops it), no_websearch without a websearch result"""
+        def ask(names, detected_names, results):
+            nonlocal answered
+            job = ToolDirectingTask(request=request, db=context["db"], infrastructure=self.infrastructure, tool_registry=registry,
+                                    tool_names=list(names), results=results, detected_tool_names=detected_names)
+            registry.task_queue.run(job)
+            directed = job.result()
+            if directed:
+                answered = True
+                if directed.get("content"):
+                    contents.append(directed["content"])
+            return directed
+
+        def direct(name, must, results):
+            return ask([name], [name] if must else None, results)
+
+        def direct_optional(names, results):
+            return ask(names, None, results)
+
+        def on_failure(name, error):
+            logger.warning(f"agent {self.role} {self.job_id}: mandatory tool {name} was not called: {error}")
+            self.response.setdefault("tool_results", []).append({"tool": name, "error": error})
+            self.trace("tool_directing", ok=False, error=f"{name}: {error}")
+
+        run_tool_sequence(steps, direct, self.run_tools, lambda: self.tool_results_text(keep=True), on_failure,
+                          lambda name: bool(registry.parallel.get(name)), lambda: self._stop.is_set(),
+                          direct_optional=direct_optional)
+        if not answered and not self.executed_calls:
+            if not required:
+                self.trace("tool_directing", ok=False, error="no tool calls written")
+            return None
+        return {"content": "\n".join(contents), "tool_calls": self.executed_calls}
+
+    def tool_results_text(self, no_websearch: str = "", keep: bool = False) -> str:
+        """MetaTask's formatting of the results in self.response (it only reads and pops it), no_websearch without a websearch result.
+        keep: the results stay in self.response (the tool chain's results so far)"""
         from app.tasks import MetaTask
-        return (MetaTask._format_websearch_results(self) or no_websearch) + \
-            (MetaTask._format_conversion_results(self) or "") + (MetaTask._format_tool_results(self) or "")
+        response = self.response
+        if keep:
+            self.response = dict(response)     # the formatters pop from the copy
+        try:
+            return (MetaTask._format_websearch_results(self) or no_websearch) + \
+                (MetaTask._format_conversion_results(self) or "") + (MetaTask._format_tool_results(self) or "")
+        finally:
+            self.response = response
 
     def chat(self, messages: list, temperature: float) -> str:
         """one llm call, "" without a reply"""
@@ -164,11 +204,16 @@ class AgentJob:
                                         max_new_tokens=JOB_MAX_TOKENS, timeout=JOB_LLM_TIMEOUT) or ""
 
     def run_tools(self, tool_calls: list) -> Dict[str, Any]:
-        """the synchronous tools of the calls on this thread, for the job's conversation (tool_context).
-        they write their results into self.response, like into MetaTask.response"""
+        """the synchronous calls on this thread, for the job's conversation (tool_context).
+        they append their results to self.response, like MetaTask.response. a sequence calls this once per tool,
+        after that tool was requested, so earlier results stay. self.executed_calls: the calls that ran, in order"""
         context = self.tool_context
-        self.response = {}
-        for call in tool_calls:     # one by one: #174 each call's duration and result in the protocol
+        if getattr(self, "response", None) is None:
+            self.response = {}
+        if not hasattr(self, "executed_calls"):
+            self.executed_calls = []
+        for call in tool_calls:     # one by one: #174 each call's duration and result in the protocol, in the order they ran
+            self.executed_calls.append(call)
             results, start = len(self.response.get("tool_results", [])), time.monotonic()
             context["tool_registry"].execute(user_id=context["user_id"], contact_id=context["contact_id"], conversation_id=context["conversation_id"],
                                              response=self.response, tool_calls=[dict(call, llm_timeout=JOB_LLM_TIMEOUT)], parallel=False)    # run_code writes code with it

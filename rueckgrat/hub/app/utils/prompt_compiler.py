@@ -7,8 +7,9 @@ from app.common import get_logger, Utils
 logger = get_logger()
 
 class PromptCompiler:
-    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_role_name: str = None, thinking: bool = False, tool_registry: ToolRegistry = None, tool_names: Optional[List[str]] = None):
+    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_role_name: str = None, thinking: bool = False, tool_registry: ToolRegistry = None, tool_names: Optional[List[str]] = None, detected_tool_names: Optional[List[str]] = None):
         self.contact = contact
+        self.detected_tool_names = detected_tool_names
         self.tool_names = tool_names  # the full prompt() of exactly these tools
         self.conversation = conversation
         self.user_role_name = user_role_name
@@ -98,6 +99,8 @@ OBJECTIVES:
     def _build_tools(self) -> str:
         if not self.tool_registry or not self.tool_names:
             return ""  # an empty list would make get_tools_prompt() return all tools
+        if self.detected_tool_names:
+            return self.tool_registry.get_tools_hydrated(self.tool_names, detected_tool_names=self.detected_tool_names)
         return self.tool_registry.get_tools_hydrated(self.tool_names)
 
     def _build_context(self) -> str:
