@@ -818,6 +818,23 @@ class Hub:
         return []
 
     @classmethod
+    def get_message_file(cls, message_id: int, stored_name: str) -> bytes | None:
+        """the attached text file or zip. None when the hub has no such file"""
+        try:
+            response = requests.get(
+                f"{cls.url}/messages/{message_id}/files/{stored_name}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=30,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.content
+            logger.error(f"get message file - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_message_file {repr(e)}")
+        return None
+
+    @classmethod
     def get_attachments(cls, message_id):
         url = f"{cls.url}/messages/{message_id}/attachments"
 

@@ -25,6 +25,55 @@ def code_text(block: str) -> str:
     return m.group(1) if m else block
 
 
+_QUOTE_LINE = re.compile(r"^[ \t]{0,3}> ?(.*)$")
+
+
+def quote_text(block: str) -> str:
+    """the quote's text, one leading > marker removed from each line"""
+    lines = []
+    for line in block.splitlines():
+        match = _QUOTE_LINE.match(line)
+        lines.append(match.group(1) if match else line)
+    return "\n".join(lines).strip("\n")
+
+
+def split_blockquotes(text: str) -> list[dict]:
+    """text and quote runs. a quote is consecutive '>' lines, including a blank gap before another '>' line"""
+    lines = text.splitlines(keepends=True)
+    parts, buf, i = [], [], 0
+
+    def flush():
+        if buf:
+            parts.append({"type": "text", "value": "".join(buf)})
+            buf.clear()
+
+    while i < len(lines):
+        if not _QUOTE_LINE.match(lines[i]):
+            buf.append(lines[i])
+            i += 1
+            continue
+        flush()
+        quote = []
+        while i < len(lines):
+            if _QUOTE_LINE.match(lines[i]):
+                quote.append(lines[i])
+                i += 1
+                continue
+            if lines[i].strip() != "":
+                break
+            j = i
+            while j < len(lines) and lines[j].strip() == "":
+                j += 1
+            if j < len(lines) and _QUOTE_LINE.match(lines[j]):
+                quote.extend(lines[i:j])
+                i = j
+            else:
+                break
+        parts.append({"type": "quote", "value": "".join(quote)})
+    flush()
+    return parts
+
+
 class BubbleActions(ft.Row):
     """the row of small buttons under a bubble, e.g. play and the sources of a web search"""
     def __init__(self):
@@ -63,7 +112,7 @@ class ChatBubble(ft.Container):
     def __init__(self, role: str, content: str, image_filepath: str | None = None, **kwargs):
         self.body = ft.Column(spacing=8, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
         super().__init__(
-            content=self.body,
+            content=self.body,            
             **kwargs,
         )
         self.role = role
@@ -94,7 +143,11 @@ class ChatBubble(ft.Container):
 
             for item in items:
                 if item["type"] == "text":
-                    self._add_text(item["value"])
+                    for part in split_blockquotes(item["value"]):
+                        if part["type"] == "quote":
+                            self._add_quote(part["value"])
+                        elif part["value"].strip():
+                            self._add_text(part["value"])
                 elif item["type"] == "code":
                     self._add_code(item["value"])
         except Exception as e:
@@ -153,11 +206,30 @@ class ChatBubble(ft.Container):
             )
         )
 
+    def _add_quote(self, content: str):
+        """the quote still renders as markdown, so the theme background and corners apply. the button copies the text"""
+        copied = quote_text(content)
+
+        async def copy(e):
+            await ft.Clipboard().set(copied)
+            e.control.icon = ft.Icons.CHECK
+            e.control.update()
+            await asyncio.sleep(1.5)
+            e.control.icon = ft.Icons.CONTENT_COPY
+            e.control.update()
+
+        self.body.controls.append(
+            ft.Stack([
+                self._md(content),
+                ft.IconButton(icon=ft.Icons.CONTENT_COPY, icon_size=16, icon_color=theme.TEXT, tooltip="Copy",
+                              top=0, right=0, on_click=copy),
+            ], data={"id": "quote"})
+        )
+
     def _add_text(self, content: str):
         self.body.controls.append(
             ft.Container(
-                content=self._md(content),
-                data={"id": "text", "role": self.role},
+                content=self._md(content)
             )
         )
 

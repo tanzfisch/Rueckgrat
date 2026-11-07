@@ -30,6 +30,7 @@ PALETTES = {
         ACCENT="#0D7377",              # switches and focused fields of the profile pages
         FOCUS="#00424c",               # focused field border
         TEXT="#E0E0E0",
+        BLOCKQUOTE="#1E3338",          # quote band: dark teal, light text stays readable (not flutter's pale blue)
         TEXT_DIM="#606060",
         TEXT_LABEL="#C8C8C8",          # row labels of the profile pages
         ON_ACCENT="#E0E0E0",           # text on TEAL_FILL and ERROR strips
@@ -56,6 +57,7 @@ PALETTES = {
         ACCENT="#0D7377",
         FOCUS="#0b6b78",
         TEXT="#1B1F20",
+        BLOCKQUOTE="#C9DDE0",          # quote band: a step deeper than the page, dark text stays readable
         TEXT_DIM="#5F6B6D",
         TEXT_LABEL="#3A4446",
         ON_ACCENT="#FFFFFF",
@@ -96,6 +98,7 @@ EMOJI_FALLBACK = ["Noto Color Emoji"]
 BACKGROUND = SURFACE = SURFACE_2 = SURFACE_3 = SURFACE_4 = SURFACE_FIELD = PRESSED = CODE_BORDER = ""
 TEAL = TEAL_FILL = TEAL_BRIGHT = TEAL_HANDLE = ACCENT = FOCUS = ""
 TEXT = TEXT_DIM = TEXT_LABEL = ON_ACCENT = ERROR = WARNING = CODE_THEME = WALLPAPER = ICON_SUFFIX = ""
+BLOCKQUOTE = ""
 SCHEME: dict = {}
 
 mode = DEFAULT_MODE
@@ -134,6 +137,8 @@ def _markdown_style() -> ft.MarkdownStyleSheet:
         p_text_style=_md_text(14),             # paragraphs and list items
         list_bullet_text_style=_md_text(14),
         blockquote_text_style=_md_text(14),
+        blockquote_padding=ft.Padding(12, 12, 12, 12),
+        blockquote_decoration=ft.BoxDecoration(bgcolor=BLOCKQUOTE, border_radius=RADIUS),
         table_head_text_style=_md_text(14),
         table_body_text_style=_md_text(14),
         h1_text_style=_md_text(24),

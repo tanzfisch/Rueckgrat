@@ -380,6 +380,28 @@ class ChatDB:
             ON voices(contact_id) WHERE contact_id IS NOT NULL
         """)
 
+        # text files of write_file. real_name is the path the AI wrote (css/style.css or files.zip).
+        # stored_name is the hashed file in files/<user_id>/<conversation_id>/<message_id>/.
+        # a zip's members point at that same stored_name via parent_id and are not separate files on disk.
+        # additive: SCHEMA_VERSION stays put, because bumping it wipes the database before 1.0
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS message_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            conversation_id INTEGER NOT NULL,
+            message_id INTEGER NOT NULL,
+            real_name TEXT NOT NULL,
+            stored_name TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            parent_id INTEGER DEFAULT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+            FOREIGN KEY (parent_id) REFERENCES message_files(id) ON DELETE CASCADE
+        )""")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_files_message ON message_files(message_id)")
+
         cursor.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
         conn.close()
@@ -1707,6 +1729,54 @@ class ChatDB:
             except Exception as e:
                 logger.error(f"answering poll: {e}")
         return None
+
+    def add_message_file(self, user_id: int, conversation_id: int, message_id: int, real_name: str,
+                         stored_name: str, file_type: str, file_size: int, parent_id: int = None) -> int:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO message_files
+                    (user_id, conversation_id, message_id, real_name, stored_name, file_type, file_size, parent_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (user_id, conversation_id, message_id, real_name, stored_name, file_type, file_size, parent_id))
+                conn.commit()
+                return cursor.lastrowid
+            except Exception as e:
+                logger.error(f"failed adding message file {real_name} for message {message_id}: {e}")
+        return -1
+
+    def get_message_file(self, message_id: int, stored_name: str) -> dict | None:
+        """the downloadable row (not a zip member) with this hashed name"""
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("""
+                    SELECT id, user_id, conversation_id, message_id, real_name, stored_name, file_type, file_size, parent_id
+                    FROM message_files
+                    WHERE message_id = ? AND stored_name = ? AND parent_id IS NULL
+                """, (message_id, stored_name)).fetchone()
+                return dict(row) if row else None
+            except Exception as e:
+                logger.error(f"failed reading message file {stored_name}: {e}")
+        return None
+
+    def get_message_files_for_messages(self, message_ids: list[int]) -> dict[int, list]:
+        if not message_ids:
+            return {}
+        marks = ",".join("?" for _ in message_ids)
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute(f"""
+                    SELECT id, user_id, conversation_id, message_id, real_name, stored_name, file_type, file_size, parent_id
+                    FROM message_files WHERE message_id IN ({marks}) ORDER BY id
+                """, message_ids).fetchall()
+                grouped = {}
+                for row in rows:
+                    grouped.setdefault(row["message_id"], []).append(dict(row))
+                return grouped
+            except Exception as e:
+                logger.error(f"failed reading message files: {e}")
+        return {}
 
     def add_attachment(self, message_id: int, file_name: str, file_url: str, file_type: str, file_size: int) -> int:
         with self.get_connection() as conn:
