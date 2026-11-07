@@ -6,22 +6,18 @@ from typing import Optional, Dict, Any
 from uuid import uuid4
 
 from app.common import get_logger, ChatRequest, MessageQueue
-from .protocol import ms_since
 logger = get_logger()
 
-DEFAULT_TIME_LIMIT = 5400     # seconds, backstop: an agent that never ends its work is stopped after this
-# a job's llm calls (plan, review, merge, retry, worker answers, run_code's code) may be slow and long, nobody waits for
-# them like for a chat reply. chat and companions keep 240 s and their own token limits
+DEFAULT_TIME_LIMIT = 5400     # max time for a job in seconds
 JOB_LLM_TIMEOUT = 900         # seconds per llm call
-JOB_MAX_TOKENS = 4096         # per reply. the llama.cpp slot's context (prompt + reply) may end it earlier
-
-MAX_TOOL_CHARS = 12000     # the tool results in the worker's prompt
-# not for workers and companions: they don't spawn agents, don't write the user's memories (their prompt is the planner's
-# or the companion's, not the user's words) and make no images, polls or maps (those belong to a chat message)
-WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "generate_image", "take_photo", "poll", "show_map", "write_file")
-# always in a worker's tool directing prompt, like PROMPT_TOOLS: the websearch questions of the detection are about chat
-# messages (news, games, shops, opening hours), a planner's "research ..." task scores 0.0. tool directing decides the call
-WORKER_TOOLS = ["websearch"]
+JOB_MAX_TOKENS = 4096         # max tokens per reply
+MAX_TOOL_CHARS = 12000        
+WORKER_TOOLS = ["websearch"]   # always run for a worker, the controller's task sets its role and scope
+NO_WEBSEARCH = "\n\nNo web search was done for this message. If you don't know current facts like opening hours, prices or news, say so.\n"
+EMPTY_WEBSEARCH = ("\n\nThe web search found nothing useful. Do the task with the results of the steps before and your own knowledge, "
+                   "and say which facts you could not check.\n")
+FAILED_TOOLS = ("\n\nThese tools failed: {failed}. Do the task with what you have and your own knowledge, and say what could not be checked. "
+                "Reply FAILED: only when the task can not be done at all without them.\n")
 RESULTS_MARKER = "\n\nRESULTS OF THE STEPS BEFORE:\n"    # the Controller appends the earlier results to a task after this
 
 WORKER_PROMPT = """You are the {role} in a background job. Do your task and report what you found or made.
@@ -36,15 +32,21 @@ Reply with the result only.
 """
 
 class AgentJob:
-    """#152 base of a spawned agent. it runs on its own thread, not on the TaskQueue:
-    its loop runs until the work is done and would hold a TaskQueue worker the whole time.
-    the role is fixed when the agent is made, the Controller (the first agent) sets it for its workers.
-    the companion (app.companion.companion_job.CompanionJob) is one too, its scheduler runs one pass per due calendar row"""
-
-    # set at hub start (main.py): a message of a job (a job report, a companion message) waits for or skips a reply
-    # being made (turns) and is pushed only to a user with an open /ws (connections), it is in the db anyway
-    turns = None
+    # never offered besides the registry's WORKER_EXCLUDED_TOOLS. a worker takes no photos: take_photo is an optional
+    # tool in every tool prompt, a job would take them for nothing
+    EXCLUDED_TOOLS = ("take_photo",)
+    _turns = None           # the hub's Turns, see set_turns
     connections = None      # user_id -> open /ws connections
+
+    @classmethod
+    def set_turns(cls, turns):
+        """the hub's Turns (main.py at start), for jobs that wait until a reply being made is done before they post"""
+        cls._turns = turns
+
+    @classmethod
+    def get_turns(cls):
+        """the hub's Turns, None before the hub started (tests)"""
+        return cls._turns
 
     def __init__(self, role: str, prompt: str, job_id: Optional[str] = None, time_limit: float = DEFAULT_TIME_LIMIT, infrastructure=None,
                  tool_context: Optional[Dict[str, Any]] = None):
@@ -62,6 +64,9 @@ class AgentJob:
         self.protocol = None    # #174 the job's Protocol, the Controller makes it and hands it to its workers. None: no trace
         self.plan_step, self.plan_task = None, None   # a worker's step and task id in the plan, set by Controller.spawn
         self.attempt = 1        # a retried task's worker: 2, ... (Controller._retry)
+        self.attachments = []   # a worker's files its tools held (write_file, generate_image), they go into its result
+        self.excluded_tools = ()    # a retried task's worker: the tools that failed the attempts before (Controller._retry)
+        self.failed_tools = []      # the tools that failed or found nothing in this worker's run, a failed result names them
 
     def trace(self, action: str, ok=None, step=None, task=None, **data):
         """#174 one line of this agent in the job's protocol, by default in its own step and task"""
@@ -94,107 +99,94 @@ class AgentJob:
         tools = self._use_tools() if self.tool_context else ""
         text = self.chat([{"role": "user", "content": WORKER_PROMPT.format(role=self.role, prompt=self.prompt, tools=tools)}], 0.3).strip()
         if not text or text.upper().startswith("FAILED"):
-            self.result = {"error": text or "no reply from the llm"}
+            self.result = {"error": text or "no reply from the llm", **({"failed_tools": self.failed_tools} if self.failed_tools else {})}
         else:
-            self.result = {"summary": text, "details": ""}
+            self.result = {"summary": text, "details": "", **({"attachments": self.attachments} if self.attachments else {})}
         self.trace("done", ok="error" not in self.result, **({"error": text or "no reply"} if "error" in self.result else {"summary": text}))
         return True
 
     def _use_tools(self) -> str:
-        """a worker's tools (find_tools) and their results as the WEBSEARCH_RESULT / CONVERSION_RESULT / TOOL_RESULT blocks.
-        a failed tool fails the worker"""
+        """a worker's tools (run_tools) and their results as the TOOL_RESULTS block. a failed tool or a search that found
+        nothing does not fail the worker: the block says so, the worker decides if it can do its task anyway
+        (else it replies FAILED, its result names the failed tools for the retry, see Controller._retry)"""
         task, _, earlier = self.prompt.partition(RESULTS_MARKER)
         # the worker's own task only: the links in the earlier results would select fetch_url every time
-        directed = self.find_tools(task, self.prompt, WORKER_TOOLS)
-        if not directed:
-            raise RuntimeError("tool directing failed")
-        tool_calls = directed["tool_calls"]
+        execution = self.run_tools(task, self.prompt, WORKER_TOOLS)
+        results = execution.get_result()
+        self.attachments = [held for result in results.values() if isinstance(result, dict) for held in result.get("attachments") or []]
 
-        errors = [f"{r.get('tool', 'tool')}: {r['error']}" for r in self.response.get("tool_results", []) if "error" in r]
-        if any(call["tool"] == "websearch" for call in tool_calls) and not self.response.get("websearch_results"):
-            if earlier:     # the steps before found something, the worker goes on with that
-                logger.info(f"agent {self.role} {self.job_id}: websearch found nothing, going on with the earlier results")
-            else:
-                errors.append("websearch: no results")
-        if errors:
-            raise RuntimeError(f"tool failed: {'; '.join(errors)}")
+        failed = [f"{name} ({result['error']})" for name, result in results.items() if isinstance(result, dict) and "error" in result]
+        self.failed_tools = [name for name, result in results.items() if isinstance(result, dict) and "error" in result]
+        searched = any(entry["call"]["tool"] == "websearch" for entry in execution.executed)
+        empty_search = searched and "websearch" not in results
+        if empty_search:
+            self.failed_tools.append("websearch")
+            logger.info(f"agent {self.role} {self.job_id}: websearch found nothing, the worker goes on without it")
+        if failed:
+            logger.warning(f"agent {self.role} {self.job_id}: tools failed {'; '.join(failed)}")
 
-        compiled = directed["content"] or ""
-        compiled += self.tool_results_text(
-            "\n\nNo web search was done for this message. If you don't know current facts like opening hours, prices or news, say so.\n")
-        return compiled[:MAX_TOOL_CHARS]
+        text = execution.results_prompt(results)
+        if empty_search:
+            text = EMPTY_WEBSEARCH + text
+        elif "websearch" not in results:
+            text = NO_WEBSEARCH + text
+        if failed:
+            text = FAILED_TOOLS.format(failed="; ".join(failed)) + text
+        return text[:MAX_TOOL_CHARS]
 
-    def find_tools(self, detect: str, query: str, always: list) -> Optional[Dict[str, Any]]:
-        """the tool part of MetaTask.execute on this thread: laya detects tools on detect. each laya tool is requested
-        on its own, in TOOL_ORDER, and a synchronous tool runs before the next request (run_tools; its sub jobs, e.g.
-        FindAnswerTask, go to the TaskQueue). tools only offered alongside them (always, PROMPT_TOOLS, never
-        WORKER_EXCLUDED_TOOLS) are one combined request after that, and may be skipped.
-        returns {content, tool_calls} of what ran, None when directing produced no answer and nothing ran"""
-        from app.tasks import ToolDetectionTask, ToolDirectingTask     # here: app.tasks imports the tools package, that imports this one
-        from app.tasks.tool_directing_task import run_tool_sequence
+    def run_tools(self, detect: str, query: str, always: list):
+        from app.tasks import ToolDetectionTask, ToolExecutionTask
         context = self.tool_context
         registry = context["tool_registry"]
-        detection = ToolDetectionTask(detect, registry, self.infrastructure, excluded=WORKER_EXCLUDED_TOOLS)
+        excluded = registry.WORKER_EXCLUDED_TOOLS + self.EXCLUDED_TOOLS + tuple(self.excluded_tools)
+        detection = ToolDetectionTask(detect, registry, self.infrastructure, excluded_tools=excluded)
         registry.task_queue.run(detection)
-        detected = detection.result() or []
-        tool_names = [name for name in dict.fromkeys(detected + always + registry.PROMPT_TOOLS) if name not in WORKER_EXCLUDED_TOOLS]
-        steps = registry.tool_steps(tool_names, detected)
-        required = [name for name, must in steps if must]
-        optional = [name for name, must in steps if not must]
-        logger.info(f"agent {self.role} {self.job_id}: tools {tool_names}, required {required}, optional {optional}")
-        self.trace("tools", tools=tool_names, required=required, optional=optional)
-        self.response, self.executed_calls = {}, []
-        if not steps:
-            return {"content": "", "tool_calls": []}
+        detected = (detection.get_result() or {}).get("tool_names") or []
+        recommended = (detection.get_result() or {}).get("recommended") or []
 
-        request = ChatRequest(contact_id=context["contact_id"], conversation_id=context["conversation_id"], role="user",
-                              name=context["user_name"], content=query, temperature=0.3)
-        contents, answered = [], False
+        request = ChatRequest(
+            contact_id=context["contact_id"], 
+            conversation_id=context["conversation_id"], 
+            role="user",
+            name=context["user_name"], 
+            content=query, 
+            temperature=0.3
+        )
 
-        def ask(names, detected_names, results):
-            nonlocal answered
-            job = ToolDirectingTask(request=request, db=context["db"], infrastructure=self.infrastructure, tool_registry=registry,
-                                    tool_names=list(names), results=results, detected_tool_names=detected_names)
-            registry.task_queue.run(job)
-            directed = job.result()
-            if directed:
-                answered = True
-                if directed.get("content"):
-                    contents.append(directed["content"])
-            return directed
+        execution = ToolExecutionTask(
+            user_id=context["user_id"], 
+            request=request, 
+            context=None, 
+            db=context["db"],
+            infrastructure=self.infrastructure, 
+            tool_registry=registry, 
+            tool_names=detected + list(always),
+            excluded_tools=excluded, llm_timeout=JOB_LLM_TIMEOUT, recommended_tools=recommended
+        )
+        
+        logger.info(f"agent {self.role} {self.job_id}: tools {execution.tool_names}, recommended {execution.recommended}, detected {detected}")
+        self.trace("tools", tools=execution.tool_names, recommended=execution.recommended or None, detected=detected)
+        registry.task_queue.run(execution)
+        self._trace_calls(execution)
+        return execution
 
-        def direct(name, must, results):
-            return ask([name], [name] if must else None, results)
+    def _trace_calls(self, execution):
+        if self.protocol is None:
+            return
+        
+        results = execution.get_result()
+        for entry in execution.executed:
+            call = entry["call"]
+            tool = call.get("tool")
+            result = results.get(tool)
+            errors = [str(result["error"])] if isinstance(result, dict) and "error" in result else []
 
-        def direct_optional(names, results):
-            return ask(names, None, results)
+            if tool == "websearch" and result is None:
+                errors.append("no results")
 
-        def on_failure(name, error):
-            logger.warning(f"agent {self.role} {self.job_id}: mandatory tool {name} was not called: {error}")
-            self.response.setdefault("tool_results", []).append({"tool": name, "error": error})
-            self.trace("tool_directing", ok=False, error=f"{name}: {error}")
-
-        run_tool_sequence(steps, direct, self.run_tools, lambda: self.tool_results_text(keep=True), on_failure,
-                          lambda name: bool(registry.parallel.get(name)), lambda: self._stop.is_set(),
-                          direct_optional=direct_optional)
-        if not answered and not self.executed_calls:
-            if not required:
-                self.trace("tool_directing", ok=False, error="no tool calls written")
-            return None
-        return {"content": "\n".join(contents), "tool_calls": self.executed_calls}
-
-    def tool_results_text(self, no_websearch: str = "", keep: bool = False) -> str:
-        """MetaTask's formatting of the results in self.response (it only reads and pops it), no_websearch without a websearch result.
-        keep: the results stay in self.response (the tool chain's results so far)"""
-        from app.tasks import MetaTask
-        response = self.response
-        if keep:
-            self.response = dict(response)     # the formatters pop from the copy
-        try:
-            return (MetaTask._format_websearch_results(self) or no_websearch) + \
-                (MetaTask._format_conversion_results(self) or "") + (MetaTask._format_tool_results(self) or "")
-        finally:
-            self.response = response
+            self.protocol.tool_call(self.role, self.job_id, self.plan_step, self.plan_task, tool,
+                                    json.dumps({k: v for k, v in call.items() if k != "tool"}, ensure_ascii=False, default=str),
+                                    not errors, "; ".join(errors) or None, entry["ms"], self.attempt if self.attempt > 1 else None)
 
     def chat(self, messages: list, temperature: float) -> str:
         """one llm call, "" without a reply"""
@@ -202,29 +194,6 @@ class AgentJob:
             raise RuntimeError(f"{self.role} agent has no llm (infrastructure)")
         return self.infrastructure.chat(messages=messages, temperature=temperature, seed=random.randint(0, 100000),
                                         max_new_tokens=JOB_MAX_TOKENS, timeout=JOB_LLM_TIMEOUT) or ""
-
-    def run_tools(self, tool_calls: list) -> Dict[str, Any]:
-        """the synchronous calls on this thread, for the job's conversation (tool_context).
-        they append their results to self.response, like MetaTask.response. a sequence calls this once per tool,
-        after that tool was requested, so earlier results stay. self.executed_calls: the calls that ran, in order"""
-        context = self.tool_context
-        if getattr(self, "response", None) is None:
-            self.response = {}
-        if not hasattr(self, "executed_calls"):
-            self.executed_calls = []
-        for call in tool_calls:     # one by one: #174 each call's duration and result in the protocol, in the order they ran
-            self.executed_calls.append(call)
-            results, start = len(self.response.get("tool_results", [])), time.monotonic()
-            context["tool_registry"].execute(user_id=context["user_id"], contact_id=context["contact_id"], conversation_id=context["conversation_id"],
-                                             response=self.response, tool_calls=[dict(call, llm_timeout=JOB_LLM_TIMEOUT)], parallel=False)    # run_code writes code with it
-            if self.protocol is not None:   # a call failed when its tool reported an error, a websearch without results too
-                errors = [str(r["error"]) for r in self.response.get("tool_results", [])[results:] if "error" in r]
-                if call.get("tool") == "websearch" and not self.response.get("websearch_results"):
-                    errors.append("no results")
-                self.protocol.tool_call(self.role, self.job_id, self.plan_step, self.plan_task, call.get("tool"),
-                                        json.dumps({k: v for k, v in call.items() if k != "tool"}, ensure_ascii=False, default=str),
-                                        not errors, "; ".join(errors) or None, ms_since(start), self.attempt if self.attempt > 1 else None)
-        return self.response
 
     @staticmethod
     def user_name(db, user_id: int) -> str:

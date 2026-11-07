@@ -43,11 +43,6 @@ def _version() -> str:
     return match.group(1) if match else "unknown"
 
 
-async def _open_link(e):
-    if e.data:
-        await ft.UrlLauncher().launch_url(e.data)
-
-
 def _section(title: str, *controls) -> ft.Column:
     # same heading style as the sections of the contact profile page
     heading = ft.Text(title, style=theme.STYLES["section_heading"])
@@ -223,16 +218,26 @@ class PreferencesSettingsPage(ft.Column):
 
 
 class AppearanceSettingsPage(ft.Column):
-    """light or dark mode, stored on this device (also used before login)"""
+    """light or dark mode and the text size, stored on this device (also used before login)"""
     def __init__(self, on_mode_changed):
         super().__init__(expand=True, spacing=28, scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
         self.on_mode_changed = on_mode_changed
         self.dark_switch = ft.Switch(value=theme.is_dark(), on_change=self.on_dark_changed)
+        options = [ft.DropdownOption(key=str(scale), text=f"{name} ({round(scale * 100)}%)") for name, scale in theme.FONT_SCALES.items()]
+        if theme.font_scale not in theme.FONT_SCALES.values():
+            options.append(ft.DropdownOption(key=str(theme.font_scale), text=f"custom ({round(theme.font_scale * 100)}%)"))
+        self.font_scale_edit = ft.Dropdown(label="Text size", value=str(theme.font_scale), options=options,
+                                           on_select=self.on_font_scale_changed, **theme.STYLES["field"])
         self.controls = [
             _section(
                 "Mode",
                 ft.Text("stored on this device", color=theme.TEXT_DIM, size=12),
                 ft.Row([self.dark_switch, ft.Text("Dark mode", expand=True)]),
+            ),
+            _section(
+                "Text size",
+                ft.Text("on top of the system's text size, stored on this device", color=theme.TEXT_DIM, size=12),
+                self.font_scale_edit,
             ),
         ]
 
@@ -240,6 +245,12 @@ class AppearanceSettingsPage(ft.Column):
         mode = theme.DARK if self.dark_switch.value else theme.LIGHT
         RueckgratConfig().theme = mode
         theme.apply_theme(self.page, mode)
+        self.on_mode_changed()
+
+    def on_font_scale_changed(self, e=None):
+        scale = float(self.font_scale_edit.value)
+        RueckgratConfig().font_scale = scale
+        theme.apply_theme(self.page, new_font_scale=scale)
         self.on_mode_changed()
 
 
@@ -256,10 +267,14 @@ class DocSettingsPage(ft.Column):
                 value=text.replace("{version}", _version()),
                 selectable=True,
                 extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,   # includes tables
-                on_tap_link=_open_link,
+                on_tap_link=self._open_link,
                 md_style_sheet=theme.MARKDOWN_STYLE,
             ),
         ]
+
+    async def _open_link(self, e):
+        if e.data:
+            await ft.UrlLauncher().launch_url(e.data)
 
 
 class SettingsPage(BasePage):

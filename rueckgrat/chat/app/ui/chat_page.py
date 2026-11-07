@@ -3,10 +3,9 @@ import random
 import re
 import flet as ft
 from app.ui import theme
-from pathlib import Path
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, FileCard
+from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, FileCards
 from app.audio import Text_To_Speech
 from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig
 from app.common import get_logger, Utils
@@ -29,10 +28,13 @@ class ChatPage(BasePage):
         self._stream_gen = 0
         self._stream_message_id = None
         self._finished_message_ids = set()
+        self._spoken_id = None      # the streaming reply that is spoken while it is written
+        self._spoken_text = ""      # its text so far
         self._bubbles: dict[int, ChatBubble] = {}       # message id -> its bubble in the history
         self._slots: dict[int, ft.Column] = {}          # message id -> the column of its bubble and button row, a poll or map goes in between
-        self._pending_images: dict[int, str] = {}       # message id -> image file name that came before its bubble
-        self._pending_files: dict[int, dict] = {}       # message id -> text file card that came before its bubble
+        self._pending_images: dict[int, list[str]] = {}  # message id -> image file names that came before its bubble
+        self._pending_files: dict[int, list] = {}       # message id -> text file cards that came before its bubble
+        self._pending_extras: dict[int, dict] = {}      # message id -> {"poll", "map"} pushed by a detached tool before its bubble
         self.user_role_name = ""   # set from the user's own character profile in on_enter
 
         self.header = Header(navigator)
@@ -198,6 +200,7 @@ class ChatPage(BasePage):
         self._slots.clear()
         self._pending_images.clear()
         self._pending_files.clear()
+        self._pending_extras.clear()
         self._play_btn = None
         self.history.controls = [self.status_row]
         self.history.update()
@@ -213,10 +216,9 @@ class ChatPage(BasePage):
         self.clear_history()
 
         for message in Hub.get_messages(self.conversation_id):
-            image_name = next((item["file_name"] for item in message.get("attachments", [])
-                               if str(item.get("file_type") or "").startswith("image/")), None)
-            image_path = self._get_image(image_name) if image_name else None
-            self._append_history(message["role"], message["content"], image_path, message_id=message["id"],
+            image_paths = [self._get_image(item["file_name"]) for item in message.get("attachments", [])
+                           if str(item.get("file_type") or "").startswith("image/") and item.get("file_name")]
+            self._append_history(message["role"], message["content"], image_paths, message_id=message["id"],
                                  sources=message.get("sources"), poll=message.get("poll"), place=message.get("map"),
                                  text_files=message.get("text_files"))
         # a reply still being made is already loaded with its text so far: skip its deltas, the final "chat" fills it
@@ -322,9 +324,10 @@ class ChatPage(BasePage):
             await self.audio_streamer.stop()
             self.audio_streamer = None
 
-    def _append_history(self, role: str, content: str, image_filepath: str = None, message_id: int = None, sources: list | None = None, poll: dict | None = None, place: dict | None = None, text_files: dict | None = None) -> ChatBubble | None:
+    def _append_history(self, role: str, content: str, image_filepaths: list[str] | None = None, message_id: int = None, 
+                        sources: list | None = None, poll: dict | None = None, place: dict | None = None, text_files: list | None = None) -> ChatBubble | None:
         try:
-            bubble = ChatBubble(role, content, image_filepath)
+            bubble = ChatBubble(role, content, image_filepaths)
             if message_id is not None:
                 self._bubbles[message_id] = bubble
             if role == "assistant":
@@ -359,8 +362,8 @@ class ChatPage(BasePage):
                     self._set_poll(message_id, poll)
                 if place:
                     self._set_map(message_id, place)
-                if text_files:
-                    self._set_files(message_id, text_files)
+                for spec in text_files or []:
+                    self._set_files(message_id, spec)
             self.history.update()
             return bubble
         except Exception as e:
@@ -368,27 +371,36 @@ class ChatPage(BasePage):
             return None            
 
     def _set_poll(self, message_id: int, poll: dict):
-        """the poll bubble between the message's bubble and its button row, once per message. the caller updates the history"""
-        slot = self._slots.get(message_id)
-        if slot is None or any(isinstance(c.content, PollView) for c in slot.controls if isinstance(c, ft.Container)):
-            return
-        view = PollView(poll, on_submit=lambda chosen, m=message_id: self._submit_poll(m, chosen))
-        slot.controls.insert(1, ft.Container(content=view, margin=ft.Margin(left=0, top=8, right=0, bottom=0), **theme.STYLES["chat_assistant"]))
+        try:
+            slot = self._slots.get(message_id)
+            if slot is None or any(isinstance(c.content, PollView) for c in slot.controls if isinstance(c, ft.Container)):
+                return
+            view = PollView(poll, on_submit=lambda chosen, m=message_id: self._submit_poll(m, chosen))
+            slot.controls.insert(1, ft.Container(content=view, margin=ft.Margin(left=0, top=8, right=0, bottom=0), **theme.STYLES["chat_assistant"]))
+        except Exception as e:
+            logger.error(f"failed to set poll: {repr(e)}")
 
     def _set_map(self, message_id: int, place: dict):
-        """the map bubble between the message's bubble (and its poll) and its button row, once per message. the caller updates the history"""
-        slot = self._slots.get(message_id)
-        if slot is None or any(isinstance(c.content, MapView) for c in slot.controls if isinstance(c, ft.Container)):
-            return
-        slot.controls.insert(len(slot.controls) - 1, ft.Container(content=MapView(place), margin=ft.Margin(left=0, top=8, right=0, bottom=0), **theme.STYLES["chat_assistant"]))
+        try:
+            slot = self._slots.get(message_id)
+            if slot is None or any(isinstance(c.content, MapView) for c in slot.controls if isinstance(c, ft.Container)):
+                return
+            slot.controls.insert(len(slot.controls) - 1, ft.Container(content=MapView(place), margin=ft.Margin(left=0, top=8, right=0, bottom=0), **theme.STYLES["chat_assistant"]))
+        except Exception as e:
+            logger.error(f"failed to set map: {repr(e)}")
 
     def _set_files(self, message_id: int, spec: dict):
-        """the file card under the bubble, once per message. names are the paths the AI wrote"""
-        slot = self._slots.get(message_id)
-        if slot is None or any(isinstance(c.content, FileCard) for c in slot.controls if isinstance(c, ft.Container)):
-            return
-        slot.controls.insert(len(slot.controls) - 1, ft.Container(
-            content=FileCard(message_id, spec), margin=ft.Margin(left=0, top=8, right=0, bottom=0)))
+        try:
+            slot = self._slots.get(message_id)
+            if slot is None:
+                return
+            cards = next((c.content for c in slot.controls if isinstance(c, ft.Container) and isinstance(c.content, FileCards)), None)
+            if cards is None:
+                cards = FileCards(message_id)
+                slot.controls.insert(len(slot.controls) - 1, ft.Container(content=cards, margin=ft.Margin(left=0, top=8, right=0, bottom=0)))
+            cards.add(spec)
+        except Exception as e:
+            logger.error(f"failed to set files: {repr(e)}")
 
     def _submit_poll(self, message_id: int, chosen: list[str]) -> bool:
         """the poll's choice goes to the hub as the user's next message, the hub locks the poll with it"""
@@ -415,10 +427,12 @@ class ChatPage(BasePage):
                     pass    # its bubble is not on the page (anymore)
         self._play_btn = button
 
-    def _speak(self, content: str, message_id: int | None = None, play_btn: ft.IconButton | None = None):
-        """speaks a message and animates the bars on the mute button while it is generated and played"""
+    def _speak(self, content: str, message_id: int | None = None, play_btn: ft.IconButton | None = None, streaming: bool = False):
+        """speaks a message and animates the bars on the mute button while it is generated and played.
+        streaming: the reply is still being written, Text_To_Speech.stream_text hands over the rest"""
         self._show_playing(play_btn)
-        Text_To_Speech.speak(text=self._cleanup_for_speech(content), voice=self.contact.get_voice_id(), message_id=message_id)
+        speak = Text_To_Speech.speak_stream if streaming else Text_To_Speech.speak
+        speak(text=content, voice=self.contact.get_voice_id(), message_id=message_id)
         if not self._tts_running and self.page:
             self._tts_running = True
             self.page.run_task(self._tts_loop)
@@ -469,7 +483,7 @@ class ChatPage(BasePage):
                 await asyncio.sleep(0.15)
         except Exception as e:
             restart = False
-            logger.debug(f"tts bars stopped: {repr(e)}")  # e.g. the page went away
+            logger.debug(f"tts bars stopped: {repr(e)}")
         finally:
             self._tts_running = False
             try:
@@ -499,14 +513,6 @@ class ChatPage(BasePage):
 
     def _cleanup_content(self, content):
         return self._remove_excess_linebreaks(content)
-
-    def _cleanup_for_speech(self, content):
-        content = content.replace("*", "")
-        content = re.sub(r"```.*?```", "", content, flags=re.DOTALL)
-        content = re.sub(r"\*[^*]+\*|\([^)]*\)|\[[^\]]+\]", "", content)
-        content = re.sub(r"https?://\S+|www\.\S+", "", content).strip()
-        content = re.sub(r"\[IMAGE:[^\]]*\]", "", content).strip()
-        return content
 
     def _get_image(self, image_filename) -> str:
         image_path = Paths.get_image_path() / image_filename
@@ -538,6 +544,20 @@ class ChatPage(BasePage):
         self._stream_message_id = None
         self._stream_gen += 1
         self.delta_buffer = ""
+        self._spoken_id = None
+
+    def _speak_delta(self, message_id: int | None, delta: str):
+        """with speech on, a reply is spoken while it streams: its first delta starts it, the others add to it"""
+        if message_id is None:
+            return
+        if message_id != self._spoken_id:
+            if not self.mute_btn.selected:
+                return
+            self._spoken_id, self._spoken_text = message_id, delta
+            self._speak(delta, message_id, streaming=True)
+            return
+        self._spoken_text += delta
+        Text_To_Speech.stream_text(message_id, self._spoken_text)
 
     def _remove_bubble(self, message_id: int):
         bubble = self._bubbles.pop(message_id, None)
@@ -567,8 +587,8 @@ class ChatPage(BasePage):
         self.history.update()
 
     def on_incomming_message(self, message: dict):
-        #if not "delta" in message:
-            #logger.debug(f"incomming message:\n{Utils.pretty_print(message)}")
+        if not "delta" in message:
+            logger.debug(f"incomming message:\n{Utils.pretty_print(message)}")
 
         try:
             if "status" in message:
@@ -583,6 +603,7 @@ class ChatPage(BasePage):
                     return
                 self._stream_message_id = message_id
                 self.delta_buffer += message["delta"]
+                self._speak_delta(message_id, message["delta"])
                 if self.page:
                     self.page.run_task(self._schedule_flush, self._stream_gen)
 
@@ -596,7 +617,16 @@ class ChatPage(BasePage):
                     self._set_files(message_id, spec)
                     self.history.update()
                 else:
-                    self._pending_files[message_id] = spec
+                    self._pending_files.setdefault(message_id, []).append(spec)
+
+            for kind, key, set_extra in (("poll", "poll", self._set_poll), ("map", "place", self._set_map)):
+                if kind in message and message[kind].get("conversation_id") == self.conversation_id:
+                    message_id = message[kind].get("message_id")
+                    if self._slots.get(message_id):
+                        set_extra(message_id, message[kind][key])
+                        self.history.update()
+                    else:
+                        self._pending_extras.setdefault(message_id, {})[kind] = message[kind][key]
 
             if "cancelled" in message and message["cancelled"]["conversation_id"] == self.conversation_id:
                 self._drop_stream(message["cancelled"].get("message_id"))
@@ -618,23 +648,24 @@ class ChatPage(BasePage):
                     self.delta_buffer = ""
                     content = self._cleanup_content(chat["content"])
                     role = chat["role"]
-                    image_filename = self._pending_images.pop(message_id, None)
-                    if image_filename is None:
+                    image_filenames = self._pending_images.pop(message_id, [])
+                    if not image_filenames:
                         if "take_photo" in message:
-                            image_filename = message["take_photo"]["filename"]
+                            image_filenames = [message["take_photo"]["filename"]]
                         elif "generate_image" in message:
-                            image_filename = message["generate_image"]["filename"]
-                    image_path = self._get_image(image_filename) if image_filename else None
+                            image_filenames = [message["generate_image"]["filename"]]
+                    image_paths = [self._get_image(name) for name in image_filenames]
                     sources = chat.get("sources") or []
-                    poll = chat.get("poll")
-                    place = chat.get("map")
+                    extras = self._pending_extras.pop(message_id, {})
+                    poll = extras.get("poll")
+                    place = extras.get("map")
                     bubble = self._bubbles.get(message_id)
-                    if bubble:  # streamed, or loaded from history in on_enter: the final text replaces what it has
+                    if bubble:
                         bubble.clear_content()
                         bubble.append_content(content)
                         bubble.update()
-                        if image_path:
-                            bubble.set_image(image_path)
+                        for image_path in image_paths:
+                            bubble.add_image(image_path)
                         if sources:
                             bubble.action_row.set_sources(sources)
                             self.history.update()
@@ -646,13 +677,17 @@ class ChatPage(BasePage):
                             self.history.update()
                         files = self._pending_files.pop(message_id, None)
                         if files:
-                            self._set_files(message_id, files)
+                            for spec in files:
+                                self._set_files(message_id, spec)
                             self.history.update()
                     else:
-                        self._append_history(role, content, image_path, message_id=message_id, sources=sources, poll=poll, place=place,
+                        self._append_history(role, content, image_paths, message_id=message_id, sources=sources, poll=poll, place=place,
                                              text_files=self._pending_files.pop(message_id, None))
 
-                    if self.mute_btn.selected:
+                    if message_id is not None and message_id == self._spoken_id:
+                        Text_To_Speech.stream_text(message_id, chat["content"], final=True)
+                        self._spoken_id = None
+                    elif self.mute_btn.selected:
                         self._speak(content, message_id)
         except Exception as e:
             logger.error(f"failed to handle incomming message: {e}")
@@ -668,9 +703,11 @@ class ChatPage(BasePage):
             return
         bubble = self._bubbles.get(message_id)
         if bubble and message_id != self._stream_message_id:   # while it streams, the "chat" message adds the image once
-            bubble.set_image(self._get_image(filename))
+            bubble.add_image(self._get_image(filename))
         else:
-            self._pending_images[message_id] = filename
+            pending = self._pending_images.setdefault(message_id, [])
+            if filename not in pending:
+                pending.append(filename)
 
     def send_message(self):
         self.status_widget.clear_status()

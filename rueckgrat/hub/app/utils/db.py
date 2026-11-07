@@ -14,7 +14,7 @@ logger = get_logger()
 # a different model with another size needs this changed and SCHEMA_VERSION bumped
 MEMORY_EMBEDDING_DIM = 384
 # PRAGMA user_version of a db made by this hub. bump it on every schema change: until 1.0 an older db is wiped, never migrated
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 # #174 job protocols older than this are deleted (save_protocol and hub start), they are for looking into recent jobs
 PROTOCOL_RETENTION_HOURS = 24
 
@@ -74,7 +74,7 @@ class ChatDB:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             contact_id INTEGER NOT NULL,
-            title TEXT DEFAULT "...",
+            title TEXT DEFAULT '...',
             context TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 
@@ -91,7 +91,6 @@ class ChatDB:
             content TEXT NOT NULL,
             timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
             sources TEXT,
-            tools TEXT,
             poll TEXT,      -- json {question, options, mode, chosen}, see PollTool
             map TEXT,       -- json {query, label, lat, lon, display_name, zoom}, see MapTool
 
@@ -158,13 +157,6 @@ class ChatDB:
         cursor.execute("DELETE FROM refresh_tokens WHERE expires_at < ?", (self._now(),))
 
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS user_data (
-            user_id INTEGER PRIMARY KEY,
-            profile TEXT,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )""")
-
-        cursor.execute("""
             CREATE TABLE IF NOT EXISTS voices (
             id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
@@ -202,14 +194,13 @@ class ChatDB:
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
 
-        # what a contact remembers (remember tool), per user and contact. embedding stays NULL until there is search
+        # what a contact remembers (remember tool), per user and contact. the vector is in contact_memory_vectors
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS contact_memories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             contact_id INTEGER NOT NULL,
             text TEXT NOT NULL,
-            embedding BLOB DEFAULT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
@@ -257,10 +248,12 @@ class ChatDB:
             END
         """)
 
-        # per user settings. timezone: IANA name, the companion plans in it (timestamps stay UTC)
+        # per user settings. profile: the user's profile json (get_user_data). timezone: IANA name, the companion plans in it
+        # (timestamps stay UTC)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
             user_id INTEGER PRIMARY KEY,
+            profile TEXT,
             timezone TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
@@ -380,9 +373,8 @@ class ChatDB:
             ON voices(contact_id) WHERE contact_id IS NOT NULL
         """)
 
-        # text files of write_file. real_name is the path the AI wrote (css/style.css or files.zip).
+        # text files of write_file. real_name is the path the AI wrote (css/style.css).
         # stored_name is the hashed file in files/<user_id>/<conversation_id>/<message_id>/.
-        # a zip's members point at that same stored_name via parent_id and are not separate files on disk.
         # additive: SCHEMA_VERSION stays put, because bumping it wipes the database before 1.0
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS message_files (
@@ -401,6 +393,18 @@ class ChatDB:
             FOREIGN KEY (parent_id) REFERENCES message_files(id) ON DELETE CASCADE
         )""")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_files_message ON message_files(message_id)")
+
+        # sqlite does not index foreign keys by itself: the lookups by conversation, contact and message
+        for index, table_columns in (
+            ("idx_messages_conversation", "messages(conversation_id)"),
+            ("idx_conversations_contact", "conversations(user_id, contact_id)"),
+            ("idx_attachments_message", "attachments(message_id)"),
+            ("idx_contact_images_contact", "contact_images(contact_id)"),
+            ("idx_contact_memories_contact", "contact_memories(user_id, contact_id)"),
+            ("idx_companion_log_contact", "companion_log(contact_id)"),
+            ("idx_jobs_conversation", "jobs(conversation_id)"),
+        ):
+            cursor.execute(f"CREATE INDEX IF NOT EXISTS {index} ON {table_columns}")
 
         cursor.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
@@ -572,69 +576,27 @@ class ChatDB:
             cursor.execute("SELECT id, username, created_at FROM users")
             return [dict(row) for row in cursor.fetchall()]        
 
-    def create_user_data(self, user_id: int, profile: str = None) -> bool:
+    def update_user_data(self, user_id: int, user_data: dict) -> bool:
+        """stores the user's profile (user_data["profile"], json text), the other settings stay"""
+        if "profile" not in user_data:
+            return False
         with self.get_connection() as conn:
             try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO user_data (user_id, profile) VALUES (?, ?)",
-                    (user_id, profile)
-                )
-                conn.commit()
-                return True
-            except sqlite3.IntegrityError:
-                return False
-        
-    def update_user_data(self, user_id: int, user_data: dict):
-        allowed_fields = ["profile"]
-
-        with self.get_connection() as conn:
-            try:
-                cursor = conn.cursor()
-
-                # Check if row exists
-                cursor.execute("SELECT 1 FROM user_data WHERE user_id = ?", (user_id,))
-                exists = cursor.fetchone() is not None
-
-                values = []
-                for key in allowed_fields:
-                    if key in user_data:
-                        values.append(user_data[key])
-
-                if not values:
-                    return False
-
-                if exists:
-                    set_clause = ", ".join(f"{key} = ?" for key in allowed_fields if key in user_data)
-                    query = f"UPDATE user_data SET {set_clause} WHERE user_id = ?"
-                    values.append(user_id)
-                else:
-                    cols = ["user_id"] + [k for k in allowed_fields if k in user_data]
-                    placeholders = ["?"] * len(cols)
-                    query = f"INSERT INTO user_data ({', '.join(cols)}) VALUES ({', '.join(placeholders)})"
-                    values.insert(0, user_id)
-
-                cursor.execute(query, values)
+                cursor = conn.execute("""
+                    INSERT INTO user_settings (user_id, profile) VALUES (?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET profile = excluded.profile
+                """, (user_id, user_data["profile"]))
                 conn.commit()
                 return cursor.rowcount > 0
-
             except Exception as e:
                 logger.error(f"failed updating user data {e}")
-                return False        
+                return False
 
-    def delete_user_data(self, user_id: int) -> bool:
+    def get_user_data(self, user_id: int) -> dict | None:
+        """{"profile": json text}, None without a profile"""
         with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM user_data WHERE user_id = ?", (user_id,))
-            conn.commit()
-            return cursor.rowcount > 0
-
-    def get_user_data(self, user_id: int) -> dict:
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT profile FROM user_data WHERE user_id = ?", (user_id,))
-            row = cursor.fetchone()
-            return {"profile": row[0]} if row else None
+            row = conn.execute("SELECT profile FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
+            return {"profile": row[0]} if row and row[0] is not None else None
 
     def create_contact(self, user_id: int, contact_name: str) -> int:
         with self.get_connection() as conn:
@@ -1146,10 +1108,11 @@ class ChatDB:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
+                # summary: the nightly maintenance summary (ConversationSummaryTask), None if there is none yet
                 cursor.execute("""
-                    SELECT id, user_id, contact_id, title, context, created_at
-                    FROM conversations
-                    WHERE id = ?
+                    SELECT c.id, c.user_id, c.contact_id, c.title, c.context, c.created_at, s.summary
+                    FROM conversations c LEFT JOIN conversation_summaries s ON s.conversation_id = c.id
+                    WHERE c.id = ?
                 """, (conversation_id,))
 
                 row = cursor.fetchone()
@@ -1577,7 +1540,7 @@ class ChatDB:
                 cursor.execute("""
                     SELECT *
                     FROM (
-                        SELECT id, role, name, content, timestamp, sources, tools, poll, map
+                        SELECT id, role, name, content, timestamp, sources, poll, map
                         FROM messages
                         WHERE conversation_id = ?
                         ORDER BY timestamp DESC
@@ -1589,7 +1552,6 @@ class ChatDB:
                 messages = [dict(row) for row in cursor.fetchall()]
                 for message in messages:
                     message["sources"] = json.loads(message["sources"]) if message["sources"] else []
-                    message["tools"] = json.loads(message["tools"]) if message["tools"] else []
                     message["poll"] = json.loads(message["poll"]) if message["poll"] else None
                     message["map"] = json.loads(message["map"]) if message["map"] else None
                 return messages
@@ -1676,17 +1638,6 @@ class ChatDB:
                 logger.error(f"setting message sources: {e}")
         return False
 
-    def set_message_tools(self, message_id: int, tools: list) -> bool:
-        with self.get_connection() as conn:
-            try:
-                cursor = conn.cursor()
-                cursor.execute("UPDATE messages SET tools = ? WHERE id = ?", (json.dumps(tools), message_id))
-                conn.commit()
-                return cursor.rowcount > 0
-            except Exception as e:
-                logger.error(f"setting message tools: {e}")
-        return False
-
     def set_message_poll(self, message_id: int, poll: dict) -> bool:
         with self.get_connection() as conn:
             try:
@@ -1747,7 +1698,7 @@ class ChatDB:
         return -1
 
     def get_message_file(self, message_id: int, stored_name: str) -> dict | None:
-        """the downloadable row (not a zip member) with this hashed name"""
+        """the downloadable row with this hashed name"""
         with self.get_connection() as conn:
             try:
                 row = conn.execute("""

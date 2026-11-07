@@ -1,6 +1,7 @@
 from .task_queue import Task
 from typing import Optional
 import random
+from typing import Dict, Any
 
 from app.common import get_logger
 from app.utils.content_filter import strip_html_boilerplate, strip_text_noise
@@ -28,8 +29,8 @@ class SummarizeTask(Task):
         except Exception as e:
             logger.error(f"failed to summarize {repr(e)}")
 
-    def result(self) -> Optional[str]:
-        return self.summary
+    def get_result(self) -> Dict[str, Any]:
+        return {"summary": self.summary}
 
     def _prepare(self) -> str:
         """filter first, then cap, so max_chars is spent on content and not on menus"""

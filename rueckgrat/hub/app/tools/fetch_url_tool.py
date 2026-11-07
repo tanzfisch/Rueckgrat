@@ -1,6 +1,5 @@
 import re
 from typing import Dict,  Any
-from .tool import ToolCategory
 from .websearch_tool import WebsearchTool
 from app.tasks.summarize_task import SummarizeTask
 from app.utils.url_check import check_url, FetchBlocked
@@ -20,14 +19,13 @@ def normalize_url(url: str) -> str:
 
 class FetchUrlTool(WebsearchTool):
     """subclass of WebsearchTool only to reuse _extract_page and _get_org_name, everything else is its own"""
-    category = ToolCategory.WEB
     description = "reads a web page the user gives a link to and returns a condensed summary of it"
     question = []    # not a laya question: ToolDetectionTask selects it from URL_PATTERN in the message
     PAGE_TIMEOUT = 20           # one page the user is waiting for, not a batch
     BROWSER_FALLBACK = True     # the user asked for this page, worth a headless browser if plain http comes back thin
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
@@ -43,30 +41,33 @@ class FetchUrlTool(WebsearchTool):
         MessageQueue().send_status_message("reading the page")
 
         try:
-            check_url(url)      # the clear reason up front. _extract_page checks again, pinned, and every redirect
+            check_url(url)
             page = self._extract_page(url)
             if not page:
-                if getattr(self, "blocked_reason", None):
-                    result = {"tool": self.name(), "error": self.blocked_reason}
-                else:
-                    result = {"tool": self.name(), "error": "could not read the page (unreachable, empty or needs JavaScript)"}
-            else:
-                job = SummarizeTask(text=page["text"], focus=focus, infrastructure=self.infrastructure)
-                self.add_sub_job(job)
-                self.wait_for([job])
-                summary = job.result()
-                if summary:
-                    result = {"tool": self.name(), "text": f"{summary} - source {self._get_org_name(page['url'])} ({page['url']})"}
-                    self.add_source(page["url"])
-                else:
-                    result = {"tool": self.name(), "error": "could not summarize the page"}
+                logger.error(f"failed to extract page {url}")
+                return
+            
+            summarize_task = SummarizeTask(text=page["text"], focus=focus, infrastructure=self.infrastructure)
+            self.add_sub_task(summarize_task)
+            self.wait_for([summarize_task])
+            summary_result = summarize_task.get_result()
+            if not summary_result or not "summary" in summary_result:
+                logger.error(f"failed to extract page {url}")
+                return
+
+            summary = summary_result["summary"]
+            result = {
+                "tool": self.name(), 
+                "text": f"{summary} - source {self._get_org_name(page['url'])} ({page['url']})"
+            }
+
+            self.add_result(result)
+            self.add_source(page["url"])
+            
         except FetchBlocked as e:
-            result = {"tool": self.name(), "error": str(e)}
+            logger.error(f"failed to fetch {url} {repr(e)}")
         except Exception as e:
             logger.error(f"failed to fetch {url} {repr(e)}")
-            result = {"tool": self.name(), "error": "reading the page failed"}
-
-        self.response.setdefault("tool_results", []).append(result)
 
     @classmethod
     def prompt(cls) -> str:

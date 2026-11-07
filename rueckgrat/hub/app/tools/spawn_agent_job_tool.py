@@ -2,7 +2,7 @@ import threading
 import time
 from typing import Dict, Any
 from uuid import uuid4
-from .tool import Tool, ToolCategory
+from .tool import Tool
 from app.agent_jobs.agent_job import AgentJob
 from app.agent_jobs.controller import Controller, short_name
 
@@ -17,8 +17,13 @@ JOB_PROMPT:
 JOB_RESULT:
 {summary}
 {details}
-
+{attachments}
 Tell the user in one or two short sentences that the job is done and what it found. Reply with the message only.
+"""
+ATTACHMENTS_NOTE = """
+ATTACHED (already with your message, files as download buttons, images shown):
+{names}
+Do NOT write their code or content into your message, only say what they are.
 """
 
 CANCEL_PROMPT = """The user cancelled a background job you started for them, it was stopped before it finished.
@@ -41,26 +46,32 @@ Tell the user in one or two short sentences that the job "{name}" failed and why
 """
 FAIL_REASON_CHARS = 300     # the failure as the contact gets it, the full one is in the protocol
 
+# the reply that starts a job only says so: the job does the work, its report comes as a new message later
+HANDED_OFF = ("Do NOT do the task yourself in this reply: no code, no file contents, no research, no results, no lists, "
+              "no drafts and no plan. Only tell the user in one or two short sentences that you are on it and report back when it is done.")
+
 class SpawnAgentJobTool(Tool):
     """#152 starts a background job: a Controller agent plans it and runs its workers (app.agent_jobs).
     the contact then tells the user about the result in a new message of the same conversation"""
-    category = ToolCategory.GENERAL
     description = "hands a task to a background job: long or multi-step work, research with its own analysis, watching something, or repeating on a schedule and reporting back later"
-    # the user tells the ai to do it, not talks about background jobs, agents or tools (scored on laya, /tmp/rg_spawnq)
+    # scored on laya (/tmp/probe_spawn.py): jobs 0.44-0.90, chat messages (a how-to with a code block, explain, a follow-up
+    # question, poem, weather) at most 0.38. "commanding you to put a task in the background" took a venv how-to for a job (0.66)
     question = [
-        "Is the user commanding you to put a task in the background?",
-        "Is the user asking you to research something on your own and report back later?",
-        "Is the user telling you to monitor something and alert them when it changes?"
+        "Is the user asking you to build a complete multi-file software project?",
+        "Does the user tell you to work on it in the background?",
+        "Is the user telling you to monitor something and alert them when it changes?",
+        "Is the user asking you to check something regularly or watch for a change?",
+        "Is the user asking you to compare several products using reviews?"
     ]
 
-    # set at hub start (main.py). the report waits while a reply is being made (AgentJob.turns)
+    # set at hub start (main.py). the report waits while a reply is being made (AgentJob.get_turns())
     # and is pushed only to a user with an open /ws (AgentJob.connections), it is in the db anyway
     tool_registry = None    # the workers' tools
     running: Dict[str, "SpawnAgentJobTool"] = {}    # job_id -> the tool of a running job: cancel, the user's messages
     running_lock = threading.Lock()
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
@@ -87,16 +98,16 @@ class SpawnAgentJobTool(Tool):
         if current is not None:
             # the user's message is in its inbox already (main.py, add_message), the job's next review reads it
             logger.info(f"spawn_job: job {current.job_id} runs in conversation {self.conversation_id}, no second job")
-            self.response.setdefault("tool_results", []).append({"tool": self.name(), "job_id": current.job_id,
-                "text": "a job is running in this conversation already, it got the user's message and adjusts its plan after its current step"})
+            self.add_result({"tool": self.name(), "job_id": current.job_id,
+                "text": f"a background job is running in this conversation already, it got the user's message and adjusts its plan after its current step. {HANDED_OFF}"})
             return
         if not saved:
-            self.response.setdefault("tool_results", []).append({"tool": self.name(), "job_id": job_id, "error": "the job could not be started"})
+            self.add_result({"tool": self.name(), "job_id": job_id, "error": "the job could not be started"})
             return
 
         threading.Thread(target=self._run, args=(job_id, prompt), daemon=True, name=f"job-{job_id[:8]}").start()
-        logger.debug(f"spawn_agent_job id:{job_id} started, prompt: {prompt}")
-        self.response.setdefault("tool_results", []).append({"tool": self.name(), "job_id": job_id, "text": "the job was started, it reports back when it is done"})
+        logger.debug(f"spawn_agent_job id:{job_id} started, prompt:\n{prompt}")
+        self.add_result({"tool": self.name(), "job_id": job_id, "text": f"a background job was started and is doing the task now. {HANDED_OFF}"})
 
     def _run(self, job_id: str, prompt: str):
         self._job = {"job_id": job_id, "name": short_name(prompt), "percent": 0, "step": 0, "total": 0}    # the last progress sent
@@ -135,10 +146,13 @@ class SpawnAgentJobTool(Tool):
             task, fallback = CANCEL_PROMPT.format(prompt=prompt, name=name), f'The background job "{name}" is cancelled.'
         else:
             self._send_progress(state="done", percent=100)
-            task = REPORT_PROMPT.format(prompt=prompt, summary=result["summary"], details=result["details"])
+            attachments = result.get("attachments") or []
+            names = "\n".join(f"- {held['name']}" for held in attachments)
+            task = REPORT_PROMPT.format(prompt=prompt, summary=result["summary"], details=result["details"],
+                                        attachments=ATTACHMENTS_NOTE.format(names=names) if attachments else "")
             fallback = f"The background job is done: {result['summary']}"
         try:
-            self._report(task, fallback)
+            self._report(task, fallback, result.get("attachments") if failure is None and not self.cancelled else None)
         except Exception as e:
             logger.error(f"job {job_id}: report failed {repr(e)}")
 
@@ -210,21 +224,26 @@ class SpawnAgentJobTool(Tool):
             return
         MessageQueue().send_job_progress(self._job["job_id"], self._job["name"], self._job["percent"], state,
                                          self._job["step"], self._job["total"], user_id=self.user_id)
-        if state != "running" and not (AgentJob.turns and AgentJob.turns.busy(self.conversation_id)):
+        turns = AgentJob.get_turns()
+        if state != "running" and not (turns and turns.busy(self.conversation_id)):
             MessageQueue().set_status("done", user_id=self.user_id)    # stops the spinner of the workers' tool status messages
 
-    def _report(self, task: str, fallback: str):
+    def _report(self, task: str, fallback: str, attachments=None):
         """the contact tells the user what the job found, that it failed or was cancelled (task: REPORT_PROMPT / FAIL_PROMPT / CANCEL_PROMPT):
-        a new assistant message, stored and pushed like a companion message (AgentJob.post_message)"""
+        a new assistant message, stored and pushed like a companion message (AgentJob.post_message). attachments: the files
+        the workers' tools held (write_file, generate_image), attached to that message"""
         contact = self.db.get_contact_by_id(self.contact_id)
         name = Utils.get_nested_value(contact, ["identity", "name"], "")
         messages = AgentJob.persona_messages(contact, self.db.get_conversation(self.conversation_id), AgentJob.user_name(self.db, self.user_id), task)
         text = self.controller.chat(messages, 0.7).strip() or fallback
 
-        while AgentJob.turns and AgentJob.turns.busy(self.conversation_id):
+        turns = AgentJob.get_turns()
+        while turns and turns.busy(self.conversation_id):
             time.sleep(1)   # a reply is being made, the report comes after it
-        message_id, _ = AgentJob.post_message(self.db, self.user_id, self.conversation_id, text, name)
+        message_id, pushed = AgentJob.post_message(self.db, self.user_id, self.conversation_id, text, name)
         logger.info(f"job report sent as message {message_id}, conversation {self.conversation_id}")
+        if attachments:
+            self.tool_registry.attach_held(self.db, self.user_id, self.conversation_id, message_id, attachments, push=pushed)
 
     @classmethod
     def prompt(cls) -> str:

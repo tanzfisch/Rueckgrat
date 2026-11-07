@@ -1,6 +1,8 @@
 import re
 
 MIN_CHUNK_WORDS = 35
+FIRST_CHUNK_WORDS = 15  # the first chunks of a reply are shorter, so its speech starts sooner, see chunk_words
+CHUNK_WORDS_STEP = 5
 ABBREVIATIONS = {
     "mr.", "mrs.", "ms.", "dr.", "prof.", "sr.", "jr.", "rev.", "gen.", "col.", "lt.", "capt.", "sgt.", "maj.", "adm.", "gov.", "pres.", "sen.", "rep.", "hon.", "st.",  # titles
     "u.s.", "u.k.", "u.n.", "e.u.", "f.b.i.", "c.i.a.", "n.s.a.", "i.r.s.", "f.d.a.", "e.p.a.", "f.t.c.", "f.c.c.", "f.a.a.", "d.o.d.", "d.o.j.", "d.o.e.", "d.o.l.", "d.o.s.", "d.o.t.", "d.o.i.",  # organisations
@@ -13,19 +15,40 @@ ABBREVIATIONS = {
 }
 
 
-def split_into_chunks(text: str, min_words: int = MIN_CHUNK_WORDS) -> list[str]:
-    """splits text into chunks of at least min_words words, a chunk only ends where a sentence ends
-    (a word ending in . ! ? or …, not an abbreviation, an initial or a number like "12." or "12.10.").
-    the last chunk takes the rest. decimals like 3.5 never end a sentence, there is no space after the dot"""
+def chunk_words(index: int) -> int:
+    """the minimum words of a reply's chunk: they grow by CHUNK_WORDS_STEP from FIRST_CHUNK_WORDS up to MIN_CHUNK_WORDS,
+    so each chunk's speech is generated while the shorter one before it plays"""
+    return min(MIN_CHUNK_WORDS, FIRST_CHUNK_WORDS + CHUNK_WORDS_STEP * index)
+
+
+def split_into_chunks(text: str, min_words: int = MIN_CHUNK_WORDS, max_words: int | None = None) -> list[str]:
     chunks, words = [], []
     for word in text.split():
         words.append(word)
         end = word.rstrip("\"')]»“”’")
         sentence_end = end.endswith((".", "!", "?", "…")) and end.lower() not in ABBREVIATIONS \
             and not re.fullmatch(r"[A-Za-z]\.|\d[\d.]*\.", end)
-        if len(words) >= min_words and sentence_end:
+        if (len(words) >= min_words and sentence_end) or (max_words and len(words) >= max_words):
             chunks.append(" ".join(words))
             words = []
     if words:
         chunks.append(" ".join(words))
     return chunks
+
+
+def without_code(text: str, complete: bool = True) -> str:
+    """text without its ``` code blocks. complete False (still streaming): also cut at a block that is not closed yet,
+    so the result of a growing text only grows"""
+    text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    if not complete and "```" in text:
+        text = text[:text.index("```")]
+    return text
+
+
+def speech_text(text: str) -> str:
+    """what of a text is spoken: no code, *actions*, (asides), [tags], links or markdown stars"""
+    text = without_code(text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)   # **bold** is spoken, a single *action* is not
+    text = re.sub(r"\*[^*]+\*|\([^)]*\)|\[[^\]]+\]", "", text)
+    text = re.sub(r"https?://\S+|www\.\S+", "", text)
+    return " ".join(text.replace("*", "").split())

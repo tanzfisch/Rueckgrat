@@ -12,6 +12,35 @@
 
 Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client. Quality of the experience depends on the models you run which is limited by the hardware you have available.
 
+- AI tools
+    - **websearch** — search the web when requested or needed
+    - **wikipedia** — search wikipedia when requested or needed
+    - **generate_image** — generate an image on request or on its own
+    - **take_photo** — generate a photo of self, user, or both from current context
+    - **remember** — keep a short fact about the user, per contact
+    - **search_memory** — find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub)
+    - **calculate** — calculate given expression
+    - **convert** — conversion between numerous units
+    - **current_time** — current time for given location
+    - **date_calc** — date calculations
+    - **fetch_url** — fetch content for given URL
+    - **weather** — weather forcast for given location
+    - **show_map** — show a place on an OpenStreetMap map in the chat, tapping it opens the maps app
+    - **run_code** — write a small program and run it in a fresh sandbox container (Python, JavaScript, C++, Java, Go)
+    - **write_file** — write text or code files, downloadable by the user in chat
+    - **poll** — ask the user a question with options to pick from in the chat
+    - **spawn_job** — hand a bigger task to a background agent job that reports back when it is done
+- agent jobs running in the background (experimental)
+    - a controller plans the job in up to 6 steps and delegates each step to up to 4 sub agents working in parallel, each with its own role (e.g. researcher, analyst, writer) and its own tools
+    - every step gets the results of the steps before, a failed sub agent is retried once with a revised task
+    - messages from the user during the job can change the remaining plan
+    - the controller merges all results into the final answer, progress is shown in the chat
+- persistent companion (experimental)
+    - opt-in per contact, the contact gets a life of its own between conversations and may write first
+    - every night it plans its day on a private calendar: events of its own life, news scans, an evening reflection and check-ins with the user, only what fits its character
+    - each planned entry runs as an agent job with the usual tools (e.g. websearch for the news) and may send the user a message, sometimes with a photo
+    - the evening reflection carries open threads into the next day's planning
+
 ## Backend
 
 - runs on Linux only
@@ -30,21 +59,6 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - text embeddings using fastembed
     - tool detection using Laya where possible
 - GPU: NVIDIA and AMD. Intel GPUs are not supported/tested.
-- AI tools
-    - **websearch** — search the web when requested or needed
-    - **wikipedia** — search wikipedia when requested or needed
-    - **generate_image** — generate an image on request or on its own
-    - **take_photo** — generate a photo of self, user, or both from current context
-    - **remember** — keep a short fact about the user, per contact
-    - **search_memory** — find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub)
-    - **calculate** — calculate given expression
-    - **convert** — conversion between numerous units
-    - **current_time** — current time for given location
-    - **date_calc** — date calculations
-    - **fetch_url** — fetch content for given URL
-    - **weather** — weather forcast for given location
-    - **show_map** — show a place on an OpenStreetMap map in the chat, tapping it opens the maps app
-    - **run_code** — write a small program and run it in a fresh sandbox container (Python, JavaScript, C++, Java, Go)
 
 ## Frontend Tools
 
@@ -56,7 +70,6 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
 - code highlighting
 - contacts, character templates, character-creation wizard, settings
 - assiting a conversation with someone in an other language (using your own llm for translation)
-- persistent companion (opt-in per contact): plans its own day and may write first
 
 Some screenhots of the app ...
 

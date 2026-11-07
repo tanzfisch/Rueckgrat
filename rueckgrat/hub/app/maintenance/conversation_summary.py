@@ -1,7 +1,7 @@
 import random
 import re
 from datetime import datetime, timezone
-
+from typing import Dict, Any
 from app.tasks.task_queue import Task
 from app.utils.embeddings import embed_text
 from app.utils.clock import to_db
@@ -55,8 +55,10 @@ class ConversationSummaryTask(Task):
             self.outcome = f"failed {repr(e)}"
             raise
 
-    def result(self) -> str:
-        return f"conversation {self.item['id']}: {self.outcome}"
+    def get_result(self) -> Dict[str, Any]:
+        return {
+            "summary": f"conversation {self.item['id']}: {self.outcome}"
+        }
 
     def _run(self) -> str:
         conversation_id, summary = self.item["id"], self.item["summary"]

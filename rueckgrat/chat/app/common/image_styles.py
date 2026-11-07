@@ -1,4 +1,3 @@
-import re
 import os
 
 IMAGE_STYLE_OPTIONS = {

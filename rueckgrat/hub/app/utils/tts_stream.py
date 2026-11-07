@@ -5,7 +5,8 @@ import wave
 from collections import deque
 
 from app.common import get_logger
-from app.common.text_chunks import split_into_chunks
+import time
+from app.common.text_chunks import split_into_chunks, chunk_words, without_code, speech_text
 logger = get_logger()
 
 PIECE_SECONDS = 1          # audio goes to the client in pieces of this length, like the #112 mic buffer
@@ -28,9 +29,13 @@ class TtsReply:
     """the audio pieces of one spoken reply, numbered by seq. a piece stays queued until the client
     acknowledged it, so after a reconnect the hub sends everything from the client's last seq on"""
 
-    def __init__(self, reply_id: str, message_id):
+    def __init__(self, reply_id: str, message_id, text: str = "", final: bool = True):
         self.reply_id = reply_id
         self.message_id = message_id
+        self.text = text        # the reply's text so far
+        self.final = final      # False while the reply is still streaming, set_text hands over the rest
+        self.text_version = 0
+        self.text_cond = threading.Condition()
         self.pieces = deque()
         self.next_seq = 0
         self.dropped = threading.Event()
@@ -62,11 +67,33 @@ class TtsReply:
             self.cond.notify_all()
             return finished
 
+    def set_text(self, text: str, final: bool):
+        """the reply's text so far (the whole of it, not the new part), final once it is complete"""
+        with self.text_cond:
+            if self.final:
+                return
+            self.text, self.final = text, final
+            self.text_version += 1
+            self.text_cond.notify_all()
+
+    def latest(self) -> tuple[str, bool, int]:
+        """(text, final, version) right now"""
+        with self.text_cond:
+            return self.text, self.final, self.text_version
+
+    def wait_text(self, version: int) -> tuple[str, bool, int]:
+        """(text, final, version) once the text is newer than version, it is complete or the reply was dropped"""
+        with self.text_cond:
+            self.text_cond.wait_for(lambda: self.text_version != version or self.final or self.dropped.is_set(), FULL_WAIT_SECONDS)
+            return self.text, self.final, self.text_version
+
     def drop(self):
         self.dropped.set()
         with self.cond:
             self.pieces.clear()
             self.cond.notify_all()
+        with self.text_cond:
+            self.text_cond.notify_all()
 
 
 class TtsStreams:
@@ -76,14 +103,16 @@ class TtsStreams:
     _replies = {}  # user_id -> TtsReply
 
     @classmethod
-    def start(cls, infrastructure, user_id: int, reply_id: str, text: str, voice: str = "", message_id=None, language: str = "") -> TtsReply:
-        reply = TtsReply(reply_id, message_id)
+    def start(cls, infrastructure, user_id: int, reply_id: str, text: str, voice: str = "", message_id=None, language: str = "",
+              final: bool = True) -> TtsReply:
+        """final False: the reply is still streaming, TtsReply.set_text hands over the rest"""
+        reply = TtsReply(reply_id, message_id, text, final)
         with cls._lock:
             previous = cls._replies.get(user_id)
             cls._replies[user_id] = reply
         if previous:
             previous.drop()
-        threading.Thread(target=cls._generate, args=(infrastructure, reply, text, voice, language), daemon=True).start()
+        threading.Thread(target=cls._generate, args=(infrastructure, reply, voice, language), daemon=True).start()
         return reply
 
     @classmethod
@@ -113,17 +142,44 @@ class TtsStreams:
             reply.drop()
 
     @staticmethod
-    def _generate(infrastructure, reply: TtsReply, text: str, voice: str, language: str):
-        chunks = split_into_chunks(text)
-        logger.info(f"tts reply {reply.reply_id}: {len(chunks)} chunk(s)")
-        for index, chunk in enumerate(chunks):
-            if reply.dropped.is_set():
-                return
-            wav = infrastructure.tts(chunk, voice, language)
-            if not wav:
-                logger.error(f"tts reply {reply.reply_id}: chunk {index} failed, skipping it")
-                continue
-            for piece in wav_pieces(wav, index):
-                if not reply.put(piece):
+    def _generate(infrastructure, reply: TtsReply, voice: str, language: str):
+        """speaks every chunk as soon as it is complete (chunk_words). while the reply streams the last chunk may still
+        grow, it waits for more text"""
+        index, spoken, version = 0, 0, -1   # spoken: the words of the text already spoken
+        while not reply.dropped.is_set():
+            text, final, latest = reply.wait_text(version)
+            if not final and latest == version:
+                logger.warning(f"tts reply {reply.reply_id}: no more text for {FULL_WAIT_SECONDS}s, speaking the rest")
+                final = True
+            version = latest
+            while not reply.dropped.is_set():
+                words = without_code(text, final).split()[spoken:]
+                chunks = split_into_chunks(" ".join(words), min_words=chunk_words(index))
+                if not chunks or (len(chunks) == 1 and not final):
+                    break   # nothing left, or the last chunk may not be complete yet
+                spoken += len(chunks[0].split())
+                if not TtsStreams._speak_chunk(infrastructure, reply, chunks[0], index, voice, language):
                     return
-        reply.put({"end": True})
+                index += 1
+                if not final:
+                    text, final, version = reply.latest()
+            if final:
+                logger.info(f"tts reply {reply.reply_id}: {index} chunk(s)")
+                reply.put({"end": True})
+                return
+
+    @staticmethod
+    def _speak_chunk(infrastructure, reply: TtsReply, chunk: str, index: int, voice: str, language: str) -> bool:
+        """generates and queues the speech of one chunk. False if the reply was dropped"""
+        speech = speech_text(chunk)
+        if not speech:
+            return True
+        started = time.perf_counter()
+        wav = infrastructure.tts(speech, voice, language)
+        if not wav:
+            logger.error(f"tts reply {reply.reply_id}: chunk {index} failed, skipping it")
+            return True
+        pieces = wav_pieces(wav, index)
+        logger.debug(f"tts reply {reply.reply_id}: chunk {index} ({len(speech.split())} words) took {time.perf_counter() - started:.2f}s "
+                     f"for {len(pieces) * PIECE_SECONDS}s of audio")
+        return all(reply.put(piece) for piece in pieces)

@@ -3,7 +3,7 @@ import json
 import random
 import re
 from typing import Dict, Any, List, Tuple
-from .tool import Tool, ToolCategory
+from .tool import Tool
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -131,21 +131,16 @@ def run_call(call: Dict[str, Any]) -> Dict[str, Any]:
 class RunCodeTool(Tool):
     """writes a one file program for the directed task (own llm call, the reply is only code) and runs it in a
     fresh llm sandbox container. the harness builds the call json with the code in base64"""
-    category = ToolCategory.MATH
     description = "writes a small program and runs it in a sandbox container, returns its output"
-    # laya, 0.5: user asks to run code, or the message (a chat message or a worker's task) needs a check the ai runs on
-    # its own: verify, debug (reproduce an error), benchmark, explore an api, validate math before a plan, prototype.
-    # 41 positives, 40 negatives: run requests 4/4, debug 6/6, validate 6/6, prototype 6/6, benchmark 5/6, explore 5/6,
-    # bare math questions ("is 2^61-1 prime?", "100th digit of pi") only 3/9. false positives 2/40 ("write me a python
-    # function ...", "write a regex ..."). the first question alone: 22/41 hits, 1/40 false positives
     question = [
-        "Does the user ask you to run, execute or test code?",
+        "Does the user want to see the output of running code?",
         "Does this message ask to check or confirm a number or formula before using it?",
-        "Does this message ask to verify, test, benchmark, reproduce or prototype something with code or numbers?",
+        "Does this message ask to verify, test, benchmark, reproduce or prototype something by running code or computing numbers?",
+        "Does this message ask to debug or reproduce an error by running code?",
     ]
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
@@ -180,7 +175,7 @@ class RunCodeTool(Tool):
             logger.debug(f"code:\n{reply}")
             MessageQueue().send_status_message("running code")
             result = run_call(json.loads(call))
-        self.response.setdefault("tool_results", []).append(result)
+        self.add_result(result)
 
     @classmethod
     def prompt(cls) -> str:

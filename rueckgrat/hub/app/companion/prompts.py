@@ -21,7 +21,7 @@ placeholders, all plain strings (str.format, so literal JSON braces are doubled)
   max_per_day     the hard limit enforced in code
   calendar        the companion's day, one row per line "HH:MM kind - note (what happened)"
   messages        the last messages of the conversation, one per line
-  summary         the conversation's running summary (context), may be empty
+  summary         the conversation's summary from the nightly maintenance, may be empty
   last_reflection the last evening reflection, may be empty
   note            the note of the firing row, may be empty
   result          the lookup results (LOOKUP_RESULT only)

@@ -2,7 +2,7 @@ from typing import Dict,  Any
 import re
 import requests
 from urllib.parse import quote
-from .tool import Tool, ToolCategory
+from .tool import Tool
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -52,7 +52,6 @@ def wikipedia_summary(query: str, lang: str = "en") -> Dict[str, str]:
 
 
 class WikipediaTool(Tool):
-    category = ToolCategory.WEB
     description = "encyclopedic summary of a well known person, place, thing, concept or historic event"
     question = [
         "Does the user ask who a famous person from history was?",
@@ -62,8 +61,8 @@ class WikipediaTool(Tool):
         "Does the user ask about a famous treaty, war, empire or monument?",
     ]
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
@@ -89,7 +88,7 @@ class WikipediaTool(Tool):
             logger.error(f"failed to query wikipedia {repr(e)}")
             result = {"tool": self.name(), "error": "Wikipedia lookup failed"}
 
-        self.response.setdefault("tool_results", []).append(result)
+        self.add_result(result)
 
     @classmethod
     def prompt(cls) -> str:

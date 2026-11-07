@@ -2,7 +2,6 @@ import os
 import time
 import requests
 import certifi
-from urllib.parse import urlparse
 import asyncio
 import json
 from pathlib import Path
@@ -819,7 +818,7 @@ class Hub:
 
     @classmethod
     def get_message_file(cls, message_id: int, stored_name: str) -> bytes | None:
-        """the attached text file or zip. None when the hub has no such file"""
+        """the attached text file. None when the hub has no such file"""
         try:
             response = requests.get(
                 f"{cls.url}/messages/{message_id}/files/{stored_name}",

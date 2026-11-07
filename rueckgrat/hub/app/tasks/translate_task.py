@@ -44,7 +44,7 @@ class TranslateTask(Task):
             return None
         return response_content.strip()
 
-    def result(self) -> Dict[str, Any]:
+    def get_result(self) -> Dict[str, Any]:
         translate = {
             "request_id": self.request_id,
             "from_language": self.from_language,

@@ -1,12 +1,11 @@
 from .task_queue import Task
 import json
-import re
 import random
 from typing import Dict, Any
 from .assistant_image_task import AssistantImageTask
 from ..utils.contact_image_prompt_compiler import ImageType, IMAGE_STYLES
 
-from app.common import get_logger, Utils, IMAGE_STYLE_OPTIONS, DEFAULT_IMAGE_STYLE
+from app.common import get_logger, Utils, DEFAULT_IMAGE_STYLE
 logger = get_logger()
 
 class ContactGeneratorTask(Task):
@@ -32,7 +31,7 @@ class ContactGeneratorTask(Task):
             persistent = profile["persistent"]
             self.db.set_contact_companion(self.user_id, contact_id, persistent)
 
-            assistant_image_job = AssistantImageTask(
+            assistant_image_task = AssistantImageTask(
                 user_id = self.user_id,
                 contact_id = contact_id,
                 db = self.db, 
@@ -42,7 +41,7 @@ class ContactGeneratorTask(Task):
                 width = 720,
                 height = 720,                
             )
-            self.add_sub_job(assistant_image_job)
+            self.add_sub_task(assistant_image_task)
 
             self.response = {
                 "new_contact": {
@@ -53,7 +52,7 @@ class ContactGeneratorTask(Task):
         except Exception as e:
             logger.error(f"failed to execute ContactGeneratorTask {repr(e)}")                    
 
-    def result(self) -> Dict[str, Any]:
+    def get_result(self) -> Dict[str, Any]:
         return self.response
     
     def has_response(self) -> bool:

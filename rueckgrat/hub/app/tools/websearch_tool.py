@@ -1,9 +1,8 @@
 from typing import Dict, Any, Optional
 import re
 import json
-from .tool import Tool, ToolCategory
+from .tool import Tool
 from app.tasks.find_answer_task import FindAnswerTask
-import requests
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 import tldextract
@@ -17,7 +16,6 @@ from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 class WebsearchTool(Tool):
-    category = ToolCategory.WEB
     description = "searches the web for current, factual or local information (news, events, prices, stocks, opening hours)"
     question = [
         "Does the user ask about recent news, like an election, protests, a disaster or a new product?",
@@ -27,10 +25,13 @@ class WebsearchTool(Tool):
         "Does the user ask the live market price of a stock or a crypto coin like bitcoin?",
         "Does the user ask who is currently the leader or head of a country or company?",
         "Does the user ask what events, games or concerts are coming up somewhere?",
+        "Does the user ask you to search the web, look something up online or google it?",
+        "Does the user want the latest news or updates on a topic?",
+        "Does the user want you to look up current news or recent information?",        
     ]
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str: 
@@ -253,9 +254,8 @@ class WebsearchTool(Tool):
     def _extract_page(self, url) -> Optional[Dict[str, Any]]:
         """reads one page: plain http first, the headless browser (if BROWSER_FALLBACK) when that is blocked
         or comes back too thin. returns {"text", "images", "url"} or None"""
-        logger.debug(f"extract from page {url}")
+        logger.info(f"extract from page {url}")
         page, try_browser = None, False
-        self.blocked_reason = None
         try:
             resp = self._http_get(url)
             if resp.status_code in self.BLOCKED_STATUS:
@@ -269,8 +269,8 @@ class WebsearchTool(Tool):
                     return None
                 page = self._parse_html(resp.content, resp.url)
                 try_browser = len(page["text"]) < self.THIN_PAGE_CHARS
-        except FetchBlocked as e:
-            self.blocked_reason = str(e)    # logged at debug by url_check, fetch_url shows it
+        except FetchBlocked:
+            # logged at debug by url_check
             return None
         except Exception as e:
             logger.error(f"failed to extract {url}: {repr(e)}")
@@ -375,6 +375,81 @@ class WebsearchTool(Tool):
             logger.error(f"failed websearch, no engine gave results for {query}")
         return results
 
+    # dropped from a query for the shorter retry: filler that makes engines find nothing
+    FILLER_WORDS = {"a", "an", "the", "how", "to", "for", "of", "in", "on", "and", "or", "with", "what", "which", "is",
+                    "are", "best", "practices", "practice", "guide", "tutorial", "tips", "example", "examples", "using", "about"}
+    SHORT_QUERY_WORDS = 4
+
+    @classmethod
+    def shorter(cls, query: str) -> Optional[str]:
+        """the query's first key words without filler (SHORT_QUERY_WORDS), None when that is not shorter"""
+        words = [word for word in query.split() if word.lower().strip("?,.!:;\"'") not in cls.FILLER_WORDS]
+        short = " ".join(words[:cls.SHORT_QUERY_WORDS])
+        return short if short and short != query.strip() else None
+
+    def _answers(self, query: str, search_query: str) -> list:
+        """the good answers to query from the pages a search for search_query finds, [] when there are none"""
+        search_results = self._web_search(search_query, 10)
+        good_results = []
+        seen_urls = set()
+        i = 0
+        threshold = 5
+        target = 3
+
+        while i < len(search_results) and len(good_results) < target:
+            batch = search_results[i:i+5]
+            i += len(batch)
+
+            # the pages of a batch load in parallel, a slow site only costs its own timeout
+            with ThreadPoolExecutor(max_workers=len(batch), thread_name_prefix="extract") as pool:
+                extractions = list(pool.map(self._extract_page, [result["url"] for result in batch]))
+
+            batch_find_answers = []
+            for result, extraction in zip(batch, extractions):
+                if extraction:
+                    result["url"] = extraction["url"]
+                    information = extraction["text"]
+                elif result["snippet"]:
+                    # page not readable (javascript, paywall, bot wall), the engine's snippet often has the answer
+                    information = f"{result['title']}\n{result['snippet']}"
+                else:
+                    continue
+
+                if result["url"] in seen_urls:
+                    continue
+                seen_urls.add(result["url"])
+
+                find_answers_task = FindAnswerTask(question=query, information=information, infrastructure=self.infrastructure)
+                self.add_sub_task(find_answers_task)
+                batch_find_answers.append((result, find_answers_task))
+
+            if batch_find_answers:
+                self.wait_for([j[1] for j in batch_find_answers])
+
+            for result, find_answers_task in batch_find_answers:
+                url = result["url"]
+                source = self._get_org_name(url)
+                title = result["title"]
+
+                answer = find_answers_task.get_result()
+                if not answer:
+                    logger.debug(f"no answer for {url}")
+                    continue
+                if answer["quality"] > threshold:
+                    good_results.append({ 
+                        "answer": answer['answer'], 
+                        "answer_quality": answer['quality'],
+                        "source": source,
+                        "title": title,
+                        "url": url,
+                    })
+                    self.add_source(url, title)
+                    if len(good_results) >= target:
+                        break
+                else:
+                    logger.debug(f"missed threshold: {answer['answer']} at {answer['quality']}")
+        return good_results
+
     def execute(self) -> None:
         try:
             if not "query" in self.tool_call:
@@ -384,73 +459,20 @@ class WebsearchTool(Tool):
             MessageQueue().send_status_message(f"searching the web")
             
             query = self.tool_call["query"]
-            search_results = self._web_search(query, 10)
-            jobs = []
-            good_results = []
-            seen_urls = set()
-            i = 0
-            threshold = 5
-            target = 3
-
-            while i < len(search_results) and len(good_results) < target:
-                batch = search_results[i:i+5]
-                i += len(batch)
-                
-                # the pages of a batch load in parallel, a slow site only costs its own timeout
-                with ThreadPoolExecutor(max_workers=len(batch), thread_name_prefix="extract") as pool:
-                    extractions = list(pool.map(self._extract_page, [result["url"] for result in batch]))
-
-                batch_jobs = []
-                for result, extraction in zip(batch, extractions):
-                    if extraction:
-                        result["url"] = extraction["url"]
-                        information = extraction["text"]
-                    elif result["snippet"]:
-                        # page not readable (javascript, paywall, bot wall), the engine's snippet often has the answer
-                        information = f"{result['title']}\n{result['snippet']}"
-                    else:
-                        continue
-
-                    if result["url"] in seen_urls:
-                        continue
-                    seen_urls.add(result["url"])
-
-                    job = FindAnswerTask(question=query, information=information, infrastructure=self.infrastructure)
-                    self.add_sub_job(job)
-                    batch_jobs.append((result, job))
-                    jobs.append((result, job))
-
-                if batch_jobs:
-                    self.wait_for([j[1] for j in batch_jobs])
-                
-                for result, job in batch_jobs:
-                    url = result["url"]
-                    source = self._get_org_name(url)
-                    title = result["title"]
-
-                    answer = job.result()
-                    if not answer:
-                        logger.debug(f"no answer for {url}")
-                        continue
-                    if answer["quality"] > threshold:
-                        good_results.append({ 
-                            "answer": answer['answer'], 
-                            "answer_quality": answer['quality'],
-                            "source": source,
-                            "title": title,
-                            "url": url,
-                        })
-                        self.add_source(url, title)
-                        if len(good_results) >= target:
-                            break
-                    else:
-                        logger.debug(f"missed threshold: {answer['answer']} at {answer['quality']}")
+            # nothing useful (no hits, or no page answers it): once more with the key words only
+            good_results = self._answers(query, query)
+            short = self.shorter(query)
+            if not good_results and short:
+                logger.info(f"websearch found nothing useful for {query!r}, trying {short!r}")
+                good_results = self._answers(query, short)
 
             if good_results:
-                self.response["websearch_results"] = sorted(good_results, key=lambda x: x["answer_quality"], reverse=True)    # best first
-            else:
-                logger.error("web search failed. found no results")
-                self.response["websearch_results"] = []
+                result = {
+                    "tool": self.name(), 
+                    "text": f"websearch results",
+                    "websearch_results": sorted(good_results, key=lambda x: x["answer_quality"], reverse=True)
+                }
+                self.add_result(result)
 
         except Exception as e:
             logger.error(f"failed to do a websearch {repr(e)}")
