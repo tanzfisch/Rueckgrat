@@ -10,6 +10,8 @@ Changelog
 - #175 the assistant can attach text files: one file as itself, several files of one message as a single zip
 - #109 cleanup round after too heavy AI use
 - #181 start audio playback while still streaming text answer
+- #177 removed scenario cration for faster response to first message
+- #162 agents are allowed to use the image generation
 
 0.26.0
 ------
