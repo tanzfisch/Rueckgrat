@@ -3,7 +3,6 @@ import sys
 import time
 import atexit
 import platform
-from urllib.parse import parse_qs, urlparse
 import flet as ft
 
 from app.audio import Text_To_Speech
@@ -27,9 +26,8 @@ from app.ui.widgets import ImageOverlay, MessageBox, ConnectionBanner
 
 from app.utils import Paths, Notifier
 from app.utils.config import RueckgratConfig
-from app.utils.hub import Hub
 
-from app.common import get_logger, set_log_level, Utils
+from app.common import get_logger, set_log_level
 logger = get_logger()
 
 TOKEN_REFRESH_SECONDS = 45 * 60
@@ -48,7 +46,7 @@ PAGES = {
     "image": ImagePage,
     "gallery": GalleryPage,
 }
-ROOT_PAGES = {"login", "initial_settings", "contacts"}   # opening one of these starts the back stack anew
+ROOT_PAGES = {"login", "initial_settings", "contacts"}
 MAX_STACK = 20
 
 
@@ -68,7 +66,7 @@ class App:
         self.page = page
         self.current_page = None
         self._current_name = None
-        self._stack: list[tuple[str, dict]] = []   # (page name, kwargs) of every page on the way here, the last is shown
+        self._stack: list[tuple[str, dict]] = []
         self.navigator = Navigator(self.navigate, self.back)
 
         page.title = "Rueckgrat"
@@ -99,7 +97,7 @@ class App:
         if page_name in ROOT_PAGES:
             self._stack.clear()
         if self._stack and self._stack[-1][0] == page_name:
-            self._stack.pop()     # the same page again (e.g. another conversation): replace it, no duplicate
+            self._stack.pop()
         self._stack.append((page_name, kwargs))
         del self._stack[:-MAX_STACK]
         self._go(page_name)
@@ -114,7 +112,7 @@ class App:
 
     def _go(self, page_name: str):
         if page_name == self._current_name:
-            self._show(page_name)   # the route doesn't change, so no route change event: rebuild here
+            self._show(page_name)
         else:
             self.page.navigate(f"/{page_name}")
 
@@ -129,7 +127,6 @@ class App:
         if name not in PAGES:
             name = "login"
         if not self._stack or self._stack[-1][0] != name:
-            # the route changed without navigate(): browser back/forward or a typed url (web)
             if len(self._stack) >= 2 and self._stack[-2][0] == name:
                 self._stack.pop()
             else:
@@ -203,7 +200,7 @@ class App:
         try:
             await self.page.window.destroy()
         except RuntimeError:
-            pass    # the window is gone before flet gets its answer ("Session closed")
+            pass
 
     def _confirm_exit(self, on_result):
         """the only way out of the app: on_result(True) once the user confirmed, False if not"""
@@ -220,7 +217,6 @@ class App:
         self.navigate("login" if restored is False else "contacts")
 
     async def _session_expired(self):
-        # the access token ran out: a stored session gets new tokens, only a refused one logs out
         restored = await Hub.refresh_session()
         if restored is not False:
             return
@@ -232,7 +228,7 @@ class App:
         while True:
             await asyncio.sleep(10)
             Hub.check_health()
-            # new tokens well before the hub's 60 minutes, or as soon as the hub is back after a failed restore
+
             if Hub.refresh_token and (not Hub.access_token or time.time() - Hub.token_time > TOKEN_REFRESH_SECONDS):
                 if await Hub.refresh_session() is False:
                     await self._session_expired()
@@ -260,7 +256,7 @@ def on_incomming_message(msg: dict):
             filename = msg["image"].get("filename")
             if filename:
                 get_image(filename)
-        if "generated_image" in msg:   # result of the image page
+        if "generated_image" in msg:
             filename = msg["generated_image"].get("filename")
             if filename:
                 get_image(filename)
@@ -293,7 +289,7 @@ def main():
     Hub.register_incomming_message(on_incomming_message)
 
     def flet_main(page: ft.Page):
-        theme.apply_theme(page, config.theme)   # dark unless light was chosen in the settings
+        theme.apply_theme(page, config.theme, config.font_scale)
         Text_To_Speech.attach(page)
         Notifier.attach(page)
         page.padding = 0

@@ -1,5 +1,3 @@
-import json
-import random
 from app.common import get_logger, Utils
 logger = get_logger()
 

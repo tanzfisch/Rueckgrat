@@ -34,7 +34,8 @@ The tasks inside one step run at the same time, so they must not need each other
 Use as few steps and tasks as the job needs, at most {max_steps} steps and at most {max_workers} tasks per step. A simple job is one step with one task.
 Each task has a role (one or two words, e.g. researcher, analyst, writer) and a prompt: full instructions the worker can follow on its own. Keep every detail of the job the task needs.
 The results of the steps before are added to each task automatically, so write every task self-contained and never use placeholders like {{design_context}} for them.
-Each worker can use the hub's tools on its own, e.g. a web search, reading a web page, wikipedia, the weather, calculations and conversions.
+Each worker can use the hub's tools on its own, e.g. a web search, reading a web page, wikipedia, the weather, calculations and conversions,
+writing files and generating images the user gets with the job's report. A task that makes files names each file and its path (e.g. index.html, css/style.css).
 Say in a task's prompt what it has to look up. A research task names the time period (e.g. "2021 to 2031"), the scope
 (e.g. country, measure, which kind of predictions) and the sources it must check (e.g. the central bank, the statistics office, the big banks).
 
@@ -144,14 +145,16 @@ class Controller(AgentJob):
         self.trace("job_started", prompt=prompt)
 
     def spawn(self, role: str, prompt: str, agent_class: Type[AgentJob] = AgentJob, time_limit: Optional[float] = None,
-              step: Optional[int] = None, task: Optional[str] = None, attempt: int = 1) -> AgentJob:
-        """makes a worker with a fixed role and starts it on its own thread. without a time limit it gets the controller's"""
+              step: Optional[int] = None, task: Optional[str] = None, attempt: int = 1, excluded_tools: tuple = ()) -> AgentJob:
+        """makes a worker with a fixed role and starts it on its own thread. without a time limit it gets the controller's.
+        excluded_tools: tools the worker is not offered (a retry, the ones that failed before)"""
         if issubclass(agent_class, Controller):
             raise ValueError("a worker can not be a Controller, only the first agent spawns")
         worker = agent_class(role, prompt, f"{self.job_id[:8]}-{uuid4().hex[:8]}", self.time_limit if time_limit is None else time_limit,
                              infrastructure=self.infrastructure, tool_context=self.tool_context)
         self.workers.append(worker)
         worker.protocol, worker.plan_step, worker.plan_task, worker.attempt = self.protocol, step, task, attempt
+        worker.excluded_tools = tuple(excluded_tools)
         self.trace("spawned", step=step, task=task, worker_id=worker.job_id, role=role, attempt=attempt if attempt > 1 else None,
                    prompt=prompt.partition(RESULTS_MARKER)[0])
         worker.start()
@@ -197,24 +200,31 @@ class Controller(AgentJob):
         if len(self.done_steps) < len(self.plan):
             return False
         self.result = self._merge()
+        attachments = self._attachments()
+        if attachments:
+            self.result = {**self.result, "attachments": attachments}
         return True
 
     def _retry(self, worker: AgentJob):
         """one llm call revises the failed worker's task with the reason it failed (or keeps it), a new worker runs it in
-        the failed one's place. the results of the steps before are passed on again. a bad reply: the task as it was"""
+        the failed one's place without the tools that failed (so it does not fail the same way again).
+        the results of the steps before are passed on again. a bad reply: the task as it was"""
         task, marker, context = worker.prompt.partition(RESULTS_MARKER)
         result = worker.result or {}
         reason = " ".join(str(result.get(key) or "") for key in ("error", "details")).strip() or "no result"
+        excluded = tuple(dict.fromkeys(tuple(worker.excluded_tools) + tuple(result.get("failed_tools") or ())))
+        if excluded:
+            reason += f" (the new worker can not use these tools: {', '.join(excluded)})"
         reply = self.chat([{"role": "user", "content": RETRY_PROMPT.format(prompt=self.prompt, role=worker.role, task=task, reason=reason)}], 0.2)
         data = Utils.json_loads(reply) if reply else None
         new = str(data.get("prompt") or "").strip() if isinstance(data, dict) else ""
         step, attempt = len(self.done_steps) + 1, worker.attempt + 1
         logger.info(f"controller {self.job_id}: step {step}: {worker.role} failed, attempt {attempt}, {'revised' if new and new != task else 'same'} task")
         self.trace("retry", step=step, task=worker.plan_task, role=worker.role, attempt=attempt, reason=reason,
-                   changed=bool(new) and new != task, old_prompt=task, new_prompt=new or task)
+                   changed=bool(new) and new != task, old_prompt=task, new_prompt=new or task, excluded_tools=list(excluded) or None)
         self._report_progress(step, len(self.plan))
         self.current[self.current.index(worker)] = self.spawn(worker.role, (new or task) + marker + context, step=step,
-                                                              task=worker.plan_task, attempt=attempt)
+                                                              task=worker.plan_task, attempt=attempt, excluded_tools=excluded)
 
     def add_message(self, text: str):
         """a user message for the running job (thread-safe), the review after the current step reads it"""
@@ -346,6 +356,18 @@ class Controller(AgentJob):
             for role, result in step:
                 parts.append(f"step {index}, {role}:\n{result.get('summary') or ''}\n{result.get('details') or ''}".strip())
         return "\n\n".join(parts)[-MAX_CONTEXT_CHARS:]
+
+    def _attachments(self) -> List[Dict[str, Any]]:
+        """the files the workers' tools held, in their order. a later one with the same name replaces the earlier
+        (a retried or later step wrote index.html again)"""
+        held = {}
+        for step in self.done_steps:
+            for _, result in step:
+                for item in result.get("attachments") or []:
+                    key = (item.get("tool"), item.get("name"))
+                    held.pop(key, None)
+                    held[key] = item
+        return list(held.values())
 
     def _merge(self) -> Dict[str, Any]:
         """one worker: its result as it is. more: one llm call merges them, on a bad reply

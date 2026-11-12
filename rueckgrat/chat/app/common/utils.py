@@ -3,7 +3,6 @@ import re
 import hashlib
 from .common_types import ImageRequest
 from typing import Dict, Any, Union
-from pathlib import Path
 from json_repair import repair_json
 
 from .logger import get_logger
@@ -47,7 +46,7 @@ class Utils:
                 return None    
             
     @classmethod
-    def pretty_print(cls, data: Union[Dict[str, Any], str]):
+    def pretty_print_full(cls, data: Union[Dict[str, Any], str]):
         if isinstance(data, str):
             try:
                 data = json.loads(data)
@@ -56,18 +55,41 @@ class Utils:
         return json.dumps(data, indent=4).replace('\\n', '\n')
 
     @classmethod
-    def pretty_scores(cls, data: dict[str, float], bar_width: int = 20) -> str:
+    def pretty_print(cls, data: Union[Dict[str, Any], str], max_len: int = 500):
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                return data[:max_len] + "..." if len(data) > max_len else data
+
+        def truncate(obj):
+            if isinstance(obj, str):
+                return obj[:max_len] + "..." if len(obj) > max_len else obj
+            if isinstance(obj, dict):
+                return {k: truncate(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [truncate(item) for item in obj]
+            return obj
+
+        return json.dumps(truncate(data), indent=4).replace('\\n', '\n')
+
+    @classmethod
+    def pretty_scores(cls, data: dict[str, float], bar_width: int = 20, thresholds: tuple[float, float] = (0.4, 0.7)) -> str:
         if not data:
             return "(empty)"
         max_key = max(len(k) for k in data)
+        low, high = (int(t * bar_width) for t in thresholds)
+        zones = ((0, low, 31), (low, high, 33), (high, bar_width, 32))
         lines = []
         for k, v in data.items():
-            filled = int(v * bar_width)
-            red_unfilled = "░" * max(0, bar_width // 2 - filled)
-            green_unfilled = "░" * (bar_width - max(filled, bar_width // 2))
-            bar = "█" * filled + (f"\033[31m{red_unfilled}\033[0m" if red_unfilled else "") + (f"\033[32m{green_unfilled}\033[0m" if green_unfilled else "")
+            filled = max(0, min(bar_width, int(v * bar_width)))
+            bar = "█" * filled
+            for start, end, colour in zones:
+                unfilled = "░" * max(0, end - max(start, filled))
+                if unfilled:
+                    bar += f"\033[{colour}m{unfilled}\033[0m"
             lines.append(f"{k:<{max_key}}  {v:7.4f}  {bar}")
-        return "\n".join(lines)    
+        return "\n".join(lines)
 
     @classmethod
     def shorten(cls, s: str, max_len: int = 40) -> str:

@@ -5,7 +5,7 @@ from app.ui import theme
 from app.ui import BasePage
 from app.ui.widgets import Header
 
-LABEL_WIDTH = 80
+LABEL_WIDTH = 90
 ASSETS_DIR = os.getenv("FLET_ASSETS_DIR") or "assets"
 
 

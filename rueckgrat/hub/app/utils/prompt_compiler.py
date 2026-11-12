@@ -1,23 +1,46 @@
 import re
-from typing import Dict, Any, List, Optional
-from app.tools.tool_registry import ToolRegistry
+from typing import Dict, Any, List
 from datetime import datetime
 
 from app.common import get_logger, Utils
 logger = get_logger()
 
+def build_context(user_name, context, summary: str = "") -> str:
+    """the situation of the conversation. summary: the nightly summary of the conversation so far, left out when empty.
+    without a context yet (before the first update) only the summary"""
+    if not context:
+        return f"Conversation so far: {summary}" if summary else ""
+    location = Utils.get_nested_value(context, ["location"], "")
+    topic = Utils.get_nested_value(context, ["topic"], "")
+
+    user_action = Utils.get_nested_value(context, ["user", "action"], "")
+    user_head = Utils.get_nested_value(context, ["user", "head"], "")
+    user_upper_body = Utils.get_nested_value(context, ["user", "upper_body"], "")
+    user_body = Utils.get_nested_value(context, ["user", "body"], "")
+
+    assistant_action = Utils.get_nested_value(context, ["assistant", "action"], "")
+    assistant_head = Utils.get_nested_value(context, ["assistant", "head"], "")
+    assistant_upper_body = Utils.get_nested_value(context, ["assistant", "upper_body"], "")
+    assistant_body = Utils.get_nested_value(context, ["assistant", "body"], "")
+
+    return f"""
+SITUATION_CONTEXT:
+Location: {location}
+Topic: {topic}
+{user_name}: {user_action}, {user_head}, {user_upper_body}, {user_body}
+You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_body}
+{f"Conversation so far: {summary}" if summary else ""}
+""".strip()
+
 class PromptCompiler:
-    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_role_name: str = None, thinking: bool = False, tool_registry: ToolRegistry = None, tool_names: Optional[List[str]] = None, detected_tool_names: Optional[List[str]] = None):
+    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_role_name: str = None):
         self.contact = contact
-        self.detected_tool_names = detected_tool_names
-        self.tool_names = tool_names  # the full prompt() of exactly these tools
         self.conversation = conversation
         self.user_role_name = user_role_name
         self.profile = contact.get("profile", {})
-        self.tool_registry = tool_registry
-        self.thinking = thinking
 
         self.context = Utils.get_nested_value(conversation, ["context"], "")
+        self.summary = Utils.get_nested_value(conversation, ["summary"], "") or ""
 
     def _clean_text(self, text: str) -> str:
         if not isinstance(text, str):
@@ -96,37 +119,6 @@ OBJECTIVES:
 {chr(10).join(f"  - {s}" for s in secondary)}
 """.strip()
    
-    def _build_tools(self) -> str:
-        if not self.tool_registry or not self.tool_names:
-            return ""  # an empty list would make get_tools_prompt() return all tools
-        if self.detected_tool_names:
-            return self.tool_registry.get_tools_hydrated(self.tool_names, detected_tool_names=self.detected_tool_names)
-        return self.tool_registry.get_tools_hydrated(self.tool_names)
-
-    def _build_context(self) -> str:
-        location = Utils.get_nested_value(self.context, ["location"], "")
-        topic = Utils.get_nested_value(self.context, ["topic"], "")
-        user_facts = Utils.get_nested_value(self.context, ["user_facts"], "")
-
-        user_action = Utils.get_nested_value(self.context, ["user", "action"], "")
-        user_head = Utils.get_nested_value(self.context, ["user", "head"], "")
-        user_upper_body = Utils.get_nested_value(self.context, ["user", "upper_body"], "")
-        user_body = Utils.get_nested_value(self.context, ["user", "body"], "")
-
-        assistant_action = Utils.get_nested_value(self.context, ["assistant", "action"], "")
-        assistant_head = Utils.get_nested_value(self.context, ["assistant", "head"], "")
-        assistant_upper_body = Utils.get_nested_value(self.context, ["assistant", "upper_body"], "")
-        assistant_body = Utils.get_nested_value(self.context, ["assistant", "body"], "")
-
-        return f"""
-SITUATION_CONTEXT:
-Location: {location}
-Topic: {topic}
-Facts about {self.user_role_name}: {user_facts}
-{self.user_role_name}: {user_action}, {user_head}, {user_upper_body}, {user_body}
-You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_body}
-""".strip()
-
     def _build_instructions(self) -> str:
         return """
 INSTRUCTIONS:
@@ -137,25 +129,20 @@ INSTRUCTIONS:
 * Only refer to past shared events that appear in the conversation, the context or your memories. If the user mentions one you have no record of, say you don't remember it.
 """
 
-    def _build_date_time(self) -> str:
+    @staticmethod
+    def date_time() -> str:
         return f"Local time right now: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
     def build_prompt(self) -> tuple[str, str]:
         sections = []
 
-        if self.thinking:
-            sections.append(self._build_tools())
-            #sections.append(self._build_date_time()) # todo make sure it's the users local time
-            context_prompt = ""
-        else:
-            sections.append(self._build_identity())
-            sections.append(self._build_behavior())
-            sections.append(self._build_style())
-            sections.append(self._build_objectives())
-            sections.append(self._build_instructions())
-            sections.append(self._build_date_time())
-            context_prompt = self._build_context()
+        sections.append(self._build_identity())
+        sections.append(self._build_behavior())
+        sections.append(self._build_style())
+        sections.append(self._build_objectives())
+        sections.append(self._build_instructions())
+        situation = [self.date_time(), build_context(self.user_role_name, self.context, self.summary)]
 
         system_prompt = "\n\n".join(sections)
 
-        return system_prompt, context_prompt
+        return system_prompt, "\n\n".join(s for s in situation if s)

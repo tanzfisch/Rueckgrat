@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /hub
 
 RUN useradd -m hubuser \
- && mkdir -p /hub/images /hub/voices /hub/db \
+ && mkdir -p /hub/images /hub/voices /hub/db /hub/files \
  && chown -R hubuser:hubuser /hub
 
 COPY requirements.txt .
@@ -15,6 +15,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY requirements_browser.txt .
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN --mount=type=cache,target=/root/.cache/pip \
+    apt-get update && apt-get install -y --no-install-recommends libatomic1 && \
     pip install -r requirements_browser.txt && \
     playwright install --with-deps --only-shell chromium && \
     rm -rf /var/lib/apt/lists/*

@@ -169,8 +169,7 @@ class DownloadQueue:
         
         total_size = int(response.headers.get("content-length", 0))
 
-        # write to a .part file and rename when complete, so nobody sees a half written file under the final name
-        part_filepath = filepath.with_name(f"{filepath.name}.{threading.get_ident()}.part")   # per thread, two downloads of the same file must not share one .part file
+        part_filepath = filepath.with_name(f"{filepath.name}.{threading.get_ident()}.part")
         with open(part_filepath, "wb") as file:
             with tqdm(total=total_size, unit="B", unit_scale=True, desc=f"Downloading {url}", unit_divisor=1024) as pbar:
                 for chunk in response.iter_content(chunk_size=64*1024):

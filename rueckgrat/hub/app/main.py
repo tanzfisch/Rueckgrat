@@ -20,14 +20,13 @@ from fastapi.security import HTTPBearer
 from fastapi.concurrency import run_in_threadpool
 
 from pydantic import BaseModel
-from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from app.utils import ChatDB, Infrastructure, ImageType, ImageStore, fence_code
 from app.tools import ToolRegistry, SpawnAgentJobTool
 from app.tools.map_tool import get_tile
 from app.agent_jobs import AgentJob
 from app.tasks import TaskQueue, MetaTask, AssistantImageTask, ContactGeneratorTask, TranslateTask, GenerateImageTask
-from app.tasks.meta_task import Turns
+from app.tasks.turns import Turns
 from app.utils.tts_stream import TtsStreams
 from app.companion import CompanionScheduler
 from app.utils.clock import DEFAULT_TIMEZONE
@@ -42,18 +41,19 @@ from datetime import datetime, timedelta, timezone
 from app.common import get_logger, set_log_level, Utils, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
 logger = get_logger()
 
-# every message the hub sends belongs to one user (MessageQueue per user), never to whoever pops next
-MessageQueue.require_user = True
+DB_PATH = "/hub/db/chat.db"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    MessageQueue.set_require_user(True)
+
     logger.info("connecting infrastructure")
     app.state.infrastructure = Infrastructure()
     await app.state.infrastructure.connect_nodes()
 
     logger.info("loading db")
-    db_path = "/hub/db/chat.db"
-    app.state.db = ChatDB(db_path)
+    
+    app.state.db = ChatDB(DB_PATH)
     stale_jobs = app.state.db.fail_stale_jobs()     # their threads died with the last hub, before any new job can start
     if stale_jobs:
         logger.info(f"{stale_jobs} interrupted job(s) set to failed")
@@ -74,7 +74,8 @@ async def lifespan(app: FastAPI):
     # agent jobs (spawned jobs and companions) write into conversations: not while a reply is made, pushed only to an open /ws,
     # the message is in the db anyway
     app.state.connections = Counter()   # user_id -> open /ws connections
-    AgentJob.turns, AgentJob.connections = app.state.turns, app.state.connections
+    AgentJob.set_turns(app.state.turns)
+    AgentJob.connections = app.state.connections
     SpawnAgentJobTool.tool_registry = app.state.tool_registry    # the job's workers use the tools like a chat reply
 
     # proactive companions: a CompanionJob per due row of their calendars
@@ -675,7 +676,8 @@ def text_to_speech(request: HubTTSRequest, username: str = Depends(get_current_u
 
 @app.websocket("/ws/tts")
 async def tts_endpoint(websocket: WebSocket, username: str = Depends(get_current_user_ws)):
-    """speech of a reply in 1 s pieces. client: {"speak": {reply_id, text, voice, message_id, language}} starts a reply,
+    """speech of a reply in 1 s pieces. client: {"speak": {reply_id, text, voice, message_id, language, stream}} starts a reply,
+    with stream true it is still being written and {"text": {reply_id, text, final}} hands over its whole text so far,
     {"resume": {reply_id, last_seq}} continues one after a reconnect, {"ack": seq} confirms a piece
     (only then the hub forgets it), {"stop": reply_id} drops it. hub: {"reply_id", "piece"}, or {"gone": reply_id}"""
     await websocket.accept()
@@ -703,7 +705,12 @@ async def tts_endpoint(websocket: WebSocket, username: str = Depends(get_current
             if "speak" in data:
                 speak = data["speak"]
                 reply, sent = TtsStreams.start(app.state.infrastructure, user_id, speak["reply_id"], speak.get("text", ""),
-                                               speak.get("voice", ""), speak.get("message_id"), speak.get("language", "")), -1
+                                               speak.get("voice", ""), speak.get("message_id"), speak.get("language", ""),
+                                               final=not speak.get("stream")), -1
+            elif "text" in data:
+                streaming = TtsStreams.get(user_id, data["text"]["reply_id"])
+                if streaming:
+                    streaming.set_text(data["text"].get("text", ""), bool(data["text"].get("final")))
             elif "resume" in data:
                 reply_id, sent = data["resume"]["reply_id"], data["resume"]["last_seq"]
                 reply = TtsStreams.get(user_id, reply_id)
@@ -941,7 +948,7 @@ async def get_map_tile(z: int, x: int, y: int, username: str = Depends(get_curre
 
 @app.get("/messages/{message_id}/files/{stored_name}")
 def download_message_file(message_id: int, stored_name: str, username: str = Depends(get_current_user)):
-    """the text file or zip attached to a message, saved under the AI's real name"""
+    """the text file attached to a message, saved under the AI's real name"""
     from urllib.parse import quote
     from app.utils.text_files import FILES_ROOT, _STORED, message_dir
     user_id = app.state.db.get_user_id(username)
@@ -1128,18 +1135,18 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
             await safe_close(code=1011)
 
     # send back to client
-    async def finish_job():
+    async def finish_task():
         while not closed.is_set():
-            job = await done_queue.get()
+            task = await done_queue.get()
 
             if closed.is_set():
                 break
 
-            if job.has_response():
-                MessageQueue().send_data(job.result(), user_id=user_id)
+            if task.has_response():
+                MessageQueue().send_data(task.get_result(), user_id=user_id)
 
     receiver_task = asyncio.create_task(receiver())
-    finish_job_task = asyncio.create_task(finish_job())
+    finish_job_task = asyncio.create_task(finish_task())
     sender_task = asyncio.create_task(sender())
 
     done, pending = await asyncio.wait(
@@ -1165,7 +1172,6 @@ def pcm16_to_float(b: bytes) -> np.ndarray:
 @app.websocket("/ws/audio")
 async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_current_user_ws)):
     await websocket.accept()
-    user_id = app.state.db.get_user_id(username)
     utterance = []
     voiced = False
     silence = 0

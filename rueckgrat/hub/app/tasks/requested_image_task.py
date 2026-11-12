@@ -1,11 +1,9 @@
-import hashlib
-import json
 from .task_queue import Task
 from .image_task import ImageTask, ImageRequest
 from ..utils.generic_image_prompt_compiler import GenericImagePromptCompiler
 from typing import Dict, Any
 
-from app.common import get_logger, ChatRequest, Utils
+from app.common import get_logger, Utils
 logger = get_logger()
 
 class RequestedImageTask(Task):
@@ -52,16 +50,16 @@ class RequestedImageTask(Task):
             self.db.add_contact_image(self.contact_id, self.output_file, "conversation_images")
             image_request.output = self.output_file
 
-            image_job = ImageTask(image_request, self.infrastructure, self.db)
-            self.add_sub_job(image_job)
-            self.wait_for([image_job])
+            image_task = ImageTask(image_request, self.infrastructure, self.db)
+            self.add_sub_task(image_task)
+            self.wait_for([image_task])
 
-            self.response = image_job.result()
+            self.response = image_task.get_result()
             if not self.response:
                 logger.error("failed to generate assistant image")
 
         except Exception as e:
             logger.error(f"failed to execute image request {repr(e)}")
 
-    def result(self) -> Dict[str, Any]:
+    def get_result(self) -> Dict[str, Any]:
         return self.response

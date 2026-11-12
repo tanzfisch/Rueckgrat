@@ -5,7 +5,7 @@ from .companion_job import CompanionJob, short
 from app.utils import clock
 from app.utils.clock import to_db, from_db, user_timezone, next_daily, last_occurrence, at_local
 
-from app.common import get_logger, user_scope
+from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 MAX_SLEEP = 60                  # wall clock seconds, also picks up new companions and rows added by other paths
@@ -105,7 +105,7 @@ class CompanionScheduler:
 
         job = CompanionJob(row, self.db, self.infrastructure, self.tool_registry, tz, now)
         try:
-            with user_scope(row["user_id"]):    # status messages of its tool lookups go to the contact's owner only
+            with MessageQueue.user_scope(row["user_id"]):    # status messages of its tool lookups go to the contact's owner only
                 job.run()
         except Exception as e:
             logger.error(f"companion pass {row['kind']} contact {row['contact_id']} failed {repr(e)}")

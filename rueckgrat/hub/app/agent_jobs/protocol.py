@@ -4,20 +4,6 @@ from datetime import datetime, timezone
 
 SHORT_TEXT = 80     # a text value of a line up to this long stays in the line, a longer one goes to the outputs
 
-# #174 a job's protocol (decision trace), saved by the spawn_job tool when the job ends (ChatDB.save_protocol):
-#   lines       one per action, the same fields each: at (UTC), agent (role), agent_id, step (the controller's step,
-#               1-based, None outside a step), task (the plan's task id, None for the controller), action, ok (True /
-#               False / None), data (the rest). a text longer than SHORT_TEXT is in the outputs: data["out"][key] = ref
-#   plan        the current plan only: {"name", "revision", "steps": [[{"task", "role", "prompt" or "out"}]]}. a review
-#               that changes it adds a revision, its line says what changed (removed / added task ids). a retry's
-#               revised prompt is in its retry line, not in the plan
-#   tool_calls  one per tool call: at, agent_id, step, task, tool, args, ok, error, duration_ms. its line has data["call"]
-#   outputs     the long texts by ref ("o1", ...): {"kind": the field, "text": in full}
-# actions: job_started, plan, step_started, spawned, tools, tool_directing, tool_call, done, failed, timed_out,
-#   user_message, cancelled, review (decision keep / refine / restart), retry (a failed task again: attempt, reason,
-#   old_prompt, new_prompt, changed), merged, job_finished. a retried task's worker lines have data["attempt"] (2, ...)
-
-
 class Protocol:
     def __init__(self):
         self._lock = threading.Lock()

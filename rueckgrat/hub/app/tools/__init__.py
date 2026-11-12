@@ -1,5 +1,5 @@
 from .tool_registry import ToolRegistry
-from .tool import Tool, ToolCategory
+from .tool import Tool
 from .take_photo_tool import TakePhotoTool
 from .image_gen_tool import ImageGenTool
 from .websearch_tool import WebsearchTool
@@ -21,7 +21,6 @@ from .write_file_tool import WriteFileTool
 __all__ = [
     "ToolRegistry",
     "Tool",
-    "ToolCategory",
     "TakePhotoTool",
     "ImageGenTool",
     "WebsearchTool",

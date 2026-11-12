@@ -139,6 +139,20 @@ class RueckgratConfig:
         self._set("chat", "theme", value)
 
     @property
+    def font_scale(self) -> float:
+        """the user's text size on top of the system's, 1.0 is the system size, this device only.
+        the settings offer 0.8, 1.0 and 1.2, any other value can be set here by hand"""
+        try:
+            value = float(self._get("chat", "font_scale", "1.0"))
+        except ValueError:
+            return 1.0
+        return value if value > 0 else 1.0
+
+    @font_scale.setter
+    def font_scale(self, value: float):
+        self._set("chat", "font_scale", str(value))
+
+    @property
     def refresh_token(self):
         """the stored session (stay logged in), "" when logged out"""
         return self._get("session", "refresh_token", "")

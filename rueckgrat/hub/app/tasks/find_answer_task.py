@@ -1,11 +1,9 @@
 from .task_queue import Task
 from typing import Dict, Any
-import json
-import re
 import random
 import datetime
 
-from app.common import get_logger, ChatRequest, Utils
+from app.common import get_logger, Utils
 logger = get_logger()
 
 # the prompt must fit one llama slot: LLAMA_SERVER_MAX_CONTEXT 8192 / LLAMA_SERVER_N_PARALLEL 2 (compose.yml, the node's .env,
@@ -45,7 +43,7 @@ class FindAnswerTask(Task):
         except Exception as e:
             logger.error(f"failed to update context {repr(e)}")
 
-    def result(self) -> Dict[str, Any]:
+    def get_result(self) -> Dict[str, Any]:
         return self.answer
        
     def _find_answer(self):

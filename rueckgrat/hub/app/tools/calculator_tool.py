@@ -2,13 +2,11 @@ from typing import Dict,  Any
 import ast
 import math
 import operator
-from .tool import Tool, ToolCategory
+from .tool import Tool
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
 
-# safe calculator: the expression is parsed into a syntax tree (ast) and only whitelisted nodes are evaluated.
-# never eval(), so "__import__('os').system(...)" is rejected instead of executed.
 MAX_EXPRESSION_LENGTH = 200
 MAX_EXPONENT = 1000
 
@@ -76,14 +74,7 @@ def calculate(expression: str) -> str:
 
 
 class CalculatorTool(Tool):
-    category = ToolCategory.MATH
     description = "exact arithmetic and math (sums, percentages, tips, powers, roots, trigonometry)"
-    # laya scores pasted code (C++, python, "why doesn't this compile") as "math with numbers", so the questions
-    # ask about everyday maths (money, percentages, word problems, sin/cos) instead of numbers in general.
-    # probe at TOOL_THRESHOLD 0.5, 30 maths questions / 16 code posts / 30 others (chit-chat, news, facts, run_code, "write a function"):
-    #   old questions: 23/30 hits, 15/16 code posts, 2/30 others
-    #   new questions: 23/30 hits,  4/16 code posts, 0/30 others
-    # still missed: bare expressions like "square root of 2", "9 squared", "144 divided by 12" (laya rates them like code)
     question = [
         "Does the user ask about money, prices, tax, tips, percentages or splitting a bill?",
         "Does the user ask how much they pay, save, owe or get, or what a percentage of an amount is?",
@@ -91,8 +82,8 @@ class CalculatorTool(Tool):
         "Does the user ask what sin, cos or tan of some degrees is?"
     ]
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
@@ -115,7 +106,7 @@ class CalculatorTool(Tool):
             logger.error(f"failed to calculate {repr(e)}")
             result = {"tool": self.name(), "error": "calculation failed"}
 
-        self.response.setdefault("tool_results", []).append(result)
+        self.add_result(result)
 
     @classmethod
     def prompt(cls) -> str:

@@ -51,9 +51,9 @@ class GenerateImageTask(Task):
         try:
             # run inline, not as a sub job: a sub job would send its own {"image": ...} to the client
             # with the db, the generation parameters are stored too, so a lost file can be generated again (ImageStore)
-            image_job = ImageTask(self.build_request(), self.infrastructure, self.db)
-            image_job.execute()
-            self.image = image_job.result().get("image") or {}
+            image_task = ImageTask(self.build_request(), self.infrastructure, self.db)
+            image_task.execute()
+            self.image = image_task.get_result().get("image") or {}
         except Exception as e:
             logger.error(f"failed to generate image {repr(e)}")
         if self.image:
@@ -61,7 +61,7 @@ class GenerateImageTask(Task):
         else:
             self.db.fail_generated_image(self.row_id)
 
-    def result(self) -> Dict[str, Any]:
+    def get_result(self) -> Dict[str, Any]:
         generated = {"request_id": self.request_id, "prompt": self.prompt}
         if self.image:
             generated.update(filename=self.image["filename"], image_path=self.image["image_path"])

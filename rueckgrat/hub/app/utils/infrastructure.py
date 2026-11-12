@@ -1,5 +1,4 @@
 
-import asyncio
 import base64
 import json
 import os
@@ -14,7 +13,7 @@ from dataclasses import dataclass
 from ..tasks.image_task import ImageRequest
 from .tts_cache import TtsCache
 
-from app.common import get_logger, ChatRequestLlama, DownloadQueue, Utils, WebSocketClient
+from app.common import get_logger, ChatRequestLlama, DownloadQueue, WebSocketClient
 logger = get_logger()
 
 INFRASTRUCTURE_CONFIG_PATH = Path("/hub/config/infrastructure.json")
@@ -146,20 +145,6 @@ class Infrastructure:
                         pbar.update(len(chunk))
 
         return total_size    
-
-    def _download_from_url(self, url: str, dst_path: str) -> int:
-        logger.debug(f"download {url} -> {dst_path}")
-
-        target_path = Path("/node") / dst_path
-        target_path.mkdir(parents=True, exist_ok=True)
-
-        filename = os.path.basename(urlparse(url).path)
-        target_filepath = target_path / filename
-
-        if os.path.exists(target_filepath):
-            target_filepath.unlink(missing_ok=True)
-
-        return self._download_file(url, target_filepath)
 
     def _image_payload(self, image_request: ImageRequest) -> dict:
         """the json the node gets. a request with a face reference (reference_image_key) also gets the bytes of that
@@ -381,9 +366,10 @@ class Infrastructure:
         if node and node.is_connected():
             node.send_message(json.dumps({"cancel": stream_id}))
 
-    def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 1024, context_size: int=8192, timeout: Optional[float] = None) -> str:
+    def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 1024, context_size: int=8192, timeout: Optional[float] = None, json_schema: Optional[dict] = None) -> str:
         """stream: returns the stream id at once, the reply goes to callback. otherwise returns the reply.
-        timeout: seconds for the node's llama call (jobs), the hub waits a bit longer. None = 240 like before"""
+        timeout: seconds for the node's llama call (jobs), the hub waits a bit longer. None = 240 like before
+        json_schema: the reply is json matching this schema, None = free text"""
         try:
             chat_request = ChatRequestLlama(
                 messages=messages,
@@ -394,7 +380,8 @@ class Infrastructure:
                 stream=stream,
                 conversation_id=conversation_id,
                 stream_id=uuid.uuid4().hex if stream else None,  # own routing key per stream
-                timeout=timeout
+                timeout=timeout,
+                json_schema=json_schema
             )
 
             #logger.debug(f"sending query to llm:\n{Utils.pretty_print(chat_request.model_dump())}")
@@ -483,14 +470,6 @@ class Infrastructure:
             if node.is_connected():
                 return node
         return self.nodes[0]
-
-    async def wait_for_any_node(self, poll: float = 1.0):
-        """block until at least one node is connected, then return it"""
-        while True:
-            for node in self.nodes:
-                if node.is_connected():
-                    return node
-            await asyncio.sleep(poll)
 
     def get_registered_models(self) -> list:
         node = self._get_any_node()

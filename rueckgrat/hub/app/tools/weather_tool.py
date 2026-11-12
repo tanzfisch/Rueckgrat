@@ -1,6 +1,6 @@
 from typing import Dict,  Any
 import requests
-from .tool import Tool, ToolCategory
+from .tool import Tool
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -63,7 +63,6 @@ def get_weather(location: str) -> str:
 
 
 class WeatherTool(Tool):
-    category = ToolCategory.WEB
     description = "current weather and 3 day forecast for a place"
     question = [
         "Does the user want the weather or forecast somewhere, like rain, sun or wind?",
@@ -73,8 +72,8 @@ class WeatherTool(Tool):
         "Does the user ask about the temperature outside right now?"
     ]
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
@@ -97,7 +96,7 @@ class WeatherTool(Tool):
             logger.error(f"failed to get weather {repr(e)}")
             result = {"tool": self.name(), "error": "weather lookup failed"}
 
-        self.response.setdefault("tool_results", []).append(result)
+        self.add_result(result)
 
     @classmethod
     def prompt(cls) -> str:

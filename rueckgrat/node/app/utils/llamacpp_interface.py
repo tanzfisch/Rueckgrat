@@ -39,7 +39,7 @@ class LLamaCppInterface:
     def _build_payload(self, request: ChatRequestLlama) -> dict:
         # sampling settings (top_k, top_p, min_p, repeat_penalty, ...) come from the
         # server's extra_args so they can be configured per model in registry.json
-        return {
+        payload = {
             "messages": self._normalize_messages(request.messages),
             "temperature": request.temperature,
             "seed": request.seed,
@@ -48,6 +48,9 @@ class LLamaCppInterface:
             # thinking off on every call (Qwen's template reads this, other templates ignore it)
             "chat_template_kwargs": {"enable_thinking": False}
         }
+        if request.json_schema:
+            payload["response_format"] = {"type": "json_schema", "json_schema": {"schema": request.json_schema}}
+        return payload
 
     def _check_finish_reason(self, finish_reason):
         if finish_reason == "length":

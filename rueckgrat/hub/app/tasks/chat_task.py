@@ -1,20 +1,24 @@
 from .task_queue import Task
 from ..utils.prompt_compiler import PromptCompiler
+from .tool_execution_task import ToolExecutionTask
 from typing import Dict, Any
-import json
-import re
 from urllib.parse import urlparse
 
-from app.common import get_logger, ChatRequest
+from app.common import get_logger, ChatRequest, Utils
 logger = get_logger()
 
 class ChatTask(Task):
-    def __init__(self, request: ChatRequest, db, infrastructure, callback=None, thinking_response = None):
+    MIN_HISTORY = 10    # the history grows from MIN_HISTORY to MIN_HISTORY + HISTORY_STEP - 1 messages and is then cut back
+    HISTORY_STEP = 10   # in one go, so the start of the chat stays the same for llama-server's prompt cache between cuts
+
+    def __init__(self, request: ChatRequest, db, infrastructure, callback=None, tool_execution_results = None, tool_registry=None):
+        """tool_registry: given, the reply may call its REPLY_TOOLS at its end (MetaTask runs them)"""
         super().__init__()
+        self.tool_registry = tool_registry
         self.request = request
         self.db = db
         self.infrastructure = infrastructure
-        self.thinking_response = thinking_response
+        self.tool_execution_results = tool_execution_results
         self.callback = callback
         self.stream_id = None
 
@@ -26,39 +30,38 @@ class ChatTask(Task):
             compiler = PromptCompiler(
                 contact=contact,
                 conversation=conversation,
-                user_role_name=self.request.name,
-                thinking=False,
-                tool_registry=None
+                user_role_name=self.request.name
             )
 
-            system_prompt, context_prompt = compiler.build_prompt()
+            system_prompt, situation_prompt = compiler.build_prompt()
+            if self.tool_registry:
+                system_prompt += "\n\n" + self.tool_registry.reply_tools_prompt().strip()
 
             messages = [{"role": "developer", "content": system_prompt}]
-            if context_prompt:
-                messages.append({"role": "developer", "content": context_prompt})
-            
-            history = self.db.get_messages_by_conversation(self.request.conversation_id, 10)
+
+            history = self.db.get_messages_by_conversation(self.request.conversation_id, self._history_size())
             note = ""   # what the last answer used, put before the next user turn so the model does not copy it
             for message in history:
                 content = message['content']
                 if not content:
                     continue    # skip if empty to not confuse ai
                 if message["role"] == "assistant":
-                    note = (self._tools_line(message.get("tools"))
-                            + self._sources_line(message.get("sources"))
+                    note = (self._sources_line(message.get("sources"))
                             + self._poll_line(message.get("poll"))
                             + self._map_line(message.get("map"))).strip()
                 elif message["role"] == "user" and note:
                     content = f"{note}\n\n{content}"
                     note = ""
                 messages.append({"role": message["role"], "content": content})
-            if note:
-                messages.append({"role": "developer", "content": note})
 
-            if self.thinking_response:
+            latest = [situation_prompt, note]
+            if self.tool_execution_results:
                 logger.debug("adding tool outputs to chat query")
-                messages.append({"role": "developer", "content": self.thinking_response})
-            
+                tool_result_prompt = ToolExecutionTask.results_prompt(self.tool_execution_results)
+                logger.debug(f"tool_result_prompt:\n{Utils.pretty_print(tool_result_prompt)}")
+                latest.append(tool_result_prompt)
+            self._add_to_latest_user_message(messages, "\n\n".join(s.strip() for s in latest if s and s.strip()))
+
             self.stream_id = self.infrastructure.chat(
                 messages=messages,
                 temperature=self.request.temperature,
@@ -69,11 +72,23 @@ class ChatTask(Task):
         except Exception as e:
             logger.error(f"failed to handle chat request {repr(e)}")
 
+    def _history_size(self) -> int:
+        """how many of the latest messages go into the chat, see MIN_HISTORY"""
+        total = self.db.get_message_count_by_conversation(self.request.conversation_id) or 0
+        if total <= self.MIN_HISTORY:
+            return self.MIN_HISTORY
+        return self.MIN_HISTORY + (total - self.MIN_HISTORY) % self.HISTORY_STEP
+
     @staticmethod
-    def _tools_line(tools) -> str:
-        """one short line naming the tools a past answer used, so the model knows what it did"""
-        names = [tool for tool in tools if isinstance(tool, str)] if isinstance(tools, list) else []
-        return f"\nYou used these tools for this answer: {', '.join(names)}." if names else ""
+    def _add_to_latest_user_message(messages: list, text: str):
+        """puts text in front of the content of the last user message, a new user message when there is none"""
+        if not text:
+            return
+        for message in reversed(messages):
+            if message["role"] == "user":
+                message["content"] = f"{text}\n\n{message['content']}"
+                return
+        messages.append({"role": "user", "content": text})
 
     @staticmethod
     def _poll_line(poll) -> str:
@@ -108,7 +123,7 @@ class ChatTask(Task):
                 domains.append(domain)
         return f"\nYou looked up these sources for this answer: {', '.join(domains)}." if domains else ""
 
-    def result(self) -> Dict[str, Any]:
+    def get_result(self) -> Dict[str, Any]:
         return None
 
     def has_response(self) -> bool:

@@ -4,7 +4,7 @@ import re
 import threading
 import time
 import requests
-from .tool import Tool, ToolCategory
+from .tool import Tool
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -359,7 +359,6 @@ def convert(amount: Any, from_unit: str, to_unit: str) -> Dict[str, Any]:
 
 
 class ConversionTool(Tool):
-    category = ToolCategory.MATH
     description = "converts amounts between currencies, crypto and physical units, prices gold/silver/platinum in any currency"
     question = [
         "Does the user want to convert something?",
@@ -372,8 +371,8 @@ class ConversionTool(Tool):
         "Does the message give speeds or temperatures in different units, like km/h and mph or Celsius and Fahrenheit?"
     ]
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
@@ -391,16 +390,14 @@ class ConversionTool(Tool):
 
         try:
             result = convert(amount, from_unit, to_unit)
-            logger.debug(f"convert: {result['text']}")
+            self.add_result({"tool": self.name(), "text": result['text']})
+            return
         except ConversionError as e:
-            logger.warning(f"convert {amount} {from_unit} -> {to_unit} failed: {e}")
-            result = {"amount": amount, "from": from_unit, "to": to_unit, "error": str(e)}
+            logger.error(f"convert {amount} {from_unit} -> {to_unit} failed: {e}")
         except Exception as e:
             logger.error(f"failed to convert {repr(e)}")
-            result = {"amount": amount, "from": from_unit, "to": to_unit, "error": "conversion failed"}
 
-        # a list, the LLM may convert several things in one answer
-        self.response.setdefault("conversion_results", []).append(result)
+        self.add_result({"tool": self.name(), "text": f"convert {amount} {from_unit} -> {to_unit} failed"})
 
     @classmethod
     def prompt(cls) -> str:

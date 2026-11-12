@@ -1,29 +1,60 @@
 from .task_queue import Task
 from typing import Dict, Any
 import re
+import json
 import random
-from ..utils.prompt_compiler import PromptCompiler
 
 from app.common import get_logger, ChatRequest, Utils
 logger = get_logger()
 
+_PERSON_SCHEMA = {
+    "type": "object",
+    "properties": {key: {"type": "string"} for key in ("action", "head", "upper_body", "body")},
+    "required": ["action", "head", "upper_body", "body"],
+}
+
 class UpdateContextTask(Task):
+    # the reply's shape, llama.cpp only lets the model write json like this (compact, no indentation)
+    CONTEXT_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "location": {"type": "string"},
+            "topic": {"type": "string"},
+            "user": _PERSON_SCHEMA,
+            "assistant": _PERSON_SCHEMA,
+        },
+        "required": ["location", "topic", "user", "assistant"],
+    }
+    MAX_NEW_TOKENS = 300    # ten short fields
+    # where a conversation starts: nothing known yet, the first update fills in what the messages show
+    EMPTY_CONTEXT = {
+        "location": "", "topic": "",
+        "user": {"action": "", "head": "", "upper_body": "", "body": ""},
+        "assistant": {"action": "", "head": "", "upper_body": "", "body": ""},
+    }
+
     def __init__(self, request: ChatRequest, db, infrastructure):
         super().__init__()
         self.request = request
         self.db = db
         self.infrastructure = infrastructure
+        self.updated_context = None
 
     def execute(self) -> None:
+        """runs after the reply: updates the conversation's context from the last exchange and stores it with
+        its topic as title, the next turn uses it. nobody waits for this"""
         try:
             conversation = self.db.get_conversation(self.request.conversation_id)
-            context = Utils.get_nested_value(conversation, ["context"], "")
+            context = Utils.get_nested_value(conversation, ["context"], "") or self.EMPTY_CONTEXT
             messages = self.db.get_messages_by_conversation(self.request.conversation_id, 2)
             self.updated_context = self._update_context(context, messages)
+            if self.updated_context:
+                title = self.updated_context["topic"] or Utils.get_nested_value(conversation, ["title"], "...")
+                self.db.update_conversation(self.request.conversation_id, title, json.dumps(self.updated_context))
         except Exception as e:
             logger.error(f"failed to update context {repr(e)}")
 
-    def result(self) -> Dict[str, Any]:
+    def get_result(self) -> Dict[str, Any]:
         return self.updated_context
     
     def _remove_code(self, text):
@@ -41,144 +72,27 @@ class UpdateContextTask(Task):
             ])
 
             messages = []
-            contact = self.db.get_contact_by_id(self.request.contact_id)
-            conversation = self.db.get_conversation(self.request.conversation_id)
-            compiler = PromptCompiler(
-                contact=contact, 
-                conversation=conversation, 
-                user_role_name=self.request.name
-            )
-            system_prompt, context_prompt = compiler.build_prompt()
 
-            messages.append({"role": "developer", "content": system_prompt})
+            # stable rules first, the changing parts last, so llama.cpp can reuse the cached prefix
+            query = f"""
+Update the scene context after the latest messages. "user" wrote the (role: user) messages, "assistant" the (role: assistant) ones, never swap them.
 
-            if context == "":
-                # fallback context
-                context = """
-{
-    "location": "unkonwn"
-    "topic": "unkonwn",
+RULES:
+- change only what the messages show, invent nothing
+- an item handed over moves to the other person
+- "" means nothing there
+- each field at most 15 words
+- location: the setting. topic: one short phrase
+- action: posture, activity, gesture, expression, mood, not speech
+- head: worn on the head. upper_body: worn on the upper body or held. body: worn on the rest of the body
 
-    "user": {
-    "action": "unknown",
-    "head": "",
-    "upper_body": "casual t-shirt",
-    "body": "jeans and comfortable shoes"
-    },
-
-    "assistant": {
-    "action": "unknown",
-    "head": "",
-    "upper_body": "casual t-shirt",
-    "body": "jeans and comfortable shoes"
-    }
-}
-"""
-
-                query = f"""
-Create a new context for a conversation.
-
-MESSAGES:
-{messages_block}
-
-EXAMPLE CONTEXT:
-{{
-    "location": "Paris",
-    "topic": "sight seeing",
-    "user_facts": "",
-
-    "user": {{
-        "action": "standing and looking around",
-        "head": "",
-        "upper_body": "casual t-shirt",
-        "body": "jeans and comfortable shoes",
-    }},
-
-    "assistant": {{
-        "action": "pointing towards a landmark",
-        "head": "sunglasses on head, light beard",
-        "upper_body": "light button-up shirt with rolled sleeves",
-        "body": "cargo pants and sturdy walking shoes",
-    }}
-}}
-
-INSTRUCTIONS:
-- Invent a detailed narrative situation where user and assistant are immersed together, with the given messages as central, heavily weighted dialogue, plot drivers, and key exchanges.
-- Fill in information as applicable
-- Keep ALL fields SHORT (max 40 words each)
-- an empty string is perfectly valid and means the absence of things or actions
-- topic = 1 short phrase about what is happening
-- user_facts = lasting facts the user told about themselves (name, health and allergies, plans and dates, family, pets, hobbies, job, likes and dislikes), empty if none, do not invent any (max 100 words)
-- "user" = the person who wrote the (role: user) messages, "assistant" = the person who wrote the (role: assistant) messages, never swap them
-- fields of user and of assistant, each about that person only:
-  - action = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
-  - head = items worn on the head
-  - upper_body = items worn on the upper body or carried in the hands
-  - body = items worn on the body
-- location = environment or setting
-
-OUTPUT:
-Return ONLY valid JSON in the given format.
-"""
-            else:
-                query = f"""
-You maintain a running context for a conversation.
+CURRENT CONTEXT:
+{json.dumps(context, ensure_ascii=False)}
 
 LATEST MESSAGES:
 {messages_block}
 
-CURRENT CONTEXT:
-{{
-    "location": "{context['location']}",
-    "topic": "{context['topic']}",
-    "summary": "{context['summary']}",
-    "user_facts": "{Utils.get_nested_value(context, ['user_facts'], '')}",
-
-    "user": {{
-        "action": "{context['user']['action']}",
-        "head": "{context['user']['head']}",
-        "upper_body": "{context['user']['upper_body']}",
-        "body": "{context['user']['body']}",
-    }},
-
-    "assistant": {{
-        "action": "{context['assistant']['action']}",
-        "head": "{context['assistant']['head']}",
-        "upper_body": "{context['assistant']['upper_body']}",
-        "body": "{context['assistant']['body']}",
-    }}
-}}
-
-INSTRUCTIONS:
-- figure out the latest state of the conversation and update the current context
-- focus on removing and adding items if mentioned in the conversation
-- do not invent items or actions
-- if an item was transfered between people remove it from the source
-- keep the information consitent, avoid redundancies or conflicting statements
-- Keep ALL fields except summary and user_facts SHORT (max 40 words each)
-- an empty string is perfectly valid and means the absence of things or actions
-- topic = 1 short phrase about what is happening
-- "user" = the person who wrote the (role: user) messages, "assistant" = the person who wrote the (role: assistant) messages, never swap them
-- fields of user and of assistant, each about that person only:
-  - action = intent, body position, activity, gestures, facial expression, emotions, NOT dialogue
-  - head = items worn on the head
-  - upper_body = items worn on the upper body or carried in the hands
-  - body = items worn on the body
-- location = environment or setting
-- user_facts = lasting facts the user told about themselves (name, health and allergies, plans and dates, family, pets, hobbies, job, likes and dislikes), max 100 words:
-  - keep every fact from the current context, never drop one unless the user corrects it
-  - add new facts from the latest messages, do not invent any
-- summary = a running record of the whole conversation (max 500 words), focused on:
-  - open questions: what is still unresolved, being asked or waiting for an answer
-  - decisions: concrete choices that were made or agreed, and why
-  - ruled out: options that were considered and rejected
-  - open branches: choices still pending and the alternatives still on the table
-  - skip small talk and minor exchanges
-  - keep scene and appearance short or leave them out unless they matter for an open question or decision
-  - drop questions once they are answered and record the answer as a decision
-
-OUTPUT:
-Return ONLY valid JSON in the same format.
+Reply with the JSON only, same keys.
 """            
             messages.append({"role": "user", "content": query})
         except Exception as e:
@@ -186,24 +100,24 @@ Return ONLY valid JSON in the same format.
                 
         response_content = self.infrastructure.chat(
             messages=messages,
-            temperature=0.4, 
-            seed=random.randint(0, 100000)
+            temperature=0.4,
+            seed=random.randint(0, 100000),
+            max_new_tokens=self.MAX_NEW_TOKENS,
+            json_schema=self.CONTEXT_SCHEMA
         )
         if not response_content:
-            logger.warning(f"failed to update context")
-            return context
-        
+            logger.warning("failed to update context")
+            return None
+
         reply = Utils.json_loads(response_content)
         if not reply:
-            logger.error(f"failed to generate new context from:\n{response_content}") 
-            return context
+            logger.error(f"failed to generate new context from:\n{response_content}")
+            return None
 
         # making sure we can guarantee a certain json structure
         new_context = {
             "location": Utils.get_nested_value(reply, ["location"], "unknown"),
             "topic": Utils.get_nested_value(reply, ["topic"], "unknown"),
-            "summary": Utils.get_nested_value(reply, ["summary"], ""),
-            "user_facts": Utils.get_nested_value(reply, ["user_facts"], ""),
 
             "user": {
                 "action": Utils.get_nested_value(reply, ["user", "action"], ""),

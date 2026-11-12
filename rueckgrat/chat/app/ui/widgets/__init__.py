@@ -3,6 +3,7 @@ from .header import Header
 from .bubbles import ChatBubble, OneLineBubble
 from .emoji_picker import EmojiPicker
 from .image import Image
+from .image_grid import ImageGrid
 from .contact_card import ContactCard
 from .contact_info import ContactInfo
 from .image_overlay import ImageOverlay
@@ -14,7 +15,7 @@ from .connection_banner import ConnectionBanner
 from .language_picker import LanguagePicker, flag_text
 from .poll import PollView
 from .map_view import MapView
-from .file_card import FileCard
+from .file_card import FileCard, FileCards
 
 __all__ = [
     "MessageBox", 
@@ -23,6 +24,7 @@ __all__ = [
     "OneLineBubble", 
     "EmojiPicker", 
     "Image", 
+    "ImageGrid",
     "ContactCard", 
     "ContactInfo",
     "ImageOverlay",
@@ -36,4 +38,5 @@ __all__ = [
     "PollView",
     "MapView",
     "FileCard",
+    "FileCards",
 ]

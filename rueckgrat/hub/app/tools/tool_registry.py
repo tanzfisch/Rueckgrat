@@ -1,5 +1,8 @@
 import re
-from typing import Dict, List, Optional, Any
+import threading
+import contextvars
+from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, List, Optional, Any, Mapping, Union, Callable
 from .tool import Tool
 from .image_gen_tool import ImageGenTool
 from .take_photo_tool import TakePhotoTool
@@ -22,59 +25,24 @@ from .write_file_tool import WriteFileTool
 from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
 
-# #176 the order the tools of one message are asked for and run in. one tool is requested at a time, after the
-# previous tool's result. a tuple shares one rank and is asked in the tuple's order. unlisted tools are last, in the
-# order they were given. calls the model wrote for one tool keep that written order
-TOOL_ORDER = [
-    "current_time",     # the time and date other tools and the answer may build on
-    "date_calc",        # date math, after the current date is known
-    "search_memory",    # what the user told before, before any lookup or job that may need it
-    ("wikipedia", "websearch", "fetch_url", "weather"),     # outside lookups, independent of each other
-    "convert",          # converts the values the lookups found (e.g. a price in another currency)
-    "calculate",        # computes with converted values, convert before calculate
-    "run_code",         # the slowest and broadest check, after the quick lookups and math
-    "write_file",       # files for the user, after the lookups they may quote, before the bubbles
-    "show_map",         # bubbles under the answer: the map first
-    "poll",             # then the poll
-    "spawn_job",        # starts a background job after the reply's own tools, so its llm calls don't compete with theirs
-    "remember",         # last: a new memory must not change this message's lookups
-]
-TOOL_RANK = {name: rank for rank, entry in enumerate(TOOL_ORDER) for name in ((entry,) if isinstance(entry, str) else entry)}
-
-
-def _json_objects(text: str):
-    """each {...} in text, with braces inside strings left alone"""
-    i, n = 0, len(text or "")
-    while i < n:
-        if text[i] != "{":
-            i += 1
-            continue
-        depth, in_str, esc, start = 0, False, False, i
-        for j in range(i, n):
-            char = text[j]
-            if in_str:
-                if esc:
-                    esc = False
-                elif char == "\\":
-                    esc = True
-                elif char == '"':
-                    in_str = False
-                continue
-            if char == '"':
-                in_str = True
-            elif char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    yield text[start:j + 1]
-                    i = j + 1
-                    break
-        else:
-            break
-
 class ToolRegistry:
+    # the order the tools are to be executed
+    TOOL_ORDER = [
+        ("spawn_job", "current_time"),
+        "date_calc",
+        ("search_memory", "wikipedia", "websearch", "fetch_url", "weather"),
+        "convert",
+        ("calculate", "run_code"),
+        ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember"),
+    ]
+
+    TOOL_RANK = {name: rank for rank, entry in enumerate(TOOL_ORDER) for name in ((entry,) if isinstance(entry, str) else entry)}
     PROMPT_TOOLS = ["remember", "search_memory", "take_photo"]
+    PRIORITY_TOOL = "spawn_job"   # overrides all other tools
+    WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "poll", "show_map")
+    DETACHED_TOOLS = ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember")
+    REPLY_TOOLS = ("remember", "take_photo")    # a chat reply calls these itself at its end (MetaTask), not the tool setup
+    REPLY_CALL = re.compile(r'(?:^|\n)[ \t]*(?:```(?:json)?\s*)?\{\s*"tool"')   # where the calls at the end of a reply start
 
     def __init__(self, db, infrastructure, task_queue):
         self.db = db
@@ -82,10 +50,9 @@ class ToolRegistry:
         self.task_queue = task_queue
 
         self.tools: Dict[str, type[Tool]] = {}
-        self.parallel: Dict[str, bool] = {}  # tool name -> runs in parallel (True) or synchronous (False)
         self._register_tool(WebsearchTool)
-        self._register_tool(ImageGenTool, parallel=True)
-        self._register_tool(TakePhotoTool, parallel=True)
+        self._register_tool(ImageGenTool)
+        self._register_tool(TakePhotoTool)
         self._register_tool(ConversionTool)
         self._register_tool(CalculatorTool)
         self._register_tool(CurrentTimeTool)
@@ -104,25 +71,51 @@ class ToolRegistry:
         temp = ", ".join(self.tools)
         logger.debug(f"registered tools: {temp}")
 
-    def _register_tool(self, cls: type[Tool], parallel: bool = False):
-        """parallel: the tool may run in parallel, default is synchronous execution"""
+    def _register_tool(self, cls: type[Tool]):
         self.tools[cls.name()] = cls
-        self.parallel[cls.name()] = parallel
 
-    @staticmethod
-    def sort_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """a new list of the calls in TOOL_ORDER, stable: unlisted tools last, equal ranks keep their order"""
-        return sorted(tool_calls, key=lambda call: TOOL_RANK.get(call.get("tool"), len(TOOL_ORDER)))
+    def attach_held(self, db, user_id: int, conversation_id: int, message_id: int, attachments: List[Dict[str, Any]], push: bool = True) -> None:
+        """attaches the files tools held without a message (their results' "attachments", each names its tool) to message_id,
+        by that tool's attach_held. push: the user has an open /ws. a file that fails is logged and skipped"""
+        for held in attachments or []:
+            try:
+                self.tools[held["tool"]].attach_held(db, user_id, conversation_id, message_id, held, push)
+            except Exception as e:
+                logger.error(f"held attachment {held.get('name')} of {held.get('tool')} not attached {repr(e)}")
 
-    @staticmethod
-    def ordered_names(names: List[str]) -> List[str]:
+    def prioritized(self, tool_names: List[str]) -> List[str]:
+        """only the PRIORITY_TOOL when it is among tool_names, else tool_names"""
+        return [self.PRIORITY_TOOL] if self.PRIORITY_TOOL in (tool_names or []) else list(tool_names or [])
+
+    def bands(self, mandatory: List[str], recommended: List[str]) -> tuple[List[str], List[str]]:
+        """(mandatory, recommended) of a detection: a mandatory PRIORITY_TOOL is the only tool, a tool in both is mandatory"""
+        mandatory = self.prioritized(mandatory)
+        if self.PRIORITY_TOOL in mandatory:
+            return mandatory, []
+        return mandatory, [name for name in dict.fromkeys(recommended or []) if name not in mandatory]
+
+    def rounds(self, tool_names: List[str], recommended: List[str] = ()) -> List[List[str]]:
+        """the rounds of a tool setup (ranked_groups of all tools). a recommended PRIORITY_TOOL comes first on its own,
+        ToolExecutionTask stops after it when it was called"""
+        names = list(dict.fromkeys(list(tool_names or []) + list(recommended or [])))
+        if self.PRIORITY_TOOL in (recommended or []) and self.PRIORITY_TOOL not in (tool_names or []):
+            rest = [name for name in names if name != self.PRIORITY_TOOL]
+            return [[self.PRIORITY_TOOL]] + (self.ranked_groups(rest) if rest else [])
+        return self.ranked_groups(names)
+
+    def available(self, tool_names: List[str], excluded: tuple = ()) -> List[str]:
+        """the registered names of tool_names without the excluded ones, in their order, no duplicates"""
+        return [name for name in dict.fromkeys(tool_names or []) if name in self.tools and name not in excluded]
+
+    @classmethod
+    def ordered_names(cls, names: List[str]) -> List[str]:
         """unique names in TOOL_ORDER. a shared rank keeps the tuple's order, unlisted names stay last in input order"""
         unique = list(dict.fromkeys(names))
 
         def key(name: str):
-            rank = TOOL_RANK.get(name, len(TOOL_ORDER))
-            if rank < len(TOOL_ORDER):
-                entry = TOOL_ORDER[rank]
+            rank = cls.TOOL_RANK.get(name, len(cls.TOOL_ORDER))
+            if rank < len(cls.TOOL_ORDER):
+                entry = cls.TOOL_ORDER[rank]
                 sub = entry.index(name) if isinstance(entry, tuple) else 0
             else:
                 sub = unique.index(name)
@@ -130,54 +123,101 @@ class ToolRegistry:
 
         return sorted(unique, key=key)
 
-    def tool_steps(self, tool_names: List[str], detected_tool_names: Optional[List[str]] = None) -> List[tuple]:
-        """(name, required) in TOOL_ORDER. required means laya detected the tool (ToolDetectionTask). PROMPT_TOOLS and
-        any other name laya did not detect stay optional: they are asked together once, after the required tools.
-        unknown names are dropped"""
-        detected = set(detected_tool_names or [])
-        return [(name, name in detected and name not in self.PROMPT_TOOLS)
-                for name in self.ordered_names(tool_names) if name in self.tools]
-
-    @staticmethod
-    def group_calls(tool_calls: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
-        """the sorted calls in groups of one rank (e.g. the lookups, or two calculate calls).
-        directing does not batch a rank: tool_steps asks for one tool at a time"""
-        groups = []
-        for call in ToolRegistry.sort_calls(tool_calls):
-            if groups and TOOL_RANK.get(groups[-1][0].get("tool")) == TOOL_RANK.get(call.get("tool")):
-                groups[-1].append(call)
+    def ranked_groups(self, tool_names: List[str]) -> List[List[str]]:
+        names = [name for name in self.ordered_names(tool_names or []) if name in self.tools]
+        if names and all(name in self.PROMPT_TOOLS for name in names):
+            return [names]
+        ranked_groups = []
+        for name in names:
+            rank = self.TOOL_RANK.get(name)
+            if ranked_groups and rank is not None and self.TOOL_RANK.get(ranked_groups[-1][0]) == rank:
+                ranked_groups[-1].append(name)
             else:
-                groups.append([call])
-        return groups
+                ranked_groups.append([name])
+        return ranked_groups
 
-    def execute(self, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_calls: List[Dict[str, Any]], parallel: bool = False) -> None:
-        """runs the tool calls in TOOL_ORDER (sort_calls). synchronous tools (parallel=False) run one after another
-        on this thread (task_queue.run), parallel tools are queued (task_queue.add) and run concurrently.
-        parallel selects which tools run: None = all (default), False = only synchronous, True = only parallel"""
-        for tool_call in self.sort_calls(tool_calls):
-            tool_name = tool_call["tool"]
-            if not tool_name in self.tools:
-                logger.warning(f"unknown tool: {tool_name}")
-                continue
-            if parallel is not None and self.parallel[tool_name] != parallel:
-                continue  # not selected in this call, the other execute() call runs it
+    def _tool_job(self, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any],
+                  message_id: Optional[int] = None) -> Optional[Tool]:
+        tool_name = tool_call.get("tool")
+        if tool_name not in self.tools:
+            logger.error(f"unknown tool: {tool_name}")
+            return None
 
-            logger.debug(f"executing:\n{Utils.pretty_print(tool_call)}")
+        logger.debug(f"executing:\n{Utils.pretty_print(tool_call)}")
+        tool_job = self.tools[tool_name](
+            db=self.db,
+            infrastructure=self.infrastructure,
+            user_id=user_id,
+            contact_id=contact_id,
+            conversation_id=conversation_id,
+            tool_call=tool_call
+        )
+        tool_job.message_id = message_id
+        return tool_job
 
-            ToolCls = self.tools[tool_name]
-            tool_job = ToolCls(
-                db=self.db,
-                infrastructure=self.infrastructure,
-                user_id=user_id,
-                contact_id=contact_id,
-                conversation_id=conversation_id,
-                response=response,
-                tool_call=tool_call
-            )
-            if self.parallel[tool_name]:
-                self.task_queue.add(tool_job)
-            else:
-                self.task_queue.run(tool_job)
+    def _run_job(self, tool_job: Tool) -> Optional[Dict[str, Any]]:
+        if not self.task_queue.run(tool_job):
+            logger.error(f"tool failed: {tool_job.name()}")
+            return None
+        return tool_job.get_result()
+
+    def execute(self, user_id: int, contact_id: int, conversation_id: int,
+                  tool_calls: Union[Dict[str, Any], List[Dict[str, Any]]],
+                  message_id: Optional[int] = None, excluded: tuple = (),
+                  detach: Optional[Callable[[], bool]] = None) -> Optional[Dict[str, Any]]:
+        """runs one tool call, or a list of them in parallel, and returns once all are done.
+        the results are merged in the order of the calls ({tool name: result}), None if no call returned a result.
+        message_id: the assistant message the calls are for. a call of an excluded tool is dropped, also when the llm
+        wrote it without being offered the tool.
+        detach: given, a call of a DETACHED_TOOLS tool for a stored message is started in the background and not waited for,
+        its planned_result is returned instead. detach() is called once before: False (the turn is gone) drops those calls.
+        the calls run on their own threads, not on the task queue's workers: the caller waits for them,
+        so they cannot block each other or the caller for a free worker"""
+        if isinstance(tool_calls, dict):
+            tool_calls = [tool_calls]
+        for call in tool_calls:
+            if call.get("tool") in excluded:
+                logger.warning(f"excluded tool dropped: {call.get('tool')}")
+        tool_calls = [call for call in tool_calls if call.get("tool") not in excluded]
+
+        jobs = [job for job in (self._tool_job(user_id, contact_id, conversation_id, call, message_id) for call in tool_calls) if job]
+        detached = [job for job in jobs if detach and self.detachable(job)]
+        if detached and not detach():
+            logger.info(f"turn gone, detached calls dropped: {[job.name() for job in detached]}")
+            jobs = [job for job in jobs if job not in detached]
+            detached = []
+        waited = [job for job in jobs if job not in detached]
+        if not jobs:
+            return None
+
+        for job in detached:
+            self._start_detached(job)
+
+        if len(waited) == 1:
+            done = {id(waited[0]): self._run_job(waited[0])}
+        elif waited:
+            # copy_context: the status messages of each tool go to the caller's user (MessageQueue.user_scope)
+            with ThreadPoolExecutor(max_workers=len(waited)) as pool:
+                futures = [pool.submit(contextvars.copy_context().run, self._run_job, job) for job in waited]
+                done = {id(job): future.result() for job, future in zip(waited, futures)}
+        else:
+            done = {}
+
+        merged: Dict[str, Any] = {}
+        for job in jobs:
+            self.merge_results(merged, job.planned_result() if job in detached else done[id(job)])
+        return merged or None
+
+    def detachable(self, tool_job: Tool) -> bool:
+        return tool_job.name() in self.DETACHED_TOOLS and tool_job.has_message()
+
+    def _start_detached(self, tool_job: Tool) -> None:
+        """runs the call on its own thread for the caller's user, without status messages: the reply's status ends first"""
+        def run():
+            with MessageQueue.quiet_scope():
+                self._run_job(tool_job)
+        logger.debug(f"detached: {tool_job.name()} for message {tool_job.message_id}")
+        threading.Thread(target=contextvars.copy_context().run, args=(run,), name=f"detached-{tool_job.name()}", daemon=True).start()
 
     def get_tools_prompt(self, skill_names: Optional[List[str]] = None) -> str:
         if not skill_names:
@@ -190,56 +230,134 @@ class ToolRegistry:
             result += f"{tool.prompt()}"
         
         return result
-    
-    def get_tools_hydrated(self, tool_names: List[str], detected_tool_names: Optional[List[str]] = None) -> str:
-        """tool directing prompt: the full prompt() of exactly these tools plus a strict JSON-only call rule.
-        tool_names must not be empty (get_tools_prompt() would return all tools).
-        laya-detected names (detected_tool_names, except PROMPT_TOOLS) must be called. every other tool stays optional"""
-        tools = self.get_tools_prompt(tool_names)
-        known = [name for name in tool_names if name in self.tools]
-        required = [name for name in dict.fromkeys(detected_tool_names or []) if name in known and name not in self.PROMPT_TOOLS]
-        prioritize = ("Prioritize tools over your own knowledge: whenever an available tool can handle part of the query, "
-                      "call it for that part even if you are confident you already know the answer.")
-        if len(required) == 1 and len(known) == 1:
-            tools_intro = "Full instructions for the tool to call:"
-            call_guidance = ("This tool was detected as necessary for this query. You must call it. Output its JSON line. Do not skip it.\n"
-                             + prioritize)
-        elif required:
-            tools_intro = "Full instructions for the available tools:"
-            call_guidance = (f"These tools were detected as necessary and must be called: {', '.join(required)}.\n"
-                             "Output the JSON call for each of them. Do not skip them.")
-            if len(required) < len(known):
-                call_guidance += ("\nFor the other tools, call only those the query really needs. "
-                                  "If none of them are needed, output nothing for them.")
-            call_guidance += "\n" + prioritize
-        else:
-            # one combined request for every tool laya did not require. nothing is a valid answer
-            return f"""TOOLS:
 
-These tools are optional. Their full instructions:
+    def merge_results(self, target: Dict[str, Any], result: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+        """merges {tool name: result} into target (changed and returned). a second result of the same tool
+        is combined by that tool's merge() (tools: name -> tool class), Tool.merge when the tool is unknown"""
+        for name, value in (result or {}).items():
+            known = target.get(name)
+            if not isinstance(known, dict) or not isinstance(value, dict):
+                target[name] = value
+                continue
+            tool = (self.tools or {}).get(name, Tool)
+            target[name] = tool.merge(known, value)
+        return target    
+
+    def split_tools(self, tool_names: List[str], recommended: List[str] = ()) -> tuple[List[str], List[str], List[str]]:
+        """(mandatory, recommended, optional): PROMPT_TOOLS are optional, the recommended ones the detection was not sure
+        about, every other tool was detected and must be called"""
+        names = list(tool_names or [])
+        return ([name for name in names if name not in self.PROMPT_TOOLS and name not in recommended],
+                [name for name in names if name in recommended and name not in self.PROMPT_TOOLS],
+                [name for name in names if name in self.PROMPT_TOOLS])
+
+    def get_tools_hydrated(self, tool_names: List[str], kind: str = "mandatory") -> str:
+        """the tools' instructions and how to call them. kind: "mandatory" (must be called), "recommended" (detected, but
+        the model decides) or "optional" (PROMPT_TOOLS, the model decides on its own)"""
+        tools = self.get_tools_prompt(tool_names)
+
+        if kind == "recommended":
+            return f"""
+These tools may be needed, the detection was not sure. YOU decide whether the user's latest message really asks for what a tool does.
+Call one only when it clearly fits the message, not because it is offered. Their full instructions:
 {tools}
 
 HOW TO CALL:
-Call a tool only if the query really needs it. If the query needs none of them, output nothing. Outputting nothing is the correct answer when the query needs none of them.
+Call a recommended tool only when the message needs it. If none of them fits, output nothing for them.
 If you do call a tool, write ONE line of JSON per call, exactly in the format shown above, with the values for the query filled in.
 Writing about a call does nothing, only a JSON line runs the tool. Do not describe the call in words, no headings like "TOOL CALL:", no analysis.
 """
-        return f"""TOOLS:
 
-{tools_intro}
+        if kind == "reply":
+            return f"""
+TOOLS IN YOUR REPLY:
+You can use these tools on your own in any reply, the user does not have to ask for them. Their full instructions:
 {tools}
 
 HOW TO CALL:
-Your answer MUST be the tool call as ONE line of JSON per call, exactly in the format shown above, with the values for the query filled in.
-{call_guidance}
+Write your reply to the user first. Only when a tool is useful, add ONE line of JSON per call at the very end of your reply, exactly in the format shown above.
+The user does not see these lines. Never mention or describe a call in your reply, only a JSON line runs the tool. Most replies need no call.
+"""
+
+        if kind == "optional":
+            return f"""
+These tools are optional: YOU decide on your own whether to use them. The user does not ask for them and does not have to mention them.
+Judge from the conversation whether a tool helps you answer well, e.g. remembering something worth keeping or looking up an earlier memory. Their full instructions:
+{tools}
+
+HOW TO CALL:
+Call an optional tool whenever you find it useful for this message, also when the user did not ask for it. If none of them is useful, output nothing for them.
+If you do call a tool, write ONE line of JSON per call, exactly in the format shown above, with the values for the query filled in.
 Writing about a call does nothing, only a JSON line runs the tool. Do not describe the call in words, no headings like "TOOL CALL:", no analysis.
 """
+
+        return f"""
+These tools must be called. Their full instructions:
+{tools}
+
+HOW TO CALL:
+Your answer MUST be the tool calls, ONE line of JSON per call, exactly in the format shown above, with the values for the query filled in. Do not skip any of them.
+Writing about a call does nothing, only a JSON line runs the tool. Do not describe the call in words, no headings like "TOOL CALL:", no analysis.
+"""
+    
+    def reply_tools_prompt(self) -> str:
+        """the REPLY_TOOLS for the chat's system prompt"""
+        return self.get_tools_hydrated(list(self.REPLY_TOOLS), kind="reply")
+
+    def split_reply(self, text: str, final: bool = True) -> tuple[str, List[Dict]]:
+        """(the text for the user, the REPLY_TOOLS calls) of a chat reply, the calls are the json lines at its end.
+        final False (still streaming): a last line that may become a call is held back. the text only grows while
+        streaming, so the part sent already stays its start"""
+        text = text or ""
+        match = self.REPLY_CALL.search(text)
+        if match and not final:
+            return text[:match.start()].rstrip(), []    # the calls may still be cut off
+        if match:
+            calls, _ = self.extract_tool_calls(text[match.start():])
+            return text[:match.start()].rstrip(), [call for call in calls or [] if call.get("tool") in self.REPLY_TOOLS]
+        if not final:
+            start = text.rfind("\n") + 1
+            if text[start:].lstrip()[:1] in ("{", "`"):
+                text = text[:start]
+        return text.rstrip(), []
+
+    def _json_objects(self, text: str):
+        """yields each top level json from given text"""
+        i, n = 0, len(text or "")
+        while i < n:
+            if text[i] != "{":
+                i += 1
+                continue
+            depth, in_str, esc, start = 0, False, False, i
+            for j in range(i, n):
+                char = text[j]
+                if in_str:
+                    if esc:
+                        esc = False
+                    elif char == "\\":
+                        esc = True
+                    elif char == '"':
+                        in_str = False
+                    continue
+                if char == '"':
+                    in_str = True
+                elif char == "{":
+                    depth += 1
+                elif char == "}":
+                    depth -= 1
+                    if depth == 0:
+                        yield text[start:j + 1]
+                        i = j + 1
+                        break
+            else:
+                logger.warning(f"tool call cut off, dropped: {text[start:start + 200]}")
+                break
 
     def extract_tool_calls(self, text: str) -> tuple[List[Dict], str]:
         """json objects that name a registered tool. braces inside strings count, so a file can contain code"""
         tool_calls = []
         cleaned_text = text or ""
-        for match in _json_objects(cleaned_text):
+        for match in self._json_objects(cleaned_text):
             if '"tool"' not in match:
                 continue
             try:

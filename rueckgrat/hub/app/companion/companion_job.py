@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from app.agent_jobs.agent_job import AgentJob
 from . import prompts
@@ -50,8 +50,10 @@ def since_text(minutes: float | None) -> str:
 
 class CompanionJob(AgentJob):
     """one pass of a companion as an agent job: a calendar row fired. its one step: the lookups on the workers' tool path
-    (find_tools), one decision call with their results, then the answer is applied: calendar rows, maybe a message.
+    (run_tools), one decision call with their results, then the answer is applied: calendar rows, maybe a message.
     the scheduler runs it on its own thread (run()) and re-arms or closes the row"""
+    # it may take a photo (sent with its message), not make pictures or files: those are for jobs the user asked for
+    EXCLUDED_TOOLS = ("generate_image", "write_file")
 
     def __init__(self, row: dict, db, infrastructure, tool_registry, tz, now: datetime):
         super().__init__("companion", row["kind"], infrastructure=infrastructure)
@@ -89,7 +91,6 @@ class CompanionJob(AgentJob):
         last_user = self.db.last_user_message_time(contact_id)
         user_minutes = (self.now - from_db(last_user)).total_seconds() / 60 if last_user else None
         sent_today = self.db.count_companion_messages(contact_id, day_start)
-        context = conversation.get("context") if isinstance(conversation.get("context"), dict) else {}
 
         values = {
             "name": name,
@@ -103,7 +104,7 @@ class CompanionJob(AgentJob):
             "calendar": self._calendar_text(contact_id, day_start, day_end) or "nothing yet",
             "last_reflection": self.db.last_companion_result(contact_id, "reflection") or "none",
             "messages": self._messages_text(conversation["id"]) or "none",
-            "summary": context.get("summary") or "none",
+            "summary": conversation.get("summary") or "none",
             "note": row.get("note") or "",
         }
         if kind == "planning":
@@ -157,16 +158,16 @@ class CompanionJob(AgentJob):
         return "\n".join(lines)
 
     def _lookup(self, kind: str, values: dict) -> str:
-        """the pass's tools like a worker's (find_tools: laya and tool directing on the pass's intent, no spawn_job, polls,
-        images or memory writes), their results in MetaTask's format. "" without results, a failed tool is in them"""
+        """the pass's tools like a worker's (run_tools: detection and execution on the pass's intent, no spawn_job, polls,
+        images or memory writes), their results in MetaTask's format. "" without results, failed tools are left out"""
         query = prompts.intent(kind, values)
-        directed = self.find_tools(query, query, ALWAYS_TOOLS.get(kind, []))
-        if not directed:
-            self.log["lookup"] = "tool directing failed, no lookup"
-            return ""
-        calls = directed["tool_calls"]
+        execution = self.run_tools(query, query, ALWAYS_TOOLS.get(kind, []))
+        calls = [entry["call"] for entry in execution.executed]
         self.tool_calls = len(calls)
-        found = self.tool_results_text().strip()
+        results = execution.get_result()
+        found = execution.results_prompt(results).strip()
+        # a photo it took, attached when it sends its message (_maybe_message)
+        self.attachments = [held for result in results.values() if isinstance(result, dict) for held in result.get("attachments") or []]
         if calls:
             done = "; ".join(f"{c['tool']} {short(json.dumps({k: v for k, v in c.items() if k != 'tool'}, ensure_ascii=False), 150)}" for c in calls)
             self.log["lookup"] = f"{done} -> {len(found)} chars"
@@ -218,7 +219,8 @@ class CompanionJob(AgentJob):
         if not text:
             return None, "empty text"
         allowed, reason = may_message(local, user_minutes, sent_today, sent_recently)
-        if allowed and self.turns and self.turns.busy(conversation_id):
+        turns = self.get_turns()
+        if allowed and turns and turns.busy(conversation_id):
             allowed, reason = False, "a reply is being made"
         if allowed and not self.db.is_companion(self.row["contact_id"]):
             allowed, reason = False, "switched off during the pass"
@@ -227,5 +229,7 @@ class CompanionJob(AgentJob):
             return None, reason
 
         message_id, pushed = self.post_message(self.db, user_id, conversation_id, text, name)
+        if self.attachments:
+            self.tool_registry.attach_held(self.db, user_id, conversation_id, message_id, self.attachments, push=pushed)
         self.log["message"] = f"sent #{message_id}, {'pushed' if pushed else 'stored (user not connected)'}: {short(text)!r}"
         return message_id, "sent"

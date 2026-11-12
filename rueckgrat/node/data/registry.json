@@ -957,12 +957,12 @@
     ],
     "llama": {
       "model_file": "IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S-00001-of-00002.gguf",
-      "max_context": 16384,
+      "max_context": 32000,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,
       "n_parallel": 2,
-      "extra_args": "--n-cpu-moe 35 -ot per_layer_token_embd.weight=CPU --cache-type-k q8_0 --cache-type-v q8_0 --no-warmup --top-p 0.95 --top-k 20"
+      "extra_args": "--n-cpu-moe 36 -ot per_layer_token_embd.weight=CPU --cache-type-k q8_0 --cache-type-v q8_0 --no-warmup --top-p 0.95 --top-k 20 -b 2048 -ub 2048"
     },    
     "install_path": "llm/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S"
   },

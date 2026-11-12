@@ -7,9 +7,8 @@ from websockets.exceptions import InvalidStatus
 import ssl
 from datetime import datetime
 import inspect
-from typing import Awaitable, Callable, Union
+from typing import Awaitable, Union
 
-from .utils import Utils
 from .logger import get_logger
 logger = get_logger()
 
