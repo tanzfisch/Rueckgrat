@@ -1,5 +1,6 @@
 from typing import Dict, Any
 from .tool import Tool
+from . import prompts
 from app.utils.text_files import attach_message_file, check_file
 
 from app.common import get_logger, MessageQueue
@@ -7,7 +8,7 @@ logger = get_logger()
 
 
 class WriteFileTool(Tool):
-    description = "writes a text file the user can keep, such as a page of a website or a source file or document"
+    description = prompts.WRITE_FILE_DESCRIPTION
     # laya, not a prompt tool: a file is only made when the message asks for one, not on every turn
     question = [
         "Does the user want a website or more than one file created?",
@@ -77,9 +78,7 @@ class WriteFileTool(Tool):
 
     @staticmethod
     def _text(file_names) -> str:
-        return (f"{', '.join(file_names)} are already attached to your answer as download buttons, the user saves them from there. "
-                "Do NOT write their code or content into your answer, no code blocks and no copy and paste instructions. "
-                "Only say in one or two sentences what each file is for and that it can be downloaded below.")
+        return prompts.WRITE_FILE_ATTACHED_PART.format(file_names=', '.join(file_names))
 
     @classmethod
     def merge(cls, known: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
@@ -94,18 +93,4 @@ class WriteFileTool(Tool):
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-WRITE_FILE:
-Use when the user wants a file they can keep: a page, a stylesheet, a script, or several of those.
-One JSON line per file. A website is several lines, one path each. Put the file text in content.
-Paths are relative (index.html, css/style.css). No .. and no absolute path.
-Escape quotes and newlines inside content so the line stays valid JSON.
-
-Parameters:
-- path (string, required): relative file name
-- content (string, required): the whole file
-
-Example:
-{"tool": "write_file", "path": "index.html", "content": "<!DOCTYPE html><html><head><link rel=\\"stylesheet\\" href=\\"css/style.css\\"></head><body><h1>Hello</h1></body></html>"}
-{"tool": "write_file", "path": "css/style.css", "content": "body { color: #222; }"}
-"""
+        return prompts.WRITE_FILE_PROMPT

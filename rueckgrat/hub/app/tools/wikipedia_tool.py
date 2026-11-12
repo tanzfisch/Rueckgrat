@@ -3,6 +3,7 @@ import re
 import requests
 from urllib.parse import quote
 from .tool import Tool
+from . import prompts
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -52,7 +53,7 @@ def wikipedia_summary(query: str, lang: str = "en") -> Dict[str, str]:
 
 
 class WikipediaTool(Tool):
-    description = "encyclopedic summary of a well known person, place, thing, concept or historic event"
+    description = prompts.WIKIPEDIA_DESCRIPTION
     question = [
         "Does the user ask who a famous person from history was?",
         "Does the user ask to have a science theory or natural process explained?",
@@ -92,14 +93,4 @@ class WikipediaTool(Tool):
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-WIKIPEDIA:
-Use for a quick encyclopedic summary of a well-known person, place, thing, or event. Not for news or current values.
-
-Parameters:
-- query (string, required): the topic
-- lang (string, optional): Wikipedia language code, default "en"
-
-Example:
-{"tool": "wikipedia", "query": "Eiffel Tower", "lang": "en"}
-"""
+        return prompts.WIKIPEDIA_PROMPT

@@ -1,5 +1,6 @@
 from typing import Dict, Any
 from .tool import Tool
+from . import prompts
 
 from app.common import get_logger, MessageQueue
 from app.utils.embeddings import embed_text
@@ -10,12 +11,10 @@ MAX_RESULTS = 5
 MAX_CONVERSATIONS = 3     # earlier conversations, from the summaries of the nightly maintenance (app/maintenance)
 SNIPPET_CHARS = 300
 # the vector search only ranks: every candidate conversation gets a yes/no check with laya (like ToolDetectionTask), the no's are dropped
-CONVERSATION_QUESTION = "Is this earlier conversation about the user's question? Summary of the conversation: {summary}"
 CONVERSATION_THRESHOLD = 0.5   # relevant above this P(true). a guess, like the tool thresholds (tool_detection_task)
 
 class SearchMemoryTool(Tool):
-    description = ("what the user told you before (name, where they live, family, work, plans, preferences, etc) and what you talked about in earlier conversations. "
-                   "Use for any personal question about the user, e.g. \"do you know where I was born?\", even without \"remember\"")
+    description = prompts.SEARCH_MEMORY_DESCRIPTION
     question = []
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
@@ -73,7 +72,7 @@ class SearchMemoryTool(Tool):
         without an answer from laya (no decision node, it failed) all candidates are kept"""
         if not conversations:
             return []
-        questions = {str(c["id"]): {"type": "noul", "instructions": CONVERSATION_QUESTION.format(summary=c["summary"][:SNIPPET_CHARS])}
+        questions = {str(c["id"]): {"type": "noul", "instructions": prompts.SEARCH_MEMORY_CONVERSATION_QUESTION_PART.format(summary=c["summary"][:SNIPPET_CHARS])}
                      for c in conversations}
         answers = self.infrastructure.decide(f"The user's question: {query}", questions)
         if answers is None:
@@ -85,14 +84,4 @@ class SearchMemoryTool(Tool):
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-SEARCH MEMORY:
-
-Call this tool whenever you need to recall a fact about the user or anything from past interactions with them (name, location, family, work, preferences, previous statements, etc.). Do not guess or invent details.
-
-Parameters:
-- query (string, required): what to look for (max 100 characters)
-
-Example:
-{"tool": "search_memory", "query": "where the user lives"}
-"""
+        return prompts.SEARCH_MEMORY_PROMPT

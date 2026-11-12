@@ -1,4 +1,5 @@
 from .task_queue import Task
+from . import prompts
 from typing import Dict, Any
 import re
 import json
@@ -74,26 +75,7 @@ class UpdateContextTask(Task):
             messages = []
 
             # stable rules first, the changing parts last, so llama.cpp can reuse the cached prefix
-            query = f"""
-Update the scene context after the latest messages. "user" wrote the (role: user) messages, "assistant" the (role: assistant) ones, never swap them.
-
-RULES:
-- change only what the messages show, invent nothing
-- an item handed over moves to the other person
-- "" means nothing there
-- each field at most 15 words
-- location: the setting. topic: one short phrase
-- action: posture, activity, gesture, expression, mood, not speech
-- head: worn on the head. upper_body: worn on the upper body or held. body: worn on the rest of the body
-
-CURRENT CONTEXT:
-{json.dumps(context, ensure_ascii=False)}
-
-LATEST MESSAGES:
-{messages_block}
-
-Reply with the JSON only, same keys.
-"""            
+            query = prompts.UPDATE_CONTEXT_PROMPT.format(context=json.dumps(context, ensure_ascii=False), messages=messages_block)            
             messages.append({"role": "user", "content": query})
         except Exception as e:
             logger.error(f"failed to build query {repr(e)}")            

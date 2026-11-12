@@ -6,6 +6,7 @@ from app.tasks.task_queue import Task
 from app.utils.embeddings import embed_text
 from app.utils.clock import to_db
 from .sweeper import MaintenanceTask
+from . import prompts
 
 from app.common import get_logger
 logger = get_logger()
@@ -84,16 +85,11 @@ class ConversationSummaryTask(Task):
         if not lines:
             return None
 
-        earlier = f"EARLIER SUMMARY (of this conversation, may be out of date):\n{previous}\n\n" if previous else ""
-        query = f"""{earlier}MESSAGES:
-{chr(10).join(lines)}
-
-Summarize the whole conversation in at most {MAX_WORDS} words, so it can be found again later by its content.
-Name the topics, people, places, plans, decisions and facts the user shared. Keep what still matters from the earlier summary.
-Plain text, no lists, no preface. Reply with the summary only."""
+        earlier = prompts.SUMMARY_EARLIER_PART.format(previous=previous) if previous else ""
+        query = prompts.SUMMARY_PROMPT.format(earlier=earlier, messages=chr(10).join(lines), max_words=MAX_WORDS)
         content = self.infrastructure.chat(
             messages=[
-                {"role": "system", "content": "You write short, factual summaries of chat conversations. Use only the given text."},
+                {"role": "system", "content": prompts.SUMMARY_SYSTEM_PROMPT},
                 {"role": "user", "content": query},
             ],
             temperature=0.2,

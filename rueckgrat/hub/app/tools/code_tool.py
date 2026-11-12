@@ -4,6 +4,7 @@ import random
 import re
 from typing import Dict, Any, List, Tuple
 from .tool import Tool
+from . import prompts
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -24,21 +25,6 @@ RUNTIME_CONFIGS = {"mem_limit": "512m", "pids_limit": 128, "nano_cpus": 1_000_00
 HEADER = re.compile(r"^\s*(?:#|//)\s*(language|requires)\s*:\s*(.*?)\s*$", re.IGNORECASE)
 LIBRARY = re.compile(r"^[A-Za-z0-9@][\w.+\-/@=<>~\[\]]*$")
 FENCE = re.compile(r"^```[^\n]*\n(.*?)(?:^```[ \t]*$|\Z)", re.DOTALL | re.MULTILINE)  # fences on their own lines
-
-CODE_PROMPT = f"""You write one complete program for the task below. It runs once in a fresh sandbox, what it prints comes back to you.
-
-Reply with ONLY the source code of the program as plain text: no JSON, no explanation, no markdown fences.
-
-Rules:
-- One single file. Print every result to stdout, the program gets no input.
-- Python, unless the task or the user asks for another language: javascript, cpp, java or go.
-- Header lines at the very top, only when needed, always with # (they are removed before the program runs):
-# language: cpp
-# requires: numpy, pandas
-- "language" when it is not python. "requires" lists packages to install first: pip for python, npm for javascript, apt for cpp, go modules for go. java can't install packages, use only its standard library.
-- When the user gave code to run, reply with that code unchanged (add header lines if it needs packages).
-- It must finish within {RUN_TIMEOUT} seconds. Keep the output short."""
-
 
 def strip_fences(reply: str) -> str:
     """the code of the reply: a <think> block dropped, the first markdown fence's content if there is one"""
@@ -131,7 +117,7 @@ def run_call(call: Dict[str, Any]) -> Dict[str, Any]:
 class RunCodeTool(Tool):
     """writes a one file program for the directed task (own llm call, the reply is only code) and runs it in a
     fresh llm sandbox container. the harness builds the call json with the code in base64"""
-    description = "writes a small program and runs it in a sandbox container, returns its output"
+    description = prompts.RUN_CODE_DESCRIPTION
     question = [
         "Does the user want to see the output of running code?",
         "Does this message ask to check or confirm a number or formula before using it?",
@@ -157,7 +143,7 @@ class RunCodeTool(Tool):
         if language:
             query += f"\n\nLANGUAGE: {language}"
         return self.infrastructure.chat(
-            messages=[{"role": "system", "content": CODE_PROMPT}, {"role": "user", "content": query}],
+            messages=[{"role": "system", "content": prompts.RUN_CODE_WRITER_PROMPT.format(run_timeout=RUN_TIMEOUT)}, {"role": "user", "content": query}],
             temperature=0.2,
             seed=random.randint(0, 100000),
             max_new_tokens=4096,
@@ -179,23 +165,4 @@ class RunCodeTool(Tool):
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-RUN_CODE:
-Use when the user asks you to run or execute code, or to work something out with a program: exact results with big numbers, simulations, data processing, checking that code works. A separate step writes one program file for your task and runs it in a fresh sandbox, you get its output, errors and exit code back.
-You may also use it on your own when an exact check is better than guessing:
-- verify a calculation, a count or an idea (primes, digits, dates, regex matches)
-- debug: reproduce an error in isolation to find its cause
-- benchmark: compare snippets for speed or output
-- explore an unfamiliar function or library by trying it
-- validate math or logic before you rely on it in a longer plan
-- prototype a small piece to see if an approach works before using it
-Do not use it when the user only wants to see or discuss code, or for simple arithmetic (calculator).
-
-Parameters:
-- task (string, required): what the program must do and print, with all the values it needs. When the user gave code to run, write "run the code from the user's message", do not copy the code here.
-- language (string, optional): "python" (default), "javascript", "cpp", "java" or "go"
-
-Examples:
-{"tool": "run_code", "task": "compute the 50th Fibonacci number and print it"}
-{"tool": "run_code", "task": "run the code from the user's message", "language": "javascript"}
-"""
+        return prompts.RUN_CODE_PROMPT

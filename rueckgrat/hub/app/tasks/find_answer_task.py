@@ -1,4 +1,5 @@
 from .task_queue import Task
+from . import prompts
 from typing import Dict, Any
 import random
 import datetime
@@ -50,25 +51,8 @@ class FindAnswerTask(Task):
         try:
             messages = []
             information = fit_tokens(self.information, CONTEXT_TOKENS - REPLY_TOKENS - PROMPT_TOKENS - estimate_tokens(self.question))
-            query = f"""
-Find the answer to a search query in a given text. 
-
-TEXT:
-{information}
-
-SEARCH QUERY:
-{self.question}
-
-Respond with a json structure like this:
-{{
-    "answer": "the answer to the question",
-    "quality": 1-10
-}}
-
-Give a concise answer (maximum of 100 words).
-Rate the quality of the source from 1 to 10 in terms of how well it answeres the question and how current the information is.
-Today is {datetime.date.today().strftime("%A, %d %B %Y")}.
-"""
+            query = prompts.FIND_ANSWER_PROMPT.format(information=information, question=self.question,
+                                                    today=datetime.date.today().strftime("%A, %d %B %Y"))
             
             #logger.debug(f"find answer query:\n{query}")
 

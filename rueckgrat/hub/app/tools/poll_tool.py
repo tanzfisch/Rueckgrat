@@ -1,5 +1,6 @@
 from typing import Dict, Any, Optional
 from .tool import Tool
+from . import prompts
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -9,7 +10,7 @@ MAX_QUESTION_LENGTH = 200
 MAX_OPTION_LENGTH = 80
 
 class PollTool(Tool):
-    description = "shows the user a poll bubble with options to tap, one choice or several"
+    description = prompts.POLL_DESCRIPTION
     question = [
         "Does the user ask for a poll, a vote, a quiz or a multiple choice question?",
         "Does the user ask to be given options or choices to pick from?",
@@ -54,28 +55,15 @@ class PollTool(Tool):
 
     def planned_text(self) -> str:
         poll = self._make_poll(self.tool_call)
-        return self._text(poll) if poll else "the poll was invalid, no poll is shown"
+        return self._text(poll) if poll else prompts.POLL_INVALID_PART
 
     @staticmethod
     def _text(poll: Dict[str, Any]) -> str:
-        return (f"the poll is shown to the user: \"{poll['question']}\" "
-                f"({'one choice' if poll['mode'] == 'single' else 'several choices'}: {' | '.join(poll['options'])}). "
-                "Do not write the question, the options or further questions in your answer text, they are only in the tool call. At most one short line that points to the poll.")
+        return prompts.POLL_SHOWN_PART.format(
+            question=poll['question'],
+            choices=prompts.POLL_ONE_CHOICE_PART if poll['mode'] == 'single' else prompts.POLL_SEVERAL_CHOICES_PART,
+            options=' | '.join(poll['options']))
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-POLL:
-Use when the user asks for a poll, a vote, a quiz or options to choose from, or when a multiple choice question fits your answer better than an open question. The user picks from the options, the choice comes back as their next message.
-
-Parameters:
-- question (string, required): the question, short
-- options (list of strings, required): 2 to 8 short options
-- mode (string, optional): "single" (one choice, default) or "multi" (several choices)
-
-Put the question and the options only in the tool call. Do not write them or a list of further questions in your answer text, at most one short line that points to the poll.
-One poll per message: for a questionnaire or quiz, put the first question in the poll and ask the next one in a new poll after the user answered.
-
-Example:
-{"tool": "poll", "question": "Where should we go tonight?", "options": ["Cinema", "Restaurant", "Stay home"], "mode": "single"}
-"""
+        return prompts.POLL_PROMPT

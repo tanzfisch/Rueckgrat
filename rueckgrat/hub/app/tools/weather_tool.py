@@ -1,6 +1,7 @@
 from typing import Dict,  Any
 import requests
 from .tool import Tool
+from . import prompts
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -63,7 +64,7 @@ def get_weather(location: str) -> str:
 
 
 class WeatherTool(Tool):
-    description = "current weather and 3 day forecast for a place"
+    description = prompts.WEATHER_DESCRIPTION
     question = [
         "Does the user want the weather or forecast somewhere, like rain, sun or wind?",
         "Does the user ask if they need an umbrella, a jacket or sunscreen?",
@@ -100,13 +101,4 @@ class WeatherTool(Tool):
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-WEATHER:
-Use for current weather and 3-day forecast. Prefer this over websearch for weather.
-
-Parameters:
-- location (string, required): city or place name
-
-Example:
-{"tool": "weather", "location": "Auckland"}
-"""
+        return prompts.WEATHER_PROMPT

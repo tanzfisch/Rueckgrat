@@ -1,6 +1,7 @@
 from typing import Dict,  Any
 from datetime import date, datetime, timedelta
 from .tool import Tool
+from . import prompts
 from .current_time_tool import resolve_timezone
 
 from app.common import get_logger, MessageQueue
@@ -58,7 +59,7 @@ def date_calc(start, end=None, days=None, timezone="UTC") -> str:
 
 
 class DateCalcTool(Tool):
-    description = "days between two dates, or a date plus/minus a number of days"
+    description = prompts.DATE_CALC_DESCRIPTION
     question = [
         "Does the user ask how many days, weeks or months are left until something or have passed since something?",
         "Does the user ask how long it is until or since a day, a date, a holiday or an event?",
@@ -97,19 +98,4 @@ class DateCalcTool(Tool):
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-DATE CALCULATION:
-Use for days between two dates or a date plus/minus a number of days. Dates are YYYY-MM-DD or "today".
-
-Parameters:
-- start (string, required): start date
-- end (string, optional): end date (for difference)
-- days (number, optional): number of days to add/subtract
-- timezone (string, required): IANA name or city
-
-Example (difference):
-{"tool": "date_calc", "start": "today", "end": "2026-12-25", "timezone": "Pacific/Auckland"}
-
-Example (offset):
-{"tool": "date_calc", "start": "today", "days": 90, "timezone": "Pacific/Auckland"}
-"""
+        return prompts.DATE_CALC_PROMPT

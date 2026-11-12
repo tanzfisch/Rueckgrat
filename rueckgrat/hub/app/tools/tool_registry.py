@@ -4,6 +4,7 @@ import contextvars
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Any, Mapping, Union, Callable
 from .tool import Tool
+from . import prompts
 from .image_gen_tool import ImageGenTool
 from .take_photo_tool import TakePhotoTool
 from .websearch_tool import WebsearchTool
@@ -257,48 +258,15 @@ class ToolRegistry:
         tools = self.get_tools_prompt(tool_names)
 
         if kind == "recommended":
-            return f"""
-These tools may be needed, the detection was not sure. YOU decide whether the user's latest message really asks for what a tool does.
-Call one only when it clearly fits the message, not because it is offered. Their full instructions:
-{tools}
-
-HOW TO CALL:
-Call a recommended tool only when the message needs it. If none of them fits, output nothing for them.
-If you do call a tool, write ONE line of JSON per call, exactly in the format shown above, with the values for the query filled in.
-Writing about a call does nothing, only a JSON line runs the tool. Do not describe the call in words, no headings like "TOOL CALL:", no analysis.
-"""
+            return prompts.TOOLS_RECOMMENDED_PART.format(tools=tools)
 
         if kind == "reply":
-            return f"""
-TOOLS IN YOUR REPLY:
-You can use these tools on your own in any reply, the user does not have to ask for them. Their full instructions:
-{tools}
-
-HOW TO CALL:
-Write your reply to the user first. Only when a tool is useful, add ONE line of JSON per call at the very end of your reply, exactly in the format shown above.
-The user does not see these lines. Never mention or describe a call in your reply, only a JSON line runs the tool. Most replies need no call.
-"""
+            return prompts.TOOLS_REPLY_PART.format(tools=tools)
 
         if kind == "optional":
-            return f"""
-These tools are optional: YOU decide on your own whether to use them. The user does not ask for them and does not have to mention them.
-Judge from the conversation whether a tool helps you answer well, e.g. remembering something worth keeping or looking up an earlier memory. Their full instructions:
-{tools}
+            return prompts.TOOLS_OPTIONAL_PART.format(tools=tools)
 
-HOW TO CALL:
-Call an optional tool whenever you find it useful for this message, also when the user did not ask for it. If none of them is useful, output nothing for them.
-If you do call a tool, write ONE line of JSON per call, exactly in the format shown above, with the values for the query filled in.
-Writing about a call does nothing, only a JSON line runs the tool. Do not describe the call in words, no headings like "TOOL CALL:", no analysis.
-"""
-
-        return f"""
-These tools must be called. Their full instructions:
-{tools}
-
-HOW TO CALL:
-Your answer MUST be the tool calls, ONE line of JSON per call, exactly in the format shown above, with the values for the query filled in. Do not skip any of them.
-Writing about a call does nothing, only a JSON line runs the tool. Do not describe the call in words, no headings like "TOOL CALL:", no analysis.
-"""
+        return prompts.TOOLS_MANDATORY_PART.format(tools=tools)
     
     def reply_tools_prompt(self) -> str:
         """the REPLY_TOOLS for the chat's system prompt"""

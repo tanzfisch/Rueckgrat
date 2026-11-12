@@ -1,4 +1,5 @@
 from app.tasks.task_queue import Task
+from . import prompts
 from typing import Dict, Any, Optional
 
 from app.common import get_logger, MessageQueue
@@ -45,7 +46,7 @@ class Tool(Task):
         return {self.name(): {"tool": self.name(), "text": self.planned_text()}}
 
     def planned_text(self) -> str:
-        return f"{self.name()} runs in the background, its result is shown to the user under your answer when it is done"
+        return prompts.TOOL_PLANNED_PART.format(name=self.name())
 
     @classmethod
     def attach_held(cls, db, user_id: int, conversation_id: int, message_id: int, held: Dict[str, Any], push: bool) -> None:
