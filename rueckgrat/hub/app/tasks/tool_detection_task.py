@@ -8,6 +8,7 @@ logger = get_logger()
 MAX_QUESTIONS = 64
 MANDATORY_THRESHOLD = 0.7
 RECOMMENDED_THRESHOLD = 0.4
+MIN_DETECTION_WORDS = 4    # shorter messages ("Hi", "thanks!") skip the laya questions, they scored spawn_job 0.71 on "Hi"
 
 # fetch_url is not a laya question but a regex to look for URLs
 TLDS = r"com|org|net|edu|gov|mil|int|info|biz|io|ai|app|dev|xyz|online|site|tech|blog|news|shop|store|cloud|page|link|live|media|tv"
@@ -78,6 +79,10 @@ class ToolDetectionTask(Task):
 
     def _detect(self) -> Optional[List[str]]:
         url_check = self._check_fetch_url()        
+
+        if len(self.prompt.split()) < MIN_DETECTION_WORDS:
+            logger.debug(f"tool detection skipped, fewer than {MIN_DETECTION_WORDS} words")
+            return self.tool_registry.bands([url_check] if url_check else [], [])
 
         answers = self.infrastructure.decide(self.prompt, self._questions())
         if answers is None:

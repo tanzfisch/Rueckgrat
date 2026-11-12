@@ -2,6 +2,8 @@ import json
 from typing import Dict, Any
 from enum import Enum
 
+from . import prompts
+
 from app.common import get_logger, Utils
 logger = get_logger()
 
@@ -220,11 +222,11 @@ class ContactImagePromptCompiler:
 
     def _build_positive_focus(self) -> str:
         if self.image_type == ImageType.Portrait:
-            return "tight face crop, face fills frame, centered, detailed eyes"
+            return prompts.PORTRAIT_FOCUS_PART
         elif self.image_type == ImageType.UpperBody:
-            return "waist-up, mid-torso to head, face and upper body fully visible, centered, chest and shoulders prominent, detailed eyes"
+            return prompts.UPPER_BODY_FOCUS_PART
         elif self.image_type == ImageType.FullBody:
-            return "full body, head to toe, entire figure in frame, head not cropped, centered, camera pulled back"
+            return prompts.FULL_BODY_FOCUS_PART
         return ""
 
     def _image_style(self) -> Dict[str, str]:
@@ -239,11 +241,11 @@ class ContactImagePromptCompiler:
 
     def _build_negative_focus(self) -> str:
         if self.image_type == ImageType.Portrait:
-            return "full body, long shot, medium shot, upper body, small subject, cropped head, extreme close-up, blurry or distorted face, off-center, artifacts in eyes"
+            return prompts.PORTRAIT_NEGATIVE_FOCUS_PART
         elif self.image_type == ImageType.UpperBody:
-            return "full body, long shot, head to toe, feet visible, cropped head, extreme close-up, face only, off-center, subject too small, lower body dominant, artifacts in eyes"
+            return prompts.UPPER_BODY_NEGATIVE_FOCUS_PART
         elif self.image_type == ImageType.FullBody:
-            return "cropped head, partial body, upper body only, medium shot, close-up, legs or feet cut off, subject out of frame, off-center, camera too close"
+            return prompts.FULL_BODY_NEGATIVE_FOCUS_PART
         return ""
 
     def _build_additional_prompt(self) -> str:

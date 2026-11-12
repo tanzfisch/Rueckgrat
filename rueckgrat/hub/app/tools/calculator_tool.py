@@ -3,6 +3,7 @@ import ast
 import math
 import operator
 from .tool import Tool
+from . import prompts
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -74,7 +75,7 @@ def calculate(expression: str) -> str:
 
 
 class CalculatorTool(Tool):
-    description = "exact arithmetic and math (sums, percentages, tips, powers, roots, trigonometry)"
+    description = prompts.CALCULATOR_DESCRIPTION
     question = [
         "Does the user ask about money, prices, tax, tips, percentages or splitting a bill?",
         "Does the user ask how much they pay, save, owe or get, or what a percentage of an amount is?",
@@ -110,16 +111,4 @@ class CalculatorTool(Tool):
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-CALCULATE:
-Use for any arithmetic or math (sums, percentages, tips, powers, roots, trigonometry).
-Operators: + - * / // % ** ( )
-Functions: sqrt, abs, round, min, max, floor, ceil, exp, ln, log10, log2, sin, cos, tan (radians), factorial
-Constants: pi, e
-
-Parameters:
-- expression (string, required): the math expression to evaluate
-
-Example:
-{"tool": "calculate", "expression": "0.15 * 84.50"}
-"""
+        return prompts.CALCULATOR_PROMPT

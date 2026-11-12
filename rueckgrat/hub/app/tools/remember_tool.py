@@ -1,5 +1,6 @@
 from typing import Dict, Any
 from .tool import Tool
+from . import prompts
 
 from app.common import get_logger, MessageQueue
 from app.utils.embeddings import embed_text
@@ -10,7 +11,7 @@ MAX_MEMORY_LENGTH = 200
 DUPLICATE_DISTANCE = 0.05
 
 class RememberTool(Tool):
-    description = "save one short fact to remember in later conversations (about the user, their life, plans, preferences or your relationship)"
+    description = prompts.REMEMBER_DESCRIPTION
     question = []
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
@@ -57,16 +58,4 @@ class RememberTool(Tool):
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-REMEMBER:
-
-Whenever the user tells you a durable fact about themselves that will still be true later (name, identity, relationships, long-term history, location, job, health and allergies, pets, hobbies, lasting preferences, plans with a date), store it. Skip temporary wants or comments about media/videos.
-
-Write in third person. Max 200 characters. One fact only.
-
-Parameters:
-- text (string, required): the fact
-
-Example:
-{"tool": "remember", "text": "The user's sister is called Anna and lives in Hamburg"}
-"""
+        return prompts.REMEMBER_PROMPT

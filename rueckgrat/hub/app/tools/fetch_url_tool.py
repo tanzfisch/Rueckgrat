@@ -1,6 +1,7 @@
 import re
 from typing import Dict,  Any
 from .websearch_tool import WebsearchTool
+from . import prompts
 from app.tasks.summarize_task import SummarizeTask
 from app.utils.url_check import check_url, FetchBlocked
 
@@ -19,7 +20,7 @@ def normalize_url(url: str) -> str:
 
 class FetchUrlTool(WebsearchTool):
     """subclass of WebsearchTool only to reuse _extract_page and _get_org_name, everything else is its own"""
-    description = "reads a web page the user gives a link to and returns a condensed summary of it"
+    description = prompts.FETCH_URL_DESCRIPTION
     question = []    # not a laya question: ToolDetectionTask selects it from URL_PATTERN in the message
     PAGE_TIMEOUT = 20           # one page the user is waiting for, not a batch
     BROWSER_FALLBACK = True     # the user asked for this page, worth a headless browser if plain http comes back thin
@@ -71,14 +72,4 @@ class FetchUrlTool(WebsearchTool):
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-FETCH_URL:
-Use when the user gives a URL and wants to know what is on the page.
-
-Parameters:
-- url (string, required): the full URL
-- focus (string, optional): what to focus on (omit for general summary)
-
-Example:
-{"tool": "fetch_url", "url": "https://example.com/article", "focus": "release date"}
-"""
+        return prompts.FETCH_URL_PROMPT

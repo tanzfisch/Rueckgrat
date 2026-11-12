@@ -6,6 +6,7 @@ from collections import OrderedDict
 from typing import Dict, Any, Optional
 import requests
 from .tool import Tool
+from . import prompts
 import re
 
 from app.common import get_logger, MessageQueue
@@ -184,7 +185,7 @@ def get_tile(z: int, x: int, y: int) -> Optional[bytes]:
 
 
 class MapTool(Tool):
-    description = "shows the user a map bubble of a place or an address, tapping it opens the maps app"
+    description = prompts.MAP_DESCRIPTION
     question = [
         "Does the user ask how to get to a place?",
         "Does the user want to see a map?",
@@ -227,29 +228,13 @@ class MapTool(Tool):
     def planned_text(self) -> str:
         query = " ".join(str(self.tool_call.get("address") or "").split())[:MAX_QUERY_LENGTH]
         if not query:
-            return "no address given, no map is shown"
-        return (f"a map of {query} is being looked up, it is shown under your answer once it is found. "
-                "Do not write coordinates or map links in your answer text and do not say the map is shown, "
-                "at most one short line that you are checking the map.")
+            return prompts.MAP_NO_ADDRESS_PART
+        return prompts.MAP_LOOKING_UP_PART.format(query=query)
 
     @staticmethod
     def _text(name: str) -> str:
-        return (f"a map of {name} is shown to the user, tapping it opens their maps app. "
-                "Do not write coordinates or map links in your answer text, at most one short line that points to the map.")
+        return prompts.MAP_SHOWN_PART.format(name=name)
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-SHOW_MAP:
-Use when the user asks where a place is, how to get there, or wants to see it on a map, or when you suggest going to or meeting at a specific place. The map is shown under your answer, tapping it opens the user's maps app.
-Do not use it for places in stories, roleplay or memories, for an address the user only mentions in passing (their home, their office), or for questions about a place that don't need a map (weather, time, history, facts).
-
-Parameters:
-- address (string, required): the address or the place, as precise as you know it, with the city
-- label (string, optional): a short name for the pin
-
-One map per message. Do not write coordinates or map links in your answer text.
-
-Example:
-{"tool": "show_map", "address": "Sky Tower, Victoria Street West, Auckland", "label": "Sky Tower"}
-"""
+        return prompts.MAP_PROMPT

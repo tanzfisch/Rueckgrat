@@ -1,12 +1,13 @@
 from typing import Dict,  Any
 from .image_tool import ImageTool
+from . import prompts
 from app.tasks.requested_image_task import RequestedImageTask
 
 from app.common import get_logger
 logger = get_logger()
 
 class ImageGenTool(ImageTool):
-    description = "generates a picture from a description when the user asks for an image"
+    description = prompts.IMAGE_GEN_DESCRIPTION
     question = [
         "Does the user ask you to draw, paint or illustrate something?",
         "Does the user want a picture or drawing made?",
@@ -54,22 +55,13 @@ class ImageGenTool(ImageTool):
             "text": "generated image",
             "image": image
         }
-        self.held(result, image, "it is attached to your message")
+        self.held(result, image, prompts.IMAGE_ATTACHED_NOTE_PART)
 
         self.add_result(result)
 
     def planned_text(self) -> str:
-        return "an image is being generated, it gets attached to your message"
+        return prompts.IMAGE_GEN_PLANNED_PART
 
     @classmethod
     def prompt(cls) -> str: 
-        return """
-IMAGE GENERATION:
-Use when the user asks you to generate, create, or visualize a picture.
-
-Parameters:
-- positive_prompt (string, required): the image description
-
-Example:
-{"tool": "generate_image", "positive_prompt": "a red bicycle in a sunny park"}
-"""
+        return prompts.IMAGE_GEN_PROMPT

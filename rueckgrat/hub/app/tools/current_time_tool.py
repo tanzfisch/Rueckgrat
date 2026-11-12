@@ -3,6 +3,7 @@ import re
 from datetime import datetime
 from zoneinfo import ZoneInfo, available_timezones
 from .tool import Tool
+from . import prompts
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -110,7 +111,7 @@ def format_time(now: datetime) -> str:
 
 
 class CurrentTimeTool(Tool):
-    description = "current date, time and weekday in a city or time zone"
+    description = prompts.CURRENT_TIME_DESCRIPTION
     question = [
         "Does the user want to know the current time or date somewhere?",
         "Does the user want the local time of day in a city or country?",
@@ -142,13 +143,4 @@ class CurrentTimeTool(Tool):
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-CURRENT TIME:
-Use when you need the current date, time, or weekday in a location.
-
-Parameters:
-- timezone (string, required): IANA name ("Pacific/Auckland") or city ("Auckland", "Munich")
-
-Example:
-{"tool": "current_time", "timezone": "Pacific/Auckland"}
-"""
+        return prompts.CURRENT_TIME_PROMPT

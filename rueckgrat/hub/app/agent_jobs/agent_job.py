@@ -5,6 +5,8 @@ import time
 from typing import Optional, Dict, Any
 from uuid import uuid4
 
+from . import prompts
+
 from app.common import get_logger, ChatRequest, MessageQueue
 logger = get_logger()
 
@@ -13,23 +15,6 @@ JOB_LLM_TIMEOUT = 900         # seconds per llm call
 JOB_MAX_TOKENS = 4096         # max tokens per reply
 MAX_TOOL_CHARS = 12000        
 WORKER_TOOLS = ["websearch"]   # always run for a worker, the controller's task sets its role and scope
-NO_WEBSEARCH = "\n\nNo web search was done for this message. If you don't know current facts like opening hours, prices or news, say so.\n"
-EMPTY_WEBSEARCH = ("\n\nThe web search found nothing useful. Do the task with the results of the steps before and your own knowledge, "
-                   "and say which facts you could not check.\n")
-FAILED_TOOLS = ("\n\nThese tools failed: {failed}. Do the task with what you have and your own knowledge, and say what could not be checked. "
-                "Reply FAILED: only when the task can not be done at all without them.\n")
-RESULTS_MARKER = "\n\nRESULTS OF THE STEPS BEFORE:\n"    # the Controller appends the earlier results to a task after this
-
-WORKER_PROMPT = """You are the {role} in a background job. Do your task and report what you found or made.
-Facts, numbers and dates come only from the tool results below and from the task itself. Name the source of each fact as the tool results give it. Never make up facts, numbers or sources.
-Stay factual and neutral: report what the sources say, also where they disagree, without taking sides.
-If you can not do the task with what you have, reply with FAILED: and the reason.
-
-YOUR TASK:
-{prompt}
-{tools}
-Reply with the result only.
-"""
 
 class AgentJob:
     # never offered besides the registry's WORKER_EXCLUDED_TOOLS. a worker takes no photos: take_photo is an optional
@@ -97,7 +82,7 @@ class AgentJob:
         """one pass of working out the current task. returns True when the agent is done.
         a worker runs the tools its task needs (like MetaTask), then does its task in one llm call with their results"""
         tools = self._use_tools() if self.tool_context else ""
-        text = self.chat([{"role": "user", "content": WORKER_PROMPT.format(role=self.role, prompt=self.prompt, tools=tools)}], 0.3).strip()
+        text = self.chat([{"role": "user", "content": prompts.WORKER_PROMPT.format(role=self.role, prompt=self.prompt, tools=tools)}], 0.3).strip()
         if not text or text.upper().startswith("FAILED"):
             self.result = {"error": text or "no reply from the llm", **({"failed_tools": self.failed_tools} if self.failed_tools else {})}
         else:
@@ -109,7 +94,7 @@ class AgentJob:
         """a worker's tools (run_tools) and their results as the TOOL_RESULTS block. a failed tool or a search that found
         nothing does not fail the worker: the block says so, the worker decides if it can do its task anyway
         (else it replies FAILED, its result names the failed tools for the retry, see Controller._retry)"""
-        task, _, earlier = self.prompt.partition(RESULTS_MARKER)
+        task, _, earlier = self.prompt.partition(prompts.RESULTS_MARKER_PART)
         # the worker's own task only: the links in the earlier results would select fetch_url every time
         execution = self.run_tools(task, self.prompt, WORKER_TOOLS)
         results = execution.get_result()
@@ -127,11 +112,11 @@ class AgentJob:
 
         text = execution.results_prompt(results)
         if empty_search:
-            text = EMPTY_WEBSEARCH + text
+            text = prompts.EMPTY_WEBSEARCH_PART + text
         elif "websearch" not in results:
-            text = NO_WEBSEARCH + text
+            text = prompts.NO_WEBSEARCH_PART + text
         if failed:
-            text = FAILED_TOOLS.format(failed="; ".join(failed)) + text
+            text = prompts.FAILED_TOOLS_PART.format(failed="; ".join(failed)) + text
         return text[:MAX_TOOL_CHARS]
 
     def run_tools(self, detect: str, query: str, always: list):

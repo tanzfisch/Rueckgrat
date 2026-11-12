@@ -1,12 +1,13 @@
 from typing import Dict,  Any, Optional
 from .image_tool import ImageTool
+from . import prompts
 from app.tasks.assistant_image_task import AssistantImageTask
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 class TakePhotoTool(ImageTool):
-    description = "takes a photo of yourself, the user or both in the current situation"
+    description = prompts.TAKE_PHOTO_DESCRIPTION
     question = []
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
@@ -81,20 +82,11 @@ class TakePhotoTool(ImageTool):
             "text": "took a picture",
             "take_photo": image
         }
-        self.add_result(self.held(result, image, "it is attached to your message"))
+        self.add_result(self.held(result, image, prompts.IMAGE_ATTACHED_NOTE_PART))
 
     def planned_text(self) -> str:
-        return "you are taking a picture, it gets attached to your message"
+        return prompts.TAKE_PHOTO_PLANNED_PART
 
     @classmethod
     def prompt(cls) -> str: 
-        return """
-TAKE PHOTO:
-Use sparingly, only when you genuinely want to take a photo of yourself, the user, or both in the current situation. Do not use for every request. Also use when the user explicitly asks for one or if you want to demonstrate something to the user.
-
-Parameters:
-- subject (string, required): "self", "user", or "both"
-
-Example:
-{"tool": "take_photo", "subject": "both"}
-"""
+        return prompts.TAKE_PHOTO_PROMPT

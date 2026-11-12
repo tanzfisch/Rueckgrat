@@ -1,5 +1,6 @@
 from typing import Dict, Any, List, Optional
 from app.tools.tool_registry import ToolRegistry
+from . import prompts
 
 from app.common import get_logger
 logger = get_logger()
@@ -19,25 +20,17 @@ class ToolPromptCompiler:
         mandatory, recommended, optional = self.tool_registry.split_tools(self.tool_names, self.recommended)
         sections = []
         if mandatory:
-            sections.append("MANDATORY TOOLS\n" + self.tool_registry.get_tools_hydrated(mandatory))
+            sections.append(prompts.TOOL_SETUP_MANDATORY_PART + self.tool_registry.get_tools_hydrated(mandatory))
         if recommended:
-            sections.append("RECOMMENDED TOOLS\n" + self.tool_registry.get_tools_hydrated(recommended, kind="recommended"))
+            sections.append(prompts.TOOL_SETUP_RECOMMENDED_PART + self.tool_registry.get_tools_hydrated(recommended, kind="recommended"))
         if optional:
-            sections.append("OPTIONAL TOOLS\n" + self.tool_registry.get_tools_hydrated(optional, kind="optional"))
+            sections.append(prompts.TOOL_SETUP_OPTIONAL_PART + self.tool_registry.get_tools_hydrated(optional, kind="optional"))
         return "\n".join(sections)
 
     def _build_first_prompt(self) -> tuple[str, str]:
         tools_definition = self._tools_definition()
         
-        return f"""
-This is a tool setup run. Apply given tools based on the original prompt.
-
-ORIGINAL PROMPT
-{self.prompt}
-
-GIVEN TOOLS TO APPLY NEXT
-{tools_definition}
-"""    
+        return prompts.TOOL_SETUP_FIRST_PROMPT.format(prompt=self.prompt, tools=tools_definition)    
 
     def _build_prompt(self) -> tuple[str, str]:
         tools_definition = self._tools_definition()
@@ -46,18 +39,7 @@ GIVEN TOOLS TO APPLY NEXT
             for i, t in enumerate(self.previous_results.values(), 1)
         )
         
-        return f"""
-This is a tool setup run. Apply given tools based on the original prompt and results from previous tool calls.
-
-ORIGINAL PROMPT
-{self.prompt}
-
-PREVIOUS TOOL CALL RESULTS
-{previous_results}
-
-GIVEN TOOLS TO APPLY NEXT
-{tools_definition}
-"""    
+        return prompts.TOOL_SETUP_NEXT_PROMPT.format(prompt=self.prompt, previous_results=previous_results, tools=tools_definition)    
 
     def build_prompt(self) -> tuple[str, str]:
         if len(self.previous_results) == 0:

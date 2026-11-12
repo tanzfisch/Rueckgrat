@@ -5,6 +5,7 @@ import threading
 import time
 import requests
 from .tool import Tool
+from . import prompts
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -359,7 +360,7 @@ def convert(amount: Any, from_unit: str, to_unit: str) -> Dict[str, Any]:
 
 
 class ConversionTool(Tool):
-    description = "converts amounts between currencies, crypto and physical units, prices gold/silver/platinum in any currency"
+    description = prompts.CONVERSION_DESCRIPTION
     question = [
         "Does the user want to convert something?",
         "Does the user want an amount in another unit or currency, like ml to cups, kg to pounds or euros to dollars?",
@@ -401,15 +402,4 @@ class ConversionTool(Tool):
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-CONVERT:
-Use for converting an amount between units: currencies and crypto (live rates), precious metals (gold, silver, platinum, palladium) in any currency, and physical units (length, mass, volume, area, temperature, speed, time, data, energy, power, pressure). Prefer this over websearch for exchange rates and metal prices. One call per conversion.
-
-Parameters:
-- amount (number, required): the value to convert
-- from (string, required): source unit (e.g. "USD", "BTC", "oz gold", "km", "°C", "GB")
-- to (string, required): target unit
-
-Example:
-{"tool": "convert", "amount": 100, "from": "USD", "to": "EUR"}
-"""
+        return prompts.CONVERSION_PROMPT

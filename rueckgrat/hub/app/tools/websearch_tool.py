@@ -2,6 +2,7 @@ from typing import Dict, Any, Optional
 import re
 import json
 from .tool import Tool
+from . import prompts
 from app.tasks.find_answer_task import FindAnswerTask
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
@@ -16,7 +17,7 @@ from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 class WebsearchTool(Tool):
-    description = "searches the web for current, factual or local information (news, events, prices, stocks, opening hours)"
+    description = prompts.WEBSEARCH_DESCRIPTION
     question = [
         "Does the user ask about recent news, like an election, protests, a disaster or a new product?",
         "Did the user ask who won last night's or this week's game?",
@@ -479,13 +480,4 @@ class WebsearchTool(Tool):
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-WEBSEARCH:
-Use for current, factual, real-time, or location-specific information, or when you need fresh ideas.
-
-Parameters:
-- query (string, required): the search query
-
-Example:
-{"tool": "websearch", "query": "current NZD to USD exchange rate"}
-"""
+        return prompts.WEBSEARCH_PROMPT
