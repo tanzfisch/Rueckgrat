@@ -12,6 +12,7 @@ Changelog
 - #181 start audio playback while still streaming text answer
 - #177 removed scenario cration for faster response to first message
 - #162 agents are allowed to use the image generation
+- #180 refactored prompts
 
 0.26.0
 ------
