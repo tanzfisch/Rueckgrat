@@ -16,6 +16,7 @@ from .spawn_agent_job_tool import SpawnAgentJobTool
 from .poll_tool import PollTool
 from .map_tool import MapTool
 from .code_tool import RunCodeTool
+from .bash_tool import BashTool
 from .write_file_tool import WriteFileTool
 
 __all__ = [
@@ -37,5 +38,6 @@ __all__ = [
     "PollTool",
     "MapTool",
     "RunCodeTool",
+    "BashTool",
     "WriteFileTool",
 ]

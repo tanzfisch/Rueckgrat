@@ -5,6 +5,7 @@ import re
 from typing import Dict, Any, List, Tuple
 from .tool import Tool
 from . import prompts
+from app.utils.conversation_volume import ConversationVolume, MOUNT_PATH
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -24,6 +25,9 @@ RUNTIME_CONFIGS = {"mem_limit": "512m", "pids_limit": 128, "nano_cpus": 1_000_00
 
 HEADER = re.compile(r"^\s*(?:#|//)\s*(language|requires)\s*:\s*(.*?)\s*$", re.IGNORECASE)
 LIBRARY = re.compile(r"^[A-Za-z0-9@][\w.+\-/@=<>~\[\]]*$")
+USER_CODE_TASK = "run the code from the user's message"     # the task RUN_CODE_PROMPT names for code the user gave
+# code in a message: a markdown fence or a line that starts like code
+CODE = re.compile(r"```|^[ \t]*(?:def |class |import |from [\w.]+ import |#include|function |public |package |func |print\(|console\.log\()", re.M)
 FENCE = re.compile(r"^```[^\n]*\n(.*?)(?:^```[ \t]*$|\Z)", re.DOTALL | re.MULTILINE)  # fences on their own lines
 
 def strip_fences(reply: str) -> str:
@@ -72,13 +76,11 @@ def format_result(language: str, libraries: List[str], exit_code: int, stdout: s
     return text
 
 
-def run_in_sandbox(language: str, code: str, libraries: List[str]) -> Tuple[int, str, str]:
-    """a fresh container for this one run (SandboxSession), removed when it ends. the docker daemon comes from the
-    environment (DOCKER_HOST or /var/run/docker.sock). keep_template: the language image stays, no pull per run"""
-    from llm_sandbox import SandboxSession  # only needed here, the hub runs without docker access too
+def run_in_sandbox(language: str, code: str, libraries: List[str], volume: ConversationVolume) -> Tuple[int, str, str]:
+    """a fresh container for this one run with the conversation's files (volume.session), removed when it ends. the docker
+    daemon comes from the environment (DOCKER_HOST or /var/run/docker.sock)"""
     configs = dict(RUNTIME_CONFIGS) if libraries else {**RUNTIME_CONFIGS, "network_mode": "none"}
-    with SandboxSession(lang=language, keep_template=True, runtime_configs=configs, encoding_errors="replace",
-                        skip_environment_setup=not libraries) as session:
+    with volume.session(configs, lang=language, skip_environment_setup=not libraries) as session:
         if language == "cpp" and libraries:     # llm sandbox runs apt-get install without update and -y
             installed = session.execute_command(f"timeout {INSTALL_TIMEOUT} sh -c 'apt-get update -qq && "
                                                 f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq {' '.join(libraries)}'")
@@ -89,8 +91,9 @@ def run_in_sandbox(language: str, code: str, libraries: List[str]) -> Tuple[int,
         return result.exit_code, result.stdout, result.stderr
 
 
-def run_call(call: Dict[str, Any]) -> Dict[str, Any]:
-    """runs a built call: the base64 code decoded, checked and run. returns the tool result {"tool", "text"|"error"}"""
+def run_call(call: Dict[str, Any], volume: ConversationVolume) -> Dict[str, Any]:
+    """runs a built call with the conversation's files: the base64 code decoded, checked and run.
+    returns the tool result {"tool", "text"|"error"}"""
     language, libraries = call.get("language", "python"), call.get("libraries") or []
     code = base64.b64decode(call.get("code", "")).decode("utf-8")
     if not code.strip():
@@ -104,7 +107,7 @@ def run_call(call: Dict[str, Any]) -> Dict[str, Any]:
     if bad or len(libraries) > MAX_LIBRARIES:
         return {"tool": "run_code", "error": f"invalid library list {libraries}, at most {MAX_LIBRARIES} plain package names. Nothing ran."}
     try:
-        exit_code, stdout, stderr = run_in_sandbox(language, code, libraries)
+        exit_code, stdout, stderr = run_in_sandbox(language, code, libraries, volume)
     except Exception as e:
         if type(e).__name__ == "SandboxTimeoutError":
             return {"tool": "run_code", "error": f"the program was stopped, it ran longer than "
@@ -116,8 +119,9 @@ def run_call(call: Dict[str, Any]) -> Dict[str, Any]:
 
 class RunCodeTool(Tool):
     """writes a one file program for the directed task (own llm call, the reply is only code) and runs it in a
-    fresh llm sandbox container. the harness builds the call json with the code in base64"""
+    fresh llm sandbox container with the conversation's files. the harness builds the call json with the code in base64"""
     description = prompts.RUN_CODE_DESCRIPTION
+    sequential = True
     question = [
         "Does the user want to see the output of running code?",
         "Does this message ask to check or confirm a number or formula before using it?",
@@ -132,27 +136,47 @@ class RunCodeTool(Tool):
     def name(cls) -> str:
         return "run_code"
 
-    def write_code(self) -> str:
-        """the code writing llm call: latest messages (pasted code stays in them, not in json) and the task"""
+    @classmethod
+    def problems(cls, result: Dict[str, Any]) -> List[str]:
+        """a program that could not run or ended with an exit code other than 0 (format_result)"""
+        if "error" in result:
+            return [f"run_code: {result['error']}"]
+        return [f"the {language} program of run_code ended with exit code {code}"
+                for language, code in re.findall(r"^ran an? (\S+) program.*?, exit code (-?\d+)$", result.get("text") or "", re.M) if code != "0"]
+
+    def conversation(self) -> str:
+        """the latest messages the code writer sees (pasted code stays in them, not in json)"""
         messages = self.db.get_messages_by_conversation(self.conversation_id, CONTEXT_MESSAGES) or []
-        conversation = "\n\n".join(f"{m['role']}: {(m['content'] or '')[:MAX_MESSAGE_CHARS]}"
-                                   for m in messages if m["role"] in ("user", "assistant") and m["content"])
+        return "\n\n".join(f"{m['role']}: {(m['content'] or '')[:MAX_MESSAGE_CHARS]}"
+                           for m in messages if m["role"] in ("user", "assistant") and m["content"])
+
+    def without_code(self, conversation: str) -> bool:
+        """the call is to run the user's code (USER_CODE_TASK), but the conversation has none: the prompt's example copied"""
+        return USER_CODE_TASK in str(self.tool_call.get("task") or "").lower() and not CODE.search(conversation)
+
+    def write_code(self, conversation: str) -> str:
+        """the code writing llm call: the latest messages (conversation()) and the task"""
         task = self.tool_call.get("task") or "do what the user's latest message asks"
         query = f"CONVERSATION (latest last):\n{conversation}\n\nTASK:\n{task}"
         language = self.tool_call.get("language")
         if language:
             query += f"\n\nLANGUAGE: {language}"
         return self.infrastructure.chat(
-            messages=[{"role": "system", "content": prompts.RUN_CODE_WRITER_PROMPT.format(run_timeout=RUN_TIMEOUT)}, {"role": "user", "content": query}],
+            messages=[{"role": "system", "content": prompts.RUN_CODE_WRITER_PROMPT.format(run_timeout=RUN_TIMEOUT, files=MOUNT_PATH)}, {"role": "user", "content": query}],
             temperature=0.2,
             seed=random.randint(0, 100000),
-            max_new_tokens=4096,
+            max_new_tokens=self.infrastructure.long_reply_tokens(),
             timeout=self.tool_call.get("llm_timeout")     # set by agent jobs, None in chat (240 s)
         ) or ""
 
     def execute(self) -> None:
+        conversation = self.conversation()
+        if self.without_code(conversation):
+            logger.warning(f"run_code: no code in the conversation to run, nothing ran: {self.tool_call.get('task')}")
+            self.add_result({"tool": self.name(), "error": prompts.RUN_CODE_NO_CODE_PART})
+            return
         MessageQueue().send_status_message("writing code")
-        reply = self.write_code()        
+        reply = self.write_code(conversation)
         if not reply.strip():
             result = {"tool": self.name(), "error": "no code was written, the language model gave no reply"}
         else:
@@ -160,7 +184,7 @@ class RunCodeTool(Tool):
             logger.debug(f"run_code call: {call}")
             logger.debug(f"code:\n{reply}")
             MessageQueue().send_status_message("running code")
-            result = run_call(json.loads(call))
+            result = run_call(json.loads(call), ConversationVolume(self.user_id, self.conversation_id))
         self.add_result(result)
 
     @classmethod

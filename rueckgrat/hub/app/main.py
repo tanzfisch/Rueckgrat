@@ -639,6 +639,8 @@ def delete_conversation(conversation_id: int, username: str = Depends(get_curren
         released_images = app.state.image_store.release(image_keys)
         from app.utils.text_files import remove_conversation_files
         remove_conversation_files(user_id, conversation_id)
+        from app.utils.conversation_volume import ConversationVolume
+        ConversationVolume(user_id, conversation_id).remove()
         return {"status": "ok", "released_images": released_images}
     else:
         return {"status": "failed to delete conversation"}
@@ -949,7 +951,6 @@ async def get_map_tile(z: int, x: int, y: int, username: str = Depends(get_curre
 @app.get("/messages/{message_id}/files/{stored_name}")
 def download_message_file(message_id: int, stored_name: str, username: str = Depends(get_current_user)):
     """the text file attached to a message, saved under the AI's real name"""
-    from urllib.parse import quote
     from app.utils.text_files import FILES_ROOT, _STORED, message_dir
     user_id = app.state.db.get_user_id(username)
     if not _STORED.fullmatch(stored_name) or not app.state.db.owns_message(user_id, message_id):
@@ -961,8 +962,65 @@ def download_message_file(message_id: int, stored_name: str, username: str = Dep
     if not path.is_file():
         raise HTTPException(status_code=404, detail="file not found")
     download_name = row["real_name"].rsplit("/", 1)[-1] or "file"
-    return Response(content=path.read_bytes(), media_type=row["file_type"],
-                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(download_name)}"})
+    return Response(content=path.read_bytes(), media_type=row["file_type"], headers=attachment_headers(download_name))
+
+########### conversation files (the sandbox volume of bash and run_code)
+def conversation_files(username: str, conversation_id: int, read):
+    """read(volume) on the logged in user's conversation volume: 404 for a conversation not theirs or a path that
+    isn't there, 400 for a path leaving the files, 503 without docker"""
+    from docker.errors import DockerException
+    from app.utils.conversation_volume import ConversationVolume
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_conversation(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="conversation not found")
+    try:
+        return read(ConversationVolume(user_id, conversation_id))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="file not found")
+    except DockerException as e:
+        logger.error(f"conversation {conversation_id} files: {repr(e)}")
+        raise HTTPException(status_code=503, detail="the files are not available")
+
+def attachment_headers(name: str, size: int | None = None) -> dict:
+    from urllib.parse import quote
+    return {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}",
+            **({"Content-Length": str(size)} if size is not None else {})}
+
+@app.get("/conversations/{conversation_id}/files")
+def list_conversation_files(conversation_id: int, path: str = "", username: str = Depends(get_current_user)):
+    """one folder of the conversation's files ("" the root): {"path", "entries": [{"name", "path", "type", "size",
+    "modified"}]}. a conversation without files yet has an empty root"""
+    entries = conversation_files(username, conversation_id, lambda volume: volume.entries(path))
+    return {"path": path, "entries": entries}
+
+@app.get("/conversations/{conversation_id}/files/download")
+def download_conversation_file(conversation_id: int, path: str, username: str = Depends(get_current_user)):
+    """one file of the conversation's files, streamed"""
+    name, size, chunks = conversation_files(username, conversation_id, lambda volume: volume.read_file(path))
+    return StreamingResponse(chunks, media_type="application/octet-stream", headers=attachment_headers(name, size))
+
+@app.get("/conversations/{conversation_id}/files/zip")
+def zip_conversation_files(conversation_id: int, path: str = "", exclude: bool = True,
+                           username: str = Depends(get_current_user)):
+    """a folder of the conversation's files ("" all of them) as one zip. exclude: without .git, caches and installed
+    packages (EXCLUDED in conversation_volume)"""
+    import tempfile
+    target = tempfile.SpooledTemporaryFile(max_size=32 * 1024 * 1024)
+    try:
+        name = conversation_files(username, conversation_id, lambda volume: volume.write_zip(target, path, exclude))
+    except BaseException:
+        target.close()
+        raise
+    size = target.tell()
+    target.seek(0)
+
+    def chunks():
+        with target:
+            while data := target.read(64 * 1024):
+                yield data
+    return StreamingResponse(chunks(), media_type="application/zip", headers=attachment_headers(name, size))
 
 ########### downloads
 @app.get("/downloads/{file_path:path}")

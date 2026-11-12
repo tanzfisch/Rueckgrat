@@ -1,6 +1,7 @@
 from app.tasks.task_queue import Task
 from . import prompts
-from typing import Dict, Any, Optional
+from contextlib import nullcontext
+from typing import Dict, Any, Optional, List
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -8,6 +9,7 @@ logger = get_logger()
 class Tool(Task):
     description = ""    # one line for the tool index, every tool sets its own
     question = []       # yes/no decision questions: does the request involve this tool's purpose. the tool counts with its most likely question
+    sequential = False  # the calls of sequential tools in one round run one after another in their order (they share the sandbox files)
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
         super().__init__()
@@ -41,6 +43,15 @@ class Tool(Task):
         MessageQueue().send_data({kind: {"conversation_id": self.conversation_id, "message_id": self.message_id, **data}},
                                  user_id=self.user_id)
 
+    @classmethod
+    def sharing(cls):
+        """the context around a round's sequential calls of this tool (ToolRegistry._run_lane), e.g. one sandbox for all"""
+        return nullcontext()
+
+    def runs_detached(self) -> bool:
+        """a call of a DETACHED_TOOLS tool runs in the background. False keeps this call in its round"""
+        return True
+
     def planned_result(self) -> Dict[str, Any]:
         """the result the reply gets while this call runs detached (ToolRegistry.DETACHED_TOOLS), made from the call alone"""
         return {self.name(): {"tool": self.name(), "text": self.planned_text()}}
@@ -53,6 +64,12 @@ class Tool(Task):
         """attaches one file this tool held without a message (an item of its result's "attachments": {"tool", "name", ...})
         to message_id. only tools that hold files have it"""
         raise NotImplementedError(f"{cls.__name__} holds no attachments")
+
+    @classmethod
+    def problems(cls, result: Dict[str, Any]) -> List[str]:
+        """what went wrong in one result of this tool that another try could fix (a worker's fix rounds, see
+        ToolExecutionTask). most tools have nothing to fix: []"""
+        return []
 
     @classmethod
     def merge(cls, known: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:

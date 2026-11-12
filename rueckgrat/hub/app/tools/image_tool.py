@@ -4,7 +4,7 @@ from .tool import Tool
 from app.common import get_logger, MessageQueue, Utils
 logger = get_logger()
 
-
+# base class for other image generation related tools
 class ImageTool(Tool):
     """a tool that makes one image (generate_image, take_photo). with a message the planned file is attached before the
     image exists. without one (agent jobs, companions) the file is held in the result's "attachments" and attached by

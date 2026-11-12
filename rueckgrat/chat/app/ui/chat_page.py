@@ -5,12 +5,16 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, FileCards
+from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, FileCards, FilesPanel
 from app.audio import Text_To_Speech
 from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig
 from app.common import get_logger, Utils
 
 logger = get_logger()
+
+# from this window width on the files panel docks to the right of the conversation, below it covers the conversation.
+# material's "expanded" window class: room for the panel and a conversation of about 500
+WIDE_MIN_WIDTH = 840
 
 
 class ChatPage(BasePage):
@@ -37,7 +41,16 @@ class ChatPage(BasePage):
         self._pending_extras: dict[int, dict] = {}      # message id -> {"poll", "map"} pushed by a detached tool before its bubble
         self.user_role_name = ""   # set from the user's own character profile in on_enter
 
-        self.header = Header(navigator)
+        self.files_panel = FilesPanel(on_close=self.toggle_files)
+        self.files_btn = ft.IconButton(
+            icon=ft.Icons.FOLDER_OPEN,
+            tooltip="files",
+            width=40,
+            height=40,
+            style=theme.STYLES["icon_button"]["style"],
+            on_click=lambda e: self.toggle_files(),
+        )
+        self.header = Header(navigator, actions=[self.files_btn])
         self.header.on_go_back = self.on_go_back
 
         self.history = ft.ListView(expand=True, spacing=4, padding=0, auto_scroll=True)
@@ -143,23 +156,47 @@ class ChatPage(BasePage):
             ),
         )
 
-        self.controls = [
-            ft.Container(
+        self.conversation = ft.Container(
+            left=0, top=0, right=0, bottom=0,   # in the stack: all of it, or all but the docked files panel
+            padding=20,
+            content=ft.Column(
                 expand=True,
-                margin=20,
-                content=ft.Column(
-                    expand=True,
-                    controls=[
-                        self.header,
-                        self.history,
-                        self.bubble,
-                    ],
-                ),
+                controls=[
+                    self.header,
+                    self.history,
+                    self.bubble,
+                ],
             ),
-        ]
+        )
+        self.controls = [ft.Stack([self.conversation, self.files_panel], expand=True)]
+        self._prev_resize = None
 
     def did_mount(self):
         self.page.on_keyboard_event = self._on_keyboard
+        self._prev_resize = self.page.on_resize
+        self.page.on_resize = self._on_resize
+        self._layout()
+
+    def _on_resize(self, e):
+        if self.page:
+            self._layout()
+            self.update()
+        if self._prev_resize:
+            self._prev_resize(e)
+
+    def _layout(self):
+        """the files panel docked right of the conversation on a wide window, over it on a narrow one"""
+        wide = (self.page.width or 0) >= WIDE_MIN_WIDTH
+        self.files_panel.dock(wide)
+        self.conversation.right = FilesPanel.WIDTH if wide and self.files_panel.visible else 0
+
+    def toggle_files(self):
+        if self.files_panel.visible:
+            self.files_panel.visible = False
+        else:
+            self.files_panel.show(self.conversation_id)
+        self._layout()
+        self.update()
 
     def _on_keyboard(self, e: ft.KeyboardEvent):
         if e.key == "Enter" and e.ctrl and self._input_focused and not self._enter_sends:   # enter_sends: on_submit sends
@@ -230,6 +267,8 @@ class ChatPage(BasePage):
     def on_leave(self):
         if self.page:
             self.page.run_task(self._stop_mic)
+            if self.page.on_resize == self._on_resize:
+                self.page.on_resize = self._prev_resize
         Hub.unregister_incomming_message(self.on_incomming_message)
 
     def on_mic_toggle(self, e=None):
@@ -640,6 +679,7 @@ class ChatPage(BasePage):
             if "chat" in message:
                 chat = message["chat"]
                 if chat["conversation_id"] == self.conversation_id:
+                    self.files_panel.refresh()     # the reply may have written files (bash, run_code). only when it is open
                     message_id = chat.get("message_id", self._stream_message_id)   # read before the stream id is reset
                     if self._stream_message_id is not None:
                         self._finished_message_ids.add(self._stream_message_id)

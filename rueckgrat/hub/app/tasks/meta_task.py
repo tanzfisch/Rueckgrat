@@ -10,6 +10,7 @@ from typing import Dict, Any
 
 from app.common import get_logger, ChatRequest, Utils, MessageQueue
 from app.utils.tts_stream import TtsStreams
+from app.utils.conversation_volume import ConversationVolume
 logger = get_logger()
 
 class MetaTask(Task):
@@ -109,7 +110,8 @@ class MetaTask(Task):
         self.response = {}
 
         MessageQueue().send_status_message("thinking")
-        tool_detection_task = ToolDetectionTask(self.request.content, self.tool_registry, self.infrastructure)
+        tool_detection_task = ToolDetectionTask(self.request.content, self.tool_registry, self.infrastructure,
+                                                volume=ConversationVolume(self.user_id, self.request.conversation_id))
         self.add_sub_task(tool_detection_task)        
 
         if self._interrupted():
@@ -119,6 +121,7 @@ class MetaTask(Task):
             self.wait_for([tool_detection_task])
             detected = tool_detection_task.get_result() or []
             logger.debug(f"tools detected: {detected}")
+            tool_detection_task.trace(self.request.conversation_id, "turn")
 
             contact = self.db.get_contact_by_id(self.request.contact_id)
             contact_name = Utils.get_nested_value(contact, ["identity", "name"])

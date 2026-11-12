@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 
 from app.agent_jobs.agent_job import AgentJob
 from . import prompts
+from .settings import CompanionSettings
 from app.utils.clock import to_db, from_db, local_day, at_local, parse_hhmm
 
 from app.common import get_logger, Utils
@@ -12,28 +13,9 @@ logger = get_logger()
 # WORKER_TOOLS): laya's websearch questions are about chat messages, a news scan needs its websearch
 ALWAYS_TOOLS = {"news": ["websearch"]}
 
-# guardrails, enforced here whatever the model answers
-MAX_MESSAGES_PER_DAY = 3
-MIN_HOURS_BETWEEN_MESSAGES = 2
-USER_ACTIVE_MINUTES = 30        # the user wrote that recently: they are chatting, don't interrupt
-QUIET_HOURS = (22, 8)           # local hours [from, to) without proactive messages
-MAX_ROWS_PER_PASS = 5
-MAX_PENDING_ROWS = 12           # one-off rows waiting per companion
+# the guardrails (message limits, quiet hours, rows per pass) come from the contact's settings: CompanionSettings
 ROW_KINDS = ("event", "check_in", "news", "reflection")   # what a pass may put on the calendar, all one-off
 SILENT_KINDS = ("planning",)
-
-def may_message(local: datetime, user_minutes: float | None, sent_today: int, sent_recently: bool) -> tuple[bool, str]:
-    """the guardrails of a proactive message: (allowed, reason)"""
-    quiet_from, quiet_to = QUIET_HOURS
-    if local.hour >= quiet_from or local.hour < quiet_to:
-        return False, "quiet hours"
-    if sent_today >= MAX_MESSAGES_PER_DAY:
-        return False, "daily limit reached"
-    if sent_recently:
-        return False, f"sent one less than {MIN_HOURS_BETWEEN_MESSAGES}h ago"
-    if user_minutes is not None and user_minutes < USER_ACTIVE_MINUTES:
-        return False, "user is chatting"
-    return True, "ok"
 
 def short(text, n: int = 200) -> str:
     text = " ".join(str(text or "").split())
@@ -65,6 +47,7 @@ class CompanionJob(AgentJob):
         self.now = now
         self.tool_calls = 0
         self.outcome = None
+        self.settings = None    # CompanionSettings of the contact, read at the start of the pass
         self.log = {}   # what this pass decided, short texts. the scheduler keeps it in companion_log (hub management)
 
     def step(self) -> bool:
@@ -81,6 +64,8 @@ class CompanionJob(AgentJob):
         local = self.now.astimezone(self.tz)
 
         contact = self.db.get_contact_by_id(contact_id)
+        self.settings = CompanionSettings(contact)
+        self.excluded_tools = self.settings.excluded_tools
         name = Utils.get_nested_value(contact, ["identity", "name"], "")
         user_name = self.user_name(self.db, user_id)
         conversation = self._conversation(user_id, contact_id)
@@ -100,12 +85,12 @@ class CompanionJob(AgentJob):
             "timezone": str(self.tz),
             "since_user": since_text(user_minutes),
             "sent_today": sent_today,
-            "max_per_day": MAX_MESSAGES_PER_DAY,
             "calendar": self._calendar_text(contact_id, day_start, day_end) or "nothing yet",
             "last_reflection": self.db.last_companion_result(contact_id, "reflection") or "none",
             "messages": self._messages_text(conversation["id"]) or "none",
             "summary": conversation.get("summary") or "none",
             "note": row.get("note") or "",
+            **self.settings.prompt_values(),
         }
         if kind == "planning":
             self.log["reflection"] = short(values["last_reflection"])
@@ -122,7 +107,7 @@ class CompanionJob(AgentJob):
 
         message_id, reason = None, "silent pass"
         if kind not in SILENT_KINDS:
-            sent_recently = self.db.count_companion_messages(contact_id, to_db(self.now - timedelta(hours=MIN_HOURS_BETWEEN_MESSAGES))) > 0
+            sent_recently = self.db.count_companion_messages(contact_id, to_db(self.now - timedelta(hours=self.settings.chattiness.min_hours))) > 0
             message_id, reason = self._maybe_message(reply.get("message"), user_id, conversation["id"], name, local, user_minutes, sent_today, sent_recently)
 
         result = str(reply.get("thoughts") or "").strip()[:2000]
@@ -174,10 +159,10 @@ class CompanionJob(AgentJob):
         return found
 
     def _add_calendar(self, items, contact_id: int) -> list[int]:
-        """valid new rows only: ROW_KINDS, later today or tomorrow (max 36h ahead), no duplicates, capped"""
+        """valid new rows only: ROW_KINDS, later today or tomorrow (max 36h ahead), no duplicates, capped by the settings"""
         added, plan = [], []
         local = self.now.astimezone(self.tz)
-        for item in (items if isinstance(items, list) else [])[:MAX_ROWS_PER_PASS]:
+        for item in (items if isinstance(items, list) else [])[:self.settings.chattiness.max_rows]:
             if not isinstance(item, dict):
                 continue
             entry = f"{short(item.get('kind'), 20)} {short(item.get('day'), 10)} {short(item.get('time'), 10)} {short(item.get('note'), 80)!r}"
@@ -200,7 +185,7 @@ class CompanionJob(AgentJob):
         due = at_local(day, at, self.tz)
         if not self.now < due <= self.now + timedelta(hours=36):
             return "not later today or tomorrow"
-        if self.db.count_pending_companion_rows(contact_id) >= MAX_PENDING_ROWS:
+        if self.db.count_pending_companion_rows(contact_id) >= self.settings.chattiness.max_pending:
             return "calendar full"
         note = " ".join(str(item.get("note") or "").split())[:200]
         if self.db.has_companion_row(contact_id, to_db(due), item["kind"], note):
@@ -218,7 +203,7 @@ class CompanionJob(AgentJob):
         text = str(message.get("text") or "").strip()[:1000]
         if not text:
             return None, "empty text"
-        allowed, reason = may_message(local, user_minutes, sent_today, sent_recently)
+        allowed, reason = self.settings.may_message(local, user_minutes, sent_today, sent_recently)
         turns = self.get_turns()
         if allowed and turns and turns.busy(conversation_id):
             allowed, reason = False, "a reply is being made"

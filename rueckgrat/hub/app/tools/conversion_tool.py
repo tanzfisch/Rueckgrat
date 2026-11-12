@@ -362,7 +362,6 @@ def convert(amount: Any, from_unit: str, to_unit: str) -> Dict[str, Any]:
 class ConversionTool(Tool):
     description = prompts.CONVERSION_DESCRIPTION
     question = [
-        "Does the user want to convert something?",
         "Does the user want an amount in another unit or currency, like ml to cups, kg to pounds or euros to dollars?",
         "Does the user give a height, length or weight and want it in other units?",
         "Does the user ask the money value of an amount of gold, silver, bitcoin or dollars?",

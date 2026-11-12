@@ -17,6 +17,9 @@ from app.common import get_logger, ChatRequestLlama, DownloadQueue, WebSocketCli
 logger = get_logger()
 
 INFRASTRUCTURE_CONFIG_PATH = Path("/hub/config/infrastructure.json")
+LONG_REPLY_SHARE = 0.5          # of a llama slot's context for a long reply (tool setup, code, job), the rest is the prompt
+MIN_LONG_REPLY_TOKENS = 4096    # also when the context is unknown
+DECIDE_BATCH = 64               # questions per /decide request, the node's MAX_DECIDE_QUESTIONS
 HUB_IMAGE_DIR = Path("/hub/images")
 
 @dataclass
@@ -44,7 +47,26 @@ class Infrastructure:
     callback_handlers: Dict[str, tuple[int, Callable[[str], None]]] = {}
     _tts_cache = TtsCache()  # generated speech, 1 h, max 100 MB
 
+    @staticmethod
+    def slot_context() -> Optional[int]:
+        """the context of one llama-server slot: LLAMA_SERVER_MAX_CONTEXT / LLAMA_SERVER_N_PARALLEL, the values compose
+        starts the llama server with (.env). None when they are not set"""
+        try:
+            context = int(os.getenv("LLAMA_SERVER_MAX_CONTEXT") or 0)
+            parallel = max(1, int(os.getenv("LLAMA_SERVER_N_PARALLEL") or 1))
+        except ValueError:
+            return None
+        return context // parallel if context > 0 else None
+
+    @classmethod
+    def long_reply_tokens(cls) -> int:
+        """max_new_tokens of a long reply (a tool setup writing files, a program, an agent job's step): LONG_REPLY_SHARE
+        of a slot's context, so it grows with the hardware the llm is started with. at least MIN_LONG_REPLY_TOKENS"""
+        slot = cls.slot_context()
+        return max(MIN_LONG_REPLY_TOKENS, int(slot * LONG_REPLY_SHARE)) if slot else MIN_LONG_REPLY_TOKENS
+
     def __init__(self):
+        logger.info(f"llm slot context {self.slot_context() or 'unknown'}, long replies {self.long_reply_tokens()} tokens")
         if not INFRASTRUCTURE_CONFIG_PATH.exists():
             logger.error(f"no infrastructure config found at {INFRASTRUCTURE_CONFIG_PATH}")
             return
@@ -272,12 +294,23 @@ class Infrastructure:
             return None
 
     def decide(self, state: str, questions: dict) -> Optional[dict]:
-        """laya typed decisions about state from the decision node, all questions in one forward pass.
+        """laya typed decisions about state from the decision node, one forward pass per DECIDE_BATCH questions.
         questions: {id: {"type": "choice"|"score"|"noul", "instructions": ..., "criteria": ...}}
-        returns the answers by id (noul: {"noul": P(true), ...}, choice: {"choice": label, ...}) or None"""
+        returns the answers by id (noul: {"noul": P(true), ...}, choice: {"choice": label, ...}) or None when any batch failed"""
         if not "text_to_decision" in self.node_by_type:
             return None
 
+        items = list(questions.items())
+        answers = {}
+        for start in range(0, len(items), DECIDE_BATCH):
+            batch = self._decide_batch(state, dict(items[start:start + DECIDE_BATCH]))
+            if batch is None:
+                return None
+            answers.update(batch)
+        return answers
+
+    def _decide_batch(self, state: str, questions: dict) -> Optional[dict]:
+        """one /decide request, at most DECIDE_BATCH questions (the node's limit)"""
         node = self.node_by_type["text_to_decision"]
         url = f"http://{node.addr}:{node.port}/decide"
         try:
@@ -366,10 +399,12 @@ class Infrastructure:
         if node and node.is_connected():
             node.send_message(json.dumps({"cancel": stream_id}))
 
-    def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 1024, context_size: int=8192, timeout: Optional[float] = None, json_schema: Optional[dict] = None) -> str:
+    def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 1024, context_size: int=8192, timeout: Optional[float] = None, json_schema: Optional[dict] = None, info: Optional[dict] = None) -> str:
         """stream: returns the stream id at once, the reply goes to callback. otherwise returns the reply.
         timeout: seconds for the node's llama call (jobs), the hub waits a bit longer. None = 240 like before
-        json_schema: the reply is json matching this schema, None = free text"""
+        json_schema: the reply is json matching this schema, None = free text
+        info: a dict given, a reply (not streamed) fills in what the node knows: finish_reason ("length": cut off),
+        prompt_tokens, completion_tokens"""
         try:
             chat_request = ChatRequestLlama(
                 messages=messages,
@@ -415,6 +450,8 @@ class Infrastructure:
                     if data.get("role") == "error":     # the node's llama call failed, content is the error, not a reply
                         logger.error(f"chat failed on the node: {data.get('content')}")
                         return None
+                    if info is not None:    # an older node sends none of them
+                        info.update({key: data[key] for key in ("finish_reason", "prompt_tokens", "completion_tokens") if data.get(key)})
                     return data.get("content", "")
 
         except Exception as e:

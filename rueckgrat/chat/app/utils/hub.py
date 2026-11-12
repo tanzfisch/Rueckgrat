@@ -834,6 +834,42 @@ class Hub:
         return None
 
     @classmethod
+    def _get_conversation_files(cls, conversation_id: int, route: str, params: dict, timeout: int):
+        """the hub's answer for the conversation's sandbox files, None on an error"""
+        try:
+            response = requests.get(
+                f"{cls.url}/conversations/{conversation_id}/files{route}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                params=params,
+                timeout=timeout,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response
+            logger.error(f"conversation files{route} {params} - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get conversation files{route} {repr(e)}")
+        return None
+
+    @classmethod
+    def get_conversation_files(cls, conversation_id: int, path: str = "") -> list | None:
+        """one folder of the conversation's sandbox files: [{"name", "path", "type", "size", "modified"}], None on an error"""
+        response = cls._get_conversation_files(conversation_id, "", {"path": path}, 30)
+        return response.json().get("entries", []) if response is not None else None
+
+    @classmethod
+    def get_conversation_file(cls, conversation_id: int, path: str) -> bytes | None:
+        """one file of the conversation's sandbox files"""
+        response = cls._get_conversation_files(conversation_id, "/download", {"path": path}, 120)
+        return response.content if response is not None else None
+
+    @classmethod
+    def get_conversation_files_zip(cls, conversation_id: int, path: str = "", exclude: bool = True) -> bytes | None:
+        """a folder of the conversation's sandbox files ("" all) as a zip. exclude: without .git, caches, packages"""
+        response = cls._get_conversation_files(conversation_id, "/zip", {"path": path, "exclude": str(exclude).lower()}, 300)
+        return response.content if response is not None else None
+
+    @classmethod
     def get_attachments(cls, message_id):
         url = f"{cls.url}/messages/{message_id}/attachments"
 

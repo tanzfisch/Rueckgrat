@@ -14,6 +14,9 @@ class ChatResponse(BaseModel):
     role: str
     content: str
     think: str = ""
+    finish_reason: str = ""     # llama.cpp's: "stop", "length" (max_tokens reached, cut off); "" when unknown
+    prompt_tokens: int = 0      # the llm's token counts of the call, 0 when unknown
+    completion_tokens: int = 0
 
 class ChatRequestLlama(BaseModel):
     messages: list[dict]

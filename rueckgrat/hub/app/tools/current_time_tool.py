@@ -114,7 +114,6 @@ class CurrentTimeTool(Tool):
     description = prompts.CURRENT_TIME_DESCRIPTION
     question = [
         "Does the user want to know the current time or date somewhere?",
-        "Does the user want the local time of day in a city or country?",
         "Does the user ask what time it is at a place, a region or a coast?"
     ]
 
