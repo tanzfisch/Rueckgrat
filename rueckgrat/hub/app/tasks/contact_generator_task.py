@@ -165,10 +165,6 @@ class ContactGeneratorTask(Task):
                     }
                 },                 
 
-                "behaviour_parameters": {
-                    "mood_gen_chance": 0.3
-                },
-
                 "llm_parameters": {
                     "temperature": "0.15",
                     "preffered_context_size": "8000"

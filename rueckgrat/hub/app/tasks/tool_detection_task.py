@@ -3,12 +3,13 @@ from .task_queue import Task
 from typing import List, Optional, Dict, Any
 
 from app.common import get_logger, Utils
+from app.utils.trace import Trace
 logger = get_logger()
 
-MAX_QUESTIONS = 64
 MANDATORY_THRESHOLD = 0.7
 RECOMMENDED_THRESHOLD = 0.4
 MIN_DETECTION_WORDS = 4    # shorter messages ("Hi", "thanks!") skip the laya questions, they scored spawn_job 0.71 on "Hi"
+PROJECT_KEY = "project"    # the ids of the ToolRegistry.PROJECT_QUESTIONS: "project__<i>"
 
 # fetch_url is not a laya question but a regex to look for URLs
 TLDS = r"com|org|net|edu|gov|mil|int|info|biz|io|ai|app|dev|xyz|online|site|tech|blog|news|shop|store|cloud|page|link|live|media|tv"
@@ -25,14 +26,18 @@ URL_PATTERN = re.compile(rf"""
 
 class ToolDetectionTask(Task):
     """detecting possible tools requests so we can offer the tools to the AI to use"""
-    def __init__(self, prompt: str, tool_registry, infrastructure, excluded_tools: tuple = ()):
+    def __init__(self, prompt: str, tool_registry, infrastructure, excluded_tools: tuple = (), volume=None):
+        """volume: the conversation's files (ConversationVolume), the PROJECT_QUESTIONS are asked. None: they are not"""
         super().__init__()
         self.prompt = prompt
         self.excluded_tools = excluded_tools
+        self.volume = volume
+        self.project = None     # whether the files hold a project, None: not checked (no project question scored high enough)
         self.infrastructure = infrastructure
         self.tool_registry = tool_registry
         self.tool_names = None
         self.recommended = []
+        self.scores = {}    # question id -> (its score, the question), for the trace
 
     def execute(self) -> None:
         try:
@@ -65,10 +70,20 @@ class ToolDetectionTask(Task):
                     "instructions": question
                 }
 
-        if len(questions) > MAX_QUESTIONS:
-            logger.warning(f"{len(questions)} questions, only the first {MAX_QUESTIONS} are checked")
-            questions = dict(list(questions.items())[:MAX_QUESTIONS])
+        if self.volume is not None and self.tool_registry.project_tools(self.excluded_tools):
+            for i, question in enumerate(self.tool_registry.PROJECT_QUESTIONS):
+                questions[f"{PROJECT_KEY}__{i}"] = {"type": "noul", "instructions": question}
+
         return questions
+
+    def _has_project(self) -> bool:
+        """whether the conversation's files hold a project (ConversationVolume.has_project), False when they can't be read"""
+        try:
+            self.project = self.volume.has_project()
+        except Exception as e:
+            logger.error(f"files of the conversation not checked for a project {repr(e)}")
+            self.project = False
+        return self.project
 
     def _check_fetch_url(self) -> Optional[str]:
         if "fetch_url" in self.excluded_tools:
@@ -84,7 +99,8 @@ class ToolDetectionTask(Task):
             logger.debug(f"tool detection skipped, fewer than {MIN_DETECTION_WORDS} words")
             return self.tool_registry.bands([url_check] if url_check else [], [])
 
-        answers = self.infrastructure.decide(self.prompt, self._questions())
+        questions = self._questions()
+        answers = self.infrastructure.decide(self.prompt, questions)
         if answers is None:
             return ([url_check] if url_check else None), []    # a link still selects fetch_url when laya is down; otherwise the caller falls back
 
@@ -94,6 +110,13 @@ class ToolDetectionTask(Task):
             if name == "fetch_url":
                 continue
             probabilities[name] = max(probabilities.get(name, 0.0), answer.get("noul", 0.0))
+            self.scores[key] = (answer.get("noul", 0.0), questions.get(key, {}).get("instructions", ""))
+
+        # a fix or change of what was made earlier selects the PROJECT_TOOLS, only when there is a project to change
+        project = probabilities.pop(PROJECT_KEY, 0.0)
+        if project >= RECOMMENDED_THRESHOLD and self._has_project():
+            for name in self.tool_registry.project_tools(self.excluded_tools):
+                probabilities[name] = max(probabilities.get(name, 0.0), project)
         
         tool_names = [name for name, p in probabilities.items() if p >= MANDATORY_THRESHOLD]
         recommended = [name for name, p in probabilities.items() if RECOMMENDED_THRESHOLD <= p < MANDATORY_THRESHOLD]
@@ -106,3 +129,10 @@ class ToolDetectionTask(Task):
             tool_names.append(url_check)
 
         return self.tool_registry.bands(tool_names, recommended)
+
+    def trace(self, conversation_id: int, who: str) -> None:
+        """the detection into the decision trace: the text it judged, each question's score and what it chose"""
+        lines = [f"{score:.4f}  {key}  {question}" for key, (score, question) in sorted(self.scores.items(), key=lambda item: -item[1][0])]
+        Trace.write(conversation_id, f"tool detection, {who}", f"TEXT:\n{self.prompt}\nSCORES (per question, best first):\n" + "\n".join(lines),
+                    mandatory=self.tool_names, recommended=self.recommended, thresholds=[RECOMMENDED_THRESHOLD, MANDATORY_THRESHOLD],
+                    excluded=list(self.excluded_tools), project_files=self.project)

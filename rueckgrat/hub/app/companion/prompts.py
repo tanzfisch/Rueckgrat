@@ -19,6 +19,10 @@ placeholders, all plain strings (str.format, so literal JSON braces are doubled)
   since_user      "3 hours ago" / "never"
   sent_today      proactive messages already sent today
   max_per_day     the hard limit enforced in code
+  max_rows        calendar rows per answer, enforced in code
+  max_sentences   of a message
+  messaging       MESSAGING_PARTS[chattiness]: how readily it writes first
+  life            LIFE_PARTS[chattiness]: how busy its own day is
   calendar        the companion's day, one row per line "HH:MM kind - note (what happened)"
   messages        the last messages of the conversation, one per line
   summary         the conversation's summary from the nightly maintenance, may be empty
@@ -26,10 +30,11 @@ placeholders, all plain strings (str.format, so literal JSON braces are doubled)
   note            the note of the firing row, may be empty
   result          the lookup results (LOOKUP_RESULT only)
 
+the settings' values (max_per_day, max_rows, max_sentences, messaging, life) come from CompanionSettings.prompt_values.
 change the wording together and bump PROMPT_VERSION, it is logged with every pass so replies can be traced to a version.
 """
 
-PROMPT_VERSION = "3"
+PROMPT_VERSION = "4"
 
 # ---------------------------------------------------------------- the shared state of every pass
 STATE = """
@@ -58,6 +63,7 @@ You are {name} and you have a life of your own between conversations with {user_
 
 INSTRUCTIONS:
 - decide what you will do today, only what fits your character, background and interests. an empty plan is perfectly valid
+- your life is {life}
 - put each activity on your calendar with its time and a short note of what you will do:
   - "event" = something in your own life (work, errands, hobbies, meeting people, small surprises), plausible and grounded
   - "news" = going through the news, only if news interest you or {user_name}, the note says which topics
@@ -115,18 +121,18 @@ YOUR CALENDAR:
 - add rows only for things that will happen later today or tomorrow, never in the past
 - kind "event" = something in your own life, "check_in" = a follow-up with {user_name},
   "news" = a news scan, "reflection" = looking back on your day. only what fits you
-- max 5 rows per answer, an empty list is perfectly valid
+- max {max_rows} rows per answer, an empty list is perfectly valid
 - don't repeat what is already on your calendar
 """
 
 # ---------------------------------------------------------------- (6) whether to surface something to the user
 SURFACE_DECISION = """
 MESSAGING {user_name}:
-- you are a friend with your own life, not a notification service. silence is the default
+- you are a friend with your own life, not a notification service. {messaging}
 - send only when you have something real: a moment of your day worth sharing, something that concerns {user_name}, a follow-up you promised
 - never send when {user_name} wrote very recently, it's night for them, or you have nothing new
 - reference your day and the conversation, never generic small talk ("how are you?")
-- the text is a chat message in your own voice, short (max 3 sentences), no greeting formulas, no questions just to get a reply
+- the text is a chat message in your own voice, short (max {max_sentences} sentences), no greeting formulas, no questions just to get a reply
 - reason = one sentence why you send or don't
 """
 
@@ -141,6 +147,23 @@ Return ONLY valid JSON in this format:
     "message": {{"send": false, "reason": "", "text": ""}}
 }}
 """
+
+# ---------------------------------------------------------------- the chattiness setting (CompanionSettings), keys: CHATTINESS_OPTIONS
+MESSAGING_PARTS = {
+    "chatty": "you like to write: share small moments of your day and what is on your mind",
+    "talkative": "write when something is on your mind, it does not have to be important",
+    "balanced": "silence is the default",
+    "reserved": "you rarely write first, only when something really matters to them",
+    "silent": "you never write first: message.send must be false",
+}
+
+LIFE_PARTS = {
+    "chatty": "busy and social, plan a full day",
+    "talkative": "lively, plan a few things",
+    "balanced": "ordinary, a few things at most",
+    "reserved": "quiet, one or two things",
+    "silent": "quiet and private, one or two things or nothing",
+}
 
 # ---------------------------------------------------------------- what the pass looked up before
 LOOKUP_RESULT = """

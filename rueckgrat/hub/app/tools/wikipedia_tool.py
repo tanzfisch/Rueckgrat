@@ -58,8 +58,7 @@ class WikipediaTool(Tool):
         "Does the user ask who a famous person from history was?",
         "Does the user ask to have a science theory or natural process explained?",
         "Does the user ask what a science term means, like photosynthesis or a black hole?",
-        "Does the user ask about a famous landmark, country, empire or historic event?",
-        "Does the user ask about a famous treaty, war, empire or monument?",
+        "Does the user ask about a famous landmark, monument, country, empire, war, treaty or historic event?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

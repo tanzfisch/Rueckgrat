@@ -28,7 +28,6 @@ class WebsearchTool(Tool):
         "Does the user ask what events, games or concerts are coming up somewhere?",
         "Does the user ask you to search the web, look something up online or google it?",
         "Does the user want the latest news or updates on a topic?",
-        "Does the user want you to look up current news or recent information?",        
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

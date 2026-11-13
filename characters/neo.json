@@ -45,9 +45,6 @@
                 "body": "ripped jeans, expensive sneakers"
             }
         },
-        "behaviour_parameters": {
-            "mood_gen_chance": 0.1
-        },
         "llm_parameters": {
             "temperature": "0.25",
             "preffered_context_size": "8000"

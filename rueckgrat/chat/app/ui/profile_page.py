@@ -10,14 +10,23 @@ from app.ui.gallery_page import GalleryPage, broken_image_fallback
 from app.ui.widgets import Header, Image, VoiceSelector
 from app.utils import Contact, Hub, Paths
 from app.audio import Text_To_Speech
-from app.common import get_logger, Utils, IMAGE_STYLE_OPTIONS, IMAGE_STYLE_ICONS
+from app.common import (get_logger, Utils, IMAGE_STYLE_OPTIONS, IMAGE_STYLE_ICONS, CHATTINESS_OPTIONS, QUIET_HOUR_OPTIONS, PHOTO_OPTIONS,
+                        put_companion_switch, pop_companion_switch)
 
 logger = get_logger()
 
 IMAGE_SIZE = 120
 IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp"]   # what the hub accepts
 
+COMPANION_SECTION = "Companion"   # shown under the companion switch, only while it is on
+
 PROFILE_SECTIONS = [
+    (COMPANION_SECTION, [
+        ("Chattiness (default balanced)", ["companion_settings", "chattiness"], "select"),
+        ("Quiet from (default 22:00)", ["companion_settings", "quiet_from"], "select"),
+        ("Quiet until (default 08:00, the same hour twice: never quiet)", ["companion_settings", "quiet_until"], "select"),
+        ("Photos (default allowed)", ["companion_settings", "photos"], "select"),
+    ]),
     ("Story", [
         ("Background", ["background_hook"], "text"),
         ("Relationship to you", ["relationship"], "text"),
@@ -59,6 +68,10 @@ PROFILE_SECTIONS = [
 
 SELECT_OPTIONS = {
     ("appearance", "image_style"): IMAGE_STYLE_OPTIONS,
+    ("companion_settings", "chattiness"): CHATTINESS_OPTIONS,
+    ("companion_settings", "quiet_from"): QUIET_HOUR_OPTIONS,
+    ("companion_settings", "quiet_until"): QUIET_HOUR_OPTIONS,
+    ("companion_settings", "photos"): PHOTO_OPTIONS,
 }
 
 # optional images for "select" fields, keyed by key path: {stored value: image src shown in front of the option}
@@ -76,16 +89,22 @@ def _option_image(src: str | None) -> ft.Control | None:
                     error_content=ft.Container(width=32, height=32))
 
 
+SELECT_MAX_VISIBLE = 8         # longer option lists (the 24 quiet hours) scroll in a menu of this many rows
+SELECT_ROW_HEIGHT = 48
+
+
 def _select_field(label: str, path: list[str]) -> ft.Dropdown:
+    options = SELECT_OPTIONS[tuple(path)]
     return ft.Dropdown(
         label=label,
+        menu_height=SELECT_MAX_VISIBLE * SELECT_ROW_HEIGHT if len(options) > SELECT_MAX_VISIBLE else None,
         options=[
             ft.DropdownOption(
                 key=option,
-                text=f"{option.replace('_', ' ')}: {description}",
+                text=f"{option.replace('_', ' ')}: {description}" if description else option.replace('_', ' '),
                 leading_icon=_option_image(SELECT_ICONS.get(tuple(path), {}).get(option)),
             )
-            for option, description in SELECT_OPTIONS[tuple(path)].items()
+            for option, description in options.items()
         ],
         expand=True,
         filled=True,
@@ -147,19 +166,22 @@ class ProfilePage(BasePage):
         self.personality = _text_field("Persona", "text")
         self.age = _text_field("Age", "text")
         self.voice_selector = VoiceSelector(Hub.get_predefined_voices(), on_play_sample=Text_To_Speech.play_voice_sample)
-        self.companion_switch = ft.Switch(label="Companion (plans its own day, may write first)", active_color=theme.ACCENT)
+        self.companion_switch = ft.Switch(label="Companion (plans its own day, may write first)", active_color=theme.ACCENT,
+                                          on_change=lambda e: self._show_companion_settings())
         self.companion_loaded = False   # the hub's state, a different switch value is sent on save
 
         # original profile dict, so fields without a form entry survive a save
         self.profile_base = {}
         self.profile_fields = []  # (key path, kind, TextField)
-        profile_controls = []
+        profile_controls, companion_controls = [], []
         for section, fields in PROFILE_SECTIONS:
-            profile_controls.append(ft.Text(section, style=theme.STYLES["section_heading"]))
+            controls = companion_controls if section == COMPANION_SECTION else profile_controls
+            controls.append(ft.Text(section, style=theme.STYLES["section_heading"]))
             for label, path, kind in fields:
                 field = _select_field(label, path) if kind == "select" else _text_field(label, kind)
                 self.profile_fields.append((path, kind, field))
-                profile_controls.append(field)
+                controls.append(field)
+        self.companion_settings = ft.Column(controls=companion_controls, spacing=12, visible=False)
         self.file_picker = ft.FilePicker()
 
         # the contact's current profile image, a tap on it or on the pen changes it. hidden for a new contact
@@ -217,6 +239,7 @@ class ProfilePage(BasePage):
                                 ),
                                 self.age,
                                 self.companion_switch,
+                                self.companion_settings,
                                 ft.Row(
                                     controls=[
                                         ft.Text("Voice"),
@@ -265,6 +288,7 @@ class ProfilePage(BasePage):
         self.voice_selector.set_current_voice("")
         self.image_row.visible = False
         self.companion_switch.value = self.companion_loaded = False
+        self.companion_settings.visible = False
         self.update()
 
     def fill_form(self, contact):
@@ -299,8 +323,14 @@ class ProfilePage(BasePage):
         self.companion_loaded = bool(Utils.get_nested_value(contact, ["profile", "companion"], False))
         self.companion_switch.value = self.companion_loaded
         self.companion_switch.update()
+        self._show_companion_settings()
         self.image_row.visible = True
         self._show_image(Contact(contact or {}).get_latest_profile_image_name())
+
+    def _show_companion_settings(self):
+        """the companion settings only while the switch is on. hidden fields keep their values, they are saved either way"""
+        self.companion_settings.visible = bool(self.companion_switch.value)
+        self.companion_settings.update()
 
     def _show_image(self, file_key: str):
         # file names are content hashes, so a cached file is never stale: a new image is a new name
@@ -386,10 +416,12 @@ class ProfilePage(BasePage):
             return
         with open(files[0].path, "r") as file:
             data = json.load(file)
+        companion = pop_companion_switch(data)
         self.fill_form(data)
         # only the switch, Save sends a changed value through PUT /contacts/{id}/companion
-        self.companion_switch.value = bool(Utils.get_nested_value(data, ["profile", "companion"], False))
+        self.companion_switch.value = companion
         self.companion_switch.update()
+        self._show_companion_settings()
 
     async def _on_export(self, e=None):
         path = await self.file_picker.save_file(dialog_title="Export Profile")
@@ -400,7 +432,7 @@ class ProfilePage(BasePage):
         if voice and "predefined_id" in voice:
             # the voices.json id instead of the uuid, the uuid differs between hubs. the hub resolves it on import
             _set_nested_value(data["profile"], ["tts_parameters", "voice_id"], voice["predefined_id"])
-        data["profile"]["companion"] = bool(self.companion_switch.value)
+        put_companion_switch(data, self.companion_switch.value)
         with open(path, "w") as file:
             json.dump(data, file, indent=4)
 

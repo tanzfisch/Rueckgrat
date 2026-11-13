@@ -16,6 +16,7 @@ from .language_picker import LanguagePicker, flag_text
 from .poll import PollView
 from .map_view import MapView
 from .file_card import FileCard, FileCards
+from .files_panel import FilesPanel
 
 __all__ = [
     "MessageBox", 
@@ -39,4 +40,5 @@ __all__ = [
     "MapView",
     "FileCard",
     "FileCards",
+    "FilesPanel",
 ]

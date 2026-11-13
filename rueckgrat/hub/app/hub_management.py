@@ -100,7 +100,7 @@ def companion_now(db):
 def companion_status(db, contact, log_entries):
     """everything about one companion as a dict, times in the user's timezone"""
     from app.utils import clock
-    from app.companion import companion_job as cj
+    from app.companion.settings import CompanionSettings
     from app.companion.scheduler import CompanionScheduler
     contact_id = contact["id"]
     tz = clock.user_timezone(db, contact["user_id"])
@@ -115,8 +115,7 @@ def companion_status(db, contact, log_entries):
         "last_run": local(last_run),
         "cutoff": CompanionScheduler(db, None, None).cutoff(contact_id, tz, now).astimezone(tz).strftime("%a %d %H:%M") if now else None,
         "messages_today": db.count_companion_messages(contact_id, clock.local_day(now.astimezone(tz))[0]) if now else None,
-        "limits": f"{cj.MAX_MESSAGES_PER_DAY}/day, {cj.MIN_HOURS_BETWEEN_MESSAGES}h apart, quiet {cj.QUIET_HOURS[0]}-{cj.QUIET_HOURS[1]}h, "
-                  f"not within {cj.USER_ACTIVE_MINUTES} min of the user writing",
+        "limits": CompanionSettings(db.get_contact_by_id(contact_id)).limits_text(),
         "calendar": [{"row": r["id"], "due": local(r["due_at"]), "kind": r["kind"], "note": r["note"], "daily": r["recurrence"] == "daily"}
                      for r in db.pending_companion_rows(contact_id)],
         "hub_next_wake": local(db.next_companion_due()),
@@ -420,7 +419,7 @@ def wrap_text(text, width, full, indent):
     """a long text for protocol show: its own line breaks kept, wrapped to the width, clipped to CLIPPED_LINES"""
     rows = [row for part in str(text).splitlines() for row in (textwrap.wrap(part, width - len(indent) - 2, subsequent_indent="  ") or [""])]
     if not full and len(rows) > CLIPPED_LINES:
-        rows = rows[:CLIPPED_LINES] + [f"… {len(rows) - CLIPPED_LINES} more lines (--full)"]
+        rows = rows[:CLIPPED_LINES] + [f"… {len(rows) - CLIPPED_LINES} more lines"]
     return [indent + row for row in rows]
 
 def short_value(value):

@@ -8,6 +8,7 @@ from app.agent_jobs.agent_job import AgentJob
 from app.agent_jobs.controller import Controller, short_name
 
 from app.common import get_logger, Utils, MessageQueue
+from app.utils.trace import Trace
 logger = get_logger()
 
 FAIL_REASON_CHARS = 300     # the failure as the contact gets it, the full one is in the protocol
@@ -130,6 +131,7 @@ class SpawnAgentJobTool(Tool):
     def _save_protocol(self, status: str, error: str = None):
         """#174 the job's decision trace into the db (job_protocols), keyed by the conversation and the user message that
         started the job. it never fails the job"""
+        Trace.write(self.conversation_id, f"job {self.job_id} {status}", error=error, result=getattr(self.controller, "result", None))
         try:
             controller = self.controller
             controller.trace("job_finished", ok=status == "done", status=status, name=controller.name,

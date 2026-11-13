@@ -1,10 +1,14 @@
 import re
+import json
+import time
 import threading
 import contextvars
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from typing import Dict, List, Optional, Any, Mapping, Union, Callable
 from .tool import Tool
 from . import prompts
+from app.utils.trace import Trace
 from .image_gen_tool import ImageGenTool
 from .take_photo_tool import TakePhotoTool
 from .websearch_tool import WebsearchTool
@@ -21,6 +25,7 @@ from .spawn_agent_job_tool import SpawnAgentJobTool
 from .poll_tool import PollTool
 from .map_tool import MapTool
 from .code_tool import RunCodeTool
+from .bash_tool import BashTool
 from .write_file_tool import WriteFileTool
 
 from app.common import get_logger, Utils, MessageQueue
@@ -33,17 +38,24 @@ class ToolRegistry:
         "date_calc",
         ("search_memory", "wikipedia", "websearch", "fetch_url", "weather"),
         "convert",
-        ("calculate", "run_code"),
+        ("calculate", "run_code", "bash"),
         ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember"),
     ]
 
     TOOL_RANK = {name: rank for rank, entry in enumerate(TOOL_ORDER) for name in ((entry,) if isinstance(entry, str) else entry)}
     PROMPT_TOOLS = ["remember", "search_memory", "take_photo"]
+    FIX_TOOLS = ["run_code", "bash", "write_file"]     # offered again in a worker's fix rounds (ToolExecutionTask), in this order
+    RUN_TOOLS = ("run_code", "bash")    # a worker's mandatory one with no call is a problem for its fix rounds (not_called)
     PRIORITY_TOOL = "spawn_job"   # overrides all other tools
     WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "poll", "show_map")
     DETACHED_TOOLS = ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember")
     REPLY_TOOLS = ("remember", "take_photo")    # a chat reply calls these itself at its end (MetaTask), not the tool setup
     REPLY_CALL = re.compile(r'(?:^|\n)[ \t]*(?:```(?:json)?\s*)?\{\s*"tool"')   # where the calls at the end of a reply start
+    PROJECT_QUESTIONS = [
+        "Does the user report a bug in a program, like a crash, an error or wrong behaviour?",
+        "Does the user ask for a fix or a change to a program, an app or a game that was made earlier?",
+    ]
+    PROJECT_TOOLS = ("spawn_job", "bash", "write_file")
 
     def __init__(self, db, infrastructure, task_queue):
         self.db = db
@@ -67,6 +79,7 @@ class ToolRegistry:
         self._register_tool(PollTool)
         self._register_tool(MapTool)
         self._register_tool(RunCodeTool)
+        self._register_tool(BashTool)
         self._register_tool(WriteFileTool)
 
         temp = ", ".join(self.tools)
@@ -81,8 +94,10 @@ class ToolRegistry:
         for held in attachments or []:
             try:
                 self.tools[held["tool"]].attach_held(db, user_id, conversation_id, message_id, held, push)
+                Trace.write(conversation_id, "held attachment attached", name=held.get("name"), tool=held.get("tool"), message_id=message_id)
             except Exception as e:
                 logger.error(f"held attachment {held.get('name')} of {held.get('tool')} not attached {repr(e)}")
+                Trace.write(conversation_id, "held attachment NOT attached", name=held.get("name"), tool=held.get("tool"), error=repr(e))
 
     def prioritized(self, tool_names: List[str]) -> List[str]:
         """only the PRIORITY_TOOL when it is among tool_names, else tool_names"""
@@ -107,6 +122,10 @@ class ToolRegistry:
     def available(self, tool_names: List[str], excluded: tuple = ()) -> List[str]:
         """the registered names of tool_names without the excluded ones, in their order, no duplicates"""
         return [name for name in dict.fromkeys(tool_names or []) if name in self.tools and name not in excluded]
+
+    def project_tools(self, excluded: tuple = ()) -> List[str]:
+        """the PROJECT_TOOLS a fix or change of an existing project selects, without the excluded ones"""
+        return self.available(list(self.PROJECT_TOOLS), excluded)
 
     @classmethod
     def ordered_names(cls, names: List[str]) -> List[str]:
@@ -157,10 +176,20 @@ class ToolRegistry:
         return tool_job
 
     def _run_job(self, tool_job: Tool) -> Optional[Dict[str, Any]]:
+        started = time.monotonic()
         if not self.task_queue.run(tool_job):
             logger.error(f"tool failed: {tool_job.name()}")
+            Trace.write(tool_job.conversation_id, f"tool {tool_job.name()} failed", call=tool_job.tool_call)
             return None
-        return tool_job.get_result()
+        result = tool_job.get_result()
+        if Trace.enabled():     # the call as the llm wrote it and the whole result text the next steps get
+            own = (result or {}).get(tool_job.name()) or {}
+            others = {k: v for k, v in own.items() if k not in ("tool", "text")} if isinstance(own, dict) else {}
+            Trace.write(tool_job.conversation_id, f"tool {tool_job.name()}",
+                        f"CALL:\n{json.dumps(tool_job.tool_call, ensure_ascii=False, indent=1, default=str)}\nRESULT:\n"
+                        f"{own.get('text', '') if isinstance(own, dict) else own}",
+                        seconds=f"{time.monotonic() - started:.2f}", message_id=tool_job.message_id, result=others or None)
+        return result
 
     def execute(self, user_id: int, contact_id: int, conversation_id: int,
                   tool_calls: Union[Dict[str, Any], List[Dict[str, Any]]],
@@ -194,13 +223,15 @@ class ToolRegistry:
         for job in detached:
             self._start_detached(job)
 
-        if len(waited) == 1:
-            done = {id(waited[0]): self._run_job(waited[0])}
-        elif waited:
+        # one lane per call, the calls of the sequential tools share one lane in their order: they work on the same files
+        lanes = [[job] for job in waited if not job.sequential] + ([in_order] if (in_order := [job for job in waited if job.sequential]) else [])
+        if len(lanes) == 1:
+            done = self._run_lane(lanes[0])
+        elif lanes:
             # copy_context: the status messages of each tool go to the caller's user (MessageQueue.user_scope)
-            with ThreadPoolExecutor(max_workers=len(waited)) as pool:
-                futures = [pool.submit(contextvars.copy_context().run, self._run_job, job) for job in waited]
-                done = {id(job): future.result() for job, future in zip(waited, futures)}
+            with ThreadPoolExecutor(max_workers=len(lanes)) as pool:
+                futures = [pool.submit(contextvars.copy_context().run, self._run_lane, lane) for lane in lanes]
+                done = {key: result for future in futures for key, result in future.result().items()}
         else:
             done = {}
 
@@ -209,8 +240,53 @@ class ToolRegistry:
             self.merge_results(merged, job.planned_result() if job in detached else done[id(job)])
         return merged or None
 
+    def _run_lane(self, jobs: List[Tool]) -> Dict[int, Optional[Dict[str, Any]]]:
+        """runs the jobs one after another inside their tools' sharing() (the bash calls: one sandbox): {id(job): its result}"""
+        with ExitStack() as stack:
+            for tool in dict.fromkeys(type(job) for job in jobs):
+                stack.enter_context(tool.sharing())
+            return {id(job): self._run_job(job) for job in jobs}
+
+    GROUND_WORD = re.compile(r"[^\W_]{3,}|\d+(?:[.,]\d+)?")    # the words and numbers grounded() compares
+
+    def grounded(self, call: Dict[str, Any], text: str) -> bool:
+        """whether a call takes at least one of its values from text (the message and the earlier results). a recommended
+        call that shares nothing with it was made up, like the tool's prompt example ("100 USD to EUR" in a fractal task)"""
+        words = {word.lower() for word in self.GROUND_WORD.findall(text or "")}
+        values = json.dumps([value for key, value in call.items() if key != "tool"], ensure_ascii=False, default=str)
+        return any(word.lower() in words for word in self.GROUND_WORD.findall(values))
+
+    def cut_off_result(self, text: str, tools: List[str], length: bool = False) -> Optional[Dict[str, Any]]:
+        """{tool name: note} when the last call of a setup reply was cut off (the reply ran out of tokens) and is one of
+        tools, None when every call is complete. the note tells the later rounds and the reply that it did not run.
+        length: the llm said the reply hit max_new_tokens (finish_reason "length"), also after a complete last call
+        the calls it did not write are missing: a note for the tool of the last call"""
+        text = text or ""
+        end = 0
+        for found in self._json_objects(text):
+            end = text.index(found, end) + len(found)
+        match = re.search(r'\{\s*"tool"\s*:\s*"([^"]+)"', text[end:])
+        if match and match.group(1) in tools:
+            name = match.group(1)
+            return {name: {"tool": name, "text": prompts.TOOL_CUT_OFF_PART.format(name=name)}}
+        if length and tools:
+            names = [name for name in re.findall(r'"tool"\s*:\s*"([^"]+)"', text) if name in tools]
+            name = names[-1] if names else tools[0]
+            return {name: {"tool": name, "text": prompts.TOOL_LENGTH_PART.format(name=name)}}
+        return None
+
+    def not_called(self, mandatory: List[str], calls: List[Dict[str, Any]]) -> List[str]:
+        """the problems of the mandatory RUN_TOOLS that got no call (a tester that only listed the files)"""
+        called = {call.get("tool") for call in calls}
+        return [prompts.TOOL_NOT_CALLED_PART.format(name=name) for name in mandatory if name in self.RUN_TOOLS and name not in called]
+
+    def problems(self, results: Optional[Mapping[str, Any]]) -> List[str]:
+        """what went wrong in {tool name: result} that a fix round could repair (each tool's problems())"""
+        return [problem for name, result in (results or {}).items() if isinstance(result, dict)
+                for problem in self.tools.get(name, Tool).problems(result)]
+
     def detachable(self, tool_job: Tool) -> bool:
-        return tool_job.name() in self.DETACHED_TOOLS and tool_job.has_message()
+        return tool_job.name() in self.DETACHED_TOOLS and tool_job.has_message() and tool_job.runs_detached()
 
     def _start_detached(self, tool_job: Tool) -> None:
         """runs the call on its own thread for the caller's user, without status messages: the reply's status ends first"""

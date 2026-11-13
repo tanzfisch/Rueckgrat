@@ -1,5 +1,7 @@
+import sys
 import json
 import random
+import re
 import threading
 import time
 from typing import Optional, Dict, Any
@@ -8,18 +10,23 @@ from uuid import uuid4
 from . import prompts
 
 from app.common import get_logger, ChatRequest, MessageQueue
+from app.utils.trace import Trace
 logger = get_logger()
 
 DEFAULT_TIME_LIMIT = 5400     # max time for a job in seconds
 JOB_LLM_TIMEOUT = 900         # seconds per llm call
-JOB_MAX_TOKENS = 4096         # max tokens per reply
 MAX_TOOL_CHARS = 12000        
-WORKER_TOOLS = ["websearch"]   # always run for a worker, the controller's task sets its role and scope
+WORKER_TOOLS = ["websearch"]   # always run for a worker, the controller's task sets its role and scope (not for a building worker, see BUILD_TOOLS)
+FAILED_LINE = re.compile(r"^\W*FAILED:", re.MULTILINE)    # a worker's reply with a line starting FAILED: failed, also mid-reply
+WORKER_FIX_ROUNDS = 3          # a worker's extra passes of bash / run_code / write_file while their calls fail (ToolExecutionTask._fix)
 
 class AgentJob:
     # never offered besides the registry's WORKER_EXCLUDED_TOOLS. a worker takes no photos: take_photo is an optional
     # tool in every tool prompt, a job would take them for nothing
     EXCLUDED_TOOLS = ("take_photo",)
+    # a worker whose detection found one of these builds or tests something from its task: WORKER_TOOLS' websearch is not
+    # forced on it (it searched for nothing useful, about a minute each), it still searches when its detection picks websearch
+    BUILD_TOOLS = ("bash", "run_code", "write_file")
     _turns = None           # the hub's Turns, see set_turns
     connections = None      # user_id -> open /ws connections
 
@@ -83,7 +90,7 @@ class AgentJob:
         a worker runs the tools its task needs (like MetaTask), then does its task in one llm call with their results"""
         tools = self._use_tools() if self.tool_context else ""
         text = self.chat([{"role": "user", "content": prompts.WORKER_PROMPT.format(role=self.role, prompt=self.prompt, tools=tools)}], 0.3).strip()
-        if not text or text.upper().startswith("FAILED"):
+        if not text or FAILED_LINE.search(text):
             self.result = {"error": text or "no reply from the llm", **({"failed_tools": self.failed_tools} if self.failed_tools else {})}
         else:
             self.result = {"summary": text, "details": "", **({"attachments": self.attachments} if self.attachments else {})}
@@ -96,7 +103,7 @@ class AgentJob:
         (else it replies FAILED, its result names the failed tools for the retry, see Controller._retry)"""
         task, _, earlier = self.prompt.partition(prompts.RESULTS_MARKER_PART)
         # the worker's own task only: the links in the earlier results would select fetch_url every time
-        execution = self.run_tools(task, self.prompt, WORKER_TOOLS)
+        execution = self.run_tools(task, self.prompt, WORKER_TOOLS, optional_when=self.BUILD_TOOLS)
         results = execution.get_result()
         self.attachments = [held for result in results.values() if isinstance(result, dict) for held in result.get("attachments") or []]
 
@@ -119,15 +126,19 @@ class AgentJob:
             text = prompts.FAILED_TOOLS_PART.format(failed="; ".join(failed)) + text
         return text[:MAX_TOOL_CHARS]
 
-    def run_tools(self, detect: str, query: str, always: list):
+    def run_tools(self, detect: str, query: str, always: list, optional_when=()):
+        """detects and runs the tools of detect. always: run in any case, unless the detection found one of optional_when"""
         from app.tasks import ToolDetectionTask, ToolExecutionTask
         context = self.tool_context
         registry = context["tool_registry"]
         excluded = registry.WORKER_EXCLUDED_TOOLS + self.EXCLUDED_TOOLS + tuple(self.excluded_tools)
         detection = ToolDetectionTask(detect, registry, self.infrastructure, excluded_tools=excluded)
         registry.task_queue.run(detection)
+        detection.trace(context["conversation_id"], f"{self.role} {self.job_id}")
         detected = (detection.get_result() or {}).get("tool_names") or []
         recommended = (detection.get_result() or {}).get("recommended") or []
+        if any(name in detected for name in optional_when):
+            always = [name for name in always if name in detected]
 
         request = ChatRequest(
             contact_id=context["contact_id"], 
@@ -146,11 +157,15 @@ class AgentJob:
             infrastructure=self.infrastructure, 
             tool_registry=registry, 
             tool_names=detected + list(always),
-            excluded_tools=excluded, llm_timeout=JOB_LLM_TIMEOUT, recommended_tools=recommended
+            excluded_tools=excluded, llm_timeout=JOB_LLM_TIMEOUT, recommended_tools=recommended,
+            fix_rounds=WORKER_FIX_ROUNDS
         )
         
         logger.info(f"agent {self.role} {self.job_id}: tools {execution.tool_names}, recommended {execution.recommended}, detected {detected}")
         self.trace("tools", tools=execution.tool_names, recommended=execution.recommended or None, detected=detected)
+        Trace.write(context["conversation_id"], f"tools of {self.role} {self.job_id}", f"TOOL SETUP QUERY:\n{query}",
+                    mandatory=execution.tool_names, recommended=execution.recommended, detected=detected, always=list(always),
+                    rounds=registry.rounds(execution.tool_names, execution.recommended), excluded=list(excluded))
         registry.task_queue.run(execution)
         self._trace_calls(execution)
         return execution
@@ -177,8 +192,14 @@ class AgentJob:
         """one llm call, "" without a reply"""
         if self.infrastructure is None:
             raise RuntimeError(f"{self.role} agent has no llm (infrastructure)")
-        return self.infrastructure.chat(messages=messages, temperature=temperature, seed=random.randint(0, 100000),
-                                        max_new_tokens=JOB_MAX_TOKENS, timeout=JOB_LLM_TIMEOUT) or ""
+        started, info = time.monotonic(), {}
+        reply = self.infrastructure.chat(messages=messages, temperature=temperature, seed=random.randint(0, 100000),
+                                         max_new_tokens=self.infrastructure.long_reply_tokens(), timeout=JOB_LLM_TIMEOUT, info=info) or ""
+        # the trace names the caller (make_plan, _review, _retry, _merge, step: the worker's summary, _report)
+        Trace.write((self.tool_context or {}).get("conversation_id"), f"llm {self.role} {sys._getframe(1).f_code.co_name}",
+                    f"{Trace.messages(messages)}\n----- reply -----\n{reply}", agent=self.job_id, temperature=temperature,
+                    chars=len(reply), seconds=f"{time.monotonic() - started:.1f}", **info)
+        return reply
 
     @staticmethod
     def user_name(db, user_id: int) -> str:

@@ -6,6 +6,7 @@ from app.tasks.task_queue import Task
 from app.utils.embeddings import embed_text
 from app.utils.clock import to_db
 from .sweeper import MaintenanceTask
+from .conversation_volumes import ConversationVolumeMaintenanceTask
 from . import prompts
 
 from app.common import get_logger
@@ -27,7 +28,7 @@ class ConversationSummaryMaintenanceTask(MaintenanceTask):
     def pending(self, user_id, limit):
         return self.db.conversations_to_summarize(user_id, limit)
 
-    def job(self, item):
+    def get_task(self, item):
         return ConversationSummaryTask(item, self.db, self.infrastructure)
 
     def status(self):
@@ -37,6 +38,7 @@ def maintenance_tasks(db, infrastructure) -> list[MaintenanceTask]:
     """the hub's maintenance tasks in run order, for the nightly sweeper and hub management. a new task goes here"""
     return [
         ConversationSummaryMaintenanceTask(db, infrastructure),
+        ConversationVolumeMaintenanceTask(db),
     ]
 
 class ConversationSummaryTask(Task):

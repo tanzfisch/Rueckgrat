@@ -7,6 +7,11 @@ the laya decision questions (Tool.question) stay with their tools, they are tune
 plain constants are used as they are: the tool prompts hold literal json examples with single braces, never call .format on them.
 templates, filled with str.format (literal braces doubled):
   TOOL_PLANNED_PART                           name: the tool's name
+  TOOL_CUT_OFF_PART                           name: the tool whose last call was cut off
+  TOOL_LENGTH_PART                            name: the tool of the last call of a setup reply that hit its token limit
+  FIX_ROUND_PART                              fix, total: the fix round and how many there are, problems: "- " lines
+  TOOL_NOT_CALLED_PART                        name: a mandatory tool of a worker that got no call
+  CHECKS_FIXED_PART, CHECKS_FAILED_PART       rounds: fix rounds run, problems (failed only): "; " separated
   TOOLS_RECOMMENDED_PART, TOOLS_REPLY_PART,
   TOOLS_OPTIONAL_PART, TOOLS_MANDATORY_PART   tools: the instructions of the offered tools (ToolRegistry.get_tools_prompt)
   RUN_CODE_WRITER_PROMPT                      run_timeout: seconds the program may run
@@ -14,6 +19,8 @@ templates, filled with str.format (literal braces doubled):
   MAP_SHOWN_PART                              name: the found place's display name
   POLL_SHOWN_PART                             question, options (joined by " | "), choices: POLL_ONE_CHOICE_PART or POLL_SEVERAL_CHOICES_PART
   WRITE_FILE_ATTACHED_PART                    file_names: the files, comma separated
+  WRITE_FILE_NOT_ATTACHED_PART                problems: what could not be attached, "; " separated
+  BASH_PROMPT                                 files: the sandbox files folder, timeout: seconds per command
   SEARCH_MEMORY_CONVERSATION_QUESTION_PART    summary: the start of an earlier conversation's summary
   SPAWN_JOB_REPORT_PROMPT                     prompt, summary, details, attachments: SPAWN_JOB_ATTACHMENTS_PART or ""
   SPAWN_JOB_ATTACHMENTS_PART                  names: one "- name" line per held file
@@ -24,6 +31,25 @@ templates, filled with str.format (literal braces doubled):
 # ---------------------------------------------------------------- tool index, how the tools are offered (ToolRegistry, Tool)
 
 TOOL_PLANNED_PART = "{name} runs in the background, its result is shown to the user under your answer when it is done"
+
+TOOL_CUT_OFF_PART = ("the last {name} call was cut off, the tool setup got too long, it did NOT run. "
+                     "Its work is missing: tell the user which part is not done")
+TOOL_LENGTH_PART = ("the tool setup hit its length limit after the last {name} call: the calls it did not write are missing, "
+                    "tell the user which part is not done")
+
+# a worker's fix rounds (ToolExecutionTask): appended to its task when bash, run_code or write_file calls did not work
+FIX_ROUND_PART = """
+
+FIX ROUND {fix} OF {total}: these calls of the earlier rounds did not work:
+{problems}
+The earlier results show what happened (the commands, exit codes and errors). Fix only what failed, in order: repair the
+code or write the missing files, then run the failed command again (e.g. the build or the test), so its result shows
+whether it works now. Do not redo what already worked. Attach a file again only when it is new or changed."""
+TOOL_NOT_CALLED_PART = ("{name}: the task needs it, but it was not called. Call it now for what the task asks "
+                        "(build, install, run, test), all calls at once")
+CHECKS_FIXED_PART = "the calls that did not work were fixed in {rounds} fix round(s), the last calls all worked."
+CHECKS_FAILED_PART = ("still not working after {rounds} fix round(s): {problems}. Tell the user what does not work, "
+                      "do not claim it works.")
 
 TOOLS_RECOMMENDED_PART = """
 These tools may be needed, the detection was not sure. YOU decide whether the user's latest message really asks for what a tool does.
@@ -104,7 +130,12 @@ Rules:
 # requires: numpy, pandas
 - "language" when it is not python. "requires" lists packages to install first: pip for python, npm for javascript, apt for cpp, go modules for go. java can't install packages, use only its standard library.
 - When the user gave code to run, reply with that code unchanged (add header lines if it needs packages).
-- It must finish within {run_timeout} seconds. Keep the output short."""
+- It must finish within {run_timeout} seconds. Keep the output short.
+- The working directory has the folder {files}: the files of this conversation, they stay between runs and the bash tool sees them too. Read and write there when the task is about these files. Files to keep go into the project's own folder, {files}/<project-name>/.
+- A task about a project in {files}: the program first changes into the project's folder {files}/<project-name> (python: os.chdir to it and sys.path.insert(0, it)), then imports or runs the project's code from there, so its own imports and relative paths work."""
+
+RUN_CODE_NO_CODE_PART = ("the task was to run the code from the user's message, but the conversation has no code. Nothing ran. "
+                         "Describe what the program must do instead.")
 
 RUN_CODE_PROMPT = """
 RUN_CODE:
@@ -117,14 +148,44 @@ You may also use it on your own when an exact check is better than guessing:
 - validate math or logic before you rely on it in a longer plan
 - prototype a small piece to see if an approach works before using it
 Do not use it when the user only wants to see or discuss code, or for simple arithmetic (calculator).
+It runs one program once. To create a project or files to keep, use bash: it works in the same files.
 
 Parameters:
-- task (string, required): what the program must do and print, with all the values it needs. When the user gave code to run, write "run the code from the user's message", do not copy the code here.
+- task (string, required): what the program must do and print, with all the values it needs. Only when the user's message has code to run, write "run the code from the user's message", do not copy the code here.
 - language (string, optional): "python" (default), "javascript", "cpp", "java" or "go"
 
 Examples:
 {"tool": "run_code", "task": "compute the 50th Fibonacci number and print it"}
 {"tool": "run_code", "task": "run the code from the user's message", "language": "javascript"}
+"""
+
+# ---------------------------------------------------------------- bash
+
+BASH_DESCRIPTION = ("runs a bash command in your own persistent sandbox files (git, python, curl, network): "
+                    "where you create and work on projects and files")
+
+BASH_PROMPT = """
+BASH:
+Use to work with files that stay with this conversation: create, read, edit, list, move and delete files and folders, run command line tools and scripts, clone and work on git repositories, download files. Each call runs one bash command (pipes, &&, heredocs are fine) in a Linux container as a normal user (no sudo, no apt-get), with network.
+- $HOME is {files}, the files in it are kept (for a week after the conversation's last message). Like an open terminal, the next call goes on in the folder the last one ended in, with its exported variables and an activated venv. Running processes do not carry over.
+- Available: bash, coreutils, git, python3 with pip and venv, curl, wget, unzip. git commit works, an author is set. There is no display: GUI programs run without a window.
+- Python packages go in a venv in the project folder: python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+- The command must finish within {timeout} seconds. A program that keeps running (a game, a GUI, a server) runs with a time limit: timeout 10 python3 main.py, exit code 124 then means it ran 10 seconds without crashing. Keep the output short: use head, tail, grep or wc instead of printing big files whole.
+- {files} is your own filesystem: create every project and its files here, with bash, not with write_file.
+- One folder per project: {files}/<project-name>/ (short, lowercase, e.g. fractal_explorer), its files and subfolders inside. Nothing loose at the top.
+- Continue earlier work: an existing project is changed in its folder, not started again.
+- You write all calls of this step at once and get no second turn: write every command the task needs now, in order, nothing left for later. They run one after another, a later call sees what an earlier one made.
+- To create or change a project: one call per file with its whole content in a heredoc (mkdir -p in the first call). Every file the task asks for gets its call.
+- The user does not see these files. To give them files, attach them afterwards with write_file "attach".
+
+Parameters:
+- command (string, required): the bash command, newlines written as \\n
+
+Examples:
+{{"tool": "bash", "command": "ls -la"}}
+{{"tool": "bash", "command": "git clone --depth 1 https://github.com/psf/requests.git && ls requests"}}
+{{"tool": "bash", "command": "mkdir -p shopping_list && printf 'milk\\neggs\\n' > shopping_list/items.txt && cat shopping_list/items.txt"}}
+{{"tool": "bash", "command": "mkdir -p fractal_explorer && cat > fractal_explorer/main.py << 'EOF'\\nprint('hello')\\nEOF"}}
 """
 
 # ---------------------------------------------------------------- conversion
@@ -205,6 +266,7 @@ IMAGE_GEN_PLANNED_PART = "an image is being generated, it gets attached to your 
 IMAGE_GEN_PROMPT = """
 IMAGE GENERATION:
 Use when the user asks you to generate, create, or visualize a picture.
+Not for feedback on a program, an app or a game (an axis is flipped, a color is wrong in it): that is a fix of the program, not a picture.
 
 Parameters:
 - positive_prompt (string, required): the image description
@@ -321,7 +383,7 @@ JOB_RESULT:
 {summary}
 {details}
 {attachments}
-Tell the user in one or two short sentences that the job is done and what it found. Reply with the message only.
+Tell the user in one or two short sentences that the job is done and what it found. If JOB_RESULT says something failed, does not work or was not tested, tell the user that too and do not call it ready. Reply with the message only.
 """
 
 SPAWN_JOB_ATTACHMENTS_PART = """
@@ -365,9 +427,11 @@ A conversation has one job at a time: while it runs, the user's messages go to i
 
 Parameters:
 - prompt (string, required): the full instructions for the job, in the user's own words. Keep every detail the user gave: what to do, when or how often, and when to report back. Never add names, numbers, tickers or places the user did not say. If the user says "these" or "my" without naming them, keep it like that and add: ask the user which ones.
+To fix or change a program or project made earlier, say that it is in your files already and is changed there, not made again, name it if you know it, and keep what the user says is wrong or wants changed.
 
 Examples:
 {"tool": "spawn_job", "prompt": "find three reviews of the new Pixel phone and summarize them"}
+{"tool": "spawn_job", "prompt": "the snake game in your files crashes when space is pressed: fix it there, not made again, and test it"}
 {"tool": "spawn_job", "prompt": "every Friday check the prices of my two favourite games and message me if one is on sale (ask the user which games)"}
 """
 
@@ -436,24 +500,31 @@ Example:
 
 # ---------------------------------------------------------------- write_file
 
-WRITE_FILE_DESCRIPTION = "writes a text file the user can keep, such as a page of a website or a source file or document"
+WRITE_FILE_DESCRIPTION = ("attaches files to your answer for the user to download: files from your sandbox files, "
+                          "or one tiny file written directly")
 
 WRITE_FILE_ATTACHED_PART = ("{file_names} are already attached to your answer as download buttons, the user saves them from there. "
                        "Do NOT write their code or content into your answer, no code blocks and no copy and paste instructions. "
                        "Only say in one or two sentences what each file is for and that it can be downloaded below.")
 
+WRITE_FILE_NOT_ATTACHED_PART = ("Not attached: {problems}. Tell the user, do not claim these files were made or attached: "
+                                "only files a tool result names exist.")
+
 WRITE_FILE_PROMPT = """
 WRITE_FILE:
-Use when the user wants a file they can keep: a page, a stylesheet, a script, or several of those.
-One JSON line per file. A website is several lines, one path each. Put the file text in content.
-Paths are relative (index.html, css/style.css). No .. and no absolute path.
+Puts files under your answer as download buttons, the user saves them from there. Two ways:
+1. attach: files that are in your sandbox files already (made with bash or run_code, now or earlier in the conversation). Give their paths relative to the sandbox files folder: a file, or a project folder to attach all of its files (.git, caches and installed packages are left out). Use it after the work, for the files the user asked for or will want to keep. Do not write their content again.
+2. path and content: only for one tiny file that belongs to no project, like a short note or a small single script. A project with several files is made in the sandbox files with bash first, then attached.
+Paths are relative (fractal_explorer/main.py). No .. and no absolute path.
 Escape quotes and newlines inside content so the line stays valid JSON.
 
 Parameters:
-- path (string, required): relative file name
-- content (string, required): the whole file
+- attach (string or list of strings): paths of files or folders in your sandbox files
+- path (string): relative file name of a tiny file, together with content
+- content (string): the whole tiny file
 
-Example:
-{"tool": "write_file", "path": "index.html", "content": "<!DOCTYPE html><html><head><link rel=\\"stylesheet\\" href=\\"css/style.css\\"></head><body><h1>Hello</h1></body></html>"}
-{"tool": "write_file", "path": "css/style.css", "content": "body { color: #222; }"}
+Examples:
+{"tool": "write_file", "attach": "fractal_explorer"}
+{"tool": "write_file", "attach": ["fractal_explorer/main.py", "fractal_explorer/README.md"]}
+{"tool": "write_file", "path": "shopping.txt", "content": "milk\\neggs\\n"}
 """

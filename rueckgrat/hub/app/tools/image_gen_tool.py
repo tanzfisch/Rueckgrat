@@ -9,9 +9,9 @@ logger = get_logger()
 class ImageGenTool(ImageTool):
     description = prompts.IMAGE_GEN_DESCRIPTION
     question = [
-        "Does the user ask you to draw, paint or illustrate something?",
-        "Does the user want a picture or drawing made?",
-        "Does the user want a picture, drawing, logo or wallpaper made?"
+        "Does the user ask you to paint, draw or generate a picture of something?",
+        "Does the user ask you to draw, paint or illustrate a subject, like a cat, a dragon, a logo or a mountain wallpaper?",
+        "Does the user ask you to design a logo, a poster or an icon?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

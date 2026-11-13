@@ -47,9 +47,6 @@
                 "body": "professional and classic attire, well-tailored suit in darker tones"
             }
         },
-        "behaviour_parameters": {
-            "mood_gen_chance": 0.1
-        },
         "llm_parameters": {
             "temperature": "0.15",
             "preffered_context_size": "8000"

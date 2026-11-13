@@ -6,7 +6,7 @@ from app.ui import theme
 from app.ui import BasePage
 from app.ui.widgets import OneLineBubble, ContactCard, ContactInfo, Header, MessageBox
 from app.utils import Hub, Contact, Paths
-from app.common import get_logger, Utils
+from app.common import get_logger, Utils, pop_companion_switch
 
 logger = get_logger()
 
@@ -67,10 +67,11 @@ class ContactsPage(BasePage):
         try:
             with open(files[0].path, "r") as file:
                 data = json.load(file)
+            companion = pop_companion_switch(data)
             contact_id = Hub.create_contact()
             Hub.update_contact(contact_id, data)
-            # the hub ignores profile.companion in an update, only its endpoint starts the companion
-            if Utils.get_nested_value(data, ["profile", "companion"], False):
+            # only its endpoint starts the companion
+            if companion:
                 Hub.set_contact_companion(contact_id, True)
             self.load_contacts()
         except Exception as ex:

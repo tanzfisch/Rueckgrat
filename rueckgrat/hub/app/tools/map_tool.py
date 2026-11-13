@@ -190,7 +190,6 @@ class MapTool(Tool):
         "Does the user ask how to get to a place?",
         "Does the user want to see a map?",
         "Is the user asking for the location of a place?",
-        "Does the user ask where exactly a place is?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

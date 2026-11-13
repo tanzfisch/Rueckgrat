@@ -9,8 +9,13 @@ from app.common import get_logger
 logger = get_logger()
 
 
-def _size(n: int) -> str:
-    return f"{n} B" if n < 1024 else f"{n / 1024:.1f} KB"
+def size_text(n: int) -> str:
+    """a byte count to read: 512 B, 3.4 KB, 1.2 MB, 2.0 GB"""
+    for unit in ("B", "KB", "MB"):
+        if n < 1024:
+            return f"{n} B" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
 
 
 class FileCard(ft.Container):
@@ -30,7 +35,7 @@ class FileCard(ft.Container):
         info = ft.Column([
             ft.Text(file_name, color=theme.TEXT, weight=ft.FontWeight.BOLD, size=13,
                     max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
-            ft.Text(f"{_size(spec.get('file_size') or 0)}  {spec.get('file_type') or ''}", size=10, color=theme.TEXT_DIM,
+            ft.Text(f"{size_text(spec.get('file_size') or 0)}  {spec.get('file_type') or ''}", size=10, color=theme.TEXT_DIM,
                     max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
         ], spacing=0, tight=True, expand=capped)
         row = ft.Row([

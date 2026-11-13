@@ -132,11 +132,14 @@ class LLamaCppInterface:
                 )
                 http_response.raise_for_status()
 
-                choice = http_response.json()["choices"][0]
+                data = http_response.json()
+                choice = data["choices"][0]
                 self._check_finish_reason(choice.get("finish_reason"))
                 message = choice["message"]
                 think, resp = self._split(message.get("content"), message.get("reasoning_content"))
-                return ChatResponse(role="assistant", content=resp, think=think)
+                usage = data.get("usage") or {}     # the hub sees a cut off reply and what the call cost
+                return ChatResponse(role="assistant", content=resp, think=think, finish_reason=choice.get("finish_reason") or "",
+                                    prompt_tokens=usage.get("prompt_tokens") or 0, completion_tokens=usage.get("completion_tokens") or 0)
 
         except requests.exceptions.RequestException as e:
             return self._fail(request, callback, f"Request failed: {str(e)}")

@@ -12,30 +12,33 @@
 
 Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client. Quality of the experience depends on the models you run which is limited by the hardware you have available.
 
-- AI tools
-    - **websearch** — search the web when requested or needed
-    - **wikipedia** — search wikipedia when requested or needed
-    - **generate_image** — generate an image on request or on its own
-    - **take_photo** — generate a photo of self, user, or both from current context
-    - **remember** — keep a short fact about the user, per contact
-    - **search_memory** — find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub)
+- Tools available to the AI
+    - **bash** — run bash commands in a sandbox
     - **calculate** — calculate given expression
+    - **run_code** — write a small program and run it in a fresh sandbox container (Python, JavaScript, C++, Java, Go)
     - **convert** — conversion between numerous units
     - **current_time** — current time for given location
     - **date_calc** — date calculations
     - **fetch_url** — fetch content for given URL
-    - **weather** — weather forcast for given location
+    - **generate_image** — generate an image on request or on its own
     - **show_map** — show a place on an OpenStreetMap map in the chat, tapping it opens the maps app
-    - **run_code** — write a small program and run it in a fresh sandbox container (Python, JavaScript, C++, Java, Go)
-    - **write_file** — write text or code files, downloadable by the user in chat
     - **poll** — ask the user a question with options to pick from in the chat
+    - **remember** — keep a short fact about the user, per contact
+    - **search_memory** — find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub)
     - **spawn_job** — hand a bigger task to a background agent job that reports back when it is done
-- agent jobs running in the background (experimental)
-    - a controller plans the job in up to 6 steps and delegates each step to up to 4 sub agents working in parallel, each with its own role (e.g. researcher, analyst, writer) and its own tools
-    - every step gets the results of the steps before, a failed sub agent is retried once with a revised task
+    - **take_photo** — generate a photo of self, user, or both from current context
+    - **weather** — weather forcast for given location
+    - **websearch** — search the web when requested or needed
+    - **wikipedia** — search wikipedia when requested or needed
+    - **write_file** — write text or code files, downloadable by the user in chat
+
+- agent jobs running in the background
+    - a controller plans the job in steps and delegates each step to up multiple sub agents working in parallel, each with its own role (e.g. researcher, analyst, writer)
+    - results of every step get reported back to the controller, a failed sub agent is retried once with a revised task
     - messages from the user during the job can change the remaining plan
     - the controller merges all results into the final answer, progress is shown in the chat
-- persistent companion (experimental)
+
+- persistent companion
     - opt-in per contact, the contact gets a life of its own between conversations and may write first
     - every night it plans its day on a private calendar: events of its own life, news scans, an evening reflection and check-ins with the user, only what fits its character
     - each planned entry runs as an agent job with the usual tools (e.g. websearch for the news) and may send the user a message, sometimes with a photo
