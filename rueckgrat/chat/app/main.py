@@ -22,7 +22,7 @@ from app.ui import (
     GalleryPage,
 )
 from app.ui import theme
-from app.ui.widgets import ImageOverlay, MessageBox, ConnectionBanner
+from app.ui.widgets import ImageOverlay, TextPreview, MessageBox, ConnectionBanner
 
 from app.utils import Paths, Notifier
 from app.utils.config import RueckgratConfig
@@ -175,8 +175,8 @@ class App:
 
     async def _on_system_back(self, e):
         view = e.control
-        # back closes the full screen image first, then goes back a page
-        if ImageOverlay.close_open(self.page):
+        # back closes the full screen image or text file first, then goes back a page
+        if ImageOverlay.close_open(self.page) or TextPreview.close_open(self.page):
             await view.confirm_pop(False)
             return
         # a page can take the back itself first (chat: hides the keyboard)

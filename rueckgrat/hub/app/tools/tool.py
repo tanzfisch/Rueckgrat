@@ -9,6 +9,7 @@ logger = get_logger()
 class Tool(Task):
     description = ""    # one line for the tool index, every tool sets its own
     question = []       # yes/no decision questions: does the request involve this tool's purpose. the tool counts with its most likely question
+    thresholds = None   # (recommended, mandatory) for the question scores, None: ToolDetectionTask's RECOMMENDED_THRESHOLD and MANDATORY_THRESHOLD
     sequential = False  # the calls of sequential tools in one round run one after another in their order (they share the sandbox files)
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
@@ -38,9 +39,13 @@ class Tool(Task):
         """the call is for a stored assistant message (not an agent job's worker or a companion that holds its result)"""
         return self.message_id is not None and self.message_id >= 0
 
-    def push(self, kind: str, **data) -> None:
-        """sends data for this call's message to the chat, e.g. push("poll", poll=...)"""
-        MessageQueue().send_data({kind: {"conversation_id": self.conversation_id, "message_id": self.message_id, **data}},
+    def show_data(self, kind: str, value) -> None:
+        """stores value as the data of kind of this call's message and sends it to the chat, e.g. show_data("poll", {...}).
+        the client shows it under the bubble by its kind. nothing without a stored message (a worker's or companion's call)"""
+        if not self.has_message():
+            return
+        self.db.set_message_data(self.message_id, kind, value)
+        MessageQueue().send_data({"data": {"conversation_id": self.conversation_id, "message_id": self.message_id, "kind": kind, "value": value}},
                                  user_id=self.user_id)
 
     @classmethod

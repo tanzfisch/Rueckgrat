@@ -4,6 +4,7 @@ import zipfile
 import flet as ft
 from app.ui import theme
 from app.utils import Hub
+from .text_preview import TextPreview
 
 from app.common import get_logger
 logger = get_logger()
@@ -22,7 +23,7 @@ class FileCard(ft.Container):
     """a chip as wide as its file name needs, at most MAX_WIDTH, the name is cut with ... beyond that"""
     MAX_WIDTH = 400
     CHAR_WIDTH = 8.5    # rough width of one bold name character, only decides when to cap at MAX_WIDTH
-    FIXED_WIDTH = 100   # icon, download button, padding and spacing around the name
+    FIXED_WIDTH = 140   # icon, preview and download buttons, padding and spacing around the name
 
     def __init__(self, message_id: int, spec: dict):
         self.message_id = message_id
@@ -41,6 +42,10 @@ class FileCard(ft.Container):
         row = ft.Row([
             ft.Icon(ft.Icons.DESCRIPTION_OUTLINED, color=theme.TEXT, size=18),
             info,
+            ft.IconButton(icon=ft.Icons.VISIBILITY_OUTLINED, icon_color=theme.TEXT, icon_size=18, tooltip=f"Preview {save_name}",
+                          on_click=lambda e: self.page.run_task(
+                              TextPreview.open, self.page, file_name, spec.get("file_size") or 0,
+                              lambda: Hub.get_message_file(self.message_id, spec.get("stored_name") or ""))),
             ft.IconButton(icon=ft.Icons.DOWNLOAD, icon_color=theme.TEXT, icon_size=18, tooltip=f"Save {save_name}",
                           on_click=lambda e: self.page.run_task(self._save, save_name)),
         ], spacing=6, tight=True, vertical_alignment=ft.CrossAxisAlignment.CENTER)

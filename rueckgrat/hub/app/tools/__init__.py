@@ -15,6 +15,7 @@ from .search_memory_tool import SearchMemoryTool
 from .spawn_agent_job_tool import SpawnAgentJobTool
 from .poll_tool import PollTool
 from .map_tool import MapTool
+from .price_finder_tool import PriceFinderTool
 from .code_tool import RunCodeTool
 from .bash_tool import BashTool
 from .write_file_tool import WriteFileTool
@@ -37,6 +38,7 @@ __all__ = [
     "SpawnAgentJobTool",
     "PollTool",
     "MapTool",
+    "PriceFinderTool",
     "RunCodeTool",
     "BashTool",
     "WriteFileTool",

@@ -8,10 +8,11 @@ logger = get_logger()
 
 class ImageGenTool(ImageTool):
     description = prompts.IMAGE_GEN_DESCRIPTION
+    thresholds = (0.55, 0.6)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask you to paint, draw or generate a picture of something?",
         "Does the user ask you to draw, paint or illustrate a subject, like a cat, a dragon, a logo or a mountain wallpaper?",
-        "Does the user ask you to design a logo, a poster or an icon?",
+        "Does the user want a logo, a poster or an icon made as an image?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

@@ -54,6 +54,7 @@ def wikipedia_summary(query: str, lang: str = "en") -> Dict[str, str]:
 
 class WikipediaTool(Tool):
     description = prompts.WIKIPEDIA_DESCRIPTION
+    thresholds = (0.5, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask who a famous person from history was?",
         "Does the user ask to have a science theory or natural process explained?",

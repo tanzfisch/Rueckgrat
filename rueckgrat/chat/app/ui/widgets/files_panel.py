@@ -8,6 +8,7 @@ import flet as ft
 from app.ui import theme
 from app.ui.widgets.file_card import size_text
 from app.utils import Hub
+from .text_preview import TextPreview
 
 from app.common import get_logger
 logger = get_logger()
@@ -108,9 +109,15 @@ class FilesPanel(ft.Container):
                                    tooltip=f"Save {entry['name']} as zip",
                                    on_click=lambda e, p=entry["path"]: self.page.run_task(self._save_zip, p))
         elif entry["type"] == "file":
-            action = ft.IconButton(icon=ft.Icons.DOWNLOAD, icon_size=18, icon_color=theme.TEXT,
-                                   tooltip=f"Save {entry['name']}",
-                                   on_click=lambda e, p=entry["path"]: self.page.run_task(self._save_file, p))
+            action = ft.Row([
+                ft.IconButton(icon=ft.Icons.VISIBILITY_OUTLINED, icon_size=18, icon_color=theme.TEXT,
+                              tooltip=f"Preview {entry['name']}",
+                              on_click=lambda e, p=entry["path"], s=entry.get("size") or 0: self.page.run_task(
+                                  TextPreview.open, self.page, p, s, lambda: Hub.get_conversation_file(self.conversation_id, p))),
+                ft.IconButton(icon=ft.Icons.DOWNLOAD, icon_size=18, icon_color=theme.TEXT,
+                              tooltip=f"Save {entry['name']}",
+                              on_click=lambda e, p=entry["path"]: self.page.run_task(self._save_file, p)),
+            ], spacing=0, tight=True)
         else:
             action = ft.Container(width=40)     # a link: the hub serves no links
         return ft.Container(

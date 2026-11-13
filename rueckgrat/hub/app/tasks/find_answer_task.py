@@ -32,11 +32,14 @@ def fit_tokens(text: str, max_tokens: float) -> str:
     return text
 
 class FindAnswerTask(Task):
+    PROMPT = prompts.FIND_ANSWER_PROMPT     # information, question, today
+
     def __init__(self, question: str, information: str, infrastructure):
         super().__init__()
         self.question = question
         self.information = information
         self.infrastructure = infrastructure
+        self.answer = None
 
     def execute(self) -> None:
         try:
@@ -51,8 +54,8 @@ class FindAnswerTask(Task):
         try:
             messages = []
             information = fit_tokens(self.information, CONTEXT_TOKENS - REPLY_TOKENS - PROMPT_TOKENS - estimate_tokens(self.question))
-            query = prompts.FIND_ANSWER_PROMPT.format(information=information, question=self.question,
-                                                    today=datetime.date.today().strftime("%A, %d %B %Y"))
+            query = self.PROMPT.format(information=information, question=self.question,
+                                       today=datetime.date.today().strftime("%A, %d %B %Y"))
             
             #logger.debug(f"find answer query:\n{query}")
 
@@ -75,12 +78,13 @@ class FindAnswerTask(Task):
             logger.error(f"failed to read answer from:\n{response_content}") 
             return None
 
-        # making sure we can guarantee a certain json structure
-        answer = {
+        return self._answer(reply)
+
+    def _answer(self, reply) -> Dict[str, Any]:
+        """the reply's json in a certain structure"""
+        return {
             "answer": Utils.get_nested_value(reply, ["answer"], "no answer"),
             "quality": Utils.get_nested_value(reply, ["quality"], 0),
         }
-
-        return answer
 
     

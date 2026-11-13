@@ -18,6 +18,9 @@ templates, filled with str.format (literal braces doubled):
   MAP_LOOKING_UP_PART                         query: the address of the call
   MAP_SHOWN_PART                              name: the found place's display name
   POLL_SHOWN_PART                             question, options (joined by " | "), choices: POLL_ONE_CHOICE_PART or POLL_SEVERAL_CHOICES_PART
+  PRICE_FOUND_PART                            query, findings: one PRICE_FINDING_LINE per find, best first
+  PRICE_FINDING_LINE                          place, title, price, currency, shop, note: " (the note)" or ""
+  PRICE_NONE_PART                             query: the product searched for
   WRITE_FILE_ATTACHED_PART                    file_names: the files, comma separated
   WRITE_FILE_NOT_ATTACHED_PART                problems: what could not be attached, "; " separated
   BASH_PROMPT                                 files: the sandbox files folder, timeout: seconds per command
@@ -319,7 +322,7 @@ POLL_SEVERAL_CHOICES_PART = "several choices"
 
 POLL_PROMPT = """
 POLL:
-Use when the user asks for a poll, a vote, a quiz or options to choose from, or when a multiple choice question fits your answer better than an open question. The user picks from the options, the choice comes back as their next message.
+Use when the user asks for a poll, a vote, a quiz, a questionnaire, a survey, questions in several rounds or options to choose from, or when a multiple choice question fits your answer better than an open question. The user picks from the options, the choice comes back as their next message.
 
 Parameters:
 - question (string, required): the question, short
@@ -331,6 +334,37 @@ One poll per message: for a questionnaire or quiz, put the first question in the
 
 Example:
 {"tool": "poll", "question": "Where should we go tonight?", "options": ["Cinema", "Restaurant", "Stay home"], "mode": "single"}
+"""
+
+# ---------------------------------------------------------------- price_finder
+
+PRICE_FINDER_DESCRIPTION = ("searches shops on the web for a product, ranks the best prices or the best matches and shows "
+                            "the top three on a podium with links to buy")
+
+PRICE_FOUND_PART = ("a price ranking for {query} is shown to the user under your answer: the best three on a podium, more finds in "
+                    "a list under it, each with a link to its shop. The finds, best first:\n{findings}\n"
+                    "Name the winner with its price and shop in one or two sentences, a runner-up when it helps. Do not write "
+                    "links or the whole list, the user sees them. The prices are from the shops' pages now, they can change.")
+
+PRICE_FINDING_LINE = "{place}. {title}: {price} {currency} at {shop}{note}"
+
+PRICE_NONE_PART = ("no shop page with a price for {query} was found. Tell the user you could not find prices for it right now, "
+                   "suggest a more precise product name. Do not make up prices, shops or links.")
+
+PRICE_FINDER_PROMPT = """
+PRICE_FINDER:
+Use when the user wants to buy something: the best price or the cheapest shop for a product, what a product costs now, or a product with the features they name (e.g. a lawn mower with a 21 inch cut and a petrol engine). It searches the shops on the web, reads their pages and shows the best three finds on a podium under your answer, more finds in a list, each with a link to its shop.
+Do not use it for stocks, crypto or exchange rates, for things the user already has, or for services like flights or hotels.
+
+Parameters:
+- query (string, required): the product with the details that matter (brand, model, size, features), and the user's country when you know it
+- rank (string, optional): "price" (default) puts the cheapest offers for a named product first, "match" the products that fit the named features best
+
+One price_finder call per message. Do not write prices, shops or links in your answer that are not in its result.
+
+Examples:
+{"tool": "price_finder", "query": "Sony WH-1000XM5 headphones NZ", "rank": "price"}
+{"tool": "price_finder", "query": "petrol lawn mower 21 inch cutting width", "rank": "match"}
 """
 
 # ---------------------------------------------------------------- remember

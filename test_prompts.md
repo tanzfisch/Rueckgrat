@@ -62,4 +62,6 @@ where is the Eifel Tower?
 Take a selfie of yourself at the beach and also make me an image of a sunset over the ocean.
 ```
 
+### poll
 
+I'd like to start a new project but I don't know what it should be about. Please create a multi round questionaire to guide me.

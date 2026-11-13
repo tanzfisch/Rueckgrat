@@ -24,6 +24,7 @@ from .search_memory_tool import SearchMemoryTool
 from .spawn_agent_job_tool import SpawnAgentJobTool
 from .poll_tool import PollTool
 from .map_tool import MapTool
+from .price_finder_tool import PriceFinderTool
 from .code_tool import RunCodeTool
 from .bash_tool import BashTool
 from .write_file_tool import WriteFileTool
@@ -36,7 +37,7 @@ class ToolRegistry:
     TOOL_ORDER = [
         ("spawn_job", "current_time"),
         "date_calc",
-        ("search_memory", "wikipedia", "websearch", "fetch_url", "weather"),
+        ("search_memory", "wikipedia", "websearch", "fetch_url", "weather", "price_finder"),
         "convert",
         ("calculate", "run_code", "bash"),
         ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember"),
@@ -78,6 +79,7 @@ class ToolRegistry:
         self._register_tool(SpawnAgentJobTool)
         self._register_tool(PollTool)
         self._register_tool(MapTool)
+        self._register_tool(PriceFinderTool)
         self._register_tool(RunCodeTool)
         self._register_tool(BashTool)
         self._register_tool(WriteFileTool)
@@ -111,12 +113,15 @@ class ToolRegistry:
         return mandatory, [name for name in dict.fromkeys(recommended or []) if name not in mandatory]
 
     def rounds(self, tool_names: List[str], recommended: List[str] = ()) -> List[List[str]]:
-        """the rounds of a tool setup (ranked_groups of all tools). a recommended PRIORITY_TOOL comes first on its own,
-        ToolExecutionTask stops after it when it was called"""
+        """the rounds of a tool setup (ranked_groups of all tools). a recommended PRIORITY_TOOL is a round on its own: the first
+        when no other tool was detected as mandatory (the PROMPT_TOOLS always are), else the last, so an uncertain one does
+        not take over from a sure tool. ToolExecutionTask stops after it when it was called"""
         names = list(dict.fromkeys(list(tool_names or []) + list(recommended or [])))
         if self.PRIORITY_TOOL in (recommended or []) and self.PRIORITY_TOOL not in (tool_names or []):
-            rest = [name for name in names if name != self.PRIORITY_TOOL]
-            return [[self.PRIORITY_TOOL]] + (self.ranked_groups(rest) if rest else [])
+            rest = self.ranked_groups([name for name in names if name != self.PRIORITY_TOOL])
+            if any(name not in self.PROMPT_TOOLS for name in tool_names or []):
+                return rest + [[self.PRIORITY_TOOL]]
+            return [[self.PRIORITY_TOOL]] + rest
         return self.ranked_groups(names)
 
     def available(self, tool_names: List[str], excluded: tuple = ()) -> List[str]:
@@ -253,7 +258,11 @@ class ToolRegistry:
         """whether a call takes at least one of its values from text (the message and the earlier results). a recommended
         call that shares nothing with it was made up, like the tool's prompt example ("100 USD to EUR" in a fractal task)"""
         words = {word.lower() for word in self.GROUND_WORD.findall(text or "")}
-        values = json.dumps([value for key, value in call.items() if key != "tool"], ensure_ascii=False, default=str)
+        values = [value for key, value in call.items() if key != "tool"]
+        # a value written in the message as it is counts too: "ls -la ~" has no word of 3 letters
+        if any(isinstance(value, str) and value.strip() and value.strip().lower() in (text or "").lower() for value in values):
+            return True
+        values = json.dumps(values, ensure_ascii=False, default=str)
         return any(word.lower() in words for word in self.GROUND_WORD.findall(values))
 
     def cut_off_result(self, text: str, tools: List[str], length: bool = False) -> Optional[Dict[str, Any]]:

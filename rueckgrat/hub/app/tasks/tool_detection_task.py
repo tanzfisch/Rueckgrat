@@ -1,13 +1,13 @@
 import re
 from .task_queue import Task
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 from app.common import get_logger, Utils
 from app.utils.trace import Trace
 logger = get_logger()
 
 MANDATORY_THRESHOLD = 0.7
-RECOMMENDED_THRESHOLD = 0.4
+RECOMMENDED_THRESHOLD = 0.5
 MIN_DETECTION_WORDS = 4    # shorter messages ("Hi", "thanks!") skip the laya questions, they scored spawn_job 0.71 on "Hi"
 PROJECT_KEY = "project"    # the ids of the ToolRegistry.PROJECT_QUESTIONS: "project__<i>"
 
@@ -76,6 +76,11 @@ class ToolDetectionTask(Task):
 
         return questions
 
+    def thresholds(self, name: str) -> Tuple[float, float]:
+        """the (recommended, mandatory) thresholds of a tool: its own (Tool.thresholds) or the global ones"""
+        cls = self.tool_registry.tools.get(name)
+        return getattr(cls, "thresholds", None) or (RECOMMENDED_THRESHOLD, MANDATORY_THRESHOLD)
+
     def _has_project(self) -> bool:
         """whether the conversation's files hold a project (ConversationVolume.has_project), False when they can't be read"""
         try:
@@ -118,8 +123,8 @@ class ToolDetectionTask(Task):
             for name in self.tool_registry.project_tools(self.excluded_tools):
                 probabilities[name] = max(probabilities.get(name, 0.0), project)
         
-        tool_names = [name for name, p in probabilities.items() if p >= MANDATORY_THRESHOLD]
-        recommended = [name for name, p in probabilities.items() if RECOMMENDED_THRESHOLD <= p < MANDATORY_THRESHOLD]
+        tool_names = [name for name, p in probabilities.items() if p >= self.thresholds(name)[1]]
+        recommended = [name for name, p in probabilities.items() if self.thresholds(name)[0] <= p < self.thresholds(name)[1]]
 
         probabilities["fetch_url"] = 1.0 if url_check else 0.0
         logger.debug(f"tool probabilities:\n{Utils.pretty_scores(probabilities, 20, (RECOMMENDED_THRESHOLD, MANDATORY_THRESHOLD))}")

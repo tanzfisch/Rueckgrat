@@ -35,3 +35,10 @@ Install on android phone, open the app on the phone and follow its logs
 ```bash
 adb uninstall com.flet.chat && adb install build/apk/*.apk && adb logcat -s flet.python
 ```
+
+# Laya tuning
+
+```bash
+cd ~/dev/Rueckgrat-dev/rueckgrat/hub
+./laya_tune/tune.sh
+```

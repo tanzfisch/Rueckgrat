@@ -14,7 +14,7 @@ logger = get_logger()
 # a different model with another size needs this changed and SCHEMA_VERSION bumped
 MEMORY_EMBEDDING_DIM = 384
 # PRAGMA user_version of a db made by this hub. bump it on every schema change: until 1.0 an older db is wiped, never migrated
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 # #174 job protocols older than this are deleted (save_protocol and hub start), they are for looking into recent jobs
 PROTOCOL_RETENTION_HOURS = 24
 
@@ -91,8 +91,7 @@ class ChatDB:
             content TEXT NOT NULL,
             timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
             sources TEXT,
-            poll TEXT,      -- json {question, options, mode, chosen}, see PollTool
-            map TEXT,       -- json {query, label, lat, lon, display_name, zoom}, see MapTool
+            data TEXT,      -- json {kind: value} a tool shows under the message, e.g. {"poll": {...}, "map": {...}}, see set_message_data
 
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         )""")
@@ -1557,7 +1556,7 @@ class ChatDB:
                 cursor.execute("""
                     SELECT *
                     FROM (
-                        SELECT id, role, name, content, timestamp, sources, poll, map
+                        SELECT id, role, name, content, timestamp, sources, data
                         FROM messages
                         WHERE conversation_id = ?
                         ORDER BY timestamp DESC
@@ -1569,8 +1568,7 @@ class ChatDB:
                 messages = [dict(row) for row in cursor.fetchall()]
                 for message in messages:
                     message["sources"] = json.loads(message["sources"]) if message["sources"] else []
-                    message["poll"] = json.loads(message["poll"]) if message["poll"] else None
-                    message["map"] = json.loads(message["map"]) if message["map"] else None
+                    message["data"] = json.loads(message["data"]) if message["data"] else {}
                 return messages
             except Exception as e:
                 logger.error(f"failed returning messages: {e}")         
@@ -1655,27 +1653,32 @@ class ChatDB:
                 logger.error(f"setting message sources: {e}")
         return False
 
-    def set_message_poll(self, message_id: int, poll: dict) -> bool:
+    def set_message_data(self, message_id: int, kind: str, value) -> bool:
+        """stores value under kind in the data of message_id ({kind: value}, the other kinds stay). a tool's poll, map or price
+        ranking: a new kind needs no schema change, the client shows the kinds it knows (Tool.show_data)"""
         with self.get_connection() as conn:
             try:
                 cursor = conn.cursor()
-                cursor.execute("UPDATE messages SET poll = ? WHERE id = ?", (json.dumps(poll), message_id))
+                self._set_message_data(cursor, message_id, kind, value)
                 conn.commit()
                 return cursor.rowcount > 0
             except Exception as e:
-                logger.error(f"setting message poll: {e}")
+                logger.error(f"setting message data {kind}: {e}")
         return False
 
-    def set_message_map(self, message_id: int, place: dict) -> bool:
-        with self.get_connection() as conn:
-            try:
-                cursor = conn.cursor()
-                cursor.execute("UPDATE messages SET map = ? WHERE id = ?", (json.dumps(place), message_id))
-                conn.commit()
-                return cursor.rowcount > 0
-            except Exception as e:
-                logger.error(f"setting message map: {e}")
-        return False
+    @staticmethod
+    def _set_message_data(cursor, message_id: int, kind: str, value) -> None:
+        """merges {kind: value} into the data of message_id in one statement, a parallel call for another kind is kept"""
+        if not kind.isidentifier():
+            raise ValueError(f"not a kind of message data: {kind}")
+        cursor.execute("UPDATE messages SET data = json_set(COALESCE(data, '{}'), ?, json(?)) WHERE id = ?",
+                       (f"$.{kind}", json.dumps(value), message_id))
+
+    @staticmethod
+    def _message_data(cursor, message_id: int, conversation_id: int) -> dict:
+        """the data of message_id in conversation_id, {} if it has none or is not there"""
+        row = cursor.execute("SELECT data FROM messages WHERE id = ? AND conversation_id = ?", (message_id, conversation_id)).fetchone()
+        return json.loads(row[0]) if row and row[0] else {}
 
     def answer_poll(self, message_id: int, conversation_id: int, chosen: list) -> list | None:
         """stores the user's choice in the open poll of message_id (in conversation_id). the valid choices in option order,
@@ -1683,15 +1686,14 @@ class ChatDB:
         with self.get_connection() as conn:
             try:
                 cursor = conn.cursor()
-                row = cursor.execute("SELECT poll FROM messages WHERE id = ? AND conversation_id = ?", (message_id, conversation_id)).fetchone()
-                poll = json.loads(row[0]) if row and row[0] else None
-                if not poll or poll.get("chosen"):
+                poll = self._message_data(cursor, message_id, conversation_id).get("poll")
+                if not isinstance(poll, dict) or poll.get("chosen"):
                     return None
                 chosen = [option for option in poll["options"] if option in chosen]
                 if not chosen or (poll["mode"] == "single" and len(chosen) != 1):
                     return None
                 poll["chosen"] = chosen
-                cursor.execute("UPDATE messages SET poll = ? WHERE id = ?", (json.dumps(poll), message_id))
+                self._set_message_data(cursor, message_id, "poll", poll)
                 conn.commit()
                 return chosen
             except Exception as e:

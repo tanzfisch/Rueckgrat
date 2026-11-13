@@ -76,11 +76,12 @@ def calculate(expression: str) -> str:
 
 class CalculatorTool(Tool):
     description = prompts.CALCULATOR_DESCRIPTION
+    thresholds = (0.75, 0.8)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
-        "Does the user ask about money, prices, tax, tips, percentages or splitting a bill?",
-        "Does the user ask how much they pay, save, owe or get, or what a percentage of an amount is?",
-        "Does the user ask how many things are left or how many there are after some are added or taken away?",
-        "Does the user ask what sin, cos or tan of some degrees is?"
+        "Does the message contain a math problem with numbers to solve?",
+        "Does the user ask what a percentage, a tip or a share of an amount is?",
+        "Does the user ask how to split a bill or how much they save over time?",
+        "Does the user ask what sin, cos or tan of some degrees is?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

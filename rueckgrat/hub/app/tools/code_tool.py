@@ -122,6 +122,7 @@ class RunCodeTool(Tool):
     fresh llm sandbox container with the conversation's files. the harness builds the call json with the code in base64"""
     description = prompts.RUN_CODE_DESCRIPTION
     sequential = True
+    thresholds = (0.65, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user want to see the output of running code?",
         "Does this message ask to check or confirm a number or formula before using it?",

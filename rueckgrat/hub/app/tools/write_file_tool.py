@@ -16,11 +16,10 @@ class WriteFileTool(Tool):
     or files of the conversation's sandbox files (attach: paths of files or folders, ConversationVolume.files)"""
     description = prompts.WRITE_FILE_DESCRIPTION
     # laya, not a prompt tool: a file is only made when the message asks for one, not on every turn
+    thresholds = (0.45, 0.5)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
-        "Does the message want to sent files attached to a message?",
-        "Does the message ask to download files or a project?",
-        "Does the message ask to send, share or hand over files that were made earlier?",
-        "Does the message ask to put the finished files or the project into the chat?",
+        "Does the user want what you write delivered as a file?",
+        "Does the user ask to save, export or download something as a text, CSV, markdown or Word file?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

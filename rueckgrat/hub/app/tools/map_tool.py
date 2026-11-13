@@ -186,6 +186,7 @@ def get_tile(z: int, x: int, y: int) -> Optional[bytes]:
 
 class MapTool(Tool):
     description = prompts.MAP_DESCRIPTION
+    thresholds = (0.45, 0.5)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask how to get to a place?",
         "Does the user want to see a map?",
@@ -219,9 +220,7 @@ class MapTool(Tool):
             return
         
         place = {"query": query, "label": label, **place}
-        if self.has_message():
-            self.db.set_message_map(self.message_id, place)
-            self.push("map", place=place)
+        self.show_data("map", place)
         self.add_result({"tool": self.name(), "text": self._text(place["display_name"]), "place": place})
 
     def planned_text(self) -> str:

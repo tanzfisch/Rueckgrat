@@ -8,6 +8,7 @@ placeholders, filled with str.format (literal json braces are doubled):
   CONTACT_GENERATOR_PROMPT  user_input (name, gender, backstory, image style lines), sfw: CONTACT_GENERATOR_SFW_PART or
                             CONTACT_GENERATOR_UNRESTRICTED_PART
   FIND_ANSWER_PROMPT        information (the page text, cut to fit), question, today ("Wednesday, 28 October 2026")
+  FIND_OFFER_PROMPT         information (the page's product data and text, cut to fit), question (what the user looks for), today
   SUMMARIZE_PROMPT          content (the cleaned page text), max_words, focus (SUMMARIZE_FOCUS_PART or "")
   SUMMARIZE_FOCUS_PART      focus: what the summary is to focus on
   TRANSLATE_PROMPT          source, target: the language names
@@ -108,6 +109,31 @@ Respond with a json structure like this:
 Give a concise answer (maximum of 100 words).
 Rate the quality of the source from 1 to 10 in terms of how well it answeres the question and how current the information is.
 Today is {today}.
+"""
+
+# ---------------------------------------------------------------- find offer (FindOfferTask), the price finder's offers on one page
+
+FIND_OFFER_PROMPT = """
+Find the offers for a product in the text of a shop or price comparison page.
+
+TEXT:
+{information}
+
+THE USER IS LOOKING FOR:
+{question}
+
+Respond with a json structure like this:
+{{
+    "offers": [
+        {{"title": "the product's name as the page gives it", "price": 1299.00, "currency": "NZD", "shop": "the shop that sells it", "match": 1-10, "note": "what matters to the user, at most 12 words"}}
+    ]
+}}
+
+- Only offers whose price is written in the text. Copy the price as a plain number with a dot for decimals, never estimate, round or convert it.
+- currency: the three letter code (NZD, AUD, USD, EUR, GBP, ...) from the currency sign and the shop's country.
+- match: how well the product fits what the user is looking for, 10: exactly it, 1: something else (an accessory, a spare part, another product).
+- At most 3 offers, the best fitting first. Say in the note when it is used, refurbished or on sale.
+- No product with a price in the text: {{"offers": []}}
 """
 
 # ---------------------------------------------------------------- translator mode (TranslateTask)

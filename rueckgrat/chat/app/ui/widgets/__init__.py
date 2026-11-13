@@ -15,6 +15,8 @@ from .connection_banner import ConnectionBanner
 from .language_picker import LanguagePicker, flag_text
 from .poll import PollView
 from .map_view import MapView
+from .price_view import PriceView
+from .text_preview import TextPreview
 from .file_card import FileCard, FileCards
 from .files_panel import FilesPanel
 
@@ -38,6 +40,8 @@ __all__ = [
     "flag_text",
     "PollView",
     "MapView",
+    "PriceView",
+    "TextPreview",
     "FileCard",
     "FileCards",
     "FilesPanel",

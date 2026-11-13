@@ -11,9 +11,13 @@ MAX_OPTION_LENGTH = 80
 
 class PollTool(Tool):
     description = prompts.POLL_DESCRIPTION
+    thresholds = (0.75, 0.8)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
-        "Does the user ask for a poll, a vote, a quiz or a multiple choice question?",
+        "Does the user ask you to make a poll or a vote?",
         "Does the user ask to be given options or choices to pick from?",
+        "Does the user ask you to quiz, test or interview them?",
+        "Does the user ask you to quiz them or ask them questions one at a time?",
+        "Does the user ask you to guide them through questions in several rounds?",
         "Does the user ask your to create a questionnaire?",
     ]
 
@@ -48,9 +52,7 @@ class PollTool(Tool):
             return
         
         MessageQueue().send_status_message("making a poll")
-        if self.has_message():
-            self.db.set_message_poll(self.message_id, poll)
-            self.push("poll", poll=poll)
+        self.show_data("poll", poll)
         self.add_result({"tool": self.name(), "text": self._text(poll), "form": poll})
 
     def planned_text(self) -> str:

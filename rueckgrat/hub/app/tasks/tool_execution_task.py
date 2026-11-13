@@ -16,7 +16,8 @@ class ToolExecutionTask(Task):
                  recommended_tools: List[str] = (), detach: Optional[Callable[[], bool]] = None,
                  tool_calls: Optional[List[Dict[str, Any]]] = None, fix_rounds: int = 0):
         """tool_names must be called, recommended_tools (the detection was not sure) the model decides about, like the
-        PROMPT_TOOLS. a mandatory PRIORITY_TOOL is the only tool, a recommended one runs first on its own (registry.rounds).
+        PROMPT_TOOLS. a mandatory PRIORITY_TOOL is the only tool, a recommended one runs on its own, first or after
+        the detected mandatory tools (registry.rounds).
         tool_calls: run these as they are instead, without a tool setup (the calls a chat reply wrote)"""
         super().__init__()
         self.user_id = user_id
