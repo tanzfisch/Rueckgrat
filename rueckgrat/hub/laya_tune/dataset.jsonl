@@ -149,3 +149,4 @@
 {"lang": "en", "text": "Find me running shoes under 150 dollars.", "labels": {"price_finder": "M"}}
 {"lang": "en", "text": "list me all files in my home folder", "labels": {"bash": "M"}}
 {"lang": "en", "text": "call the command ls -la ~", "labels": {"bash": "M"}}
+{"lang": "en", "text": "paint me an oil painting of an elephant riding the bus", "labels": {"generate_image": "M"}}
