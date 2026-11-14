@@ -39,6 +39,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - results of every step get reported back to the controller, a failed sub agent is retried once with a revised task
     - messages from the user during the job can change the remaining plan
     - the controller merges all results into the final answer, progress is shown in the chat
+    - agents work on projects in their own sandbox file system and can generate images
 
 - persistent companion
     - opt-in per contact, the contact gets a life of its own between conversations and may write first
@@ -72,7 +73,11 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
 - chat with a locally installed LLM
 - in-chat image generation based on use prompt
 - self image generation. Like taking a picture of self based on current context.
-- code highlighting
+- code highlighting, copy button on code blocks
+- files from the AI: one file as itself, several files of one answer as a single zip
+- preview text files in the chat with syntax highlighting, without downloading them
+- file browser for the files of a conversation
+- spoken answers start playing while the text is still streaming
 - contacts, character templates, character-creation wizard, settings
 - assiting a conversation with someone in an other language (using your own llm for translation)
 
