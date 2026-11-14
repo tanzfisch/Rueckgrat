@@ -28,6 +28,7 @@ from .price_finder_tool import PriceFinderTool
 from .code_tool import RunCodeTool
 from .bash_tool import BashTool
 from .write_file_tool import WriteFileTool
+from .find_tools_tool import FindToolsTool
 
 from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
@@ -37,14 +38,14 @@ class ToolRegistry:
     TOOL_ORDER = [
         ("spawn_job", "current_time"),
         "date_calc",
-        ("search_memory", "wikipedia", "websearch", "fetch_url", "weather", "price_finder"),
+        ("search_memory", "find_tools", "wikipedia", "websearch", "fetch_url", "weather", "price_finder"),
         "convert",
         ("calculate", "run_code", "bash"),
         ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember"),
     ]
 
     TOOL_RANK = {name: rank for rank, entry in enumerate(TOOL_ORDER) for name in ((entry,) if isinstance(entry, str) else entry)}
-    PROMPT_TOOLS = ["remember", "search_memory", "take_photo"]
+    PROMPT_TOOLS = ["remember", "search_memory", "take_photo", "find_tools"]   # find_tools shares search_memory's round, no extra setup call
     FIX_TOOLS = ["run_code", "bash", "write_file"]     # offered again in a worker's fix rounds (ToolExecutionTask), in this order
     RUN_TOOLS = ("run_code", "bash")    # a worker's mandatory one with no call is a problem for its fix rounds (not_called)
     PRIORITY_TOOL = "spawn_job"   # overrides all other tools
@@ -83,6 +84,7 @@ class ToolRegistry:
         self._register_tool(RunCodeTool)
         self._register_tool(BashTool)
         self._register_tool(WriteFileTool)
+        self._register_tool(FindToolsTool)
 
         temp = ", ".join(self.tools)
         logger.debug(f"registered tools: {temp}")

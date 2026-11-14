@@ -14,8 +14,10 @@ placeholders, filled with str.format (literal json braces are doubled). the comp
   SITUATION_CONTEXT_PART    location, topic, user_name, user_action, user_head, user_upper_body, user_body, assistant_action,
                             assistant_head, assistant_upper_body, assistant_body, conversation_so_far (CONVERSATION_SO_FAR_PART or "")
   CONVERSATION_SO_FAR_PART  summary: the nightly summary of the conversation
-  TOOL_SETUP_FIRST_PROMPT   prompt (the user's message), tools (the TOOL_SETUP_* sections of ToolRegistry.get_tools_hydrated)
-  TOOL_SETUP_NEXT_PROMPT    prompt, previous_results (one "i. tool -> text" line each), tools
+  TOOL_SETUP_FIRST_PROMPT   history (TOOL_SETUP_HISTORY_PART or ""), prompt (the user's message), tools (the TOOL_SETUP_*
+                            sections of ToolRegistry.get_tools_hydrated)
+  TOOL_SETUP_NEXT_PROMPT    history, prompt, previous_results (one "i. tool -> text" line each), tools
+  TOOL_SETUP_HISTORY_PART   history: the last messages before the user's message, one "name: content" block each
   GENERIC_IMAGE_PROMPT      prompt: what the image is to show
 """
 
@@ -101,7 +103,7 @@ TOOL_SETUP_OPTIONAL_PART = "OPTIONAL TOOLS\n"
 
 TOOL_SETUP_FIRST_PROMPT = """
 This is a tool setup run. Apply given tools based on the original prompt.
-
+{history}
 ORIGINAL PROMPT
 {prompt}
 
@@ -109,9 +111,14 @@ GIVEN TOOLS TO APPLY NEXT
 {tools}
 """
 
+TOOL_SETUP_HISTORY_PART = """
+THE CONVERSATION BEFORE IT (what goes on, e.g. a quiz or a game: the tools are applied to the original prompt)
+{history}
+"""
+
 TOOL_SETUP_NEXT_PROMPT = """
 This is a tool setup run. Apply given tools based on the original prompt and results from previous tool calls.
-
+{history}
 ORIGINAL PROMPT
 {prompt}
 

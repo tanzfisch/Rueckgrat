@@ -20,6 +20,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **current_time** — current time for given location
     - **date_calc** — date calculations
     - **fetch_url** — fetch content for given URL
+    - **find_tools** — helps the AI to find tools it needs
     - **generate_image** — generate an image on request or on its own
     - **show_map** — show a place on an OpenStreetMap map in the chat, tapping it opens the maps app
     - **poll** — ask the user a question with options to pick from in the chat

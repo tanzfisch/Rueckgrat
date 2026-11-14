@@ -11,14 +11,14 @@ from app.common import get_logger, ChatRequest, Utils
 logger = get_logger()
 
 class ToolExecutionTask(Task):
+    FIND_TOOLS = "find_tools"   # its calls ask for another detection, their tools get extra rounds (_find_tools)
+    FIND_TOOLS_STEPS = 2        # how often in a row the extra rounds can find more tools
+    HISTORY_CHARS = 1500        # an earlier message in the setup prompt is cut after this, the prompt stays short
+
     def __init__(self, user_id: int, request: ChatRequest, context, db, infrastructure, tool_registry, tool_names: List[str],
                  message_id: int = None, excluded_tools: tuple = (), llm_timeout: Optional[float] = None,
                  recommended_tools: List[str] = (), detach: Optional[Callable[[], bool]] = None,
-                 tool_calls: Optional[List[Dict[str, Any]]] = None, fix_rounds: int = 0):
-        """tool_names must be called, recommended_tools (the detection was not sure) the model decides about, like the
-        PROMPT_TOOLS. a mandatory PRIORITY_TOOL is the only tool, a recommended one runs on its own, first or after
-        the detected mandatory tools (registry.rounds).
-        tool_calls: run these as they are instead, without a tool setup (the calls a chat reply wrote)"""
+                 tool_calls: Optional[List[Dict[str, Any]]] = None, fix_rounds: int = 0, history: int = 0):
         super().__init__()
         self.user_id = user_id
         self.request = request
@@ -27,20 +27,47 @@ class ToolExecutionTask(Task):
         self.infrastructure = infrastructure
         self.tool_registry = tool_registry
         self.excluded_tools = tuple(excluded_tools)
-        mandatory, recommended = tool_registry.bands(tool_registry.available(list(tool_names or []) + tool_registry.PROMPT_TOOLS, self.excluded_tools),
-                                                     tool_registry.available(recommended_tools, self.excluded_tools))
-        self.tool_names = mandatory
-        self.recommended = recommended
+        self.tool_names, self.recommended = self._bands(list(tool_names or []) + tool_registry.PROMPT_TOOLS, recommended_tools)
         self.message_id = message_id
         self.detach = detach    # ToolRegistry.execute: lets the DETACHED_TOOLS calls run in the background
         self.llm_timeout = llm_timeout
         self.tool_calls = tool_calls
+        self.history = history          # how many messages before this turn's the setup sees (_history), 0 for a worker
+        self.history_text: Optional[str] = None
         self.fix_rounds = fix_rounds    # a worker's: more passes of the FIX_TOOLS while their calls fail (_fix), 0 for a chat turn
         self.tool_response = {}
         self.executed: List[Dict[str, Any]] = []    # {"call", "ms"} per call that ran, in order. the calls of a round run together and share its time
 
+    def _bands(self, mandatory: List[str], recommended: List[str]) -> tuple[List[str], List[str]]:
+        """(mandatory, recommended) of a detection, without the excluded tools (ToolRegistry.bands)"""
+        return self.tool_registry.bands(self.tool_registry.available(mandatory, self.excluded_tools),
+                                        self.tool_registry.available(recommended, self.excluded_tools))
+
     def get_result(self) -> Dict[str, Any]:
         return self.tool_response
+
+    def _history(self) -> str:
+        """the last self.history messages before this turn's, with what the answers showed (a poll and its choice, a map):
+        the setup sees that a quiz goes on when the user's message is only its answer. read once per task"""
+        if self.history_text is None:
+            self.history_text = ""
+            if self.history and self.db:
+                from .chat_task import ChatTask     # chat_task imports this module
+                messages = [message for message in self.db.get_messages_by_conversation(self.request.conversation_id, self.history + 8) or []
+                            if message.get("role") in ("user", "assistant") and message.get("id") != self.message_id]
+                while messages and messages[-1]["role"] == "user":
+                    messages.pop()      # this turn's message, and the follow-ups merged into it
+                blocks = []
+                for message in messages:
+                    content = (message.get("content") or "").strip()
+                    if len(content) > self.HISTORY_CHARS:
+                        content = content[:self.HISTORY_CHARS] + " ..."
+                    if message["role"] == "assistant":
+                        content = (content + ChatTask._data_lines(message.get("data") or {})).strip()
+                    if content:
+                        blocks.append(f"{message.get('name') or message['role']}: {content}")
+                self.history_text = "\n\n".join(blocks[-self.history:])
+        return self.history_text
       
     def execute(self) -> None:
         try:
@@ -49,17 +76,9 @@ class ToolExecutionTask(Task):
                 self._run(self.tool_calls)
                 return
 
-            ranked_groups = self.tool_registry.rounds(self.tool_names, self.recommended)
-            problems: List[str] = []
-            for round, tools in enumerate(ranked_groups, 1):
-                logger.debug(f"tool execution ({round}/{len(ranked_groups)}): {', '.join(tools)}"
-                             + (f" (recommended: {', '.join(t for t in tools if t in self.recommended)})" if any(t in self.recommended for t in tools) else ""))
-                tool_calls, found = self._round(f"{round}/{len(ranked_groups)}", tools, self.recommended, self.request.content)
-                problems += found
-                if any(call.get("tool") == self.tool_registry.PRIORITY_TOOL for call in tool_calls):
-                    logger.debug(f"{self.tool_registry.PRIORITY_TOOL} was called, it is the only tool")
-                    break
-            else:
+            problems, requests = self._rounds(self.tool_names, self.recommended, self.request.content)
+            if requests is not None:
+                problems += self._find_tools(requests)
                 self._fix(problems)
 
             logger.debug(f"execution task results:\n{Utils.pretty_print(self.tool_response)}")
@@ -67,11 +86,69 @@ class ToolExecutionTask(Task):
         except Exception as e:
             logger.error(f"failed to direct tools {repr(e)}")
 
+    def _rounds(self, mandatory: List[str], recommended: List[str], prompt_text: str, step: str = "",
+                also: List[str] = ()) -> tuple[List[str], Optional[List[Dict[str, Any]]]]:
+        """the rounds of a tool setup (ToolRegistry.rounds), also: optional tools offered in the last round (no round of
+        their own). returns (what a fix round could repair, the find_tools calls), None for the calls when the
+        PRIORITY_TOOL was called: it is the only tool, nothing runs after it"""
+        ranked_groups = self.tool_registry.rounds(mandatory, recommended)
+        if ranked_groups and also:
+            ranked_groups[-1] += [name for name in also if name not in ranked_groups[-1]]
+        problems: List[str] = []
+        requests: List[Dict[str, Any]] = []
+        for round, tools in enumerate(ranked_groups, 1):
+            label = f"{step}{round}/{len(ranked_groups)}"
+            logger.debug(f"tool execution ({label}): {', '.join(tools)}"
+                         + (f" (recommended: {', '.join(t for t in tools if t in recommended)})" if any(t in recommended for t in tools) else ""))
+            tool_calls, found = self._round(label, tools, recommended, prompt_text)
+            problems += found
+            requests += [call for call in tool_calls if call.get("tool") == self.FIND_TOOLS]
+            if any(call.get("tool") == self.tool_registry.PRIORITY_TOOL for call in tool_calls):
+                logger.debug(f"{self.tool_registry.PRIORITY_TOOL} was called, it is the only tool")
+                return problems, None
+        return problems, requests
+
+    def _find_tools(self, requests: List[Dict[str, Any]]) -> List[str]:
+        """the find_tools calls: a detection on their tasks, the tools it finds that were not offered yet get extra rounds
+        (with find_tools again, at most FIND_TOOLS_STEPS in a row). returns what a fix round could repair"""
+        from .tool_detection_task import ToolDetectionTask     # tool_detection_task imports the task package too
+        problems: List[str] = []
+        step = 0
+        while requests and step < self.FIND_TOOLS_STEPS:
+            step += 1
+            task = "; ".join(dict.fromkeys(filter(None, (self.tool_registry.tools[self.FIND_TOOLS].task(call) for call in requests))))
+            if not task:
+                break
+            detection = ToolDetectionTask(task, self.tool_registry, self.infrastructure, excluded_tools=self.excluded_tools)
+            self.tool_registry.task_queue.run(detection)
+            detection.trace(self.request.conversation_id, f"find_tools {step}/{self.FIND_TOOLS_STEPS}")
+            # a tool offered already is not offered again: the poll would be asked twice
+            detected = self._bands(detection.tool_names or [], detection.recommended or [])
+            offered = set(self.tool_names + self.recommended)
+            mandatory, recommended = ([name for name in band if name not in offered] for band in detected)
+            found, detected = mandatory + recommended, detected[0] + detected[1]
+            logger.info(f"find_tools {step}/{self.FIND_TOOLS_STEPS}: {task[:200]} -> {detected or 'nothing'}, new: {found}")
+            text = tool_prompts.FIND_TOOLS_FOUND_PART.format(task=task, tools=", ".join(found)) if found \
+                else tool_prompts.FIND_TOOLS_OFFERED_PART.format(task=task, tools=", ".join(detected)) if detected \
+                else tool_prompts.FIND_TOOLS_NONE_PART.format(task=task)
+            self.tool_response[self.FIND_TOOLS] = {"tool": self.FIND_TOOLS, "text": text}
+            if not found:
+                break
+            self.tool_names += [name for name in mandatory if name not in self.tool_names]
+            self.recommended += [name for name in recommended if name not in self.recommended]
+            again = [self.FIND_TOOLS] if step < self.FIND_TOOLS_STEPS and self.FIND_TOOLS not in self.excluded_tools else []
+            found_problems, requests = self._rounds(mandatory, recommended,
+                                                    self.request.content + tool_prompts.FIND_TOOLS_ROUND_PART.format(task=task),
+                                                    step=f"find {step} ", also=again)
+            problems += found_problems
+        return problems
+
     def _round(self, label: str, tools: List[str], recommended: List[str], prompt_text: str) -> tuple[List[Dict[str, Any]], List[str]]:
         """one tool setup: one llm call writes the calls of tools (prompt_text: the task, with the earlier results), they run
         together and their results go into tool_response. returns (the calls that ran, what went wrong that a fix round
         could repair: failed calls, a cut off reply)"""
-        compiler = ToolPromptCompiler(prompt_text, self.tool_response, self.tool_registry, tools, recommended)
+        compiler = ToolPromptCompiler(prompt_text, self.tool_response, self.tool_registry, tools, recommended,
+                                      history=self._history())
         messages = []
         context_prompt = build_context(self.request.name, self.context) if self.context else ""
         if context_prompt:

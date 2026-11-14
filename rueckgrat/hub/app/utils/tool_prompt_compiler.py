@@ -7,8 +7,10 @@ logger = get_logger()
 
 class ToolPromptCompiler:
     def __init__(self, prompt: str, previous_results: Dict[str, Any], tool_registry: ToolRegistry = None, tool_names: Optional[List[str]] = None,
-                 recommended: Optional[List[str]] = None):
+                 recommended: Optional[List[str]] = None, history: str = ""):
+        """history: the last messages before the prompt (ToolExecutionTask._history), "" for none"""
         self.prompt = prompt
+        self.history = prompts.TOOL_SETUP_HISTORY_PART.format(history=history) if history else ""
         self.previous_results = previous_results
         self.tool_names = tool_names
         self.recommended = list(recommended or [])
@@ -30,7 +32,7 @@ class ToolPromptCompiler:
     def _build_first_prompt(self) -> tuple[str, str]:
         tools_definition = self._tools_definition()
         
-        return prompts.TOOL_SETUP_FIRST_PROMPT.format(prompt=self.prompt, tools=tools_definition)    
+        return prompts.TOOL_SETUP_FIRST_PROMPT.format(history=self.history, prompt=self.prompt, tools=tools_definition)    
 
     def _build_prompt(self) -> tuple[str, str]:
         tools_definition = self._tools_definition()
@@ -39,7 +41,7 @@ class ToolPromptCompiler:
             for i, t in enumerate(self.previous_results.values(), 1)
         )
         
-        return prompts.TOOL_SETUP_NEXT_PROMPT.format(prompt=self.prompt, previous_results=previous_results, tools=tools_definition)    
+        return prompts.TOOL_SETUP_NEXT_PROMPT.format(history=self.history, prompt=self.prompt, previous_results=previous_results, tools=tools_definition)    
 
     def build_prompt(self) -> tuple[str, str]:
         if len(self.previous_results) == 0:
