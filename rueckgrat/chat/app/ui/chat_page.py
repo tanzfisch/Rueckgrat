@@ -5,7 +5,7 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, FileCards, FilesPanel
+from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, PriceView, FileCards, FilesPanel
 from app.audio import Text_To_Speech
 from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig
 from app.common import get_logger, Utils
@@ -35,10 +35,10 @@ class ChatPage(BasePage):
         self._spoken_id = None      # the streaming reply that is spoken while it is written
         self._spoken_text = ""      # its text so far
         self._bubbles: dict[int, ChatBubble] = {}       # message id -> its bubble in the history
-        self._slots: dict[int, ft.Column] = {}          # message id -> the column of its bubble and button row, a poll or map goes in between
+        self._slots: dict[int, ft.Column] = {}          # message id -> the column of its bubble and button row, a poll, map or price ranking goes in between
         self._pending_images: dict[int, list[str]] = {}  # message id -> image file names that came before its bubble
         self._pending_files: dict[int, list] = {}       # message id -> text file cards that came before its bubble
-        self._pending_extras: dict[int, dict] = {}      # message id -> {"poll", "map"} pushed by a detached tool before its bubble
+        self._pending_data: dict[int, dict] = {}        # message id -> {kind: value} a tool pushed before its bubble (_set_data)
         self.user_role_name = ""   # set from the user's own character profile in on_enter
 
         self.files_panel = FilesPanel(on_close=self.toggle_files)
@@ -237,7 +237,7 @@ class ChatPage(BasePage):
         self._slots.clear()
         self._pending_images.clear()
         self._pending_files.clear()
-        self._pending_extras.clear()
+        self._pending_data.clear()
         self._play_btn = None
         self.history.controls = [self.status_row]
         self.history.update()
@@ -256,8 +256,7 @@ class ChatPage(BasePage):
             image_paths = [self._get_image(item["file_name"]) for item in message.get("attachments", [])
                            if str(item.get("file_type") or "").startswith("image/") and item.get("file_name")]
             self._append_history(message["role"], message["content"], image_paths, message_id=message["id"],
-                                 sources=message.get("sources"), poll=message.get("poll"), place=message.get("map"),
-                                 text_files=message.get("text_files"))
+                                 sources=message.get("sources"), data=message.get("data"), text_files=message.get("text_files"))
         # a reply still being made is already loaded with its text so far: skip its deltas, the final "chat" fills it
         self._finished_message_ids.update(self._bubbles)
 
@@ -364,7 +363,7 @@ class ChatPage(BasePage):
             self.audio_streamer = None
 
     def _append_history(self, role: str, content: str, image_filepaths: list[str] | None = None, message_id: int = None, 
-                        sources: list | None = None, poll: dict | None = None, place: dict | None = None, text_files: list | None = None) -> ChatBubble | None:
+                        sources: list | None = None, data: dict | None = None, text_files: list | None = None) -> ChatBubble | None:
         try:
             bubble = ChatBubble(role, content, image_filepaths)
             if message_id is not None:
@@ -397,10 +396,7 @@ class ChatPage(BasePage):
             self.history.controls.insert(self.history.controls.index(self.status_row), row)
             if message_id is not None:
                 self._slots[message_id] = bubble_slot
-                if poll:
-                    self._set_poll(message_id, poll)
-                if place:
-                    self._set_map(message_id, place)
+                self._set_data(message_id, data)
                 for spec in text_files or []:
                     self._set_files(message_id, spec)
             self.history.update()
@@ -409,24 +405,35 @@ class ChatPage(BasePage):
             logger.error(f"failed to append to history: {repr(e)}")
             return None            
 
-    def _set_poll(self, message_id: int, poll: dict):
-        try:
-            slot = self._slots.get(message_id)
-            if slot is None or any(isinstance(c.content, PollView) for c in slot.controls if isinstance(c, ft.Container)):
-                return
-            view = PollView(poll, on_submit=lambda chosen, m=message_id: self._submit_poll(m, chosen))
-            slot.controls.insert(1, ft.Container(content=view, margin=ft.Margin(left=0, top=8, right=0, bottom=0), **theme.STYLES["chat_assistant"]))
-        except Exception as e:
-            logger.error(f"failed to set poll: {repr(e)}")
+    def _data_view(self, message_id: int, kind: str, value: dict) -> ft.Control | None:
+        """the view of one kind of a message's data, None for a kind this client does not show"""
+        if kind == "poll":
+            return PollView(value, on_submit=lambda chosen: self._submit_poll(message_id, chosen))
+        if kind == "map":
+            return MapView(value)
+        if kind == "prices":
+            return PriceView(value)
+        return None
 
-    def _set_map(self, message_id: int, place: dict):
-        try:
-            slot = self._slots.get(message_id)
-            if slot is None or any(isinstance(c.content, MapView) for c in slot.controls if isinstance(c, ft.Container)):
-                return
-            slot.controls.insert(len(slot.controls) - 1, ft.Container(content=MapView(place), margin=ft.Margin(left=0, top=8, right=0, bottom=0), **theme.STYLES["chat_assistant"]))
-        except Exception as e:
-            logger.error(f"failed to set map: {repr(e)}")
+    def _set_data(self, message_id: int, data: dict | None):
+        """shows a message's data ({kind: value}) under its bubble, a view per kind: the poll right under the bubble, the others
+        above the button row. a kind pushed again replaces its view in place, a kind this client does not know is left out"""
+        slot = self._slots.get(message_id)
+        if slot is None or not isinstance(data, dict):
+            return
+        for kind, value in data.items():
+            try:
+                view = self._data_view(message_id, kind, value) if isinstance(value, dict) else None
+                if view is None:
+                    continue
+                container = ft.Container(content=view, data=kind, margin=ft.Margin(left=0, top=8, right=0, bottom=0), **theme.STYLES["chat_assistant"])
+                index = next((i for i, c in enumerate(slot.controls) if getattr(c, "data", None) == kind), None)
+                if index is not None:
+                    slot.controls[index] = container
+                else:
+                    slot.controls.insert(1 if kind == "poll" else len(slot.controls) - 1, container)
+            except Exception as e:
+                logger.error(f"failed to show {kind} data: {repr(e)}")
 
     def _set_files(self, message_id: int, spec: dict):
         try:
@@ -658,14 +665,14 @@ class ChatPage(BasePage):
                 else:
                     self._pending_files.setdefault(message_id, []).append(spec)
 
-            for kind, key, set_extra in (("poll", "poll", self._set_poll), ("map", "place", self._set_map)):
-                if kind in message and message[kind].get("conversation_id") == self.conversation_id:
-                    message_id = message[kind].get("message_id")
-                    if self._slots.get(message_id):
-                        set_extra(message_id, message[kind][key])
-                        self.history.update()
-                    else:
-                        self._pending_extras.setdefault(message_id, {})[kind] = message[kind][key]
+            if "data" in message and message["data"].get("conversation_id") == self.conversation_id:
+                pushed = message["data"]
+                message_id = pushed.get("message_id")
+                if self._slots.get(message_id):
+                    self._set_data(message_id, {pushed.get("kind"): pushed.get("value")})
+                    self.history.update()
+                else:
+                    self._pending_data.setdefault(message_id, {})[pushed.get("kind")] = pushed.get("value")
 
             if "cancelled" in message and message["cancelled"]["conversation_id"] == self.conversation_id:
                 self._drop_stream(message["cancelled"].get("message_id"))
@@ -696,9 +703,7 @@ class ChatPage(BasePage):
                             image_filenames = [message["generate_image"]["filename"]]
                     image_paths = [self._get_image(name) for name in image_filenames]
                     sources = chat.get("sources") or []
-                    extras = self._pending_extras.pop(message_id, {})
-                    poll = extras.get("poll")
-                    place = extras.get("map")
+                    data = self._pending_data.pop(message_id, {})
                     bubble = self._bubbles.get(message_id)
                     if bubble:
                         bubble.clear_content()
@@ -709,11 +714,8 @@ class ChatPage(BasePage):
                         if sources:
                             bubble.action_row.set_sources(sources)
                             self.history.update()
-                        if poll:
-                            self._set_poll(message_id, poll)
-                            self.history.update()
-                        if place:
-                            self._set_map(message_id, place)
+                        if data:
+                            self._set_data(message_id, data)
                             self.history.update()
                         files = self._pending_files.pop(message_id, None)
                         if files:
@@ -721,7 +723,7 @@ class ChatPage(BasePage):
                                 self._set_files(message_id, spec)
                             self.history.update()
                     else:
-                        self._append_history(role, content, image_paths, message_id=message_id, sources=sources, poll=poll, place=place,
+                        self._append_history(role, content, image_paths, message_id=message_id, sources=sources, data=data,
                                              text_files=self._pending_files.pop(message_id, None))
 
                     if message_id is not None and message_id == self._spoken_id:

@@ -37,12 +37,15 @@ class BashTool(Tool):
     open terminal the folder, exported variables and functions (SHELL_STATE), running processes do not"""
     description = prompts.BASH_DESCRIPTION
     sequential = True
+    thresholds = (0.6, 0.65)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
-        "Does this message ask to create, edit, list, read or delete files?",
-        "Does this message ask to run a shell command or a command line tool?",
-        "Does this message ask to clone, inspect or change a git repository?",
-        "Does this message ask to continue working on files from earlier in the conversation?",
-        "Does this message ask to create a program, a script or a software project?",
+        "Does the message ask to copy, move, rename, delete, list or unzip files or folders that already exist?",
+        "Does the message ask to run git, like clone, pull or status?",
+        "Does the message ask to install a package with pip, apt or npm?",
+        "Does the message ask how much disk space, memory or CPU the computer uses or has left?",
+        "Does the message ask to create a new folder?",
+        "Does the message ask to change the permissions of a file?",
+        "Does the message ask to search inside files or count the lines of a file?",
     ]
 
     @classmethod

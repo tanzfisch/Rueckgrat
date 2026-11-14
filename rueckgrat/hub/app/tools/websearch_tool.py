@@ -18,6 +18,7 @@ logger = get_logger()
 
 class WebsearchTool(Tool):
     description = prompts.WEBSEARCH_DESCRIPTION
+    thresholds = (0.7, 0.75)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask about recent news, like an election, protests, a disaster or a new product?",
         "Did the user ask who won last night's or this week's game?",
@@ -190,13 +191,13 @@ class WebsearchTool(Tool):
         attrs = " ".join(elem.get("class") or []) + " " + (elem.get("id") or "")
         return bool(self.OVERLAY.search(attrs)) and len(elem.get_text(" ", strip=True).split()) < self.OVERLAY_MAX_WORDS
 
-    def _structured_text(self, soup) -> str:
-        """text a page carries for search engines: json-ld articleBody (also of live blog updates), else og:description"""
-        bodies = []
+    @staticmethod
+    def _json_ld_nodes(soup) -> list:
+        """every json object in the page's json-ld scripts, outer ones before the ones inside them"""
+        nodes = []
         def walk(node):
             if isinstance(node, dict):
-                if isinstance(node.get("articleBody"), str):
-                    bodies.append(node["articleBody"].strip())
+                nodes.append(node)
                 for value in node.values():
                     walk(value)
             elif isinstance(node, list):
@@ -208,6 +209,11 @@ class WebsearchTool(Tool):
                 walk(json.loads(script.string or ""))
             except ValueError:
                 continue
+        return nodes
+
+    def _structured_text(self, soup) -> str:
+        """text a page carries for search engines: json-ld articleBody (also of live blog updates), else og:description"""
+        bodies = [node["articleBody"].strip() for node in self._json_ld_nodes(soup) if isinstance(node.get("articleBody"), str)]
         if bodies:
             return "\n".join(bodies)
         meta = soup.find("meta", property="og:description") or soup.find("meta", attrs={"name": "description"})
@@ -218,6 +224,7 @@ class WebsearchTool(Tool):
         instead of requests' latin-1 guess when the server sends none"""
         soup = BeautifulSoup(html, 'html.parser')
         structured = self._structured_text(soup)
+        extras = self._page_extras(soup, url)
 
         for tag in soup(["script", "style", "noscript", "iframe", "nav", "header", "footer", "aside", "form", "button", "svg"]):
             tag.decompose()
@@ -233,7 +240,15 @@ class WebsearchTool(Tool):
 
         images = [img.get('src') or img.get('data-src') or img.get('data-original')
                 for img in soup.find_all('img') if img.get('src') or img.get('data-src')]
-        return {"text": text, "images": images, "url": url}
+        return {"text": text, "images": images, "url": url, **extras}
+
+    def _page_extras(self, soup, url) -> Dict[str, Any]:
+        """more of a page for a subclass, read before scripts and overlays are removed (PriceFinderTool: the product)"""
+        return {}
+
+    def _readable(self, page: Dict[str, Any]) -> bool:
+        """whether a page has enough to read, else the search snippet is used"""
+        return len(page["text"]) >= self.MIN_PAGE_CHARS
 
     def _http_get(self, url):
         # pinned to the checked address, redirects checked hop by hop (url_check). raises FetchBlocked
@@ -283,7 +298,7 @@ class WebsearchTool(Tool):
                 if not page or len(rendered_page["text"]) > len(page["text"]):
                     page = rendered_page
 
-        if not page or len(page["text"]) < self.MIN_PAGE_CHARS:
+        if not page or not self._readable(page):
             logger.debug(f"was not able to get text from {url}")    # usual, the snippet is used then
             return None
         if len(page["text"]) < self.THIN_PAGE_CHARS * 2 and self.CHALLENGE.search(page["text"]):

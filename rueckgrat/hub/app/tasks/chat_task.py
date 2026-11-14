@@ -46,9 +46,7 @@ class ChatTask(Task):
                 if not content:
                     continue    # skip if empty to not confuse ai
                 if message["role"] == "assistant":
-                    note = (self._sources_line(message.get("sources"))
-                            + self._poll_line(message.get("poll"))
-                            + self._map_line(message.get("map"))).strip()
+                    note = (self._sources_line(message.get("sources")) + self._data_lines(message.get("data") or {})).strip()
                 elif message["role"] == "user" and note:
                     content = f"{note}\n\n{content}"
                     note = ""
@@ -90,6 +88,12 @@ class ChatTask(Task):
                 return
         messages.append({"role": "user", "content": text})
 
+    @classmethod
+    def _data_lines(cls, data: dict) -> str:
+        """a short line for each kind of data a past answer showed (db.set_message_data), kinds without a line are left out"""
+        lines = {"poll": cls._poll_line, "map": cls._map_line, "prices": cls._prices_line}
+        return "".join(line(data.get(kind)) for kind, line in lines.items())
+
     @staticmethod
     def _poll_line(poll) -> str:
         """one short line with the poll a past answer showed and what the user chose"""
@@ -111,6 +115,15 @@ class ChatTask(Task):
         if not isinstance(place, dict) or not place.get("display_name"):
             return ""
         return f"\nYou showed the user a map of {place['display_name']}."
+
+    @staticmethod
+    def _prices_line(prices) -> str:
+        """one short line with the top three of a price ranking a past answer showed"""
+        if not isinstance(prices, dict) or not prices.get("findings"):
+            return ""
+        top = "; ".join(f"{i}. {f.get('title')}: {f.get('price')} {f.get('currency')} at {f.get('shop')}"
+                        for i, f in enumerate(prices["findings"][:3], 1))
+        return f"\nYou showed the user a price ranking for {prices.get('query')}: {top}."
 
     @staticmethod
     def _sources_line(sources) -> str:

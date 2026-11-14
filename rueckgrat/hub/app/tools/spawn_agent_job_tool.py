@@ -20,6 +20,7 @@ class SpawnAgentJobTool(Tool):
     description = prompts.SPAWN_JOB_DESCRIPTION
     # scored on laya (/tmp/probe_spawn.py): jobs 0.44-0.90, chat messages (a how-to with a code block, explain, a follow-up
     # question, poem, weather) at most 0.38. "commanding you to put a task in the background" took a venv how-to for a job (0.66)
+    thresholds = (0.7, 0.75)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Is the user asking you to build a complete multi-file software project?",
         "Does the user tell you to work on it in the background?",

@@ -361,6 +361,7 @@ def convert(amount: Any, from_unit: str, to_unit: str) -> Dict[str, Any]:
 
 class ConversionTool(Tool):
     description = prompts.CONVERSION_DESCRIPTION
+    thresholds = (0.6, 0.65)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user want an amount in another unit or currency, like ml to cups, kg to pounds or euros to dollars?",
         "Does the user give a height, length or weight and want it in other units?",

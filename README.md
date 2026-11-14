@@ -23,6 +23,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **generate_image** — generate an image on request or on its own
     - **show_map** — show a place on an OpenStreetMap map in the chat, tapping it opens the maps app
     - **poll** — ask the user a question with options to pick from in the chat
+    - **price_finder** — looks for the best price of something and then shows you a ranked result in the chat
     - **remember** — keep a short fact about the user, per contact
     - **search_memory** — find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub)
     - **spawn_job** — hand a bigger task to a background agent job that reports back when it is done

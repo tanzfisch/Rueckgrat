@@ -87,6 +87,10 @@ ON_SCRIM = ft.Colors.WHITE
 INPUT_BAR = ft.Colors.SURFACE_CONTAINER_HIGH                 # message / prompt input bars
 CARD = ft.Colors.SURFACE_CONTAINER
 TEXT_VARIANT = ft.Colors.ON_SURFACE_VARIANT
+# the podium of a price ranking (PriceView): gold, silver, bronze and the text on them
+GOLD, SILVER, BRONZE = "#D4AF37", "#A8A9AD", "#CD7F32"
+MEDALS = (GOLD, SILVER, BRONZE)
+ON_MEDAL = "#1B1F20"
 
 RADIUS = 16
 
