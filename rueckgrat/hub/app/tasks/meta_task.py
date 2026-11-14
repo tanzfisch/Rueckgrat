@@ -138,7 +138,8 @@ class MetaTask(Task):
                 recommended_tools = detected.get("recommended") or [],
                 excluded_tools = self.tool_registry.REPLY_TOOLS,  # the reply calls these itself, see _run_reply_tools
                 message_id = self.message_id,
-                detach = lambda: self.turns.set_state(self, "detached")
+                detach = lambda: self.turns.set_state(self, "detached"),
+                history = 2     # the setup sees the last answer and the message before it: a quiz goes on
             )
             
             self.add_sub_task(tool_execution_task)

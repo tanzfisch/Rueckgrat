@@ -29,6 +29,10 @@ templates, filled with str.format (literal braces doubled):
   SPAWN_JOB_ATTACHMENTS_PART                  names: one "- name" line per held file
   SPAWN_JOB_CANCELLED_PROMPT                  prompt, name: the job's name
   SPAWN_JOB_FAILED_PROMPT                     prompt, name, reason
+  FIND_TOOLS_PART                             task: what the find_tools call asked a tool for
+  FIND_TOOLS_FOUND_PART, FIND_TOOLS_NONE_PART,
+  FIND_TOOLS_OFFERED_PART                     task, tools (not for none): the tools found, comma separated
+  FIND_TOOLS_ROUND_PART                       task: added to the original prompt of the rounds of the found tools
 """
 
 # ---------------------------------------------------------------- tool index, how the tools are offered (ToolRegistry, Tool)
@@ -384,6 +388,38 @@ Parameters:
 Example:
 {"tool": "remember", "text": "The user's sister is called Anna and lives in Hamburg"}
 """
+
+# ---------------------------------------------------------------- find_tools
+
+FIND_TOOLS_DESCRIPTION = "asks for the tools of a task that the offered tools can not do, they are offered in an extra round"
+
+FIND_TOOLS_PROMPT = """
+FIND TOOLS:
+Rarely needed: most answers need no tool at all. Do not call it unless one of these is true:
+- something that runs with a tool goes on in this answer, as the conversation before shows: e.g. a quiz asked as polls
+  continues with its next poll, or a game that shows maps shows the next one
+- the user clearly asks for something that needs a tool, and no offered tool can do it
+Never call it to chat, to answer from what you know, to tell a story, to give an opinion, or because a tool might help.
+Never call it for what an offered tool can do. When in doubt, do not call it.
+The tools that fit the task are offered to you in an extra round.
+
+Parameters:
+- task (string, required): one short sentence, written as the user would ask for it: what has to happen now, without
+  the content details (no questions, answers or lists of values)
+
+Examples:
+{"tool": "find_tools", "task": "Ask me the next quiz question as a poll."}
+{"tool": "find_tools", "task": "Show me the city I guessed on a map."}
+"""
+
+FIND_TOOLS_PART = "looked for the tools of: {task}"
+FIND_TOOLS_FOUND_PART = "looked for the tools of: {task}. found and offered: {tools}"
+FIND_TOOLS_NONE_PART = "looked for the tools of: {task}. no tool fits it"
+FIND_TOOLS_OFFERED_PART = "looked for the tools of: {task}. found {tools}, they were offered already"
+FIND_TOOLS_ROUND_PART = """
+
+THE TASK THE TOOLS WERE FOUND FOR
+{task}"""
 
 # ---------------------------------------------------------------- search_memory
 

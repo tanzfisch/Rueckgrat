@@ -17,9 +17,10 @@ Changelog
 - #184 bash tool
 - #186 file browser for conversation files
 - agents have access to their own sandbox file system to work on projects
-- #187 price finder
+- #187 added price finder tool
 - preview of text files in chat without downloading
 - added tools to tune laya tool detection
+- #189 AI can ask actively for tools to use
 
 0.26.0
 ------
