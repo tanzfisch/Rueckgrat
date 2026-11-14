@@ -1,11 +1,10 @@
 from .task_queue import Task
+from . import prompts
 from typing import Dict, Any
-import json
-import re
 import random
 import datetime
 
-from app.common import get_logger, ChatRequest, Utils
+from app.common import get_logger, Utils
 logger = get_logger()
 
 # the prompt must fit one llama slot: LLAMA_SERVER_MAX_CONTEXT 8192 / LLAMA_SERVER_N_PARALLEL 2 (compose.yml, the node's .env,
@@ -33,11 +32,14 @@ def fit_tokens(text: str, max_tokens: float) -> str:
     return text
 
 class FindAnswerTask(Task):
+    PROMPT = prompts.FIND_ANSWER_PROMPT     # information, question, today
+
     def __init__(self, question: str, information: str, infrastructure):
         super().__init__()
         self.question = question
         self.information = information
         self.infrastructure = infrastructure
+        self.answer = None
 
     def execute(self) -> None:
         try:
@@ -45,32 +47,15 @@ class FindAnswerTask(Task):
         except Exception as e:
             logger.error(f"failed to update context {repr(e)}")
 
-    def result(self) -> Dict[str, Any]:
+    def get_result(self) -> Dict[str, Any]:
         return self.answer
        
     def _find_answer(self):
         try:
             messages = []
             information = fit_tokens(self.information, CONTEXT_TOKENS - REPLY_TOKENS - PROMPT_TOKENS - estimate_tokens(self.question))
-            query = f"""
-Find the answer to a search query in a given text. 
-
-TEXT:
-{information}
-
-SEARCH QUERY:
-{self.question}
-
-Respond with a json structure like this:
-{{
-    "answer": "the answer to the question",
-    "quality": 1-10
-}}
-
-Give a concise answer (maximum of 100 words).
-Rate the quality of the source from 1 to 10 in terms of how well it answeres the question and how current the information is.
-Today is {datetime.date.today().strftime("%A, %d %B %Y")}.
-"""
+            query = self.PROMPT.format(information=information, question=self.question,
+                                       today=datetime.date.today().strftime("%A, %d %B %Y"))
             
             #logger.debug(f"find answer query:\n{query}")
 
@@ -93,12 +78,13 @@ Today is {datetime.date.today().strftime("%A, %d %B %Y")}.
             logger.error(f"failed to read answer from:\n{response_content}") 
             return None
 
-        # making sure we can guarantee a certain json structure
-        answer = {
+        return self._answer(reply)
+
+    def _answer(self, reply) -> Dict[str, Any]:
+        """the reply's json in a certain structure"""
+        return {
             "answer": Utils.get_nested_value(reply, ["answer"], "no answer"),
             "quality": Utils.get_nested_value(reply, ["quality"], 0),
         }
-
-        return answer
 
     

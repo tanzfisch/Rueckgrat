@@ -1,6 +1,7 @@
 from typing import Dict,  Any
 from datetime import date, datetime, timedelta
-from .tool import Tool, ToolCategory
+from .tool import Tool
+from . import prompts
 from .current_time_tool import resolve_timezone
 
 from app.common import get_logger, MessageQueue
@@ -58,12 +59,15 @@ def date_calc(start, end=None, days=None, timezone="UTC") -> str:
 
 
 class DateCalcTool(Tool):
-    category = ToolCategory.TIME
-    description = "days between two dates, or a date plus/minus a number of days"
-    question = ["Does the user name a date and want to count the days to it or from it?"]
+    description = prompts.DATE_CALC_DESCRIPTION
+    thresholds = (0.5, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    question = [
+        "Does the user ask how many days, weeks or months are left until something or have passed since something?",
+        "Does the user ask how long it is until or since a day, a date, a holiday or an event?",
+    ]
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
@@ -91,23 +95,8 @@ class DateCalcTool(Tool):
             logger.error(f"failed to calculate dates {repr(e)}")
             result = {"tool": self.name(), "error": "date calculation failed"}
 
-        self.response.setdefault("tool_results", []).append(result)
+        self.add_result(result)
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-DATE CALCULATION:
-Use for days between two dates or a date plus/minus a number of days. Dates are YYYY-MM-DD or "today".
-
-Parameters:
-- start (string, required): start date
-- end (string, optional): end date (for difference)
-- days (number, optional): number of days to add/subtract
-- timezone (string, required): IANA name or city
-
-Example (difference):
-{"tool": "date_calc", "start": "today", "end": "2026-12-25", "timezone": "Pacific/Auckland"}
-
-Example (offset):
-{"tool": "date_calc", "start": "today", "days": 90, "timezone": "Pacific/Auckland"}
-"""
+        return prompts.DATE_CALC_PROMPT

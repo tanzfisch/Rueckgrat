@@ -27,11 +27,13 @@ services:
       - hub_db:/hub/db
       - hub_images:/hub/images
       - hub_voices:/hub/voices
+      - hub_files:/hub/files
       - ../characters:/hub/characters:ro
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
       - ${HOST_MODELS_DIR:-/var/lib/Rueckgrat/models}:/hub/models
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./logs:/hub/logs
     group_add: ["989"]
     environment:
       SIGNUP_MODE: ${SIGNUP_MODE:-open}
@@ -44,6 +46,9 @@ services:
       HUB_MAINTENANCE_BATCH: ${HUB_MAINTENANCE_BATCH:-50}
       HUB_MAINTENANCE_INTERVAL: ${HUB_MAINTENANCE_INTERVAL:-15}
       HUB_MAINTENANCE_SMALL_BATCH: ${HUB_MAINTENANCE_SMALL_BATCH:-10}
+      LLAMA_SERVER_MAX_CONTEXT: ${LLAMA_SERVER_MAX_CONTEXT:-}
+      LLAMA_SERVER_N_PARALLEL: ${LLAMA_SERVER_N_PARALLEL:-}
+      RUECKGRAT_TRACE: ${RUECKGRAT_TRACE:-}
     restart: unless-stopped
     stdin_open: true
     tty: true
@@ -125,4 +130,5 @@ volumes:
   hub_db:
   hub_images:
   hub_voices:
+  hub_files:
   chat_cache:

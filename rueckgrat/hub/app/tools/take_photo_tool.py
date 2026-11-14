@@ -1,17 +1,17 @@
 from typing import Dict,  Any, Optional
-from .tool import Tool, ToolCategory
+from .image_tool import ImageTool
+from . import prompts
 from app.tasks.assistant_image_task import AssistantImageTask
 
-from app.common import get_logger, MessageQueue, Utils
+from app.common import get_logger, MessageQueue
 logger = get_logger()
 
-class TakePhotoTool(Tool):
-    category = ToolCategory.MEDIA
-    description = "takes a photo of yourself, the user or both in the current situation"
+class TakePhotoTool(ImageTool):
+    description = prompts.TAKE_PHOTO_DESCRIPTION
     question = []
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
@@ -40,7 +40,7 @@ class TakePhotoTool(Tool):
             width = height
             height = temp
 
-        assistant_image_job = AssistantImageTask(
+        assistant_image_task = AssistantImageTask(
             user_id = self.user_id,
             contact_id = self.contact_id,
             conversation_id = self.conversation_id, 
@@ -51,48 +51,25 @@ class TakePhotoTool(Tool):
             width = width,
             height = height
         )
-        return assistant_image_job
-
-    def attach_planned_image(self, image_job) -> None:
-        """attaches the image file of image_job (not started yet) to the message in tool_call["message_id"].
-        the file name is the hash of the request the job will build (output ""), so it is known before
-        the image exists. the image job itself knows nothing about messages"""
-        message_id = self.tool_call.get("message_id")
-        if not message_id or message_id < 0:
-            logger.warning(f"{self.name()}: no message id, image not attached")
-            return
-        try:
-            image_filename = f"{Utils.hash_image_request(image_job.build_request())}.png"
-            self.db.add_attachment(message_id, image_filename, f"images/{image_filename}", "image/png", 0)
-            logger.debug(f"{self.name()}: attached planned file {image_filename} to message {message_id}")
-            # tell the client now, the image itself takes minutes. it shows the placeholder and starts the download
-            MessageQueue().send_data({
-                "attachment": {
-                    "conversation_id": self.conversation_id,
-                    "message_id": message_id,
-                    "filename": image_filename
-                }
-            })
-        except Exception as e:
-            logger.error(f"{self.name()}: failed to attach the planned image {repr(e)}")
+        return assistant_image_task
 
     def execute(self) -> None:
-        assistant_image_job = self.create_image_job()
-        if not assistant_image_job:
+        assistant_image_task = self.create_image_job()
+        if not assistant_image_task:
             return None
-        self.attach_planned_image(assistant_image_job)
+        self.attach_planned_image(assistant_image_task)
 
         logger.debug(f"taking picture of \"{self.tool_call['subject']}\" ...")
         MessageQueue().send_status_message("taking a picture")
 
-        self.add_sub_job(assistant_image_job)
-        self.wait_for([assistant_image_job])
-        image = (assistant_image_job.result() or {}).get("image")
+        self.add_sub_task(assistant_image_task)
+        self.wait_for([assistant_image_task])
+        image = (assistant_image_task.get_result() or {}).get("image")
 
         if not image:
             # generation failed, but the file name and its parameters (images table) are already stored.
             # attach the planned file anyway, the hub's ImageStore generates it again when it gets downloaded
-            output_file = getattr(assistant_image_job, "output_file", None)
+            output_file = getattr(assistant_image_task, "output_file", None)
             if output_file:
                 logger.warning(f"take_photo failed, attaching {output_file} for lazy regeneration")
                 image = {"filename": output_file, "image_path": f"images/{output_file}"}
@@ -100,17 +77,16 @@ class TakePhotoTool(Tool):
                 logger.error("take_photo failed before a file name was planned, no attachment")
                 return None
 
-        self.response["take_photo"] = image        
+        result = {
+            "tool": self.name(),
+            "text": "took a picture",
+            "take_photo": image
+        }
+        self.add_result(self.held(result, image, prompts.IMAGE_ATTACHED_NOTE_PART))
+
+    def planned_text(self) -> str:
+        return prompts.TAKE_PHOTO_PLANNED_PART
 
     @classmethod
     def prompt(cls) -> str: 
-        return """
-TAKE PHOTO:
-Use sparingly, only when you genuinely want to take a photo of yourself, the user, or both in the current situation. Do not use for every request. Also use when the user explicitly asks for one or if you want to demonstrate something to the user.
-
-Parameters:
-- subject (string, required): "self", "user", or "both"
-
-Example:
-{"tool": "take_photo", "subject": "both"}
-"""
+        return prompts.TAKE_PHOTO_PROMPT

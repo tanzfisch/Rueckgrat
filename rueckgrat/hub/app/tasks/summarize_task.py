@@ -1,6 +1,8 @@
 from .task_queue import Task
+from . import prompts
 from typing import Optional
 import random
+from typing import Dict, Any
 
 from app.common import get_logger
 from app.utils.content_filter import strip_html_boilerplate, strip_text_noise
@@ -28,8 +30,8 @@ class SummarizeTask(Task):
         except Exception as e:
             logger.error(f"failed to summarize {repr(e)}")
 
-    def result(self) -> Optional[str]:
-        return self.summary
+    def get_result(self) -> Dict[str, Any]:
+        return {"summary": self.summary}
 
     def _prepare(self) -> str:
         """filter first, then cap, so max_chars is spent on content and not on menus"""
@@ -42,17 +44,12 @@ class SummarizeTask(Task):
             logger.warning(f"nothing to summarize, only {len(content)} characters left after cleanup")
             return None
 
-        focus = f"\nFocus on: {self.focus}" if self.focus else ""
-        query = f"""TEXT:
-{content}
-
-Summarize the main content of the TEXT in at most {self.max_words} words.{focus}
-Leave out navigation, ads and cookie notices. Reply with the summary only.
-"""
+        focus = prompts.SUMMARIZE_FOCUS_PART.format(focus=self.focus) if self.focus else ""
+        query = prompts.SUMMARIZE_PROMPT.format(content=content, max_words=self.max_words, focus=focus)
         logger.debug(f"summarize query:\n{query}")
 
         messages = [
-            {"role": "system", "content": "You summarize web pages accurately. Use only the given text."},
+            {"role": "system", "content": prompts.SUMMARIZE_SYSTEM_PROMPT},
             {"role": "user", "content": query},
         ]
         response_content = self.infrastructure.chat(

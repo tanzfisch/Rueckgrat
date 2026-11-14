@@ -1,11 +1,13 @@
 import random
 import re
 from datetime import datetime, timezone
-
+from typing import Dict, Any
 from app.tasks.task_queue import Task
 from app.utils.embeddings import embed_text
 from app.utils.clock import to_db
 from .sweeper import MaintenanceTask
+from .conversation_volumes import ConversationVolumeMaintenanceTask
+from . import prompts
 
 from app.common import get_logger
 logger = get_logger()
@@ -26,7 +28,7 @@ class ConversationSummaryMaintenanceTask(MaintenanceTask):
     def pending(self, user_id, limit):
         return self.db.conversations_to_summarize(user_id, limit)
 
-    def job(self, item):
+    def get_task(self, item):
         return ConversationSummaryTask(item, self.db, self.infrastructure)
 
     def status(self):
@@ -36,6 +38,7 @@ def maintenance_tasks(db, infrastructure) -> list[MaintenanceTask]:
     """the hub's maintenance tasks in run order, for the nightly sweeper and hub management. a new task goes here"""
     return [
         ConversationSummaryMaintenanceTask(db, infrastructure),
+        ConversationVolumeMaintenanceTask(db),
     ]
 
 class ConversationSummaryTask(Task):
@@ -55,8 +58,10 @@ class ConversationSummaryTask(Task):
             self.outcome = f"failed {repr(e)}"
             raise
 
-    def result(self) -> str:
-        return f"conversation {self.item['id']}: {self.outcome}"
+    def get_result(self) -> Dict[str, Any]:
+        return {
+            "summary": f"conversation {self.item['id']}: {self.outcome}"
+        }
 
     def _run(self) -> str:
         conversation_id, summary = self.item["id"], self.item["summary"]
@@ -82,16 +87,11 @@ class ConversationSummaryTask(Task):
         if not lines:
             return None
 
-        earlier = f"EARLIER SUMMARY (of this conversation, may be out of date):\n{previous}\n\n" if previous else ""
-        query = f"""{earlier}MESSAGES:
-{chr(10).join(lines)}
-
-Summarize the whole conversation in at most {MAX_WORDS} words, so it can be found again later by its content.
-Name the topics, people, places, plans, decisions and facts the user shared. Keep what still matters from the earlier summary.
-Plain text, no lists, no preface. Reply with the summary only."""
+        earlier = prompts.SUMMARY_EARLIER_PART.format(previous=previous) if previous else ""
+        query = prompts.SUMMARY_PROMPT.format(earlier=earlier, messages=chr(10).join(lines), max_words=MAX_WORDS)
         content = self.infrastructure.chat(
             messages=[
-                {"role": "system", "content": "You write short, factual summaries of chat conversations. Use only the given text."},
+                {"role": "system", "content": prompts.SUMMARY_SYSTEM_PROMPT},
                 {"role": "user", "content": query},
             ],
             temperature=0.2,

@@ -1,11 +1,13 @@
 import os
-import re
 from threading import Lock
 
 from app.common import get_logger, Utils
+from app.common.text_chunks import split_into_chunks
 logger = get_logger()
 
-MAX_STATE_CHARS = 1500  # ~350 tokens, older text is cut at the front. the question itself takes ~50
+# the state is scored chunk by chunk, each question keeps its best answer over all chunks
+MIN_CHUNK_WORDS = 8     # about 50 chars, so short sentences are scored on their own, like the old splitter
+MAX_CHUNK_WORDS = 150   # about 1500 chars / 350 tokens, a run-on text without sentence ends is cut there
 MODELS_DIR = "/node/models"
 DECISION_MODEL = "laya"   # registry.json entry, loaded with the laya package
 
@@ -21,26 +23,6 @@ class DecisionModel:
         self.load_lock = Lock()
         self.predict_lock = Lock()   # one forward pass at a time
         logger.info("startup decision interface")
-
-    def _split_into_sentence_chunks(self, text: str, max_chars: int) -> list[str]:
-        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-        chunks = []
-        current = ""
-
-        for sent in sentences:
-            sent = sent.strip()
-            if not sent:
-                continue
-            # Start new chunk if adding this sentence exceeds limit
-            if current and len(current) + len(sent) + 1 > max_chars:
-                chunks.append(current)
-                current = sent
-            else:
-                current = f"{current} {sent}".strip() if current else sent
-
-        if current:
-            chunks.append(current)
-        return chunks
 
     def _load(self, source: str = "request"):
         with self.load_lock:
@@ -70,7 +52,7 @@ class DecisionModel:
 
         #logger.debug(f"all answers:\n{Utils.pretty_print(questions)}")
 
-        chunks = self._split_into_sentence_chunks(state, MAX_STATE_CHARS)
+        chunks = split_into_chunks(state, MIN_CHUNK_WORDS, MAX_CHUNK_WORDS)
         for chunk in chunks:
             with self.predict_lock:
                 partial = agent.predict(chunk, questions)

@@ -1,0 +1,151 @@
+{"lang": "en", "text": "I'd like to start a new project but I don't know what it should be about. Please create a multi round questionaire to guide me.", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Quiz me on the capitals of Europe, one question at a time.", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Help me decide which laptop to buy by asking me a few questions.", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Can you make a little survey for me about my eating habits?", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Ask me some questions to figure out which dog breed suits me.", "labels": {"poll": "M"}}
+{"lang": "en", "text": "I can't decide where to go on holiday, guide me with a few multiple choice questions.", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Give me a personality test with several rounds of questions.", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Interview me to find out what career would suit me.", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Make a poll for my friends about where we go on Saturday.", "labels": {"poll": "M"}}
+{"lang": "en", "text": "What is a poll and how do polling companies pick the people they ask?", "labels": {"wikipedia": "r", "websearch": "r"}}
+{"lang": "en", "text": "Write a customer satisfaction questionnaire as a Word document I can print.", "labels": {"write_file": "M"}}
+{"lang": "en", "text": "Create a python script that reads a CSV file and plots a chart.", "labels": {"spawn_job": "r"}}
+{"lang": "en", "text": "What's the capital of Australia and how many people live there?", "labels": {"wikipedia": "M", "websearch": "r"}}
+{"lang": "en", "text": "Fix the crash in the snake game you made earlier.", "labels": {"spawn_job": "r"}}
+{"lang": "en", "text": "Who won the election in Germany last week?", "labels": {"websearch": "M"}}
+{"lang": "en", "text": "Can you explain how vaccines work in the human body?", "labels": {"wikipedia": "r", "websearch": "M"}}
+{"lang": "en", "text": "Save this questionnaire to a file: 1. Name? 2. Age? 3. Hobbies?", "labels": {"write_file": "M"}}
+{"lang": "en", "text": "I'd like to start a new coding project, set up a Flask app with a login page.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "My survey results show 60% prefer tea, what does that mean for my cafe?", "labels": {}}
+{"lang": "en", "text": "How do I write a good multiple choice exam for my students?", "labels": {}}
+{"lang": "en", "text": "Write me ten quiz questions about space with the answers below them.", "labels": {"poll": "r"}}
+{"lang": "en", "text": "Build a complete snake game in python with separate files for the game logic and the graphics.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Write a bash script that backs up my home folder every night.", "labels": {"write_file": "M", "spawn_job": "r"}}
+{"lang": "en", "text": "Design a logo for my coffee shop called Bean There.", "labels": {"generate_image": "M"}}
+{"lang": "en", "text": "Continue with the files from before and add a settings page.", "labels": {"spawn_job": "r"}}
+{"lang": "en", "text": "Make me a poster for our school's summer fair.", "labels": {"generate_image": "M"}}
+{"lang": "en", "text": "Create a React app with a todo list, a Node backend and a database.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Check the bitcoin price every hour and tell me when it drops below 50k.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Make me a website for my band with a gallery, a tour page and a contact form.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Program a tetris clone in javascript.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "What's the best price for Sony WH-1000XM5 headphones in New Zealand?", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "Where can I get the cheapest iPhone 16 Pro?", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "Find me a lawn mower with 21 inch cutting width and a petrol engine.", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "How much does a Nintendo Switch 2 cost at the moment?", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "I want to buy an espresso machine under 500 dollars, what are the best deals?", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "Find me a 27 inch 4K gaming monitor at a good price.", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "Where can I buy a Raspberry Pi 5 the cheapest?", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "Find the best price for Asics Gel-Kayano 31 running shoes.", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "Search the shops for AirPods Pro 2 deals.", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "I need a cordless drill, what's the best value one I can buy?", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "Find me a 4 person tent with a vestibule under 400 dollars.", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "Cheapest place to buy a PS5 right now?", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "Compare prices for the Makita 18V impact driver.", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "What's the price of a Weber Q1200 BBQ in NZ?", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "Compare prices for the Dyson V15 vacuum.", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "You are Julia and you have a life of your own between conversations with the user. Plan your day. the first day, plan the rest of today", "labels": {}}
+{"lang": "en", "text": "My new phone cost 1200 dollars, was that too much?", "labels": {"websearch": "r"}}
+{"lang": "en", "text": "I bought a new lawn mower yesterday and it works great.", "labels": {}}
+{"lang": "en", "text": "Which features should a good lawn mower have?", "labels": {"websearch": "r"}}
+{"lang": "en", "text": "Will it rain in Auckland tomorrow?", "labels": {"weather": "M"}}
+{"lang": "en", "text": "What time is it in Tokyo right now?", "labels": {"current_time": "M"}}
+{"lang": "en", "text": "Convert 5 kg to pounds please.", "labels": {"convert": "M"}}
+{"lang": "en", "text": "What is an 18% tip on a 64 dollar bill?", "labels": {"calculate": "M"}}
+{"lang": "en", "text": "How many days are left until Christmas?", "labels": {"date_calc": "M"}}
+{"lang": "en", "text": "Show me where the Eiffel Tower is on a map.", "labels": {"show_map": "M", "wikipedia": "r"}}
+{"lang": "en", "text": "Who was Napoleon Bonaparte and why is he famous?", "labels": {"wikipedia": "M", "websearch": "r"}}
+{"lang": "en", "text": "What's the latest news about the Mars mission?", "labels": {"websearch": "M"}}
+{"lang": "en", "text": "Hi, how are you doing today?", "labels": {}}
+{"lang": "en", "text": "Please remember that my sister's name is Anna.", "labels": {}}
+{"lang": "en", "text": "Create a folder called projects in my home directory.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Clone the repo https://github.com/tanzfisch/Igor into my dev folder.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "List all the files in the current directory.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Delete the tmp folder and everything in it.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Install numpy and pygame with pip.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Show me how much disk space is left.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Run git status in my project folder.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Unzip the archive data.zip into a folder named data.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Rename report.txt to report_2026.txt.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Find all python files that contain the word TODO.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Check which processes are using the most memory.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Pull the latest changes from the main branch.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Make the script start.sh executable.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Copy all the images from downloads into the photos folder.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "Count how many lines the file main.py has.", "labels": {"bash": "M"}}
+{"lang": "en", "text": "What is 17 times 243?", "labels": {"calculate": "M"}}
+{"lang": "en", "text": "Calculate the square root of 1764.", "labels": {"calculate": "M"}}
+{"lang": "en", "text": "What's 15% of 380?", "labels": {"calculate": "M"}}
+{"lang": "en", "text": "Add up 12.50, 8.75 and 23.40 for me.", "labels": {"calculate": "M"}}
+{"lang": "en", "text": "If I save 250 dollars a month, how much do I have after 3 years?", "labels": {"calculate": "M"}}
+{"lang": "en", "text": "What is 2 to the power of 32?", "labels": {"calculate": "M"}}
+{"lang": "en", "text": "Split a 186 dollar bill between 4 people.", "labels": {"calculate": "M"}}
+{"lang": "en", "text": "How many centimetres are 6 feet 2 inches?", "labels": {"convert": "M"}}
+{"lang": "en", "text": "Convert 100 Fahrenheit to Celsius.", "labels": {"convert": "M"}}
+{"lang": "en", "text": "How many litres are in 5 gallons?", "labels": {"convert": "M"}}
+{"lang": "en", "text": "What is 250 euros in New Zealand dollars?", "labels": {"convert": "M"}}
+{"lang": "en", "text": "Convert 60 miles per hour to km/h.", "labels": {"convert": "M"}}
+{"lang": "en", "text": "How many cups is 500 ml?", "labels": {"convert": "M"}}
+{"lang": "en", "text": "What time is it right now?", "labels": {"current_time": "M"}}
+{"lang": "en", "text": "What's the time in London at the moment?", "labels": {"current_time": "M"}}
+{"lang": "en", "text": "Is it night in New York right now?", "labels": {"current_time": "M"}}
+{"lang": "en", "text": "What's the current time in Berlin?", "labels": {"current_time": "M"}}
+{"lang": "en", "text": "Tell me the time in Sydney.", "labels": {"current_time": "M"}}
+{"lang": "en", "text": "What day of the week is the 25th of December 2026?", "labels": {"date_calc": "M"}}
+{"lang": "en", "text": "How many days are between March 3 and July 19?", "labels": {"date_calc": "M"}}
+{"lang": "en", "text": "What date is 90 days from today?", "labels": {"date_calc": "M"}}
+{"lang": "en", "text": "How old is someone born on 12 May 1984?", "labels": {"date_calc": "M"}}
+{"lang": "en", "text": "How many weeks until the 1st of February?", "labels": {"date_calc": "M"}}
+{"lang": "en", "text": "What was the date 100 days ago?", "labels": {"date_calc": "M"}}
+{"lang": "en", "text": "Draw a cat wearing a space helmet.", "labels": {"generate_image": "M"}}
+{"lang": "en", "text": "Generate a picture of a sunset over the mountains.", "labels": {"generate_image": "M"}}
+{"lang": "en", "text": "Make an icon for my weather app.", "labels": {"generate_image": "M"}}
+{"lang": "en", "text": "Create an image of a dragon flying over a castle.", "labels": {"generate_image": "M"}}
+{"lang": "en", "text": "Paint a watercolour of a lighthouse in a storm.", "labels": {"generate_image": "M"}}
+{"lang": "en", "text": "Make me a birthday card picture with balloons.", "labels": {"generate_image": "M"}}
+{"lang": "en", "text": "Show me Wellington on a map.", "labels": {"show_map": "M"}}
+{"lang": "en", "text": "Where is Palmerston North? Show it on a map.", "labels": {"show_map": "M"}}
+{"lang": "en", "text": "Put the Sky Tower in Auckland on a map.", "labels": {"show_map": "M"}}
+{"lang": "en", "text": "Show me Lake Taupo on a map.", "labels": {"show_map": "M"}}
+{"lang": "en", "text": "Can you show me where Machu Picchu is?", "labels": {"show_map": "M"}}
+{"lang": "en", "text": "Let's vote: pizza, sushi or burgers for dinner?", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Give me a multiple choice question about the solar system.", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Give me some options which colour I should use for the website", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Create a quiz about world flags.", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Run a poll on which movie we watch tonight.", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Test my knowledge of Python with a few questions.", "labels": {"poll": "M"}}
+{"lang": "en", "text": "Run this: print(sum(range(100)))", "labels": {"run_code": "M"}}
+{"lang": "en", "text": "What does this output? for i in range(3): print(i * i)", "labels": {"run_code": "M"}}
+{"lang": "en", "text": "Execute this python: import math; print(math.factorial(20))", "labels": {"run_code": "M"}}
+{"lang": "en", "text": "Does this code work? print(sorted([3, 1, 2]))", "labels": {"run_code": "M"}}
+{"lang": "en", "text": "Run this snippet and tell me the result: x = [1, 2, 3]; print(x[::-1])", "labels": {"run_code": "M"}}
+{"lang": "en", "text": "Write a complete chess game with a GUI in python.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Build me a REST API with user accounts and a database.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Create a full web shop with a cart, checkout and admin page.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Make a 2D platformer game with several levels.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Develop a desktop app for tracking my expenses.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "What's the weather like in Wellington today?", "labels": {"weather": "M"}}
+{"lang": "en", "text": "Do I need an umbrella tomorrow in Palmerston North?", "labels": {"weather": "M"}}
+{"lang": "en", "text": "How hot will it be in Christchurch this weekend?", "labels": {"weather": "M"}}
+{"lang": "en", "text": "Is it going to snow in Queenstown this week?", "labels": {"weather": "M"}}
+{"lang": "en", "text": "What's the forecast for Napier on Saturday?", "labels": {"weather": "M"}}
+{"lang": "en", "text": "What are the opening hours of the Te Papa museum?", "labels": {"websearch": "M"}}
+{"lang": "en", "text": "Search the web for the newest Linux kernel release.", "labels": {"websearch": "M"}}
+{"lang": "en", "text": "What's the score of the All Blacks game today?", "labels": {"websearch": "M"}}
+{"lang": "en", "text": "Find reviews of the new Toyota RAV4.", "labels": {"websearch": "M"}}
+{"lang": "en", "text": "Look up the current exchange rate trends for the NZ dollar.", "labels": {"websearch": "M"}}
+{"lang": "en", "text": "What movies are showing in cinemas this week?", "labels": {"websearch": "M"}}
+{"lang": "en", "text": "Tell me about the history of the Roman Empire.", "labels": {"wikipedia": "M", "websearch": "r"}}
+{"lang": "en", "text": "What is photosynthesis?", "labels": {"wikipedia": "M", "websearch": "r"}}
+{"lang": "en", "text": "Who wrote Pride and Prejudice?", "labels": {"wikipedia": "M", "websearch": "r"}}
+{"lang": "en", "text": "Explain the theory of relativity.", "labels": {"wikipedia": "M", "websearch": "r"}}
+{"lang": "en", "text": "What is the tallest mountain in New Zealand?", "labels": {"wikipedia": "M", "websearch": "r"}}
+{"lang": "en", "text": "Write my CV as a text file I can download.", "labels": {"write_file": "M"}}
+{"lang": "en", "text": "Save the shopping list as a file.", "labels": {"write_file": "M"}}
+{"lang": "en", "text": "Create a markdown file with the meeting notes.", "labels": {"write_file": "M"}}
+{"lang": "en", "text": "Put these addresses into a CSV file for me.", "labels": {"write_file": "M"}}
+{"lang": "en", "text": "Make a downloadable text file with the recipe.", "labels": {"write_file": "M"}}
+{"lang": "en", "text": "Where's the best deal on a Samsung 65 inch TV?", "labels": {"price_finder": "M"}}
+{"lang": "en", "text": "Find the cheapest Kindle Paperwhite.", "labels": {"price_finder": "M"}}
+{"lang": "en", "text": "Find me running shoes under 150 dollars.", "labels": {"price_finder": "M"}}
+{"lang": "en", "text": "list me all files in my home folder", "labels": {"bash": "M"}}
+{"lang": "en", "text": "call the command ls -la ~", "labels": {"bash": "M"}}

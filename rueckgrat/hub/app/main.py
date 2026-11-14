@@ -20,14 +20,13 @@ from fastapi.security import HTTPBearer
 from fastapi.concurrency import run_in_threadpool
 
 from pydantic import BaseModel
-from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from app.utils import ChatDB, Infrastructure, ImageType, ImageStore, fence_code
 from app.tools import ToolRegistry, SpawnAgentJobTool
 from app.tools.map_tool import get_tile
 from app.agent_jobs import AgentJob
 from app.tasks import TaskQueue, MetaTask, AssistantImageTask, ContactGeneratorTask, TranslateTask, GenerateImageTask
-from app.tasks.meta_task import Turns
+from app.tasks.turns import Turns
 from app.utils.tts_stream import TtsStreams
 from app.companion import CompanionScheduler
 from app.utils.clock import DEFAULT_TIMEZONE
@@ -42,18 +41,19 @@ from datetime import datetime, timedelta, timezone
 from app.common import get_logger, set_log_level, Utils, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
 logger = get_logger()
 
-# every message the hub sends belongs to one user (MessageQueue per user), never to whoever pops next
-MessageQueue.require_user = True
+DB_PATH = "/hub/db/chat.db"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    MessageQueue.set_require_user(True)
+
     logger.info("connecting infrastructure")
     app.state.infrastructure = Infrastructure()
     await app.state.infrastructure.connect_nodes()
 
     logger.info("loading db")
-    db_path = "/hub/db/chat.db"
-    app.state.db = ChatDB(db_path)
+    
+    app.state.db = ChatDB(DB_PATH)
     stale_jobs = app.state.db.fail_stale_jobs()     # their threads died with the last hub, before any new job can start
     if stale_jobs:
         logger.info(f"{stale_jobs} interrupted job(s) set to failed")
@@ -74,7 +74,8 @@ async def lifespan(app: FastAPI):
     # agent jobs (spawned jobs and companions) write into conversations: not while a reply is made, pushed only to an open /ws,
     # the message is in the db anyway
     app.state.connections = Counter()   # user_id -> open /ws connections
-    AgentJob.turns, AgentJob.connections = app.state.turns, app.state.connections
+    AgentJob.set_turns(app.state.turns)
+    AgentJob.connections = app.state.connections
     SpawnAgentJobTool.tool_registry = app.state.tool_registry    # the job's workers use the tools like a chat reply
 
     # proactive companions: a CompanionJob per due row of their calendars
@@ -636,6 +637,10 @@ def delete_conversation(conversation_id: int, username: str = Depends(get_curren
     image_keys = app.state.db.get_conversation_image_keys(conversation_id)
     if app.state.db.delete_conversation(conversation_id):
         released_images = app.state.image_store.release(image_keys)
+        from app.utils.text_files import remove_conversation_files
+        remove_conversation_files(user_id, conversation_id)
+        from app.utils.conversation_volume import ConversationVolume
+        ConversationVolume(user_id, conversation_id).remove()
         return {"status": "ok", "released_images": released_images}
     else:
         return {"status": "failed to delete conversation"}
@@ -647,8 +652,12 @@ def get_messages(conversation_id: int, request: GetMessagesRequest, username: st
         raise HTTPException(status_code=404, detail="conversation not found")
     messages = app.state.db.get_messages_by_conversation(conversation_id, request.max_messages) or []
     attachments = app.state.db.get_attachments_for_messages([message["id"] for message in messages])
+    from app.utils.text_files import payloads_for_messages
+    text_files = payloads_for_messages(app.state.db, [message["id"] for message in messages])
     for message in messages:
         message["attachments"] = attachments.get(message["id"], [])
+        if message["id"] in text_files:
+            message["text_files"] = text_files[message["id"]]
     return {"messages": messages}
 
 @app.get("/messages/{message_id}/attachments")
@@ -669,7 +678,8 @@ def text_to_speech(request: HubTTSRequest, username: str = Depends(get_current_u
 
 @app.websocket("/ws/tts")
 async def tts_endpoint(websocket: WebSocket, username: str = Depends(get_current_user_ws)):
-    """speech of a reply in 1 s pieces. client: {"speak": {reply_id, text, voice, message_id, language}} starts a reply,
+    """speech of a reply in 1 s pieces. client: {"speak": {reply_id, text, voice, message_id, language, stream}} starts a reply,
+    with stream true it is still being written and {"text": {reply_id, text, final}} hands over its whole text so far,
     {"resume": {reply_id, last_seq}} continues one after a reconnect, {"ack": seq} confirms a piece
     (only then the hub forgets it), {"stop": reply_id} drops it. hub: {"reply_id", "piece"}, or {"gone": reply_id}"""
     await websocket.accept()
@@ -697,7 +707,12 @@ async def tts_endpoint(websocket: WebSocket, username: str = Depends(get_current
             if "speak" in data:
                 speak = data["speak"]
                 reply, sent = TtsStreams.start(app.state.infrastructure, user_id, speak["reply_id"], speak.get("text", ""),
-                                               speak.get("voice", ""), speak.get("message_id"), speak.get("language", "")), -1
+                                               speak.get("voice", ""), speak.get("message_id"), speak.get("language", ""),
+                                               final=not speak.get("stream")), -1
+            elif "text" in data:
+                streaming = TtsStreams.get(user_id, data["text"]["reply_id"])
+                if streaming:
+                    streaming.set_text(data["text"].get("text", ""), bool(data["text"].get("final")))
             elif "resume" in data:
                 reply_id, sent = data["resume"]["reply_id"], data["resume"]["last_seq"]
                 reply = TtsStreams.get(user_id, reply_id)
@@ -933,6 +948,80 @@ async def get_map_tile(z: int, x: int, y: int, username: str = Depends(get_curre
         raise HTTPException(status_code=404, detail="tile not available")
     return Response(content=tile, media_type="image/png", headers={"Cache-Control": "max-age=604800"})
 
+@app.get("/messages/{message_id}/files/{stored_name}")
+def download_message_file(message_id: int, stored_name: str, username: str = Depends(get_current_user)):
+    """the text file attached to a message, saved under the AI's real name"""
+    from app.utils.text_files import FILES_ROOT, _STORED, message_dir
+    user_id = app.state.db.get_user_id(username)
+    if not _STORED.fullmatch(stored_name) or not app.state.db.owns_message(user_id, message_id):
+        raise HTTPException(status_code=404, detail="file not found")
+    row = app.state.db.get_message_file(message_id, stored_name)
+    if row is None or row["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="file not found")
+    path = message_dir(row["user_id"], row["conversation_id"], row["message_id"], FILES_ROOT) / stored_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    download_name = row["real_name"].rsplit("/", 1)[-1] or "file"
+    return Response(content=path.read_bytes(), media_type=row["file_type"], headers=attachment_headers(download_name))
+
+########### conversation files (the sandbox volume of bash and run_code)
+def conversation_files(username: str, conversation_id: int, read):
+    """read(volume) on the logged in user's conversation volume: 404 for a conversation not theirs or a path that
+    isn't there, 400 for a path leaving the files, 503 without docker"""
+    from docker.errors import DockerException
+    from app.utils.conversation_volume import ConversationVolume
+    user_id = app.state.db.get_user_id(username)
+    if not app.state.db.owns_conversation(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="conversation not found")
+    try:
+        return read(ConversationVolume(user_id, conversation_id))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="file not found")
+    except DockerException as e:
+        logger.error(f"conversation {conversation_id} files: {repr(e)}")
+        raise HTTPException(status_code=503, detail="the files are not available")
+
+def attachment_headers(name: str, size: int | None = None) -> dict:
+    from urllib.parse import quote
+    return {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}",
+            **({"Content-Length": str(size)} if size is not None else {})}
+
+@app.get("/conversations/{conversation_id}/files")
+def list_conversation_files(conversation_id: int, path: str = "", username: str = Depends(get_current_user)):
+    """one folder of the conversation's files ("" the root): {"path", "entries": [{"name", "path", "type", "size",
+    "modified"}]}. a conversation without files yet has an empty root"""
+    entries = conversation_files(username, conversation_id, lambda volume: volume.entries(path))
+    return {"path": path, "entries": entries}
+
+@app.get("/conversations/{conversation_id}/files/download")
+def download_conversation_file(conversation_id: int, path: str, username: str = Depends(get_current_user)):
+    """one file of the conversation's files, streamed"""
+    name, size, chunks = conversation_files(username, conversation_id, lambda volume: volume.read_file(path))
+    return StreamingResponse(chunks, media_type="application/octet-stream", headers=attachment_headers(name, size))
+
+@app.get("/conversations/{conversation_id}/files/zip")
+def zip_conversation_files(conversation_id: int, path: str = "", exclude: bool = True,
+                           username: str = Depends(get_current_user)):
+    """a folder of the conversation's files ("" all of them) as one zip. exclude: without .git, caches and installed
+    packages (EXCLUDED in conversation_volume)"""
+    import tempfile
+    target = tempfile.SpooledTemporaryFile(max_size=32 * 1024 * 1024)
+    try:
+        name = conversation_files(username, conversation_id, lambda volume: volume.write_zip(target, path, exclude))
+    except BaseException:
+        target.close()
+        raise
+    size = target.tell()
+    target.seek(0)
+
+    def chunks():
+        with target:
+            while data := target.read(64 * 1024):
+                yield data
+    return StreamingResponse(chunks(), media_type="application/zip", headers=attachment_headers(name, size))
+
 ########### downloads
 @app.get("/downloads/{file_path:path}")
 async def download_file(file_path: str, username: str = Depends(get_current_user)):
@@ -1104,18 +1193,18 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
             await safe_close(code=1011)
 
     # send back to client
-    async def finish_job():
+    async def finish_task():
         while not closed.is_set():
-            job = await done_queue.get()
+            task = await done_queue.get()
 
             if closed.is_set():
                 break
 
-            if job.has_response():
-                MessageQueue().send_data(job.result(), user_id=user_id)
+            if task.has_response():
+                MessageQueue().send_data(task.get_result(), user_id=user_id)
 
     receiver_task = asyncio.create_task(receiver())
-    finish_job_task = asyncio.create_task(finish_job())
+    finish_job_task = asyncio.create_task(finish_task())
     sender_task = asyncio.create_task(sender())
 
     done, pending = await asyncio.wait(
@@ -1141,7 +1230,6 @@ def pcm16_to_float(b: bytes) -> np.ndarray:
 @app.websocket("/ws/audio")
 async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_current_user_ws)):
     await websocket.accept()
-    user_id = app.state.db.get_user_id(username)
     utterance = []
     voiced = False
     silence = 0

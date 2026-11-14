@@ -1,6 +1,27 @@
 Changelog
 =========
 
+0.27.0
+------
+
+- #176 ordering tool calls: laya-detected tools one at a time, then one optional request for the rest
+-     fetch_url is selected by a url in the message, not by laya
+- maps don't try to simulate dark mode anymore. it was too ugly
+- #175 the assistant can attach text files: one file as itself, several files of one message as a single zip
+- #109 cleanup round after too heavy AI use
+- #181 start audio playback while still streaming text answer
+- #177 removed scenario cration for faster response to first message
+- #162 agents are allowed to use the image generation
+- #180 refactored prompts
+- #183 expose more companion settings to the ui
+- #184 bash tool
+- #186 file browser for conversation files
+- agents have access to their own sandbox file system to work on projects
+- #187 added price finder tool
+- preview of text files in chat without downloading
+- added tools to tune laya tool detection
+- #189 AI can ask actively for tools to use
+
 0.26.0
 ------
 

@@ -3,7 +3,9 @@ import json
 import random
 import re
 from typing import Dict, Any, List, Tuple
-from .tool import Tool, ToolCategory
+from .tool import Tool
+from . import prompts
+from app.utils.conversation_volume import ConversationVolume, MOUNT_PATH
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -23,22 +25,10 @@ RUNTIME_CONFIGS = {"mem_limit": "512m", "pids_limit": 128, "nano_cpus": 1_000_00
 
 HEADER = re.compile(r"^\s*(?:#|//)\s*(language|requires)\s*:\s*(.*?)\s*$", re.IGNORECASE)
 LIBRARY = re.compile(r"^[A-Za-z0-9@][\w.+\-/@=<>~\[\]]*$")
+USER_CODE_TASK = "run the code from the user's message"     # the task RUN_CODE_PROMPT names for code the user gave
+# code in a message: a markdown fence or a line that starts like code
+CODE = re.compile(r"```|^[ \t]*(?:def |class |import |from [\w.]+ import |#include|function |public |package |func |print\(|console\.log\()", re.M)
 FENCE = re.compile(r"^```[^\n]*\n(.*?)(?:^```[ \t]*$|\Z)", re.DOTALL | re.MULTILINE)  # fences on their own lines
-
-CODE_PROMPT = f"""You write one complete program for the task below. It runs once in a fresh sandbox, what it prints comes back to you.
-
-Reply with ONLY the source code of the program as plain text: no JSON, no explanation, no markdown fences.
-
-Rules:
-- One single file. Print every result to stdout, the program gets no input.
-- Python, unless the task or the user asks for another language: javascript, cpp, java or go.
-- Header lines at the very top, only when needed, always with # (they are removed before the program runs):
-# language: cpp
-# requires: numpy, pandas
-- "language" when it is not python. "requires" lists packages to install first: pip for python, npm for javascript, apt for cpp, go modules for go. java can't install packages, use only its standard library.
-- When the user gave code to run, reply with that code unchanged (add header lines if it needs packages).
-- It must finish within {RUN_TIMEOUT} seconds. Keep the output short."""
-
 
 def strip_fences(reply: str) -> str:
     """the code of the reply: a <think> block dropped, the first markdown fence's content if there is one"""
@@ -86,13 +76,11 @@ def format_result(language: str, libraries: List[str], exit_code: int, stdout: s
     return text
 
 
-def run_in_sandbox(language: str, code: str, libraries: List[str]) -> Tuple[int, str, str]:
-    """a fresh container for this one run (SandboxSession), removed when it ends. the docker daemon comes from the
-    environment (DOCKER_HOST or /var/run/docker.sock). keep_template: the language image stays, no pull per run"""
-    from llm_sandbox import SandboxSession  # only needed here, the hub runs without docker access too
+def run_in_sandbox(language: str, code: str, libraries: List[str], volume: ConversationVolume) -> Tuple[int, str, str]:
+    """a fresh container for this one run with the conversation's files (volume.session), removed when it ends. the docker
+    daemon comes from the environment (DOCKER_HOST or /var/run/docker.sock)"""
     configs = dict(RUNTIME_CONFIGS) if libraries else {**RUNTIME_CONFIGS, "network_mode": "none"}
-    with SandboxSession(lang=language, keep_template=True, runtime_configs=configs, encoding_errors="replace",
-                        skip_environment_setup=not libraries) as session:
+    with volume.session(configs, lang=language, skip_environment_setup=not libraries) as session:
         if language == "cpp" and libraries:     # llm sandbox runs apt-get install without update and -y
             installed = session.execute_command(f"timeout {INSTALL_TIMEOUT} sh -c 'apt-get update -qq && "
                                                 f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq {' '.join(libraries)}'")
@@ -103,8 +91,9 @@ def run_in_sandbox(language: str, code: str, libraries: List[str]) -> Tuple[int,
         return result.exit_code, result.stdout, result.stderr
 
 
-def run_call(call: Dict[str, Any]) -> Dict[str, Any]:
-    """runs a built call: the base64 code decoded, checked and run. returns the tool result {"tool", "text"|"error"}"""
+def run_call(call: Dict[str, Any], volume: ConversationVolume) -> Dict[str, Any]:
+    """runs a built call with the conversation's files: the base64 code decoded, checked and run.
+    returns the tool result {"tool", "text"|"error"}"""
     language, libraries = call.get("language", "python"), call.get("libraries") or []
     code = base64.b64decode(call.get("code", "")).decode("utf-8")
     if not code.strip():
@@ -118,7 +107,7 @@ def run_call(call: Dict[str, Any]) -> Dict[str, Any]:
     if bad or len(libraries) > MAX_LIBRARIES:
         return {"tool": "run_code", "error": f"invalid library list {libraries}, at most {MAX_LIBRARIES} plain package names. Nothing ran."}
     try:
-        exit_code, stdout, stderr = run_in_sandbox(language, code, libraries)
+        exit_code, stdout, stderr = run_in_sandbox(language, code, libraries, volume)
     except Exception as e:
         if type(e).__name__ == "SandboxTimeoutError":
             return {"tool": "run_code", "error": f"the program was stopped, it ran longer than "
@@ -130,48 +119,65 @@ def run_call(call: Dict[str, Any]) -> Dict[str, Any]:
 
 class RunCodeTool(Tool):
     """writes a one file program for the directed task (own llm call, the reply is only code) and runs it in a
-    fresh llm sandbox container. the harness builds the call json with the code in base64"""
-    category = ToolCategory.MATH
-    description = "writes a small program and runs it in a sandbox container, returns its output"
-    # laya, 0.5: user asks to run code, or the message (a chat message or a worker's task) needs a check the ai runs on
-    # its own: verify, debug (reproduce an error), benchmark, explore an api, validate math before a plan, prototype.
-    # 41 positives, 40 negatives: run requests 4/4, debug 6/6, validate 6/6, prototype 6/6, benchmark 5/6, explore 5/6,
-    # bare math questions ("is 2^61-1 prime?", "100th digit of pi") only 3/9. false positives 2/40 ("write me a python
-    # function ...", "write a regex ..."). the first question alone: 22/41 hits, 1/40 false positives
+    fresh llm sandbox container with the conversation's files. the harness builds the call json with the code in base64"""
+    description = prompts.RUN_CODE_DESCRIPTION
+    sequential = True
+    thresholds = (0.65, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
-        "Does the user ask you to run, execute or test code?",
+        "Does the user want to see the output of running code?",
         "Does this message ask to check or confirm a number or formula before using it?",
-        "Does this message ask to verify, test, benchmark, reproduce or prototype something with code or numbers?",
+        "Does this message ask to verify, test, benchmark, reproduce or prototype something by running code or computing numbers?",
+        "Does this message ask to debug or reproduce an error by running code?",
     ]
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
         return "run_code"
 
-    def write_code(self) -> str:
-        """the code writing llm call: latest messages (pasted code stays in them, not in json) and the task"""
+    @classmethod
+    def problems(cls, result: Dict[str, Any]) -> List[str]:
+        """a program that could not run or ended with an exit code other than 0 (format_result)"""
+        if "error" in result:
+            return [f"run_code: {result['error']}"]
+        return [f"the {language} program of run_code ended with exit code {code}"
+                for language, code in re.findall(r"^ran an? (\S+) program.*?, exit code (-?\d+)$", result.get("text") or "", re.M) if code != "0"]
+
+    def conversation(self) -> str:
+        """the latest messages the code writer sees (pasted code stays in them, not in json)"""
         messages = self.db.get_messages_by_conversation(self.conversation_id, CONTEXT_MESSAGES) or []
-        conversation = "\n\n".join(f"{m['role']}: {(m['content'] or '')[:MAX_MESSAGE_CHARS]}"
-                                   for m in messages if m["role"] in ("user", "assistant") and m["content"])
+        return "\n\n".join(f"{m['role']}: {(m['content'] or '')[:MAX_MESSAGE_CHARS]}"
+                           for m in messages if m["role"] in ("user", "assistant") and m["content"])
+
+    def without_code(self, conversation: str) -> bool:
+        """the call is to run the user's code (USER_CODE_TASK), but the conversation has none: the prompt's example copied"""
+        return USER_CODE_TASK in str(self.tool_call.get("task") or "").lower() and not CODE.search(conversation)
+
+    def write_code(self, conversation: str) -> str:
+        """the code writing llm call: the latest messages (conversation()) and the task"""
         task = self.tool_call.get("task") or "do what the user's latest message asks"
         query = f"CONVERSATION (latest last):\n{conversation}\n\nTASK:\n{task}"
         language = self.tool_call.get("language")
         if language:
             query += f"\n\nLANGUAGE: {language}"
         return self.infrastructure.chat(
-            messages=[{"role": "system", "content": CODE_PROMPT}, {"role": "user", "content": query}],
+            messages=[{"role": "system", "content": prompts.RUN_CODE_WRITER_PROMPT.format(run_timeout=RUN_TIMEOUT, files=MOUNT_PATH)}, {"role": "user", "content": query}],
             temperature=0.2,
             seed=random.randint(0, 100000),
-            max_new_tokens=4096,
+            max_new_tokens=self.infrastructure.long_reply_tokens(),
             timeout=self.tool_call.get("llm_timeout")     # set by agent jobs, None in chat (240 s)
         ) or ""
 
     def execute(self) -> None:
+        conversation = self.conversation()
+        if self.without_code(conversation):
+            logger.warning(f"run_code: no code in the conversation to run, nothing ran: {self.tool_call.get('task')}")
+            self.add_result({"tool": self.name(), "error": prompts.RUN_CODE_NO_CODE_PART})
+            return
         MessageQueue().send_status_message("writing code")
-        reply = self.write_code()        
+        reply = self.write_code(conversation)
         if not reply.strip():
             result = {"tool": self.name(), "error": "no code was written, the language model gave no reply"}
         else:
@@ -179,28 +185,9 @@ class RunCodeTool(Tool):
             logger.debug(f"run_code call: {call}")
             logger.debug(f"code:\n{reply}")
             MessageQueue().send_status_message("running code")
-            result = run_call(json.loads(call))
-        self.response.setdefault("tool_results", []).append(result)
+            result = run_call(json.loads(call), ConversationVolume(self.user_id, self.conversation_id))
+        self.add_result(result)
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-RUN_CODE:
-Use when the user asks you to run or execute code, or to work something out with a program: exact results with big numbers, simulations, data processing, checking that code works. A separate step writes one program file for your task and runs it in a fresh sandbox, you get its output, errors and exit code back.
-You may also use it on your own when an exact check is better than guessing:
-- verify a calculation, a count or an idea (primes, digits, dates, regex matches)
-- debug: reproduce an error in isolation to find its cause
-- benchmark: compare snippets for speed or output
-- explore an unfamiliar function or library by trying it
-- validate math or logic before you rely on it in a longer plan
-- prototype a small piece to see if an approach works before using it
-Do not use it when the user only wants to see or discuss code, or for simple arithmetic (calculator).
-
-Parameters:
-- task (string, required): what the program must do and print, with all the values it needs. When the user gave code to run, write "run the code from the user's message", do not copy the code here.
-- language (string, optional): "python" (default), "javascript", "cpp", "java" or "go"
-
-Examples:
-{"tool": "run_code", "task": "compute the 50th Fibonacci number and print it"}
-{"tool": "run_code", "task": "run the code from the user's message", "language": "javascript"}
-"""
+        return prompts.RUN_CODE_PROMPT

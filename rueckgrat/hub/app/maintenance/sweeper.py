@@ -27,7 +27,7 @@ class MaintenanceTask:
         """the work waiting for this user (None = all users), at most limit items (None = all)"""
         raise NotImplementedError
 
-    def job(self, item: dict) -> Task:
+    def get_task(self, item: dict) -> Task:
         """the job for one item, its result() is a short outcome for the log"""
         raise NotImplementedError
 
@@ -46,10 +46,10 @@ class MaintenanceSweeper:
     one item at a time on this thread (task_queue.run), no TaskQueue worker is held. while the hub is busy
     (is_busy, e.g. a reply is being made) it waits, when the window closes it stops, the rest comes the next night"""
 
-    def __init__(self, db, task_queue, tasks: list[MaintenanceTask], is_busy=None):
+    def __init__(self, db, task_queue, maintenance_tasks: list[MaintenanceTask], is_busy=None):
         self.db = db
         self.task_queue = task_queue
-        self.tasks = tasks
+        self.maintenance_tasks = maintenance_tasks
         self.is_busy = is_busy or (lambda: False)
         self._done = {}   # user_id -> local date of the last finished sweep. a restart in the window sweeps again, nothing is stale then
         self._last_small = {}   # user_id -> time of the last small run
@@ -93,19 +93,19 @@ class MaintenanceSweeper:
     def sweep(self, user_id: int | None, limit: int | None, task_names: list[str] | None = None, until=None) -> bool:
         """runs the pending items of the tasks for a user (None = all users). until: False stops the sweep (window closed).
         True if the sweep got through"""
-        for task in self.tasks:
-            if task_names and task.name not in task_names:
+        for maintenance_task in self.maintenance_tasks:
+            if task_names and maintenance_task.name not in task_names:
                 continue
-            items = task.pending(user_id, limit)
+            items = maintenance_task.pending(user_id, limit)
             if items:
-                logger.info(f"maintenance {task.name}: {len(items)} item(s) for user {user_id}")
+                logger.info(f"maintenance {maintenance_task.name}: {len(items)} item(s) for user {user_id}")
             for item in items:
                 if not self._wait_quiet(until):
-                    logger.info(f"maintenance {task.name}: window closed, the rest waits for the next night")
+                    logger.info(f"maintenance {maintenance_task.name}: window closed, the rest waits for the next night")
                     return False
-                job = task.job(item)
-                self.task_queue.run(job)
-                logger.info(f"maintenance {task.name}: {job.result()}")
+                task = maintenance_task.get_task(item)
+                self.task_queue.run(task)
+                logger.info(f"maintenance {maintenance_task.name}: {task.get_result()}")
         return True
 
     def _wait_quiet(self, until) -> bool:

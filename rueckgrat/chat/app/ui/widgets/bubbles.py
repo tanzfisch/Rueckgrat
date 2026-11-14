@@ -1,29 +1,18 @@
 import re
 import asyncio
+import textwrap
 import flet as ft
 from urllib.parse import urlparse
 from app.ui import theme
-from app.ui.widgets.image import Image
+from app.ui.widgets.image_grid import ImageGrid
 
 from app.common import get_logger
 logger = get_logger()
 
 
-async def _open_link(e):
-    url = e.data
-    if url:
-        await ft.UrlLauncher().launch_url(url)
-
-
 FAVICON_SIZE = 20   # source buttons: the favicon and its fallback icon
-CODE_RADIUS = theme.RADIUS - 4   # #173 code block corners, a bit smaller than the bubble's so they fit inside it
-
-
-def code_text(block: str) -> str:
-    """#173 the code of a fenced block, without the ``` lines and the language tag"""
-    m = re.fullmatch(r"\s*```[^\n]*\n(.*?)\n?```\s*", block, re.DOTALL)
-    return m.group(1) if m else block
-
+CODE_RADIUS = theme.RADIUS - 4
+_QUOTE_LINE = re.compile(r"^[ \t]{0,3}> ?(.*)$")
 
 class BubbleActions(ft.Row):
     """the row of small buttons under a bubble, e.g. play and the sources of a web search"""
@@ -60,14 +49,14 @@ class BubbleActions(ft.Row):
 
 
 class ChatBubble(ft.Container):
-    def __init__(self, role: str, content: str, image_filepath: str | None = None, **kwargs):
+    def __init__(self, role: str, content: str, image_filepaths: list[str] | None = None, **kwargs):
         self.body = ft.Column(spacing=8, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
         super().__init__(
-            content=self.body,
+            content=self.body,            
             **kwargs,
         )
         self.role = role
-        self.image_filepath = image_filepath
+        self.image_filepaths: list[str] = list(dict.fromkeys(image_filepaths or []))   # in order, no duplicates
         self.action_row = BubbleActions()   # shown under the bubble by the chat page
         self.raw_content = ""
         self.append_content(content)
@@ -77,6 +66,42 @@ class ChatBubble(ft.Container):
 
     def clear_content(self):
         self.raw_content = ""
+
+    def _split_blockquotes(self, text: str) -> list[dict]:
+        """text and quote runs. a quote is consecutive '>' lines, including a blank gap before another '>' line"""
+        lines = text.splitlines(keepends=True)
+        parts, buf, i = [], [], 0
+
+        def flush():
+            if buf:
+                parts.append({"type": "text", "value": "".join(buf)})
+                buf.clear()
+
+        while i < len(lines):
+            if not _QUOTE_LINE.match(lines[i]):
+                buf.append(lines[i])
+                i += 1
+                continue
+            flush()
+            quote = []
+            while i < len(lines):
+                if _QUOTE_LINE.match(lines[i]):
+                    quote.append(lines[i])
+                    i += 1
+                    continue
+                if lines[i].strip() != "":
+                    break
+                j = i
+                while j < len(lines) and lines[j].strip() == "":
+                    j += 1
+                if j < len(lines) and _QUOTE_LINE.match(lines[j]):
+                    quote.extend(lines[i:j])
+                    i = j
+                else:
+                    break
+            parts.append({"type": "quote", "value": "".join(quote)})
+        flush()
+        return parts
 
     def append_content(self, content: str):
         try:
@@ -89,30 +114,34 @@ class ChatBubble(ft.Container):
 
             items = self._parse_content(parsable)
 
-            if self.image_filepath:
-                self._add_image(self.image_filepath)
+            if self.image_filepaths:
+                self.body.controls.append(ImageGrid(self.image_filepaths, ft.Alignment.CENTER_RIGHT if self.role == "user" else ft.Alignment.CENTER_LEFT))
 
             for item in items:
                 if item["type"] == "text":
-                    self._add_text(item["value"])
+                    for part in self._split_blockquotes(item["value"]):
+                        if part["type"] == "quote":
+                            self._add_quote(part["value"])
+                        elif part["value"].strip():
+                            self._add_text(part["value"])
                 elif item["type"] == "code":
                     self._add_code(item["value"])
         except Exception as e:
             logger.error(f"failed to append content: {repr(e)}")
 
-    def set_image(self, image_filepath: str):
-        """adds the image (placeholder until the file exists) to a bubble that is already shown"""
-        if self.image_filepath == image_filepath:
+    def add_image(self, image_filepath: str):
+        """adds an image (placeholder until the file exists) to a bubble that is already shown, a known one is skipped"""
+        if image_filepath in self.image_filepaths:
             return
-        self.image_filepath = image_filepath
-        self.append_content("")     # rebuilds the controls, with the image first
+        self.image_filepaths.append(image_filepath)
+        self.append_content("")     # rebuilds the controls, with the images first
         if self.page:
             self.update()
 
-    def set_fixed_width(self, width: int):
-        self.width = width
-        if self.page:
-            self.update()
+    async def _open_link(self, e):
+        url = e.data
+        if url:
+            await ft.UrlLauncher().launch_url(url)
 
     def _md(self, value: str, code: bool = False) -> ft.Markdown:
         return ft.Markdown(
@@ -120,13 +149,18 @@ class ChatBubble(ft.Container):
             selectable=True,
             extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
             code_theme=theme.CODE_THEME,
-            on_tap_link=_open_link,
+            on_tap_link=self._open_link,
             shrink_wrap=True,
             md_style_sheet=None if code else theme.MARKDOWN_STYLE,
         )
 
+    def _code_text(self, block: str) -> str:
+        m = re.fullmatch(r"\s*```[^\n]*\n(.*?)\n?[ \t]*```\s*", textwrap.dedent(block), re.DOTALL)
+        return m.group(1) if m else block
+
     def _add_code(self, content: str):
-        code = code_text(content)
+        content = textwrap.dedent(content)  # a block of a list item, it is shown at full width
+        code = self._code_text(content)
 
         async def copy(e):   # #173 copies the block's code, the icon shows a check for a moment
             await ft.Clipboard().set(code)
@@ -153,34 +187,48 @@ class ChatBubble(ft.Container):
             )
         )
 
+    def _quote_text(self, block: str) -> str:
+        """the quote's text, one leading > marker removed from each line"""
+        lines = []
+        for line in block.splitlines():
+            match = _QUOTE_LINE.match(line)
+            lines.append(match.group(1) if match else line)
+        return "\n".join(lines).strip("\n")
+
+    def _add_quote(self, content: str):
+        """the quote still renders as markdown, so the theme background and corners apply. the button copies the text"""
+        copied = self.quote_text(content)
+
+        async def copy(e):
+            await ft.Clipboard().set(copied)
+            e.control.icon = ft.Icons.CHECK
+            e.control.update()
+            await asyncio.sleep(1.5)
+            e.control.icon = ft.Icons.CONTENT_COPY
+            e.control.update()
+
+        self.body.controls.append(
+            ft.Stack([
+                self._md(content),
+                ft.IconButton(icon=ft.Icons.CONTENT_COPY, icon_size=16, icon_color=theme.TEXT, tooltip="Copy",
+                              top=0, right=0, on_click=copy),
+            ], data={"id": "quote"})
+        )
+
     def _add_text(self, content: str):
         self.body.controls.append(
             ft.Container(
-                content=self._md(content),
-                data={"id": "text", "role": self.role},
-            )
-        )
-
-    def _add_image(self, image_filepath: str):
-        image = Image(image_path=image_filepath)
-
-        self.body.controls.append(
-            ft.Row(
-                [
-                    ft.Container(expand=1),
-                    ft.Container(content=image, expand=4),
-                    ft.Container(expand=1),
-                ],
-                expand=True,
+                content=self._md(content)
             )
         )
 
     def _parse_content(self, content: str) -> list[dict]:
         parts = []
         last_pos = 0
-        pattern = r'(```(?:\w+)?\s*\n.*?\n```)|(\[IMAGE:\s*(.*?)\])|(\[MOOD:\s*(.*?)\])'
+        # a fenced block may be indented, e.g. in a list item ("1. Install:\n   ```\n   pip ...\n   ```")
+        pattern = r'(^[ \t]*```(?:[\w+#.-]+)?[ \t]*\n.*?\n[ \t]*```)|(\[IMAGE:\s*(.*?)\])|(\[MOOD:\s*(.*?)\])'
 
-        for m in re.finditer(pattern, content, re.DOTALL):
+        for m in re.finditer(pattern, content, re.DOTALL | re.MULTILINE):
             if m.start() > last_pos:
                 parts.append({"type": "text", "value": content[last_pos:m.start()].strip()})
             if m.group(1) is not None:

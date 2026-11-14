@@ -14,6 +14,9 @@ class ChatResponse(BaseModel):
     role: str
     content: str
     think: str = ""
+    finish_reason: str = ""     # llama.cpp's: "stop", "length" (max_tokens reached, cut off); "" when unknown
+    prompt_tokens: int = 0      # the llm's token counts of the call, 0 when unknown
+    completion_tokens: int = 0
 
 class ChatRequestLlama(BaseModel):
     messages: list[dict]
@@ -25,6 +28,7 @@ class ChatRequestLlama(BaseModel):
     conversation_id: int = -1
     stream_id: str | None = None
     timeout: float | None = None     # seconds the node waits for llama.cpp, None = its default (240)
+    json_schema: dict | None = None  # the reply must be json matching this schema (llama.cpp grammar), None = free text
 
 class ImageRequest(BaseModel):
     positive_prompt: str
@@ -32,16 +36,12 @@ class ImageRequest(BaseModel):
     seed: int = 1337
     width: int = 256
     height: int = 256
-    steps: int = 10
-    cfg: float = 7.5
+    steps: int = 10         
+    cfg: float = 7.5        
     model: str
     output: str
-    # face reference (FaceID): file key of the contact's current profile image on the hub, "" = none.
-    # only dumped/hashed when set, so requests without a reference keep their old dump and hash
-    reference_image_key: str = ""
-    # the image bytes of reference_image_key (base64), attached by the hub right before it posts the request
-    # to the node. never part of model_dump(), so never hashed or stored with the generation
-    reference_image_b64: str = Field(default="", exclude=True)
+    reference_image_key: str = ""                               # face reference (FaceID): file key of the contact's current profile image on the hub
+    reference_image_b64: str = Field(default="", exclude=True)  # the image bytes of reference_image_key (base64)
 
     @model_serializer(mode="wrap")
     def _drop_empty_reference(self, handler):

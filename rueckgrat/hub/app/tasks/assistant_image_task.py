@@ -17,7 +17,7 @@ class AssistantImageTask(Task):
         self.infrastructure = infrastructure
         self.response = {}
         self.show_assistant = show_assistant
-        self.show_user = show_user
+        self.show_user = show_user and not show_assistant # TODO at the moment we are only able to display one character at the time reliably
         self.image_type = image_type
         self.store_image_as = store_image_as
         self.width = width
@@ -82,13 +82,13 @@ class AssistantImageTask(Task):
         # skip generation if it already exists
         downloaded_file = Path(f"/hub/images/{self.output_file}")
         if not downloaded_file.exists():
-            image_job = ImageTask(image_request, self.infrastructure, self.db)
-            self.add_sub_job(image_job)
-            self.wait_for([image_job])
-            self.response = image_job.result()
+            image_task = ImageTask(image_request, self.infrastructure, self.db)
+            self.add_sub_task(image_task)
+            self.wait_for([image_task])
+            self.response = image_task.get_result()
         else:
             # same response ImageTask gives for an image that is already there
             self.response = {"image": {"filename": self.output_file, "image_path": f"images/{self.output_file}"}}
 
-    def result(self) -> Dict[str, Any]:
+    def get_result(self) -> Dict[str, Any]:
         return self.response

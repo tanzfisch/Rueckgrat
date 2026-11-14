@@ -39,7 +39,7 @@ class LLamaCppInterface:
     def _build_payload(self, request: ChatRequestLlama) -> dict:
         # sampling settings (top_k, top_p, min_p, repeat_penalty, ...) come from the
         # server's extra_args so they can be configured per model in registry.json
-        return {
+        payload = {
             "messages": self._normalize_messages(request.messages),
             "temperature": request.temperature,
             "seed": request.seed,
@@ -48,6 +48,9 @@ class LLamaCppInterface:
             # thinking off on every call (Qwen's template reads this, other templates ignore it)
             "chat_template_kwargs": {"enable_thinking": False}
         }
+        if request.json_schema:
+            payload["response_format"] = {"type": "json_schema", "json_schema": {"schema": request.json_schema}}
+        return payload
 
     def _check_finish_reason(self, finish_reason):
         if finish_reason == "length":
@@ -129,11 +132,14 @@ class LLamaCppInterface:
                 )
                 http_response.raise_for_status()
 
-                choice = http_response.json()["choices"][0]
+                data = http_response.json()
+                choice = data["choices"][0]
                 self._check_finish_reason(choice.get("finish_reason"))
                 message = choice["message"]
                 think, resp = self._split(message.get("content"), message.get("reasoning_content"))
-                return ChatResponse(role="assistant", content=resp, think=think)
+                usage = data.get("usage") or {}     # the hub sees a cut off reply and what the call cost
+                return ChatResponse(role="assistant", content=resp, think=think, finish_reason=choice.get("finish_reason") or "",
+                                    prompt_tokens=usage.get("prompt_tokens") or 0, completion_tokens=usage.get("completion_tokens") or 0)
 
         except requests.exceptions.RequestException as e:
             return self._fail(request, callback, f"Request failed: {str(e)}")

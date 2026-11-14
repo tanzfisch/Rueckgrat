@@ -1,5 +1,5 @@
 from .tool_registry import ToolRegistry
-from .tool import Tool, ToolCategory
+from .tool import Tool
 from .take_photo_tool import TakePhotoTool
 from .image_gen_tool import ImageGenTool
 from .websearch_tool import WebsearchTool
@@ -15,12 +15,14 @@ from .search_memory_tool import SearchMemoryTool
 from .spawn_agent_job_tool import SpawnAgentJobTool
 from .poll_tool import PollTool
 from .map_tool import MapTool
+from .price_finder_tool import PriceFinderTool
 from .code_tool import RunCodeTool
+from .bash_tool import BashTool
+from .write_file_tool import WriteFileTool
 
 __all__ = [
     "ToolRegistry",
     "Tool",
-    "ToolCategory",
     "TakePhotoTool",
     "ImageGenTool",
     "WebsearchTool",
@@ -36,5 +38,8 @@ __all__ = [
     "SpawnAgentJobTool",
     "PollTool",
     "MapTool",
-    "RunCodeTool"
+    "PriceFinderTool",
+    "RunCodeTool",
+    "BashTool",
+    "WriteFileTool",
 ]

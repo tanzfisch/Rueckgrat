@@ -94,7 +94,7 @@ class PasswordPage(ft.Container):
         self.update()
 
 class AddUserPage(ft.Column):
-    def __init__(self, create_user, goto_select, invite_required=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH):
+    def __init__(self, create_user, goto_select, invite_required=False):
         super().__init__(expand=True, spacing=8)
         self.name_edit = ft.TextField(label="Name", expand=True, **theme.STYLES["field"])
         self.pass_edit = ft.TextField(label="Password", password=True, can_reveal_password=True, expand=True, **theme.STYLES["field"])

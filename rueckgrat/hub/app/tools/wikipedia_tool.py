@@ -2,7 +2,8 @@ from typing import Dict,  Any
 import re
 import requests
 from urllib.parse import quote
-from .tool import Tool, ToolCategory
+from .tool import Tool
+from . import prompts
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -52,18 +53,17 @@ def wikipedia_summary(query: str, lang: str = "en") -> Dict[str, str]:
 
 
 class WikipediaTool(Tool):
-    category = ToolCategory.WEB
-    description = "encyclopedic summary of a well known person, place, thing, concept or historic event"
+    description = prompts.WIKIPEDIA_DESCRIPTION
+    thresholds = (0.5, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask who a famous person from history was?",
         "Does the user ask to have a science theory or natural process explained?",
         "Does the user ask what a science term means, like photosynthesis or a black hole?",
-        "Does the user ask about a famous landmark, country, empire or historic event?",
-        "Does the user ask about a famous treaty, war, empire or monument?",
+        "Does the user ask about a famous landmark, monument, country, empire, war, treaty or historic event?",
     ]
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
@@ -89,18 +89,8 @@ class WikipediaTool(Tool):
             logger.error(f"failed to query wikipedia {repr(e)}")
             result = {"tool": self.name(), "error": "Wikipedia lookup failed"}
 
-        self.response.setdefault("tool_results", []).append(result)
+        self.add_result(result)
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-WIKIPEDIA:
-Use for a quick encyclopedic summary of a well-known person, place, thing, or event. Not for news or current values.
-
-Parameters:
-- query (string, required): the topic
-- lang (string, optional): Wikipedia language code, default "en"
-
-Example:
-{"tool": "wikipedia", "query": "Eiffel Tower", "lang": "en"}
-"""
+        return prompts.WIKIPEDIA_PROMPT

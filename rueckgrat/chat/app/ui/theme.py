@@ -6,6 +6,7 @@ apply_theme(page, mode) switches the mode: the palette names below, STYLES and M
 rebuilt and the flet theme is set; open pages then have to be rebuilt (the settings page does that).
 """
 import os
+import subprocess
 import sys
 import flet as ft
 
@@ -30,6 +31,7 @@ PALETTES = {
         ACCENT="#0D7377",              # switches and focused fields of the profile pages
         FOCUS="#00424c",               # focused field border
         TEXT="#E0E0E0",
+        BLOCKQUOTE="#1E3338",          # quote band: dark teal, light text stays readable (not flutter's pale blue)
         TEXT_DIM="#606060",
         TEXT_LABEL="#C8C8C8",          # row labels of the profile pages
         ON_ACCENT="#E0E0E0",           # text on TEAL_FILL and ERROR strips
@@ -56,6 +58,7 @@ PALETTES = {
         ACCENT="#0D7377",
         FOCUS="#0b6b78",
         TEXT="#1B1F20",
+        BLOCKQUOTE="#C9DDE0",          # quote band: a step deeper than the page, dark text stays readable
         TEXT_DIM="#5F6B6D",
         TEXT_LABEL="#3A4446",
         ON_ACCENT="#FFFFFF",
@@ -84,9 +87,33 @@ ON_SCRIM = ft.Colors.WHITE
 INPUT_BAR = ft.Colors.SURFACE_CONTAINER_HIGH                 # message / prompt input bars
 CARD = ft.Colors.SURFACE_CONTAINER
 TEXT_VARIANT = ft.Colors.ON_SURFACE_VARIANT
+# the podium of a price ranking (PriceView): gold, silver, bronze and the text on them
+GOLD, SILVER, BRONZE = "#D4AF37", "#A8A9AD", "#CD7F32"
+MEDALS = (GOLD, SILVER, BRONZE)
+ON_MEDAL = "#1B1F20"
 
 RADIUS = 16
-SIZE_FACTOR = 1.2 if sys.platform not in ("android", "ios") else 1.0
+
+
+def _base_font_factor() -> float:
+    """the text sizes here are flutter's material defaults (body 14 px). flutter itself applies the system text scale
+    (android's font size, gnome's text-scaling-factor), so this only adds the desktop's base font size, which flutter
+    ignores: gnome's 'Cantarell 11' is 11 pt = 14.7 px, a factor of 1.05. android and other desktops stay at 1.0"""
+    if sys.platform != "linux":
+        return 1.0
+    try:
+        out = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "font-name"],
+                             capture_output=True, text=True, timeout=2).stdout
+        points = float(out.strip().strip("'").rsplit(" ", 1)[-1])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 1.0
+    return min(max(points * 96 / 72 / 14, 0.75), 2.0)
+
+
+BASE_FONT_FACTOR = _base_font_factor()
+FONT_SCALES = {"smaller": 0.8, "normal": 1.0, "bigger": 1.2}   # the user's choices in the settings
+font_scale = 1.0                                               # the active one, any positive value works
+SIZE_FACTOR = BASE_FONT_FACTOR
 
 # text font + color emoji fallback (#68). code blocks keep markdown's monospace default
 TEXT_FONT = "DejaVu Sans"
@@ -96,6 +123,7 @@ EMOJI_FALLBACK = ["Noto Color Emoji"]
 BACKGROUND = SURFACE = SURFACE_2 = SURFACE_3 = SURFACE_4 = SURFACE_FIELD = PRESSED = CODE_BORDER = ""
 TEAL = TEAL_FILL = TEAL_BRIGHT = TEAL_HANDLE = ACCENT = FOCUS = ""
 TEXT = TEXT_DIM = TEXT_LABEL = ON_ACCENT = ERROR = WARNING = CODE_THEME = WALLPAPER = ICON_SUFFIX = ""
+BLOCKQUOTE = ""
 SCHEME: dict = {}
 
 mode = DEFAULT_MODE
@@ -134,6 +162,8 @@ def _markdown_style() -> ft.MarkdownStyleSheet:
         p_text_style=_md_text(14),             # paragraphs and list items
         list_bullet_text_style=_md_text(14),
         blockquote_text_style=_md_text(14),
+        blockquote_padding=ft.Padding(12, 12, 12, 12),
+        blockquote_decoration=ft.BoxDecoration(bgcolor=BLOCKQUOTE, border_radius=RADIUS),
         table_head_text_style=_md_text(14),
         table_body_text_style=_md_text(14),
         h1_text_style=_md_text(24),
@@ -233,8 +263,18 @@ def _flet_theme() -> ft.Theme:
     )
 
 
-def apply_theme(page: ft.Page, new_mode: str | None = None):
-    """on startup with the stored mode, and when the user switches it. None keeps the active mode"""
+def set_font_scale(value: float):
+    """the user's text size on top of the system's (1.0), STYLES and MARKDOWN_STYLE are rebuilt with it"""
+    global font_scale, SIZE_FACTOR
+    font_scale = value if value > 0 else 1.0
+    SIZE_FACTOR = BASE_FONT_FACTOR * font_scale
+    set_mode(mode)
+
+
+def apply_theme(page: ft.Page, new_mode: str | None = None, new_font_scale: float | None = None):
+    """on startup with the stored mode and font scale, and when the user switches one. None keeps the active one"""
+    if new_font_scale is not None:
+        set_font_scale(new_font_scale)
     if new_mode is not None:
         set_mode(new_mode)
     page.theme_mode = ft.ThemeMode.DARK if mode == DARK else ft.ThemeMode.LIGHT

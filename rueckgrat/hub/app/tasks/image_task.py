@@ -59,7 +59,7 @@ class ImageTask(Task):
         except Exception as e:
             logger.error(f"failed to execute ImageTask {repr(e)}")                    
 
-    def result(self) -> Dict[str, Any]:
+    def get_result(self) -> Dict[str, Any]:
         return self.response
     
     def has_response(self) -> bool:

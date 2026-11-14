@@ -1,6 +1,5 @@
-import json
-import random
 from app.common import get_logger, Utils
+from . import prompts
 logger = get_logger()
 
 class GenericImagePromptCompiler:
@@ -12,21 +11,7 @@ class GenericImagePromptCompiler:
     
     def _build_prompt(self) -> str:
         try:
-            prompt = f"""
-Create a concise, self-contained image generation prompt (positive and negative) based on the given input.
-
-Input: {self.prompt}
-
-Use the following json format for the output and nothing else
-
-{{
-  "positive_prompt": "",
-  "negative_prompt": ""
-}}
-
-- positive_prompt: be specific but also add detail when helpfull. add quality and lighting information
-- negative_prompt: exclude what not to expect in the image
-            """
+            prompt = prompts.GENERIC_IMAGE_PROMPT.format(prompt=self.prompt)
             messages = [{"role": "developer", "content": prompt}]
 
             new_prompt = self.infrastructure.chat(

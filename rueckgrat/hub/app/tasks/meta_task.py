@@ -1,82 +1,17 @@
-import re
 import json
 import time
 import threading
 from .task_queue import Task
 from .chat_task import ChatTask
-from .tool_directing_task import ToolDirectingTask
 from .update_context_task import UpdateContextTask
 from .tool_detection_task import ToolDetectionTask
-from typing import Dict, Any, List, Optional
+from .tool_execution_task import ToolExecutionTask
+from typing import Dict, Any
 
 from app.common import get_logger, ChatRequest, Utils, MessageQueue
 from app.utils.tts_stream import TtsStreams
+from app.utils.conversation_volume import ConversationVolume
 logger = get_logger()
-
-FILLERS = {
-    "uh", "uhm", "um", "umm", "hm", "hmm", "mhm", "mm", "mmm", "ah", "oh", "eh", "er", "erm", "huh", "uh-huh", "aha",
-    "ok", "okay", "yeah", "yea", "yep", "yup", "nope", "nah", "right", "sure", "cool", "nice", "wow", "alright",
-    "thanks", "thank", "you", "thx",  # "you" only for "thank you"
-    "cough", "coughs", "coughing", "sniff", "sniffs", "laughs", "laughing", "sigh", "sighs",
-}
-
-def is_trivial(text: str) -> bool:
-    """a single word or only fillers (a cough, "hmm"): not worth interrupting the reply for"""
-    words = re.findall(r"\w+", text.lower())
-    return len(words) < 2 or all(word in FILLERS for word in words)
-
-class Turns:
-    """the MetaTask answering each conversation. a new user message either merges into it
-    (that job gets cancelled, the new one answers both) or is stored as a message of its own"""
-
-    def __init__(self, db):
-        self.db = db
-        self._lock = threading.Lock()
-        self._running = {}  # conversation_id -> MetaTask
-
-    def start(self, job):
-        """stores the job's user message, merged into the running turn's message while that can still be interrupted"""
-        request = job.request
-        with self._lock:
-            previous = self._running.get(request.conversation_id)
-            mergeable = previous is not None and previous.state == "running"
-            merge = mergeable and not is_trivial(request.content)
-            if merge:
-                previous.cancelled.set()
-                request.content = f"{previous.request.content} … {request.content}"
-                job.user_message_id = previous.user_message_id
-                self.db.update_message(job.user_message_id, request.role, request.content, request.name)
-                MessageQueue().send_data({"merged": {
-                    "conversation_id": request.conversation_id,
-                    "user_message_id": job.user_message_id,
-                    "content": request.content
-                }}, user_id=job.user_id)   # runs on the websocket loop, not in a job
-                logger.info(f"follow-up merged into message {job.user_message_id}, conversation {request.conversation_id}")
-            else:
-                job.user_message_id = self.db.add_message(request.conversation_id, request.role, request.content, request.name)
-            if merge or not mergeable:
-                self._running[request.conversation_id] = job
-
-    def busy(self, conversation_id: int) -> bool:
-        """a reply is being made in this conversation"""
-        with self._lock:
-            return conversation_id in self._running
-
-    def any_busy(self) -> bool:
-        """a reply is being made in any conversation"""
-        with self._lock:
-            return bool(self._running)
-
-    def set_state(self, job, state: str) -> bool:
-        """"images" (an image tool is queued) or "done" (the final goes out): from then on nothing merges into the job.
-        False if the job was cancelled already"""
-        with self._lock:
-            if job.cancelled.is_set():
-                return False
-            job.state = state
-            if state == "done" and self._running.get(job.request.conversation_id) is job:
-                del self._running[job.request.conversation_id]
-            return True
 
 class MetaTask(Task):
     def __init__(self, user_id: int, request: ChatRequest, db, infrastructure, tool_registry, turns):
@@ -89,22 +24,13 @@ class MetaTask(Task):
         self.turns = turns
         self.user_message_id = None  # stored by Turns.start, merged follow-ups update it
         self.cancelled = threading.Event()  # set when a follow-up merged into this turn
-        self.state = "running"  # "images" / "done", see Turns.set_state
+        self.state = "running"  # "detached" / "done", see Turns.set_state
         self.message_id = -1
         self.sources = []   # pages the web tools used, shown as links under the answer
-        self.poll = None    # the poll tool's poll, shown as a bubble under the answer
-        self.map = None     # the show_map tool's place, shown as a map under the answer
+        self.reply = ""     # the reply streamed so far, with the tool calls at its end
+        self.streamed = ""  # the part of it sent to the user, without the tool calls
+        self.reply_calls = []   # the REPLY_TOOLS calls the reply wrote
         self.done = False
-
-    def _update_conversation_context(self):
-        udate_context_job = UpdateContextTask(self.request, self.db, self.infrastructure)
-        self.add_sub_job(udate_context_job)
-        self.wait_for([udate_context_job])
-        new_context = udate_context_job.result()
-    
-        conversation = self.db.get_conversation(self.request.conversation_id)
-        conversation["title"] = new_context["topic"]
-        self.db.update_conversation(self.request.conversation_id, conversation["title"], json.dumps(new_context))        
 
     def _on_incomming_message(self, message: str):
         if self.cancelled.is_set():
@@ -112,102 +38,67 @@ class MetaTask(Task):
         data = json.loads(message)
 
         if "delta" in data:
-            delta = data["delta"]
-            self.db.append_to_message(self.message_id, delta)
-
-            MessageQueue().send_data({
-                "delta": delta,
-                "conversation_id": self.request.conversation_id,
-                "message_id": self.message_id
-            }, user_id=self.user_id)   # called on the node's websocket thread, no job context there
+            self.reply += data["delta"]
+            visible, _ = self.tool_registry.split_reply(self.reply, final=False)
+            self._send_delta(visible)
 
         if data.get("error"):
             logger.error(f"chat stream failed: {data['error']}")
 
         if "response" in data:
+            visible, self.reply_calls = self.tool_registry.split_reply(data["response"])
+            self._send_delta(visible)
             self.response["chat"] = {
                 "conversation_id": self.request.conversation_id,
                 "role": "assistant",
-                "content": data["response"],
+                "content": visible,
                 "tool_calls": [],
                 "message_id": self.message_id,
-                "sources": self.sources,
-                "poll": self.poll,
-                "map": self.map
+                "sources": self.sources
             }
             self.done = True
-            
-    def _format_websearch_results(self) -> Optional[str]:
-        """removes the websearch tool result from self.response, returns the WEBSEARCH_RESULT block or None"""
-        if not "websearch_results" in self.response:
-            return None
+    
+    def _send_delta(self, visible: str):
+        """stores and sends what of the visible reply was not sent yet"""
+        delta = visible[len(self.streamed):]
+        if not delta:
+            return
+        self.streamed = visible
+        self.db.append_to_message(self.message_id, delta)
 
-        websearch_response = ""
-        websearch_results = self.response.pop("websearch_results")
-        if len(websearch_results) > 0:
-            websearch_response += f"\nWebsearch results in order of accuracy: "
-            for websearch_result in websearch_results:
-                websearch_response += f"\n{websearch_result['title']} - {websearch_result['answer']} - source {websearch_result['source']}"
-        else:
-            logger.error("empty tool response from websearch")
+        MessageQueue().send_data({
+            "delta": delta,
+            "conversation_id": self.request.conversation_id,
+            "message_id": self.message_id
+        }, user_id=self.user_id)   # called on the node's websocket thread, no task context there
 
-        if websearch_response == "":
-            return None
-        return f"\n\nWEBSEARCH_RESULT{websearch_response}\nBase your answer on the WEBSEARCH_RESULT. Do not invent or add any information. Answer concisely.\n"
-
-    def _format_conversion_results(self) -> Optional[str]:
-        """removes the convert tool results from self.response, returns the CONVERSION_RESULT block or None"""
-        if not "conversion_results" in self.response:
-            return None
-
-        conversion_response = ""
-        for conversion in self.response.pop("conversion_results"):
-            if "error" in conversion:
-                conversion_response += f"\n{conversion['amount']} {conversion['from']} -> {conversion['to']}: failed - {conversion['error']}"
-            else:
-                date = f", rate date {conversion['date']}" if "date" in conversion else ""
-                conversion_response += f"\n{conversion['text']} - source {conversion['source']}{date}"
-
-        if conversion_response == "":
-            return None
-        return f"\n\nCONVERSION_RESULT{conversion_response}\n"
-
-    def _format_tool_results(self) -> Optional[str]:
-        """removes the results of the simple tools (calculate, current_time, date_calc, wikipedia, weather) from self.response, returns the TOOL_RESULT block or None"""
-        if not "tool_results" in self.response:
-            return None
-
-        tool_response = ""
-        for tool_result in self.response.pop("tool_results"):
-            if "error" in tool_result:
-                tool_response += f"\n{tool_result['tool']}: failed - {tool_result['error']}"
-            else:
-                tool_response += f"\n{tool_result['tool']}: {tool_result['text']}"
-
-        if tool_response == "":
-            return None
-        return f"\n\nTOOL_RESULT{tool_response}\n"
-
-    def _direct_tools(self, tool_names: List[str]) -> Dict[str, Any]:
-        """one tool directing call as a sub job, with the full prompts of these tools. the model writes their calls"""
-        tool_directing_job = ToolDirectingTask(
-            request=self.request,
-            db=self.db,
-            infrastructure=self.infrastructure,
-            tool_registry=self.tool_registry,
-            tool_names=tool_names
+    def _run_reply_tools(self):
+        """runs the REPLY_TOOLS calls the reply wrote, they are detached and write to the reply's message"""
+        logger.debug(f"reply tool calls: {self.reply_calls}")
+        task = ToolExecutionTask(
+            user_id = self.user_id,
+            request = self.request,
+            context = None,
+            db = self.db,
+            infrastructure = self.infrastructure,
+            tool_registry = self.tool_registry,
+            tool_names = [],
+            message_id = self.message_id,
+            detach = lambda: self.turns.set_state(self, "detached"),
+            tool_calls = self.reply_calls
         )
-        self.add_sub_job(tool_directing_job)
-        self.wait_for([tool_directing_job])
-        return tool_directing_job.result()
+        self.add_sub_task(task)
+        self.wait_for([task])
 
     def _interrupted(self) -> bool:
-        """True once a follow-up was merged into this turn: drops the partial reply, the merged job answers instead"""
+        """True once a follow-up was merged into this turn: drops the partial reply, the merged task answers instead"""
         if not self.cancelled.is_set():
             return False
         if self.message_id != -1:
             self.db.delete_message(self.message_id)
             TtsStreams.drop_message(self.message_id)
+            from app.utils.text_files import remove_message_files
+            remove_message_files(self.user_id, self.request.conversation_id, self.message_id)
         MessageQueue().send_data({"cancelled": {
             "conversation_id": self.request.conversation_id,
             "message_id": self.message_id if self.message_id != -1 else None
@@ -218,135 +109,100 @@ class MetaTask(Task):
     def execute(self) -> None:
         self.response = {}
 
-        if self.db.get_message_count_by_conversation(self.request.conversation_id) <= 1:
-            MessageQueue().send_status_message("creating scenario")
-        else:
-            MessageQueue().send_status_message("update context")
+        MessageQueue().send_status_message("thinking")
+        tool_detection_task = ToolDetectionTask(self.request.content, self.tool_registry, self.infrastructure,
+                                                volume=ConversationVolume(self.user_id, self.request.conversation_id))
+        self.add_sub_task(tool_detection_task)        
 
-        # run this in parallel to updateing the context
-        tool_detection_job = ToolDetectionTask(self.request.content, self.tool_registry, self.infrastructure)
-        self.add_sub_job(tool_detection_job)
-
-        self._update_conversation_context() # update context after user message was added
         if self._interrupted():
             return
 
-        try:
-            MessageQueue().send_status_message("thinking")
-            self.wait_for([tool_detection_job])
-            tool_names = tool_detection_job.result()
-            logger.info(f"tools detected: {tool_names}")
-            
-            tool_names = (tool_names or []) + self.tool_registry.PROMPT_TOOLS
+        try:            
+            self.wait_for([tool_detection_task])
+            detected = tool_detection_task.get_result() or []
+            logger.debug(f"tools detected: {detected}")
+            tool_detection_task.trace(self.request.conversation_id, "turn")
+
             contact = self.db.get_contact_by_id(self.request.contact_id)
-
-            tool_calls, compiled_response = [], ""
-            if tool_names:
-                tool_response = self._direct_tools(tool_names)
-                tool_calls, compiled_response = tool_response["tool_calls"], tool_response["content"]
-            if self._interrupted():
-                return
-
-            self.tool_registry.execute(
-                user_id=self.user_id,
-                contact_id=self.request.contact_id,
-                conversation_id=self.request.conversation_id,
-                response=self.response,
-                tool_calls=tool_calls,
-                parallel=False
-            )
-
-            MessageQueue().send_status_message("compile response")
-
-            websearch_block = self._format_websearch_results()
-            if websearch_block:
-                compiled_response += websearch_block
-            else:
-                compiled_response += "\n\nNo web search was done for this message. If you don't know current facts like opening hours, prices or news, say so.\n"
-
-            conversion_block = self._format_conversion_results()
-            if conversion_block:
-                compiled_response += conversion_block
-
-            tool_block = self._format_tool_results()
-            if tool_block:
-                compiled_response += tool_block
-            
-            #logger.debug(f"compiled response:\n{compiled_response}")
-            if self._interrupted():
-                return
-
             contact_name = Utils.get_nested_value(contact, ["identity", "name"])
             self.message_id = self.db.add_message(self.request.conversation_id, "assistant", "", contact_name)
 
-            # once an image is queued the reply can't be interrupted anymore, a follow-up is a new message then
-            if any(self.tool_registry.parallel.get(call["tool"]) for call in tool_calls) and not self.turns.set_state(self, "images"):
-                self._interrupted()
+            tool_execution_task = ToolExecutionTask(
+                user_id = self.user_id, 
+                request = self.request, 
+                context = Utils.get_nested_value(self.db.get_conversation(self.request.conversation_id), ["context"], ""),
+                db = self.db, 
+                infrastructure = self.infrastructure, 
+                tool_registry = self.tool_registry, 
+                tool_names = detected["tool_names"],
+                recommended_tools = detected.get("recommended") or [],
+                excluded_tools = self.tool_registry.REPLY_TOOLS,  # the reply calls these itself, see _run_reply_tools
+                message_id = self.message_id,
+                detach = lambda: self.turns.set_state(self, "detached"),
+                history = 2     # the setup sees the last answer and the message before it: a quiz goes on
+            )
+            
+            self.add_sub_task(tool_execution_task)
+            self.wait_for([tool_execution_task])
+            tool_execution_results = tool_execution_task.get_result() or {}
+            #logger.debug(f"Tool execution results:\n{Utils.pretty_print(tool_execution_results)}")
+
+            if self._interrupted():
                 return
 
-            # the parallel tools (take_photo, generate_image) attach their images to the new message themselves
-            parallel_tool_calls = [{**tool_call, "message_id": self.message_id} for tool_call in tool_calls]
-            self.tool_registry.execute(
-                user_id=self.user_id,
-                contact_id=self.request.contact_id,
-                conversation_id=self.request.conversation_id,
-                response=self.response,
-                tool_calls=parallel_tool_calls,
-                parallel=True
-            )
+            if "wikipedia" in tool_execution_results:
+                self.sources += tool_execution_results["wikipedia"]["sources"]
 
-            self.poll = self.response.pop("poll", None)
-            if self.poll:
-                self.db.set_message_poll(self.message_id, self.poll)
-            self.map = self.response.pop("map", None)
-            if self.map:
-                self.db.set_message_map(self.message_id, self.map)
+            if "fetch_url" in tool_execution_results:
+                self.sources += tool_execution_results["fetch_url"]["sources"]
 
-            self.sources = self.response.pop("sources", [])
-            if self.sources:
+            if "websearch" in tool_execution_results:
+                self.sources += tool_execution_results["websearch"]["sources"]                
+
+            if self.sources and len(self.sources) > 0:
                 self.db.set_message_sources(self.message_id, self.sources)
-
-            # the tools this answer used, so later turns know what was done. the memory tools run every turn, they'd only add noise
-            used_tools = list(dict.fromkeys(call["tool"] for call in tool_calls if call["tool"] not in ("remember", "search_memory")))
-            if used_tools:
-                self.db.set_message_tools(self.message_id, used_tools)
 
             MessageQueue().send_status_message("finalize answer")
 
-            chat_job = ChatTask(
+            chat_task = ChatTask(
                 request=self.request,
                 db=self.db,
                 infrastructure=self.infrastructure, 
                 callback=self._on_incomming_message,
-                thinking_response=compiled_response
+                tool_execution_results=tool_execution_results,
+                tool_registry=self.tool_registry
             )
 
-            self.add_sub_job(chat_job)
-            self.wait_for([chat_job])
+            self.add_sub_task(chat_task)
+            self.wait_for([chat_task])
 
             logger.debug("assistant response generated")
 
             start = time.time()
             while not self.done:
                 if self.cancelled.is_set():
-                    self.infrastructure.cancel(chat_job.stream_id)
+                    self.infrastructure.cancel(chat_task.stream_id)
                     break
                 if time.time() - start > 300:
                     raise TimeoutError("5 min timeout")
                 time.sleep(0.01)
 
+            if self.reply_calls and not self.cancelled.is_set():
+                self._run_reply_tools()
+
             if not self.turns.set_state(self, "done"):
                 self._interrupted()
                 return
 
-            MessageQueue().set_status("done")
+            MessageQueue().set_status("done")            
+            self.add_sub_task(UpdateContextTask(self.request, self.db, self.infrastructure))
 
         except Exception as e:
             logger.error(f"failed to execute MetaTask {repr(e)}")
         finally:
             self.turns.set_state(self, "done")
 
-    def result(self) -> Dict[str, Any]:
+    def get_result(self) -> Dict[str, Any]:
         return self.response
     
     def has_response(self) -> bool:

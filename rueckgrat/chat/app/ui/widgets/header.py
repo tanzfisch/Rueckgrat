@@ -19,8 +19,10 @@ class Header(ft.Row):
         back_button: bool = True,
         on_go_back=None,
         on_open_profile=None,
+        actions: list | None = None,
         **kwargs,
     ):
+        """actions: the page's own buttons, right aligned in front of the app tools and the menu"""
         self.navigator = navigator
         self.on_go_back = on_go_back
         self.on_open_profile = on_open_profile
@@ -76,6 +78,7 @@ class Header(ft.Row):
                 )
             )
         controls.append(ft.Container(expand=True))
+        controls.extend(actions or [])
         # app level tools, only with a logged in session (not on the login page)
         if Hub.access_token:
             controls.append(self._tools_menu())

@@ -4,7 +4,8 @@ import re
 import threading
 import time
 import requests
-from .tool import Tool, ToolCategory
+from .tool import Tool
+from . import prompts
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -359,18 +360,20 @@ def convert(amount: Any, from_unit: str, to_unit: str) -> Dict[str, Any]:
 
 
 class ConversionTool(Tool):
-    category = ToolCategory.MATH
-    description = "converts amounts between currencies, crypto and physical units, prices gold/silver/platinum in any currency"
+    description = prompts.CONVERSION_DESCRIPTION
+    thresholds = (0.6, 0.65)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
-        "Does the user want to convert something?",
         "Does the user want an amount in another unit or currency, like ml to cups, kg to pounds or euros to dollars?",
         "Does the user give a height, length or weight and want it in other units?",
         "Does the user ask the money value of an amount of gold, silver, bitcoin or dollars?",
-        "Does the user ask how many centimeters, inches, grams or ounces are in an amount?"
+        "Does the user ask how many centimeters, inches, grams or ounces are in an amount?",
+        "Does the message have money in two different currencies, not just one currency?",
+        "Is one amount given in a metric unit and another in an imperial unit?",
+        "Does the message give speeds or temperatures in different units, like km/h and mph or Celsius and Fahrenheit?"
     ]
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
@@ -388,28 +391,15 @@ class ConversionTool(Tool):
 
         try:
             result = convert(amount, from_unit, to_unit)
-            logger.debug(f"convert: {result['text']}")
+            self.add_result({"tool": self.name(), "text": result['text']})
+            return
         except ConversionError as e:
-            logger.warning(f"convert {amount} {from_unit} -> {to_unit} failed: {e}")
-            result = {"amount": amount, "from": from_unit, "to": to_unit, "error": str(e)}
+            logger.error(f"convert {amount} {from_unit} -> {to_unit} failed: {e}")
         except Exception as e:
             logger.error(f"failed to convert {repr(e)}")
-            result = {"amount": amount, "from": from_unit, "to": to_unit, "error": "conversion failed"}
 
-        # a list, the LLM may convert several things in one answer
-        self.response.setdefault("conversion_results", []).append(result)
+        self.add_result({"tool": self.name(), "text": f"convert {amount} {from_unit} -> {to_unit} failed"})
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-CONVERT:
-Use for converting an amount between units: currencies and crypto (live rates), precious metals (gold, silver, platinum, palladium) in any currency, and physical units (length, mass, volume, area, temperature, speed, time, data, energy, power, pressure). Prefer this over websearch for exchange rates and metal prices. One call per conversion.
-
-Parameters:
-- amount (number, required): the value to convert
-- from (string, required): source unit (e.g. "USD", "BTC", "oz gold", "km", "°C", "GB")
-- to (string, required): target unit
-
-Example:
-{"tool": "convert", "amount": 100, "from": "USD", "to": "EUR"}
-"""
+        return prompts.CONVERSION_PROMPT

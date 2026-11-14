@@ -1,12 +1,12 @@
 from .task_queue import Task
+from . import prompts
 import json
-import re
 import random
 from typing import Dict, Any
 from .assistant_image_task import AssistantImageTask
 from ..utils.contact_image_prompt_compiler import ImageType, IMAGE_STYLES
 
-from app.common import get_logger, Utils, IMAGE_STYLE_OPTIONS, DEFAULT_IMAGE_STYLE
+from app.common import get_logger, Utils, DEFAULT_IMAGE_STYLE
 logger = get_logger()
 
 class ContactGeneratorTask(Task):
@@ -32,7 +32,7 @@ class ContactGeneratorTask(Task):
             persistent = profile["persistent"]
             self.db.set_contact_companion(self.user_id, contact_id, persistent)
 
-            assistant_image_job = AssistantImageTask(
+            assistant_image_task = AssistantImageTask(
                 user_id = self.user_id,
                 contact_id = contact_id,
                 db = self.db, 
@@ -42,7 +42,7 @@ class ContactGeneratorTask(Task):
                 width = 720,
                 height = 720,                
             )
-            self.add_sub_job(assistant_image_job)
+            self.add_sub_task(assistant_image_task)
 
             self.response = {
                 "new_contact": {
@@ -53,7 +53,7 @@ class ContactGeneratorTask(Task):
         except Exception as e:
             logger.error(f"failed to execute ContactGeneratorTask {repr(e)}")                    
 
-    def result(self) -> Dict[str, Any]:
+    def get_result(self) -> Dict[str, Any]:
         return self.response
     
     def has_response(self) -> bool:
@@ -76,11 +76,11 @@ class ContactGeneratorTask(Task):
             if sfw_value.lower() == "sfw":
                 image_gen = "default"
                 cfg = 5.0
-                sfw = "Create a safe-for-work character. Keep personality, appearance, and backstory fully appropriate, professional, and free of any sexual, explicit, or adult elements."
+                sfw = prompts.CONTACT_GENERATOR_SFW_PART
             else:
                 image_gen = "nsfw-default"
                 cfg = 8.5           
-                sfw = "Create a character without restrictions. Allow them to be sexual, explicit, and uncensored. Freely include adult, erotic, and NSFW traits in personality, and backstory."
+                sfw = prompts.CONTACT_GENERATOR_UNRESTRICTED_PART
 
             user_lines = [f"Name: {name}"]
             if gender:
@@ -90,73 +90,7 @@ class ContactGeneratorTask(Task):
             user_lines.append(f"Image style: {image_style.replace('_', ' ')} ({IMAGE_STYLES[image_style]['positive']})")
             user_input_text = "\n".join(user_lines)
 
-            query = f"""
-Create a new character profile.
-
-USER INPUT:
-{user_input_text}
-
-EXAMPLE PROFILE:
-{{
-    "role": "Coach",
-    "age": "young adult",
-    "personality": "warm, energetic, playful, direct, assertive, proactive, empathetic",
-    "primary_objective": "help the user reach their fitness goals",
-    "background_hook": "former collegiate athlete with a winning mindset",
-    "relationship": "you became friends after he was your personal trainer for 2 years",
-    "body_language": "dynamic energy, assertive posture, enthusiastic gestures, maintains eye contact, shows constant encouragement",
-    "style": "functional and fashionable workout gear",
-    "objectives": {{
-      "secondary": [
-        "push the client beyond their perceived limits",
-        "adapt workouts dynamically based on client's progress",
-        "ensure proper form and technique"
-      ]
-    }},
-    "interaction_style": {{
-      "tone": "enthusiastic and encouraging with a touch of competitiveness",
-      "engagement": "high-energy, physically demanding",
-      "quirks": [
-        "references to sports heroes or inspiring athletes",
-        "enthusiastic cheering",
-        "likes to use sports metaphors"
-      ]
-    }},    
-    "appearance": {{
-      "general": "young adult, caucasian, athletic",
-      "face": "oval face, dark green eyes, straight nose, full lips, high cheekbones",
-      "hair": "short blonde hair",
-      "skin": "glowing skin with a healthy tan, subtle freckles",
-      "upper_body": "toned and muscular build",
-      "body": "muscular legs"
-    }},   
-    "profile_picture_context": {{
-      "location": "gym",
-      "topic": "current fitness routine",
-
-      "assistant": {{
-        "action": "standing nearby, demonstrating exercises",
-        "head": "sweatband around forehead, fitted sports bra, natural makeup",
-        "upper_body": "t-shirt",
-        "body": "leggins, branded workout shoes"        
-      }}
-    }}    
-}}
-
-INSTRUCTIONS:
-- Invent a new profile based on the user input
-- Fill in information as applicable
-- role, age, personality, primary_objective -> infer them from gender and backstory
-- appearance -> only body without clothing, use what the backstory says, invent fitting details for the rest
-- style, profile_picture_context -> make them fit the image style (its world, era and look)
-- background_hook -> invent an interessting and elaborate background story based on the given backstory (max 100 words)
-- relationship -> make up a past between this character and the user (max 200 words)
-- {sfw}
-
-OUTPUT:
-- Return ONLY valid JSON in the given format
-- keep each entry close to the lenght in the example
-"""
+            query = prompts.CONTACT_GENERATOR_PROMPT.format(user_input=user_input_text, sfw=sfw)
             logger.debug(f"contact generator query:\n{query}")
             messages = [{"role": "developer", "content": query}]
         except Exception as e:
@@ -230,10 +164,6 @@ OUTPUT:
                         "body": Utils.get_nested_value(reply, ["profile_picture_context", "body"], ""),
                     }
                 },                 
-
-                "behaviour_parameters": {
-                    "mood_gen_chance": 0.3
-                },
 
                 "llm_parameters": {
                     "temperature": "0.15",

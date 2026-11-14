@@ -12,6 +12,41 @@
 
 Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client. Quality of the experience depends on the models you run which is limited by the hardware you have available.
 
+- Tools available to the AI
+    - **bash** — run bash commands in a sandbox
+    - **calculate** — calculate given expression
+    - **run_code** — write a small program and run it in a fresh sandbox container (Python, JavaScript, C++, Java, Go)
+    - **convert** — conversion between numerous units
+    - **current_time** — current time for given location
+    - **date_calc** — date calculations
+    - **fetch_url** — fetch content for given URL
+    - **find_tools** — helps the AI to find tools it needs
+    - **generate_image** — generate an image on request or on its own
+    - **show_map** — show a place on an OpenStreetMap map in the chat, tapping it opens the maps app
+    - **poll** — ask the user a question with options to pick from in the chat
+    - **price_finder** — looks for the best price of something and then shows you a ranked result in the chat
+    - **remember** — keep a short fact about the user, per contact
+    - **search_memory** — find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub)
+    - **spawn_job** — hand a bigger task to a background agent job that reports back when it is done
+    - **take_photo** — generate a photo of self, user, or both from current context
+    - **weather** — weather forcast for given location
+    - **websearch** — search the web when requested or needed
+    - **wikipedia** — search wikipedia when requested or needed
+    - **write_file** — write text or code files, downloadable by the user in chat
+
+- agent jobs running in the background
+    - a controller plans the job in steps and delegates each step to up multiple sub agents working in parallel, each with its own role (e.g. researcher, analyst, writer)
+    - results of every step get reported back to the controller, a failed sub agent is retried once with a revised task
+    - messages from the user during the job can change the remaining plan
+    - the controller merges all results into the final answer, progress is shown in the chat
+    - agents work on projects in their own sandbox file system and can generate images
+
+- persistent companion
+    - opt-in per contact, the contact gets a life of its own between conversations and may write first
+    - every night it plans its day on a private calendar: events of its own life, news scans, an evening reflection and check-ins with the user, only what fits its character
+    - each planned entry runs as an agent job with the usual tools (e.g. websearch for the news) and may send the user a message, sometimes with a photo
+    - the evening reflection carries open threads into the next day's planning
+
 ## Backend
 
 - runs on Linux only
@@ -30,21 +65,6 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - text embeddings using fastembed
     - tool detection using Laya where possible
 - GPU: NVIDIA and AMD. Intel GPUs are not supported/tested.
-- AI tools
-    - **websearch** — search the web when requested or needed
-    - **wikipedia** — search wikipedia when requested or needed
-    - **generate_image** — generate an image on request or on its own
-    - **take_photo** — generate a photo of self, user, or both from current context
-    - **remember** — keep a short fact about the user, per contact
-    - **search_memory** — find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub)
-    - **calculate** — calculate given expression
-    - **convert** — conversion between numerous units
-    - **current_time** — current time for given location
-    - **date_calc** — date calculations
-    - **fetch_url** — fetch content for given URL
-    - **weather** — weather forcast for given location
-    - **show_map** — show a place on an OpenStreetMap map in the chat, tapping it opens the maps app
-    - **run_code** — write a small program and run it in a fresh sandbox container (Python, JavaScript, C++, Java, Go)
 
 ## Frontend Tools
 
@@ -53,10 +73,13 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
 - chat with a locally installed LLM
 - in-chat image generation based on use prompt
 - self image generation. Like taking a picture of self based on current context.
-- code highlighting
+- code highlighting, copy button on code blocks
+- files from the AI: one file as itself, several files of one answer as a single zip
+- preview text files in the chat with syntax highlighting, without downloading them
+- file browser for the files of a conversation
+- spoken answers start playing while the text is still streaming
 - contacts, character templates, character-creation wizard, settings
 - assiting a conversation with someone in an other language (using your own llm for translation)
-- persistent companion (opt-in per contact): plans its own day and may write first
 
 Some screenhots of the app ...
 

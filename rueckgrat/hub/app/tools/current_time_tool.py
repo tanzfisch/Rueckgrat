@@ -2,7 +2,8 @@ from typing import Dict,  Any, Optional
 import re
 from datetime import datetime
 from zoneinfo import ZoneInfo, available_timezones
-from .tool import Tool, ToolCategory
+from .tool import Tool
+from . import prompts
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -110,16 +111,15 @@ def format_time(now: datetime) -> str:
 
 
 class CurrentTimeTool(Tool):
-    category = ToolCategory.TIME
-    description = "current date, time and weekday in a city or time zone"
+    description = prompts.CURRENT_TIME_DESCRIPTION
+    thresholds = (0.65, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user want to know the current time or date somewhere?",
-        "Does the user want the local time of day in a city or country?",
         "Does the user ask what time it is at a place, a region or a coast?"
     ]
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, response: Dict[str, Any], tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, response, tool_call)
+    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
+        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
 
     @classmethod
     def name(cls) -> str:
@@ -139,17 +139,8 @@ class CurrentTimeTool(Tool):
             logger.error(f"failed to get current time {repr(e)}")
             result = {"tool": self.name(), "error": "time lookup failed"}
 
-        self.response.setdefault("tool_results", []).append(result)
+        self.add_result(result)
 
     @classmethod
     def prompt(cls) -> str:
-        return """
-CURRENT TIME:
-Use when you need the current date, time, or weekday in a location.
-
-Parameters:
-- timezone (string, required): IANA name ("Pacific/Auckland") or city ("Auckland", "Munich")
-
-Example:
-{"tool": "current_time", "timezone": "Pacific/Auckland"}
-"""
+        return prompts.CURRENT_TIME_PROMPT

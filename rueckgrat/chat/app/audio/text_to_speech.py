@@ -4,7 +4,6 @@ import json
 import os
 import platform
 import queue
-import re
 import shlex
 import ssl
 import subprocess
@@ -26,15 +25,16 @@ logger = get_logger()
 class Text_To_Speech:
     """fetches speech from the hub and plays it, in a background thread"""
 
-    _current_proc = None  # running aplay process, if any
-    _generation = 0       # bumped on every speak/kill, stale threads skip playback
+    _current_proc = None    # running aplay process, if any
+    _generation_counter = 0 # bumped on every speak/kill, stale threads skip playback
     _proc_lock = Lock()
-    _page = None          # flet page, needed for in-app playback on mobile
-    _current_audio = None # running flet Audio service on mobile, if any
-    _audio_done = None    # set when in-app playback ends
-    _sample_id = None     # predefined voice whose sample is playing, None for speech
-    _tts_ws = None        # (websocket, reply_id) of the reply streaming from the hub, if any
-    state = "idle"        # "idle" / "generating" / "playing", written by the speech thread, polled by the chat page
+    _page = None            # flet page, needed for in-app playback on mobile
+    _current_audio = None   # running flet Audio service on mobile, if any
+    _audio_done = None      # set when in-app playback ends
+    _sample_id = None       # predefined voice whose sample is playing, None for speech
+    _tts_ws = None          # (websocket, reply_id) of the reply streaming from the hub, if any
+    _stream = None          # {"message_id", "text", "final"} of the reply spoken while it is still written, see speak_stream
+    state = "idle"          # "idle" / "generating" / "playing"
 
     @classmethod
     def attach(cls, page: ft.Page):
@@ -48,13 +48,14 @@ class Text_To_Speech:
     @classmethod
     def kill_current_speech(cls):
         with cls._proc_lock:
-            cls._generation += 1
+            cls._generation_counter += 1
             cls.state = "idle"
             cls._sample_id = None
             proc = cls._current_proc
             cls._current_proc = None
             audio, done = cls._current_audio, cls._audio_done
             tts, cls._tts_ws = cls._tts_ws, None
+
         if tts:
             ws, reply_id = tts
             try:
@@ -62,13 +63,17 @@ class Text_To_Speech:
                 ws.close()
             except Exception:
                 pass
+
         if audio and cls._page and cls._is_attached(audio):
             cls._page.run_task(audio.pause)
+
         if done:
             done.set()
+
         if proc and proc.poll() is None:
             proc.kill()
             proc.wait()
+
         if platform.system() == "Windows":
             import winsound
             winsound.PlaySound(None, 0)
@@ -80,8 +85,30 @@ class Text_To_Speech:
             return
 
         logger.info(f"prep speech \"{Utils.shorten(text)}\" with voice \"{voice or 'default'}\"")
-        text = cls._cleanup_for_speech(text)
         cls._start(lambda generation, put: cls._receive_reply(text, voice, message_id, generation, put, language))
+
+    @classmethod
+    def speak_stream(cls, text: str, voice: str = "", message_id: int | None = None, language: str = ""):
+        """speaks a reply that is still being written, from its text so far. stream_text hands over the rest"""
+        logger.info(f"prep streamed speech of message {message_id} with voice \"{voice or 'default'}\"")
+        with cls._proc_lock:
+            cls._stream = {"message_id": message_id, "text": text, "final": False}
+        cls._start(lambda generation, put: cls._receive_reply(text, voice, message_id, generation, put, language, streaming=True))
+
+    @classmethod
+    def stream_text(cls, message_id: int | None, text: str, final: bool = False):
+        """the whole text so far of the reply speak_stream speaks, final once it is complete"""
+        with cls._proc_lock:
+            stream = cls._stream
+            if not stream or stream["message_id"] != message_id:
+                return
+            stream["text"], stream["final"] = text, final
+            if cls._tts_ws:
+                ws, reply_id = cls._tts_ws
+                try:
+                    ws.send(json.dumps({"text": {"reply_id": reply_id, "text": text, "final": final}}))
+                except Exception:
+                    pass    # the reconnect sends the text again
 
     @classmethod
     def play_voice_sample(cls, predefined_id: str):
@@ -96,14 +123,13 @@ class Text_To_Speech:
         """stops what is playing and plays, in a background thread, the wavs produce(generation, put) hands to put()"""
         try:
             cls.kill_current_speech()
+            
             with cls._proc_lock:
-                generation = cls._generation
+                generation = cls._generation_counter
                 cls.state = "generating"
                 cls._sample_id = sample_id
+
             if cls._page and cls._is_mobile():
-                # run_thread sets flet's page context, so services like flet_audio.Audio register themselves.
-                # mobile only: run_thread workers are not daemon threads, on desktop they would block
-                # interpreter exit until aplay finished, so the atexit kill_current_speech came too late
                 cls._page.run_thread(cls._run_speech, produce, generation)
             else:
                 threading.Thread(target=cls._run_speech, args=(produce, generation), daemon=True).start()
@@ -111,23 +137,16 @@ class Text_To_Speech:
             cls.state = "idle"
             logger.error(f"failed to run speech generation {e}")
 
-    @staticmethod
-    def _cleanup_for_speech(text: str) -> str:
-        text = text.replace("*", "")
-        text = re.sub(r"\*[^*]+\*|\([^)]*\)|\[[^\]]+\]", "", text)
-        text = re.sub(r'https?://\S+|www\.\S+', '', text).strip()
-        return re.sub(r'\[IMAGE:[^\]]*\]', '', text).strip()
-
     @classmethod
     def _is_current(cls, generation: int) -> bool:
         with cls._proc_lock:
-            return generation == cls._generation
+            return generation == cls._generation_counter
 
     @classmethod
     def _set_state(cls, generation: int, state: str):
         """only the current speech may change the state, a killed one must not overwrite its successor"""
         with cls._proc_lock:
-            if generation == cls._generation:
+            if generation == cls._generation_counter:
                 cls.state = state
 
     @classmethod
@@ -158,10 +177,10 @@ class Text_To_Speech:
             cls._set_state(generation, "idle")
 
     @classmethod
-    def _receive_reply(cls, text: str, voice: str, message_id, generation: int, put, language: str = ""):
+    def _receive_reply(cls, text: str, voice: str, message_id, generation: int, put, language: str = "", streaming: bool = False):
         """streams the speech of a reply from the hub's /ws/tts in 1 s pieces, a wav per text chunk goes to put().
         every piece is acknowledged, after a dropped connection the hub resends from the last one received,
-        so nothing is lost and nothing played twice"""
+        so nothing is lost and nothing played twice. streaming: the text is still being written, see speak_stream"""
         from websockets.sync.client import connect
         from websockets.exceptions import InvalidStatus
 
@@ -173,14 +192,21 @@ class Text_To_Speech:
             try:
                 with connect(uri, additional_headers={"Authorization": f"Bearer {Hub.access_token}"}, ssl=ctx,
                              open_timeout=10, ping_interval=5, ping_timeout=5) as ws:
-                    with cls._proc_lock:
-                        if generation != cls._generation:
+                    with cls._proc_lock:    # stream_text sends under the lock too, so its text can't come before the speak
+                        if generation != cls._generation_counter:
                             return
                         cls._tts_ws = (ws, reply_id)
+                        stream = cls._stream if streaming and cls._stream and cls._stream["message_id"] == message_id else None
+                        # nothing received yet: (re)start the reply, otherwise continue after the last piece
+                        if last_seq < 0:
+                            ws.send(json.dumps({"speak": {"reply_id": reply_id, "text": stream["text"] if stream else text, "voice": voice,
+                                                          "message_id": message_id, "language": language,
+                                                          "stream": bool(stream and not stream["final"])}}))
+                        else:
+                            ws.send(json.dumps({"resume": {"reply_id": reply_id, "last_seq": last_seq}}))
+                            if stream:
+                                ws.send(json.dumps({"text": {"reply_id": reply_id, "text": stream["text"], "final": stream["final"]}}))
                     delay = 0.5
-                    # nothing received yet: (re)start the reply, otherwise continue after the last piece
-                    ws.send(json.dumps({"speak": {"reply_id": reply_id, "text": text, "voice": voice, "message_id": message_id, "language": language}}
-                                       if last_seq < 0 else {"resume": {"reply_id": reply_id, "last_seq": last_seq}}))
                     for message in ws:
                         data = json.loads(message)
                         if data.get("gone") == reply_id:
@@ -260,7 +286,7 @@ class Text_To_Speech:
         command_aplay = ["aplay", wav_file]
         logger.debug(f"run: {shlex.join(command_aplay)}")
         with cls._proc_lock:
-            if generation != cls._generation:
+            if generation != cls._generation_counter:
                 return
             proc = subprocess.Popen(command_aplay, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             cls._current_proc = proc
@@ -284,7 +310,7 @@ class Text_To_Speech:
 
         audio = fta.Audio(src=wav, autoplay=True, on_state_change=on_state_change)
         with cls._proc_lock:
-            if generation != cls._generation:
+            if generation != cls._generation_counter:
                 return
             cls._current_audio, cls._audio_done = audio, done
             cls.state = "playing"
