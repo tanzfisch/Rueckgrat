@@ -95,8 +95,9 @@ class ProfileSettingsPage(ft.Column):
         # text only. the page is built on every visit, so this is always the stored profile
         profile = (Hub.get_user_data() or {}).get("profile") or {}
         name = (profile.get("name") or "").strip()
-        hair, eyes = profile.get("hair_color"), profile.get("eye_color")
-        attributes = [profile.get("gender"), profile.get("age"), hair and f"{hair} hair", eyes and f"{eyes} eyes", profile.get("ethnicity"), profile.get("body_type")]
+        attributes = [
+            profile.get("gender")
+        ]
         attributes = ", ".join(str(a) for a in attributes if a)
         backstory = (profile.get("backstory") or "").strip()
 

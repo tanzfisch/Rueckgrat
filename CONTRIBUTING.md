@@ -42,3 +42,25 @@ adb uninstall com.flet.chat && adb install build/apk/*.apk && adb logcat -s flet
 cd ~/dev/Rueckgrat-dev/rueckgrat/hub
 ./laya_tune/tune.sh
 ```
+
+# better logging
+
+Install doozle-agent on remote machines
+
+```
+docker run -d --name dozzle-agent \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  -p 7007:7007 \
+  amir20/dozzle:latest agent
+```
+
+Install doozle on your machine refering to the remote machines. For Example:
+
+```
+docker run -d --name dozzle \
+  -p 8088:8080 \
+  -e DOZZLE_REMOTE_AGENT=192.168.2.158:7007,192.168.2.239:7007 \
+  amir20/dozzle:latest
+```
+
+Then open with http://localhost:8088/ in browser
