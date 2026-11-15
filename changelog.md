@@ -6,6 +6,7 @@ Changelog
 
 - #192 reduce user profile to minimum
 - #207 add user id to logs in hub
+- #191 prevent android disconnect when in backgrond
 
 0.27.0
 ------

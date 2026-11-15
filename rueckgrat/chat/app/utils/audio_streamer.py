@@ -12,12 +12,8 @@ import websockets
 from websockets.exceptions import InvalidStatus
 
 from app.common import get_logger
+from .keep_alive import KeepAlive
 logger = get_logger()
-
-try:  # only bundled into the Android build (see pyproject.toml), absent on desktop
-    from flet_foreground_service import ForegroundService
-except ImportError:
-    ForegroundService = None
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
@@ -47,7 +43,6 @@ class AudioStreamer:
         self._stream = None
         self._send_thread = None
         self._page = None
-        self._foreground = None  # Android foreground service, keeps mic + network alive in background
         self.level = 0.0
         self._buffer = bytearray()
         self._queued_buffer = bytearray()
@@ -76,38 +71,7 @@ class AudioStreamer:
         self._page = page
         if self._is_mobile() and self.recorder not in page.services:
             page.services.append(self.recorder)
-            self._foreground = self._foreground_service(page)
             page.update()
-
-    @staticmethod
-    def _foreground_service(page: ft.Page):
-        """ Android only: without a foreground service the OS silences the mic 5 s after the app leaves the screen. """
-        if ForegroundService is None or page.platform != ft.PagePlatform.ANDROID:
-            return None
-        for service in page.services:
-            if isinstance(service, ForegroundService):
-                return service
-        service = ForegroundService()
-        page.services.append(service)
-        return service
-
-    async def _start_foreground(self):
-        """ must run while the app is visible (Android 14+) and after RECORD_AUDIO is granted. Never blocks recording. """
-        if self._foreground is None:
-            return
-        try:
-            if not await self._foreground.start("Rückgrat", "Microphone active"):
-                logger.warning("foreground service did not start, mic stops when the app is in the background")
-        except Exception as e:
-            logger.warning("foreground service failed to start: %r", e)
-
-    async def _stop_foreground(self):
-        if self._foreground is None:
-            return
-        try:
-            await self._foreground.stop()
-        except Exception as e:
-            logger.warning("foreground service failed to stop: %r", e)
 
     def _is_mobile(self) -> bool:
         p = getattr(self._page, "platform", None) if self._page else None
@@ -189,7 +153,8 @@ class AudioStreamer:
         check = getattr(self.recorder, "check_permission", None) or self.recorder.has_permission
         if not await check():
             raise PermissionError("RECORD_AUDIO denied")
-        await self._start_foreground()
+        # while visible and after RECORD_AUDIO (Android 14+): without it the OS silences the mic in the background
+        await KeepAlive.set_microphone(True)
         for rate in (16000, 44100):
             started = await self.recorder.start_recording(
                 configuration=self._recorder_config(rate),
@@ -211,7 +176,7 @@ class AudioStreamer:
                 await self.recorder.stop_recording()
         except Exception:
             pass
-        await self._stop_foreground()
+        await KeepAlive.set_microphone(False)
         if self._ws and self._loop:
             try:
                 asyncio.run_coroutine_threadsafe(self._ws.close(), self._loop)

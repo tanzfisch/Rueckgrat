@@ -24,7 +24,7 @@ from app.ui import (
 from app.ui import theme
 from app.ui.widgets import ImageOverlay, TextPreview, MessageBox, ConnectionBanner
 
-from app.utils import Paths, Notifier
+from app.utils import Paths, Notifier, KeepAlive
 from app.utils.config import RueckgratConfig
 
 from app.common import get_logger, set_log_level
@@ -292,6 +292,7 @@ def main():
         theme.apply_theme(page, config.theme, config.font_scale)
         Text_To_Speech.attach(page)
         Notifier.attach(page)
+        KeepAlive.attach(page)
         page.padding = 0
         App(page, config.has_config())
 

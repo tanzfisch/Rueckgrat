@@ -22,6 +22,7 @@ class Hub:
     websocket_client = None
     _last_health: Optional[str] = None
     _refresh_lock: Optional[asyncio.Lock] = None
+    _session_handlers: list[Callable[[bool], None]] = []
 
     @classmethod
     def init(cls, config):
@@ -111,6 +112,20 @@ class Hub:
         cls.user_name = data.get("user_name", cls.user_name)
         cls.nsfw_allowed = bool(data.get("nsfw_allowed", False))
         cls.config.refresh_token = cls.refresh_token
+        cls._notify_session(True)
+
+    @classmethod
+    def register_session_change(cls, callback: Callable[[bool], None]):
+        """callback(True) after a login or session refresh, callback(False) on logout"""
+        cls._session_handlers.append(callback)
+
+    @classmethod
+    def _notify_session(cls, logged_in: bool):
+        for cb in list(cls._session_handlers):
+            try:
+                cb(logged_in)
+            except Exception as e:
+                logger.error(f"session handler {cb!r} failed: {e!r}")
 
     @classmethod
     def has_stored_session(cls) -> bool:
@@ -188,12 +203,18 @@ class Hub:
         cls.user_id = -1
         cls.user_name = ""
         cls.nsfw_allowed = False
+        cls._notify_session(False)
 
     @classmethod
     async def _start_websocket(cls, token: str):
         # supervised: reconnects after drops. a second login replaces the old token's supervisor
         await cls.websocket_client.close()
         cls.websocket_client.start(token)
+
+    @classmethod
+    async def check_connection(cls) -> bool:
+        """see WebSocketClient.check_alive, e.g. when the app comes back from the background"""
+        return await cls.websocket_client.check_alive()
 
     @classmethod
     def register_connection_state(cls, callback: Callable[[str], None]):
