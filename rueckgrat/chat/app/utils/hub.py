@@ -488,7 +488,7 @@ class Hub:
             )
             if response.status_code == 200:
                 return response.json()
-            logger.error(f"get gallery - {response.status_code} {response.reason}")
+            logger.error(f"failed to get gallery {response.status_code} {response.reason}")
         except Exception as e:
             logger.error(f"failed to get_gallery {repr(e)}")
         return None
