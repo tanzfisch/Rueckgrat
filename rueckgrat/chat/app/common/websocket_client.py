@@ -159,6 +159,29 @@ class WebSocketClient:
         self._send_queue.put_nowait(msg)
         return True
 
+    async def check_alive(self, timeout: float = 3) -> bool:
+        """start() mode, e.g. after the app was frozen in the background: a socket that does not answer a ping
+        within timeout is dropped at once, so the supervisor reconnects now instead of after ping_timeout.
+        False while not connected (the supervisor is reconnecting already)"""
+        if not self.is_connected():
+            return False
+        ws = self.ws
+        try:
+            await asyncio.wait_for(self._ping(ws), timeout)
+            return True
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.info(f"{self.uri} did not answer the ping ({e!r}), reconnecting")
+            ws.transport.abort()    # no closing handshake, a dead peer would hold close() for close_timeout
+            return False
+
+    @staticmethod
+    async def _ping(ws):
+        """sending can hang too (full buffers of a dead socket), so the timeout covers both"""
+        pong = await ws.ping()
+        await pong
+
     def start(self, token: Optional[str] = None):
         """keep the connection alive in the background: connect whenever the peer
         becomes reachable and reconnect after it goes away. returns immediately.
