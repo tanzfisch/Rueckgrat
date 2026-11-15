@@ -39,9 +39,11 @@ class ToolExecutionTask(Task):
         self.executed: List[Dict[str, Any]] = []    # {"call", "ms"} per call that ran, in order. the calls of a round run together and share its time
 
     def _bands(self, mandatory: List[str], recommended: List[str]) -> tuple[List[str], List[str]]:
-        """(mandatory, recommended) of a detection, without the excluded tools (ToolRegistry.bands)"""
-        return self.tool_registry.bands(self.tool_registry.available(mandatory, self.excluded_tools),
-                                        self.tool_registry.available(recommended, self.excluded_tools))
+        """(mandatory, recommended) of a detection, without the excluded tools (ToolRegistry.bands). the companions of
+        the offered tools (share_file with bash) join the mandatory ones, the setup offers them as optional (split_tools)"""
+        mandatory, recommended = self.tool_registry.bands(self.tool_registry.available(mandatory, self.excluded_tools),
+                                                          self.tool_registry.available(recommended, self.excluded_tools))
+        return mandatory + self.tool_registry.companions(mandatory + recommended, self.excluded_tools), recommended
 
     def get_result(self) -> Dict[str, Any]:
         return self.tool_response
@@ -148,7 +150,9 @@ class ToolExecutionTask(Task):
         together and their results go into tool_response. returns (the calls that ran, what went wrong that a fix round
         could repair: failed calls, a cut off reply)"""
         compiler = ToolPromptCompiler(prompt_text, self.tool_response, self.tool_registry, tools, recommended,
-                                      history=self._history())
+                                      history=self._history(),
+                                      scope={"user_id": self.user_id, "contact_id": self.request.contact_id,
+                                             "conversation_id": self.request.conversation_id})
         messages = []
         context_prompt = build_context(self.request.name, self.context) if self.context else ""
         if context_prompt:
@@ -209,7 +213,7 @@ class ToolExecutionTask(Task):
             prompt = self.request.content + tool_prompts.FIX_ROUND_PART.format(
                 fix=fix, total=self.fix_rounds, problems="\n".join(f"- {problem}" for problem in problems))
             problems = []
-            for group in self.tool_registry.ranked_groups(tools):    # bash and run_code, then write_file
+            for group in self.tool_registry.ranked_groups(tools):    # bash, run_code and share_file, then write_file
                 problems += self._round(f"fix {fix}/{self.fix_rounds}", group, group, prompt)[1]
         text = tool_prompts.CHECKS_FAILED_PART.format(rounds=fix, problems="; ".join(problems)) if problems \
             else tool_prompts.CHECKS_FIXED_PART.format(rounds=fix)

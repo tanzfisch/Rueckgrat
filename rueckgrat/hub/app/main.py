@@ -598,6 +598,8 @@ def delete_contact(contact_id: int, username: str = Depends(get_current_user)):
         image_keys = app.state.db.get_contact_image_keys(contact_id)
         if app.state.db.delete_contact(contact_id):
             released_images = app.state.image_store.release(image_keys, drop_conversation_images=False)
+            from app.utils.sandbox_volume import SandboxVolume
+            SandboxVolume(user_id, contact_id).remove()
             return {"status": "ok", "released_images": released_images}
         else:
             return {"status": "failed to delete contact"}
@@ -660,8 +662,6 @@ def delete_conversation(conversation_id: int, username: str = Depends(get_curren
             released_images = app.state.image_store.release(image_keys)
             from app.utils.text_files import remove_conversation_files
             remove_conversation_files(user_id, conversation_id)
-            from app.utils.conversation_volume import ConversationVolume
-            ConversationVolume(user_id, conversation_id).remove()
             return {"status": "ok", "released_images": released_images}
         else:
             return {"status": "failed to delete conversation"}
@@ -996,18 +996,18 @@ def download_message_file(message_id: int, stored_name: str, username: str = Dep
         download_name = row["real_name"].rsplit("/", 1)[-1] or "file"
         return Response(content=path.read_bytes(), media_type=row["file_type"], headers=attachment_headers(download_name))
 
-########### conversation files (the sandbox volume of bash and run_code)
+########### conversation files (the sandbox volume of bash and run_code, shared by all conversations of the contact)
 def conversation_files(username: str, conversation_id: int, read):
-    """read(volume) on the logged in user's conversation volume: 404 for a conversation not theirs or a path that
-    isn't there, 400 for a path leaving the files, 503 without docker"""
+    """read(volume) on the volume of the logged in user's conversation's contact: 404 for a conversation not theirs or
+    a path that isn't there, 400 for a path leaving the files, 503 without docker"""
     from docker.errors import DockerException
-    from app.utils.conversation_volume import ConversationVolume
+    from app.utils.sandbox_volume import SandboxVolume
     user_id = app.state.db.get_user_id(username)
     with logger_context(user_id):
         if not app.state.db.owns_conversation(user_id, conversation_id):
             raise HTTPException(status_code=404, detail="conversation not found")
         try:
-            return read(ConversationVolume(user_id, conversation_id))
+            return read(SandboxVolume.of_conversation(app.state.db, user_id, conversation_id))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         except FileNotFoundError:
@@ -1038,7 +1038,7 @@ def download_conversation_file(conversation_id: int, path: str, username: str = 
 def zip_conversation_files(conversation_id: int, path: str = "", exclude: bool = True,
                            username: str = Depends(get_current_user)):
     """a folder of the conversation's files ("" all of them) as one zip. exclude: without .git, caches and installed
-    packages (EXCLUDED in conversation_volume)"""
+    packages (EXCLUDED in sandbox_volume)"""
     import tempfile
     target = tempfile.SpooledTemporaryFile(max_size=32 * 1024 * 1024)
     try:

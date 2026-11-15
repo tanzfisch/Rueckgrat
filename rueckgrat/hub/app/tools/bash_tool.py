@@ -5,21 +5,21 @@ from typing import Dict, Any, List
 from .tool import Tool
 from .code_tool import RUNTIME_CONFIGS, clip
 from . import prompts
-from app.utils.conversation_volume import ConversationVolume, MOUNT_PATH, SANDBOX_USER
+from app.utils.sandbox_volume import SandboxVolume, MOUNT_PATH, SANDBOX_USER, PROJECTS, DOCUMENTS, IMAGES
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 COMMAND_TIMEOUT = 120       # seconds, a git clone or pip install needs a while
 MAX_COMMAND_ECHO = 300      # characters of the command repeated in its result
-# the terminal stays open: the folder, the exported variables (an activated venv) and the shell functions of the
-# conversation's last command are restored before the next one. kept with the files, .cache is not in a zip
-SHELL_STATE = f"{MOUNT_PATH}/.cache/rueckgrat/shell"
-RESTORE = (f'S={SHELL_STATE}; mkdir -p "$S"\n'
+# the terminal stays open per conversation: the folder, the exported variables (an activated venv) and the shell
+# functions of the conversation's last command are restored before the next one, a new conversation starts in its
+# workdir. kept with the files (SandboxVolume.shell_state), .cache is not in a zip. {state}, {workdir}: of the conversation
+RESTORE = ('S={state}; mkdir -p "$S"\n'
            '[ -f "$S/env" ] && . "$S/env" 2>/dev/null; [ -f "$S/functions" ] && . "$S/functions" 2>/dev/null\n'
-           f'cd "$(cat "$S/cwd" 2>/dev/null)" 2>/dev/null || cd {MOUNT_PATH}\n'
+           '{{ [ -s "$S/cwd" ] && cd "$(cat "$S/cwd")" 2>/dev/null; }} || {{ mkdir -p {workdir} && cd {workdir}; }}\n'
            'trap \'code=$?; pwd > "$S/cwd"; export -p | grep -v -E "^declare -x (PWD|OLDPWD|SHLVL|HOSTNAME|_)=" > "$S/env"; '
-           'declare -p ${!_OLD_VIRTUAL_*} >> "$S/env" 2>/dev/null; declare -f > "$S/functions"; exit $code\' EXIT\n')
+           'declare -p ${{!_OLD_VIRTUAL_*}} >> "$S/env" 2>/dev/null; declare -f > "$S/functions"; exit $code\' EXIT\n')
 # the files home: git config and pip install --user stay with the files. a fixed git author, git commit refuses without one
 ENVIRONMENT = {
     "HOME": MOUNT_PATH,
@@ -32,9 +32,10 @@ ENVIRONMENT = {
 
 class BashTool(Tool):
     """runs one bash command in a sandbox container (python image: git, curl, python), as SANDBOX_USER, with network,
-    in the conversation's persistent files (ConversationVolume). the calls of one round share one container (sharing),
-    each with its own timeout and result, a failing command does not stop the next. the files carry over, and like an
-    open terminal the folder, exported variables and functions (SHELL_STATE), running processes do not"""
+    in the contact's persistent files (SandboxVolume, shared by all its conversations). the calls of one round share one
+    container (sharing), each with its own timeout and result, a failing command does not stop the next. the files carry
+    over, and like an open terminal per conversation the folder, exported variables and functions (RESTORE), running
+    processes do not"""
     description = prompts.BASH_DESCRIPTION
     sequential = True
     thresholds = (0.6, 0.65)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
@@ -54,7 +55,7 @@ class BashTool(Tool):
 
     @classmethod
     def sharing(cls):
-        return ConversationVolume.sharing()
+        return SandboxVolume.sharing()
 
     @classmethod
     def problems(cls, result: Dict[str, Any]) -> List[str]:
@@ -70,10 +71,12 @@ class BashTool(Tool):
         """the tool result {"tool", "text"|"error"} of one command"""
         configs = {**RUNTIME_CONFIGS, "user": SANDBOX_USER, "environment": dict(ENVIRONMENT)}
         try:
-            with ConversationVolume(self.user_id, self.conversation_id).session(configs, lang="python",
-                                                                               skip_environment_setup=True) as session:
+            restore = RESTORE.format(state=SandboxVolume.shell_state(self.conversation_id),
+                                     workdir=SandboxVolume.workdir(self.conversation_id))
+            with SandboxVolume(self.user_id, self.contact_id).session(configs, lang="python",
+                                                                      skip_environment_setup=True) as session:
                 started = time.monotonic()
-                result = session.execute_command(f"timeout {COMMAND_TIMEOUT} bash -c {shlex.quote(RESTORE + command)}",
+                result = session.execute_command(f"timeout {COMMAND_TIMEOUT} bash -c {shlex.quote(restore + command)}",
                                                  workdir=MOUNT_PATH)
                 stopped = time.monotonic() - started >= COMMAND_TIMEOUT - 1
         except Exception as e:
@@ -98,5 +101,20 @@ class BashTool(Tool):
         self.add_result(self.run(command))
 
     @classmethod
-    def prompt(cls) -> str:
-        return prompts.BASH_PROMPT.format(files=MOUNT_PATH, timeout=COMMAND_TIMEOUT)
+    def prompt(cls, workdir: str = f"{MOUNT_PATH}/workdir/<conversation>", projects: str = prompts.BASH_PROJECTS_UNKNOWN_PART) -> str:
+        return prompts.BASH_PROMPT.format(files=MOUNT_PATH, timeout=COMMAND_TIMEOUT, workdir=workdir, projects=projects,
+                                          project_dir=f"{MOUNT_PATH}/{PROJECTS}", documents=f"{MOUNT_PATH}/{DOCUMENTS}",
+                                          images=f"{MOUNT_PATH}/{IMAGES}")
+
+    @classmethod
+    def prompt_for(cls, user_id: int, contact_id: int, conversation_id: int) -> str:
+        """the prompt with the conversation's workdir and the contact's projects (SandboxVolume.projects): name and the
+        first line of its PROJECT.md each"""
+        try:
+            projects = SandboxVolume(user_id, contact_id).projects()
+            listed = "\n".join(prompts.BASH_PROJECT_LINE.format(name=name, summary=summary or "no PROJECT.md")
+                                for name, summary in projects) or prompts.BASH_NO_PROJECTS_PART
+        except Exception as e:
+            logger.warning(f"projects of contact {contact_id} not listed {repr(e)}")
+            listed = prompts.BASH_PROJECTS_UNKNOWN_PART
+        return cls.prompt(SandboxVolume.workdir(conversation_id), listed)

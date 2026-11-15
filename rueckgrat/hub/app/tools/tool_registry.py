@@ -28,6 +28,7 @@ from .price_finder_tool import PriceFinderTool
 from .code_tool import RunCodeTool
 from .bash_tool import BashTool
 from .write_file_tool import WriteFileTool
+from .share_file_tool import ShareFileTool
 from .find_tools_tool import FindToolsTool
 
 from app.common import get_logger, Utils, MessageQueue
@@ -40,13 +41,13 @@ class ToolRegistry:
         "date_calc",
         ("search_memory", "find_tools", "wikipedia", "websearch", "fetch_url", "weather", "price_finder"),
         "convert",
-        ("calculate", "run_code", "bash"),
+        ("calculate", "run_code", "bash", "share_file"),    # share_file in bash's round: it runs after the calls that make the files
         ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember"),
     ]
 
     TOOL_RANK = {name: rank for rank, entry in enumerate(TOOL_ORDER) for name in ((entry,) if isinstance(entry, str) else entry)}
     PROMPT_TOOLS = ["remember", "search_memory", "take_photo", "find_tools"]   # find_tools shares search_memory's round, no extra setup call
-    FIX_TOOLS = ["run_code", "bash", "write_file"]     # offered again in a worker's fix rounds (ToolExecutionTask), in this order
+    FIX_TOOLS = ["run_code", "bash", "share_file", "write_file"]     # offered again in a worker's fix rounds (ToolExecutionTask), in this order
     RUN_TOOLS = ("run_code", "bash")    # a worker's mandatory one with no call is a problem for its fix rounds (not_called)
     PRIORITY_TOOL = "spawn_job"   # overrides all other tools
     WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "poll", "show_map")
@@ -84,6 +85,7 @@ class ToolRegistry:
         self._register_tool(RunCodeTool)
         self._register_tool(BashTool)
         self._register_tool(WriteFileTool)
+        self._register_tool(ShareFileTool)
         self._register_tool(FindToolsTool)
 
         temp = ", ".join(self.tools)
@@ -129,6 +131,15 @@ class ToolRegistry:
     def available(self, tool_names: List[str], excluded: tuple = ()) -> List[str]:
         """the registered names of tool_names without the excluded ones, in their order, no duplicates"""
         return [name for name in dict.fromkeys(tool_names or []) if name in self.tools and name not in excluded]
+
+    def companions(self, tool_names: List[str], excluded: tuple = ()) -> List[str]:
+        """the tools offered with one of tool_names (Tool.offered_with) that are not among them or excluded"""
+        return [name for name, tool in self.tools.items() if set(tool.offered_with) & set(tool_names or [])
+                and name not in (tool_names or []) and name not in excluded]
+
+    def optional(self, name: str) -> bool:
+        """the model decides on its own whether to call it: the PROMPT_TOOLS and the companions (Tool.offered_with)"""
+        return name in self.PROMPT_TOOLS or bool(getattr(self.tools.get(name), "offered_with", ()))
 
     def project_tools(self, excluded: tuple = ()) -> List[str]:
         """the PROJECT_TOOLS a fix or change of an existing project selects, without the excluded ones"""
@@ -307,7 +318,8 @@ class ToolRegistry:
         logger.debug(f"detached: {tool_job.name()} for message {tool_job.message_id}")
         threading.Thread(target=contextvars.copy_context().run, args=(run,), name=f"detached-{tool_job.name()}", daemon=True).start()
 
-    def get_tools_prompt(self, skill_names: Optional[List[str]] = None) -> str:
+    def get_tools_prompt(self, skill_names: Optional[List[str]] = None, scope: Optional[Dict[str, int]] = None) -> str:
+        """the instructions of the tools. scope: {user_id, contact_id, conversation_id} of the setup, the tools' prompt_for"""
         if not skill_names:
             selected = self.tools.values()
         else:
@@ -315,7 +327,7 @@ class ToolRegistry:
 
         result = ""
         for tool in selected:
-            result += f"{tool.prompt()}"
+            result += f"{tool.prompt_for(**scope) if scope else tool.prompt()}"
         
         return result
 
@@ -332,17 +344,17 @@ class ToolRegistry:
         return target    
 
     def split_tools(self, tool_names: List[str], recommended: List[str] = ()) -> tuple[List[str], List[str], List[str]]:
-        """(mandatory, recommended, optional): PROMPT_TOOLS are optional, the recommended ones the detection was not sure
-        about, every other tool was detected and must be called"""
+        """(mandatory, recommended, optional): PROMPT_TOOLS and companions are optional (optional()), the recommended ones
+        the detection was not sure about, every other tool was detected and must be called"""
         names = list(tool_names or [])
-        return ([name for name in names if name not in self.PROMPT_TOOLS and name not in recommended],
-                [name for name in names if name in recommended and name not in self.PROMPT_TOOLS],
-                [name for name in names if name in self.PROMPT_TOOLS])
+        return ([name for name in names if not self.optional(name) and name not in recommended],
+                [name for name in names if name in recommended and not self.optional(name)],
+                [name for name in names if self.optional(name)])
 
-    def get_tools_hydrated(self, tool_names: List[str], kind: str = "mandatory") -> str:
+    def get_tools_hydrated(self, tool_names: List[str], kind: str = "mandatory", scope: Optional[Dict[str, int]] = None) -> str:
         """the tools' instructions and how to call them. kind: "mandatory" (must be called), "recommended" (detected, but
-        the model decides) or "optional" (PROMPT_TOOLS, the model decides on its own)"""
-        tools = self.get_tools_prompt(tool_names)
+        the model decides) or "optional" (PROMPT_TOOLS and companions, the model decides on its own). scope: see get_tools_prompt"""
+        tools = self.get_tools_prompt(tool_names, scope)
 
         if kind == "recommended":
             return prompts.TOOLS_RECOMMENDED_PART.format(tools=tools)

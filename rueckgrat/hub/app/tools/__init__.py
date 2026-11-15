@@ -19,6 +19,7 @@ from .price_finder_tool import PriceFinderTool
 from .code_tool import RunCodeTool
 from .bash_tool import BashTool
 from .write_file_tool import WriteFileTool
+from .share_file_tool import ShareFileTool
 
 __all__ = [
     "ToolRegistry",
@@ -42,4 +43,5 @@ __all__ = [
     "RunCodeTool",
     "BashTool",
     "WriteFileTool",
+    "ShareFileTool",
 ]

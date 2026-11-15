@@ -10,7 +10,7 @@ from typing import Dict, Any
 
 from app.common import get_logger, ChatRequest, Utils, MessageQueue
 from app.utils.tts_stream import TtsStreams
-from app.utils.conversation_volume import ConversationVolume
+from app.utils.sandbox_volume import SandboxVolume
 logger = get_logger()
 
 class MetaTask(Task):
@@ -111,7 +111,7 @@ class MetaTask(Task):
 
         MessageQueue().send_status_message("thinking")
         tool_detection_task = ToolDetectionTask(self.request.content, self.tool_registry, self.infrastructure,
-                                                volume=ConversationVolume(self.user_id, self.request.conversation_id))
+                                                volume=SandboxVolume(self.user_id, self.request.contact_id))
         self.add_sub_task(tool_detection_task)        
 
         if self._interrupted():

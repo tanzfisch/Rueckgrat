@@ -14,7 +14,8 @@ templates, filled with str.format (literal braces doubled):
   CHECKS_FIXED_PART, CHECKS_FAILED_PART       rounds: fix rounds run, problems (failed only): "; " separated
   TOOLS_RECOMMENDED_PART, TOOLS_REPLY_PART,
   TOOLS_OPTIONAL_PART, TOOLS_MANDATORY_PART   tools: the instructions of the offered tools (ToolRegistry.get_tools_prompt)
-  RUN_CODE_WRITER_PROMPT                      run_timeout: seconds the program may run
+  RUN_CODE_WRITER_PROMPT                      run_timeout: seconds the program may run, files: the sandbox files folder,
+                                              projects: its projects folder, workdir: the conversation's own folder
   MAP_LOOKING_UP_PART                         query: the address of the call
   MAP_SHOWN_PART                              name: the found place's display name
   POLL_SHOWN_PART                             question, options (joined by " | "), choices: POLL_ONE_CHOICE_PART or POLL_SEVERAL_CHOICES_PART
@@ -23,7 +24,14 @@ templates, filled with str.format (literal braces doubled):
   PRICE_NONE_PART                             query: the product searched for
   WRITE_FILE_ATTACHED_PART                    file_names: the files, comma separated
   WRITE_FILE_NOT_ATTACHED_PART                problems: what could not be attached, "; " separated
-  BASH_PROMPT                                 files: the sandbox files folder, timeout: seconds per command
+  WRITE_FILE_SAVED_PART                       paths: where write_file kept its files, comma separated
+  WRITE_FILE_PROMPT                           documents: the folder write_file writes into
+  SHARE_FILE_PROMPT                           files: the sandbox files folder
+  BASH_PROMPT                                 files: the sandbox files folder, timeout: seconds per command, workdir: the
+                                              conversation's own folder, project_dir, documents, images: the folders of
+                                              the layout, projects: BASH_PROJECT_LINE lines, BASH_NO_PROJECTS_PART or
+                                              BASH_PROJECTS_UNKNOWN_PART
+  BASH_PROJECT_LINE                           name: a project's folder, summary: the first line of its PROJECT.md
   SEARCH_MEMORY_CONVERSATION_QUESTION_PART    summary: the start of an earlier conversation's summary
   SPAWN_JOB_REPORT_PROMPT                     prompt, summary, details, attachments: SPAWN_JOB_ATTACHMENTS_PART or ""
   SPAWN_JOB_ATTACHMENTS_PART                  names: one "- name" line per held file
@@ -44,7 +52,7 @@ TOOL_CUT_OFF_PART = ("the last {name} call was cut off, the tool setup got too l
 TOOL_LENGTH_PART = ("the tool setup hit its length limit after the last {name} call: the calls it did not write are missing, "
                     "tell the user which part is not done")
 
-# a worker's fix rounds (ToolExecutionTask): appended to its task when bash, run_code or write_file calls did not work
+# a worker's fix rounds (ToolExecutionTask): appended to its task when bash, run_code, share_file or write_file calls did not work
 FIX_ROUND_PART = """
 
 FIX ROUND {fix} OF {total}: these calls of the earlier rounds did not work:
@@ -138,8 +146,8 @@ Rules:
 - "language" when it is not python. "requires" lists packages to install first: pip for python, npm for javascript, apt for cpp, go modules for go. java can't install packages, use only its standard library.
 - When the user gave code to run, reply with that code unchanged (add header lines if it needs packages).
 - It must finish within {run_timeout} seconds. Keep the output short.
-- The working directory has the folder {files}: the files of this conversation, they stay between runs and the bash tool sees them too. Read and write there when the task is about these files. Files to keep go into the project's own folder, {files}/<project-name>/.
-- A task about a project in {files}: the program first changes into the project's folder {files}/<project-name> (python: os.chdir to it and sys.path.insert(0, it)), then imports or runs the project's code from there, so its own imports and relative paths work."""
+- The folder {files} holds the user's files, they stay between runs and the bash tool sees them too: the projects in {projects}/<project-name>/, this conversation's own folder {workdir}, the files written for the user in {files}/data/documents/. Read and write there when the task is about these files. Files to keep go into the project's own folder, scratch files into {workdir}.
+- A task about a project: the program first changes into the project's folder {projects}/<project-name> (python: os.chdir to it and sys.path.insert(0, it)), then imports or runs the project's code from there, so its own imports and relative paths work."""
 
 RUN_CODE_NO_CODE_PART = ("the task was to run the code from the user's message, but the conversation has no code. Nothing ran. "
                          "Describe what the program must do instead.")
@@ -168,22 +176,28 @@ Examples:
 
 # ---------------------------------------------------------------- bash
 
-BASH_DESCRIPTION = ("runs a bash command in your own persistent sandbox files (git, python, curl, network): "
+BASH_DESCRIPTION = ("runs a bash command in your own persistent sandbox files, shared by all your conversations with the user (git, python, curl, network): "
                     "where you create and work on projects and files")
 
 BASH_PROMPT = """
 BASH:
-Use to work with files that stay with this conversation: create, read, edit, list, move and delete files and folders, run command line tools and scripts, clone and work on git repositories, download files. Each call runs one bash command (pipes, &&, heredocs are fine) in a Linux container as a normal user (no sudo, no apt-get), with network.
-- $HOME is {files}, the files in it are kept (for a week after the conversation's last message). Like an open terminal, the next call goes on in the folder the last one ended in, with its exported variables and an activated venv. Running processes do not carry over.
+Use to work with your files, shared by all your conversations with the user: create, read, edit, list, move and delete files and folders, run command line tools and scripts, clone and work on git repositories, download files. Each call runs one bash command (pipes, &&, heredocs are fine) in a Linux container as a normal user (no sudo, no apt-get), with network.
+- $HOME is {files}, the files in it are kept (for a week after the last message to you). Like an open terminal, the next call of this conversation goes on in the folder its last one ended in, with its exported variables and an activated venv. A new conversation starts in {workdir}. Running processes do not carry over.
+- The folders, each for one purpose:
+  - {project_dir}/<project-name>/: one folder per project (short, lowercase, e.g. fractal_explorer), all its files and subfolders inside. Each has a PROJECT.md: its first line says in one sentence what the project is, then its status and how to run it. Write it when you create the project, update it when the project changes.
+  - {workdir}: this conversation's own folder: scratch work, quick scripts and downloads that belong to no project.
+  - {documents}/: the files write_file made for the user, each in its own folder (<hash>/<name>). Read or copy them, do not change them.
+  - {images}/: generated images.
+- The projects so far (folder: first line of its PROJECT.md):
+{projects}
 - Available: bash, coreutils, git, python3 with pip and venv, curl, wget, unzip. git commit works, an author is set. There is no display: GUI programs run without a window.
 - Python packages go in a venv in the project folder: python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
 - The command must finish within {timeout} seconds. A program that keeps running (a game, a GUI, a server) runs with a time limit: timeout 10 python3 main.py, exit code 124 then means it ran 10 seconds without crashing. Keep the output short: use head, tail, grep or wc instead of printing big files whole.
-- {files} is your own filesystem: create every project and its files here, with bash, not with write_file.
-- One folder per project: {files}/<project-name>/ (short, lowercase, e.g. fractal_explorer), its files and subfolders inside. Nothing loose at the top.
-- Continue earlier work: an existing project is changed in its folder, not started again.
+- {files} is your own filesystem: create every project and its files with bash, not with write_file. Nothing loose at the top of {files}.
+- Continue earlier work: an existing project is changed in its folder (cd into it first), not started again.
 - You write all calls of this step at once and get no second turn: write every command the task needs now, in order, nothing left for later. They run one after another, a later call sees what an earlier one made.
 - To create or change a project: one call per file with its whole content in a heredoc (mkdir -p in the first call). Every file the task asks for gets its call.
-- The user does not see these files. To give them files, attach them afterwards with write_file "attach".
+- The user does not see these files. To give them files or a project folder, share them afterwards with share_file.
 
 Parameters:
 - command (string, required): the bash command, newlines written as \\n
@@ -192,8 +206,13 @@ Examples:
 {{"tool": "bash", "command": "ls -la"}}
 {{"tool": "bash", "command": "git clone --depth 1 https://github.com/psf/requests.git && ls requests"}}
 {{"tool": "bash", "command": "mkdir -p shopping_list && printf 'milk\\neggs\\n' > shopping_list/items.txt && cat shopping_list/items.txt"}}
-{{"tool": "bash", "command": "mkdir -p fractal_explorer && cat > fractal_explorer/main.py << 'EOF'\\nprint('hello')\\nEOF"}}
+{{"tool": "bash", "command": "mkdir -p ~/projects/fractal_explorer && cd ~/projects/fractal_explorer && printf '%s\\n' 'Fractal explorer: a Mandelbrot viewer in python.' '' 'Status: started.' 'Run: python3 main.py' > PROJECT.md"}}
+{{"tool": "bash", "command": "cat > ~/projects/fractal_explorer/main.py << 'EOF'\\nprint('hello')\\nEOF"}}
 """
+
+BASH_PROJECT_LINE = "  - {name}: {summary}"
+BASH_NO_PROJECTS_PART = "  none yet"
+BASH_PROJECTS_UNKNOWN_PART = "  (not listed here, ls ~/projects shows them)"
 
 # ---------------------------------------------------------------- conversion
 
@@ -570,8 +589,9 @@ Example:
 
 # ---------------------------------------------------------------- write_file
 
-WRITE_FILE_DESCRIPTION = ("attaches files to your answer for the user to download: files from your sandbox files, "
-                          "or one tiny file written directly")
+WRITE_FILE_DESCRIPTION = ("writes one tiny text file into your documents and attaches it to your answer for the user to download")
+
+SHARE_FILE_DESCRIPTION = ("attaches files or folders that are in your sandbox files already to your answer for the user to download")
 
 WRITE_FILE_ATTACHED_PART = ("{file_names} are already attached to your answer as download buttons, the user saves them from there. "
                        "Do NOT write their code or content into your answer, no code blocks and no copy and paste instructions. "
@@ -580,21 +600,34 @@ WRITE_FILE_ATTACHED_PART = ("{file_names} are already attached to your answer as
 WRITE_FILE_NOT_ATTACHED_PART = ("Not attached: {problems}. Tell the user, do not claim these files were made or attached: "
                                 "only files a tool result names exist.")
 
+WRITE_FILE_SAVED_PART = "Kept in your files as {paths}."
+
 WRITE_FILE_PROMPT = """
 WRITE_FILE:
-Puts files under your answer as download buttons, the user saves them from there. Two ways:
-1. attach: files that are in your sandbox files already (made with bash or run_code, now or earlier in the conversation). Give their paths relative to the sandbox files folder: a file, or a project folder to attach all of its files (.git, caches and installed packages are left out). Use it after the work, for the files the user asked for or will want to keep. Do not write their content again.
-2. path and content: only for one tiny file that belongs to no project, like a short note or a small single script. A project with several files is made in the sandbox files with bash first, then attached.
-Paths are relative (fractal_explorer/main.py). No .. and no absolute path.
+Writes one tiny text file and puts it under your answer as a download button, the user saves it from there. Only for a file that belongs to no project, like a short note, a small list or a small single script. It is kept in {documents}/<hash>/<path>, a new folder for every content, so it never overwrites another file.
+A project or several files are made with bash in your sandbox files, then given to the user with share_file, not with write_file.
+The path is relative (shopping.txt, notes/todo.md). No .. and no absolute path.
 Escape quotes and newlines inside content so the line stays valid JSON.
 
 Parameters:
-- attach (string or list of strings): paths of files or folders in your sandbox files
-- path (string): relative file name of a tiny file, together with content
-- content (string): the whole tiny file
+- path (string, required): relative file name, the name the user sees
+- content (string, required): the whole file
+
+Example:
+{{"tool": "write_file", "path": "shopping.txt", "content": "milk\\neggs\\n"}}
+"""
+
+SHARE_FILE_PROMPT = """
+SHARE_FILE:
+Puts files that are in your sandbox files already (made with bash or run_code, now or earlier, also in another conversation) under your answer as download buttons, the user saves them from there. It writes nothing. Use it after the work, for the files the user asked for or will want to keep, also when the user asks you to send or give them a file. Do not write their content again.
+- path: a file, or a folder to share all of its files (.git, caches and installed packages are left out). Relative to the folder your last bash command ended in, or absolute under {files} (e.g. {files}/projects/fractal_explorer).
+- Calls in the same answer as the bash calls that make the files run after them.
+
+Parameters:
+- path (string or list of strings, required): the files or folders
 
 Examples:
-{"tool": "write_file", "attach": "fractal_explorer"}
-{"tool": "write_file", "attach": ["fractal_explorer/main.py", "fractal_explorer/README.md"]}
-{"tool": "write_file", "path": "shopping.txt", "content": "milk\\neggs\\n"}
+{{"tool": "share_file", "path": "{files}/projects/fractal_explorer"}}
+{{"tool": "share_file", "path": ["{files}/projects/fractal_explorer/main.py", "{files}/projects/fractal_explorer/README.md"]}}
+{{"tool": "share_file", "path": "result.csv"}}
 """
