@@ -150,3 +150,4 @@
 {"lang": "en", "text": "list me all files in my home folder", "labels": {"bash": "M"}}
 {"lang": "en", "text": "call the command ls -la ~", "labels": {"bash": "M"}}
 {"lang": "en", "text": "paint me an oil painting of an elephant riding the bus", "labels": {"generate_image": "M"}}
+{"lang": "en", "text": "write me a short python script which counts to 100 and prints the number in to the terminal", "labels": {"write_file": "M"}}

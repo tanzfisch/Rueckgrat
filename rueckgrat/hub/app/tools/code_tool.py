@@ -5,7 +5,7 @@ import re
 from typing import Dict, Any, List, Tuple
 from .tool import Tool
 from . import prompts
-from app.utils.conversation_volume import ConversationVolume, MOUNT_PATH
+from app.utils.sandbox_volume import SandboxVolume, MOUNT_PATH, PROJECTS
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -76,8 +76,8 @@ def format_result(language: str, libraries: List[str], exit_code: int, stdout: s
     return text
 
 
-def run_in_sandbox(language: str, code: str, libraries: List[str], volume: ConversationVolume) -> Tuple[int, str, str]:
-    """a fresh container for this one run with the conversation's files (volume.session), removed when it ends. the docker
+def run_in_sandbox(language: str, code: str, libraries: List[str], volume: SandboxVolume) -> Tuple[int, str, str]:
+    """a fresh container for this one run with the contact's files (volume.session), removed when it ends. the docker
     daemon comes from the environment (DOCKER_HOST or /var/run/docker.sock)"""
     configs = dict(RUNTIME_CONFIGS) if libraries else {**RUNTIME_CONFIGS, "network_mode": "none"}
     with volume.session(configs, lang=language, skip_environment_setup=not libraries) as session:
@@ -91,8 +91,8 @@ def run_in_sandbox(language: str, code: str, libraries: List[str], volume: Conve
         return result.exit_code, result.stdout, result.stderr
 
 
-def run_call(call: Dict[str, Any], volume: ConversationVolume) -> Dict[str, Any]:
-    """runs a built call with the conversation's files: the base64 code decoded, checked and run.
+def run_call(call: Dict[str, Any], volume: SandboxVolume) -> Dict[str, Any]:
+    """runs a built call with the contact's files: the base64 code decoded, checked and run.
     returns the tool result {"tool", "text"|"error"}"""
     language, libraries = call.get("language", "python"), call.get("libraries") or []
     code = base64.b64decode(call.get("code", "")).decode("utf-8")
@@ -119,7 +119,7 @@ def run_call(call: Dict[str, Any], volume: ConversationVolume) -> Dict[str, Any]
 
 class RunCodeTool(Tool):
     """writes a one file program for the directed task (own llm call, the reply is only code) and runs it in a
-    fresh llm sandbox container with the conversation's files. the harness builds the call json with the code in base64"""
+    fresh llm sandbox container with the contact's files. the harness builds the call json with the code in base64"""
     description = prompts.RUN_CODE_DESCRIPTION
     sequential = True
     thresholds = (0.65, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
@@ -163,7 +163,7 @@ class RunCodeTool(Tool):
         if language:
             query += f"\n\nLANGUAGE: {language}"
         return self.infrastructure.chat(
-            messages=[{"role": "system", "content": prompts.RUN_CODE_WRITER_PROMPT.format(run_timeout=RUN_TIMEOUT, files=MOUNT_PATH)}, {"role": "user", "content": query}],
+            messages=[{"role": "system", "content": prompts.RUN_CODE_WRITER_PROMPT.format(run_timeout=RUN_TIMEOUT, files=MOUNT_PATH, projects=f"{MOUNT_PATH}/{PROJECTS}", workdir=SandboxVolume.workdir(self.conversation_id))}, {"role": "user", "content": query}],
             temperature=0.2,
             seed=random.randint(0, 100000),
             max_new_tokens=self.infrastructure.long_reply_tokens(),
@@ -185,7 +185,7 @@ class RunCodeTool(Tool):
             logger.debug(f"run_code call: {call}")
             logger.debug(f"code:\n{reply}")
             MessageQueue().send_status_message("running code")
-            result = run_call(json.loads(call), ConversationVolume(self.user_id, self.conversation_id))
+            result = run_call(json.loads(call), SandboxVolume(self.user_id, self.contact_id))
         self.add_result(result)
 
     @classmethod

@@ -1206,6 +1206,24 @@ class ChatDB:
                 logger.error(f"failed reading the last activity of conversation {conversation_id}: {e}")
                 return ""   # not None: a failed read must not remove its files
 
+    def contact_last_activity(self, contact_id: int) -> str | None:
+        """the time of the latest message in any conversation of the contact (db format, UTC), the latest conversation's
+        creation without messages, "" without conversations, None if the contact is gone"""
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("""
+                    SELECT ct.id, MAX(COALESCE(m.timestamp, c.created_at))
+                    FROM contacts ct
+                    LEFT JOIN conversations c ON c.contact_id = ct.id
+                    LEFT JOIN messages m ON m.conversation_id = c.id
+                    WHERE ct.id = ?
+                    GROUP BY ct.id
+                """, (contact_id,)).fetchone()
+                return (row[1] or "") if row else None
+            except Exception as e:
+                logger.error(f"failed reading the last activity of contact {contact_id}: {e}")
+                return ""   # not None: a failed read must not remove its files
+
     def get_conversation_image_keys(self, conversation_id: int) -> list[str]:
         """file keys of the hub images attached to messages of this conversation (images/<file_key>)"""
         with self.get_connection() as conn:

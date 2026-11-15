@@ -18,7 +18,7 @@ JOB_LLM_TIMEOUT = 900         # seconds per llm call
 MAX_TOOL_CHARS = 12000        
 WORKER_TOOLS = ["websearch"]   # always run for a worker, the controller's task sets its role and scope (not for a building worker, see BUILD_TOOLS)
 FAILED_LINE = re.compile(r"^\W*FAILED:", re.MULTILINE)    # a worker's reply with a line starting FAILED: failed, also mid-reply
-WORKER_FIX_ROUNDS = 3          # a worker's extra passes of bash / run_code / write_file while their calls fail (ToolExecutionTask._fix)
+WORKER_FIX_ROUNDS = 3          # a worker's extra passes of bash / run_code / share_file / write_file while their calls fail (ToolExecutionTask._fix)
 
 class AgentJob:
     # never offered besides the registry's WORKER_EXCLUDED_TOOLS. a worker takes no photos: take_photo is an optional
@@ -56,7 +56,7 @@ class AgentJob:
         self.protocol = None    # #174 the job's Protocol, the Controller makes it and hands it to its workers. None: no trace
         self.plan_step, self.plan_task = None, None   # a worker's step and task id in the plan, set by Controller.spawn
         self.attempt = 1        # a retried task's worker: 2, ... (Controller._retry)
-        self.attachments = []   # a worker's files its tools held (write_file, generate_image), they go into its result
+        self.attachments = []   # a worker's files its tools held (write_file, share_file, generate_image), they go into its result
         self.excluded_tools = ()    # a retried task's worker: the tools that failed the attempts before (Controller._retry)
         self.failed_tools = []      # the tools that failed or found nothing in this worker's run, a failed result names them
 

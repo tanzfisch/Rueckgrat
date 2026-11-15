@@ -11,6 +11,7 @@ class Tool(Task):
     question = []       # yes/no decision questions: does the request involve this tool's purpose. the tool counts with its most likely question
     thresholds = None   # (recommended, mandatory) for the question scores, None: ToolDetectionTask's RECOMMENDED_THRESHOLD and MANDATORY_THRESHOLD
     sequential = False  # the calls of sequential tools in one round run one after another in their order (they share the sandbox files)
+    offered_with = ()   # names of tools this one is offered with as an optional tool (ToolRegistry.companions), no laya question of its own
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
         super().__init__()
@@ -95,6 +96,12 @@ class Tool(Task):
     @classmethod
     def prompt(cls) -> str:
         raise NotImplementedError
+
+    @classmethod
+    def prompt_for(cls, user_id: int, contact_id: int, conversation_id: int) -> str:
+        """the prompt for one conversation's tool setup (ToolRegistry.get_tools_prompt with a scope), e.g. with what
+        the contact's files hold. most tools have one prompt for all: prompt()"""
+        return cls.prompt()
 
     @classmethod
     def get_description(cls) -> str:
