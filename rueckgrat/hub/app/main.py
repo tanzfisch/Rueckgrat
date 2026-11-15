@@ -204,8 +204,9 @@ def get_users():
 def get_user_data(username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
     with logger_context(user_id):
-        user_data = app.state.db.get_user_data(user_id)
-        return {"user_data": user_data}  
+        user_data = app.state.db.get_user_data(user_id) or {}
+        user_data["profile_image_key"] = app.state.db.get_user_profile_image_key(user_id)
+        return {"user_data": user_data}
 
 class UpdateUserDataRequest(BaseModel):
     user_id: int
@@ -517,24 +518,31 @@ def profile_image_hash(job: AssistantImageTask) -> str | None:
     except Exception:
         return None
 
-########### contact image: upload or pick from the gallery
-MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024
+########### contact and user images: upload or pick from the gallery
 
-def image_extension(data: bytes) -> str | None:
-    """file extension from the first bytes, None if it is no png, jpeg or webp"""
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return "jpg"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "webp"
-    return None
+def store_uploaded_image(data: bytes) -> str:
+    """raw png, jpeg or webp bytes as /hub/images/<sha256>.<ext>. raises HTTPException on bad input.
+    the same bytes again reuse that file. an upload has no stored generation, so ImageStore.ensure
+    never generates it again: a lost upload is gone"""
+    try:
+        return app.state.image_store.store_uploaded_image(data)
+    except ValueError as e:
+        detail = str(e)
+        raise HTTPException(status_code=413 if detail == "image too large" else 400, detail=detail)
 
 def set_contact_image(contact_id: int, file_key: str) -> dict:
     """the image becomes the contact's current profile image (the newest 'profile' row), older ones stay"""
     if app.state.db.add_contact_image(contact_id, file_key, "profile") == -1:
         raise HTTPException(status_code=500, detail="failed to set the contact image")
     return {"status": "ok", "file_key": file_key}
+
+def set_user_image(user_id: int, file_key: str | None) -> dict:
+    """the image becomes the user's current profile image, or None clears it.
+    a previous key that nothing else uses is released (file and generation go)"""
+    previous = app.state.db.set_user_profile_image_key(user_id, file_key)
+    if previous and previous != file_key:
+        app.state.image_store.release([previous])
+    return {"status": "ok", "file_key": file_key} if file_key else {"status": "ok"}
 
 @app.post("/contacts/{contact_id}/image")
 async def upload_contact_image(contact_id: int, request: Request, username: str = Depends(get_current_user)):
@@ -547,22 +555,7 @@ async def upload_contact_image(contact_id: int, request: Request, username: str 
     with logger_context(user_id):
         if not app.state.db.owns_contact(user_id, contact_id):
             raise HTTPException(status_code=404, detail="contact not found")
-        data = await request.body()
-        if not data:
-            raise HTTPException(status_code=400, detail="empty upload")
-        if len(data) > MAX_IMAGE_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail="image too large")
-        extension = image_extension(data)
-        if not extension:
-            raise HTTPException(status_code=400, detail="not a png, jpeg or webp image")
-
-        file_key = f"{hashlib.sha256(data).hexdigest()}.{extension}"
-        path = app.state.image_store.path(file_key)
-        if not path.exists():
-            part = path.with_name(file_key + ".part")
-            part.write_bytes(data)
-            part.replace(path)
-        return set_contact_image(contact_id, file_key)
+        return set_contact_image(contact_id, store_uploaded_image(await request.body()))
 
 @app.put("/contacts/{contact_id}/image/{file_key}")
 def pick_contact_image(contact_id: int, file_key: str, username: str = Depends(get_current_user)):
@@ -575,6 +568,30 @@ def pick_contact_image(contact_id: int, file_key: str, username: str = Depends(g
         if not app.state.db.user_has_image(user_id, file_key) or not app.state.image_store.ensure(file_key):
             raise HTTPException(status_code=404, detail="image not found")
         return set_contact_image(contact_id, file_key)
+
+@app.post("/users/me/image")
+async def upload_user_image(request: Request, username: str = Depends(get_current_user)):
+    """raw image bytes in the body (png, jpeg or webp), no multipart, like POST /contacts/{id}/image.
+    stored as /hub/images/<sha256>.<ext> and becomes the user's current profile image"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        return set_user_image(user_id, store_uploaded_image(await request.body()))
+
+@app.put("/users/me/image/{file_key}")
+def pick_user_image(file_key: str, username: str = Depends(get_current_user)):
+    """an image from the user's gallery becomes their profile image. the file is shared, only the key changes"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        if not app.state.db.user_has_image(user_id, file_key) or not app.state.image_store.ensure(file_key):
+            raise HTTPException(status_code=404, detail="image not found")
+        return set_user_image(user_id, file_key)
+
+@app.delete("/users/me/image")
+def delete_user_image(username: str = Depends(get_current_user)):
+    """clears the user's profile image. the file stays if the gallery or a contact still uses it"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        return set_user_image(user_id, None)
 
 class CompanionRequest(BaseModel):
     enabled: bool

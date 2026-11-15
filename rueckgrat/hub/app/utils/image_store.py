@@ -1,8 +1,11 @@
+import hashlib
 import threading
 from pathlib import Path
 
 from app.common import get_logger, ImageRequest
 logger = get_logger()
+
+MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024
 
 # one lock per image file, shared by everything that generates images (ImageTask and ImageStore.ensure),
 # so the same file is never generated twice at the same time
@@ -74,6 +77,37 @@ class ImageStore:
 
     def path(self, file_key: str) -> Path:
         return self.image_dir / file_key
+
+    @staticmethod
+    def image_extension(data: bytes) -> str | None:
+        """file extension from the first bytes, None if it is no png, jpeg or webp"""
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "png"
+        if data.startswith(b"\xff\xd8\xff"):
+            return "jpg"
+        if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return "webp"
+        return None
+
+    def store_uploaded_image(self, data: bytes) -> str:
+        """raw png, jpeg or webp bytes as <sha256>.<ext> in the image dir. the same bytes again reuse the file.
+        an upload has no stored generation, so ensure() never generates it again: a lost upload is gone.
+        raises ValueError: 'empty upload', 'image too large', or 'not a png, jpeg or webp image'"""
+        if not data:
+            raise ValueError("empty upload")
+        if len(data) > MAX_IMAGE_UPLOAD_BYTES:
+            raise ValueError("image too large")
+        extension = self.image_extension(data)
+        if not extension:
+            raise ValueError("not a png, jpeg or webp image")
+
+        file_key = f"{hashlib.sha256(data).hexdigest()}.{extension}"
+        path = self.path(file_key)
+        if not path.exists():
+            part = path.with_name(file_key + ".part")
+            part.write_bytes(data)
+            part.replace(path)
+        return file_key
 
     def _lock_for(self, file_key: str) -> threading.Lock:
         # one lock per image, shared with ImageTask, so a missing image is generated only once

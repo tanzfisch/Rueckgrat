@@ -525,6 +525,33 @@ class Hub:
         return cls._set_contact_image(requests.put, f"contacts/{contact_id}/image/{file_key}")
 
     @classmethod
+    def upload_user_image(cls, data: bytes) -> Optional[str]:
+        """png, jpeg or webp bytes become the user's profile image, returns its file key or None"""
+        return cls._set_contact_image(requests.post, "users/me/image", data)
+
+    @classmethod
+    def pick_user_image(cls, file_key: str) -> Optional[str]:
+        """an image of the gallery becomes the user's profile image, returns its file key or None"""
+        return cls._set_contact_image(requests.put, f"users/me/image/{file_key}")
+
+    @classmethod
+    def remove_user_image(cls) -> bool:
+        """clears the user's profile image. True if the hub accepted it"""
+        try:
+            response = requests.delete(
+                f"{cls.url}/users/me/image",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=60,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return True
+            logger.error(f"remove user image - {response.status_code} {response.text}")
+        except Exception as e:
+            logger.error(f"failed to remove the user image {repr(e)}")
+        return False
+
+    @classmethod
     def _set_contact_image(cls, send, path: str, data: bytes | None = None) -> Optional[str]:
         try:
             response = send(
@@ -536,9 +563,9 @@ class Hub:
             )
             if response.status_code == 200:
                 return response.json().get("file_key")
-            logger.error(f"set contact image - {response.status_code} {response.text}")
+            logger.error(f"set image - {response.status_code} {response.text}")
         except Exception as e:
-            logger.error(f"failed to set the contact image {repr(e)}")
+            logger.error(f"failed to set the image {repr(e)}")
         return None
 
     @classmethod

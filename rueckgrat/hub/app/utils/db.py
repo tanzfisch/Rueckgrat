@@ -14,7 +14,7 @@ logger = get_logger()
 # a different model with another size needs this changed and SCHEMA_VERSION bumped
 MEMORY_EMBEDDING_DIM = 384
 # PRAGMA user_version of a db made by this hub. bump it on every schema change: until 1.0 an older db is wiped, never migrated
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 # #174 job protocols older than this are deleted (save_protocol and hub start), they are for looking into recent jobs
 PROTOCOL_RETENTION_HOURS = 24
 
@@ -248,12 +248,13 @@ class ChatDB:
         """)
 
         # per user settings. profile: the user's profile json (get_user_data). timezone: IANA name, the companion plans in it
-        # (timestamps stay UTC)
+        # (timestamps stay UTC). profile_image_key: current user avatar in /hub/images, NULL if none
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
             user_id INTEGER PRIMARY KEY,
             profile TEXT,
             timezone TEXT,
+            profile_image_key TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
 
@@ -808,6 +809,9 @@ class ChatDB:
                         UNION ALL
                         SELECT file_name, NULL, NULL, created_at FROM generated_images
                         WHERE user_id = ? AND status = 'done' AND file_name IS NOT NULL
+                        UNION ALL
+                        SELECT profile_image_key, NULL, NULL, NULL FROM user_settings
+                        WHERE user_id = ? AND profile_image_key IS NOT NULL AND profile_image_key != ''
                     ), grouped AS (
                         SELECT file_key, MAX(contact_id) AS contact_id, MAX(conversation_id) AS conversation_id, MIN(created_at) AS created_at
                         FROM all_images WHERE file_key IS NOT NULL AND file_key != ''
@@ -818,7 +822,7 @@ class ChatDB:
                     FROM grouped g LEFT JOIN contacts ct ON ct.id = g.contact_id
                     ORDER BY g.created_at DESC, g.file_key DESC
                     LIMIT ? OFFSET ?
-                """, (user_id, user_id, user_id, limit, offset)).fetchall()
+                """, (user_id, user_id, user_id, user_id, limit, offset)).fetchall()
                 return [dict(row) for row in rows]
             except Exception as e:
                 logger.error(f"failed reading images of user {user_id}: {e}")
@@ -1276,8 +1280,10 @@ class ChatDB:
                     if drop_conversation_images:
                         cursor.execute("DELETE FROM contact_images WHERE file_key = ? AND type = 'conversation_images'", (file_key,))
 
-                    # a profile image keeps its file and generation
+                    # a contact or user profile image keeps its file and generation
                     if cursor.execute("SELECT 1 FROM contact_images WHERE file_key = ? LIMIT 1", (file_key,)).fetchone():
+                        continue
+                    if cursor.execute("SELECT 1 FROM user_settings WHERE profile_image_key = ? LIMIT 1", (file_key,)).fetchone():
                         continue
 
                     # an image tool image picked as a contact image stays in the image tool's list
@@ -1323,7 +1329,8 @@ class ChatDB:
         return False
 
     def user_has_image(self, user_id: int, file_key: str) -> bool:
-        """True if the image is in the user's gallery (get_user_images): a contact image, a chat attachment or an image tool image"""
+        """True if the image is in the user's gallery (get_user_images): a contact image, a chat attachment,
+        an image tool image or the user's current profile image"""
         with self.get_connection() as conn:
             try:
                 row = conn.execute("""
@@ -1333,18 +1340,25 @@ class ChatDB:
                     WHERE a.file_name = ? AND cv.user_id = ? AND a.file_url = 'images/' || a.file_name
                     UNION ALL
                     SELECT 1 FROM generated_images WHERE file_name = ? AND user_id = ? AND status = 'done'
+                    UNION ALL
+                    SELECT 1 FROM user_settings WHERE profile_image_key = ? AND user_id = ?
                     LIMIT 1
-                """, (file_key, user_id, file_key, user_id, file_key, user_id)).fetchone()
+                """, (file_key, user_id, file_key, user_id, file_key, user_id, file_key, user_id)).fetchone()
                 return row is not None
             except Exception as e:
                 logger.error(f"failed checking image of user: {e}")
         return False
 
     def owns_image(self, user_id: int, file_key: str) -> bool:
-        """False for foreign and unknown images alike, an image belongs to the owner of its contact"""
+        """False for foreign and unknown images alike: the image belongs to this user as a contact image or their profile image"""
         with self.get_connection() as conn:
             try:
-                row = conn.execute("SELECT 1 FROM contact_images ci JOIN contacts c ON c.id = ci.contact_id WHERE ci.file_key = ? AND c.user_id = ?", (file_key, user_id)).fetchone()
+                row = conn.execute("""
+                    SELECT 1 FROM contact_images ci JOIN contacts c ON c.id = ci.contact_id WHERE ci.file_key = ? AND c.user_id = ?
+                    UNION ALL
+                    SELECT 1 FROM user_settings WHERE profile_image_key = ? AND user_id = ?
+                    LIMIT 1
+                """, (file_key, user_id, file_key, user_id)).fetchone()
                 return row is not None
             except Exception as e:
                 logger.error(f"failed checking image owner: {e}")
@@ -2086,6 +2100,33 @@ class ChatDB:
             """, (user_id, timezone))
             conn.commit()
             return cursor.rowcount == 1
+
+    def get_user_profile_image_key(self, user_id: int) -> str | None:
+        """the current profile image file key, None if the user has none"""
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT profile_image_key FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
+            return row["profile_image_key"] if row and row["profile_image_key"] else None
+
+    def get_current_user_profile_image_key(self, user_id: int, image_dir: str = "/hub/images") -> str:
+        """file key of the user's current profile image if the file exists, otherwise "".
+        same existence check as get_current_profile_image_key: a lost upload or a key not on disk is skipped,
+        so image generation can run without a face reference"""
+        file_key = self.get_user_profile_image_key(user_id)
+        if file_key and "/" not in file_key and (Path(image_dir) / file_key).is_file():
+            return file_key
+        return ""
+
+    def set_user_profile_image_key(self, user_id: int, file_key: str | None) -> str | None:
+        """sets the current profile image (None clears it). returns the previous key, if any"""
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT profile_image_key FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
+            previous = row["profile_image_key"] if row and row["profile_image_key"] else None
+            conn.execute("""
+                INSERT INTO user_settings (user_id, profile_image_key) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET profile_image_key = excluded.profile_image_key
+            """, (user_id, file_key))
+            conn.commit()
+            return previous
 
     ########### companion calendar
 

@@ -3,6 +3,7 @@ from .header import Header
 from .bubbles import ChatBubble, OneLineBubble
 from .emoji_picker import EmojiPicker
 from .image import Image
+from .profile_image import ProfileImageSlot, ProfileImageView
 from .image_grid import ImageGrid
 from .contact_card import ContactCard
 from .contact_info import ContactInfo
@@ -26,7 +27,9 @@ __all__ = [
     "ChatBubble", 
     "OneLineBubble", 
     "EmojiPicker", 
-    "Image", 
+    "Image",
+    "ProfileImageSlot",
+    "ProfileImageView",
     "ImageGrid",
     "ContactCard", 
     "ContactInfo",
