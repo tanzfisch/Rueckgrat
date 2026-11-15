@@ -17,7 +17,8 @@ class AssistantImageTask(Task):
         self.infrastructure = infrastructure
         self.response = {}
         self.show_assistant = show_assistant
-        self.show_user = show_user and not show_assistant # TODO at the moment we are only able to display one character at the time reliably
+        # TODO one FaceID slot, and only one character is reliable: a 'both' shot is of the assistant only
+        self.show_user = show_user and not show_assistant
         self.image_type = image_type
         self.store_image_as = store_image_as
         self.width = width
@@ -40,9 +41,8 @@ class AssistantImageTask(Task):
         # whatever the contact's profile says (the client can edit that)
         nsfw_allowed = self.db.user_nsfw_allowed(self.user_id)
 
-        use_profile_image_reference = self.store_image_as != "profile" and self.show_assistant and not self.show_user
-
-        compiler = ContactImagePromptCompiler(contact_data, user_data, context, self.image_type, self.show_assistant, self.show_user, not use_profile_image_reference)
+        reference = self.profile_image_reference()
+        compiler = ContactImagePromptCompiler(contact_data, user_data, context, self.image_type, self.show_assistant, self.show_user, not reference)
         positive_prompt, negative_prompt = compiler.build()
 
         models = {
@@ -67,10 +67,25 @@ class AssistantImageTask(Task):
             output = ""
         )
 
-        if use_profile_image_reference:
-            image_request.reference_image_key = self.db.get_current_profile_image_key(self.contact_id)
+        if reference:
+            image_request.reference_image_key = reference
 
         return image_request
+
+    def profile_image_reference(self) -> str:
+        """FaceID reference file key, or "". not used when generating a contact profile image, and not when
+        both people are in the shot (one FaceID slot). the key is only returned if the image file exists,
+        same as get_current_profile_image_key (ImageStore.ensure is not called for contact references either:
+        an upload cannot be regenerated, a missing file means generate without a face reference)"""
+        if self.store_image_as == "profile":
+            return ""
+        if self.show_assistant and self.show_user:
+            return ""
+        if self.show_assistant:
+            return self.db.get_current_profile_image_key(self.contact_id)
+        if self.show_user:
+            return self.db.get_current_user_profile_image_key(self.user_id)
+        return ""
 
     def execute(self) -> None:
         image_request = self.build_request()

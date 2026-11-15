@@ -4,7 +4,7 @@ from app.ui import theme
 
 from app.utils import Hub
 from app.ui.wizzard_base import WizardPage, wizard_row
-from app.ui.widgets import RowSelector, MessageBox
+from app.ui.widgets import RowSelector, MessageBox, ProfileImageSlot
 from app.ui.settings_page import timezone_options
 
 
@@ -12,8 +12,16 @@ class UserProfileForm(ft.Column):
     """the user's own character: name, gender, age, hair, eyes, ethnicity, body type and backstory"""
 
 
-    def __init__(self, profile: dict = None):
+    def __init__(self, profile: dict = None, image_key: str | None = None):
         super().__init__(expand=True, spacing=14, scroll=ft.ScrollMode.AUTO)
+
+        self.profile_image = ProfileImageSlot(
+            title="Profile image",
+            file_key=image_key,
+            on_upload=Hub.upload_user_image,
+            on_pick=Hub.pick_user_image,
+            on_remove=Hub.remove_user_image,
+        )
 
         self.name_input = ft.TextField(
             value=((profile or {}).get("name") or "").strip(),
@@ -42,6 +50,7 @@ class UserProfileForm(ft.Column):
         )
 
         self.controls = [
+            self.profile_image,
             wizard_row("Name", self.name_input),
             wizard_row("Gender", self.gender),
             wizard_row("Backstory", self.backstory)
@@ -173,8 +182,8 @@ class UserProfileWizard(WizardPage):
 
     def on_enter(self, **kwargs):
         self.first_setup = kwargs.get("first_setup", False)
-        data = Hub.get_user_data()
-        self.form = UserProfileForm(profile=data["profile"] if data and "profile" in data else None)
+        data = Hub.get_user_data() or {}
+        self.form = UserProfileForm(profile=data.get("profile"), image_key=data.get("profile_image_key"))
         if self.first_setup:
             self.where = WhereForm()
             self._show_where()

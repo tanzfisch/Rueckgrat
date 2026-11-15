@@ -40,7 +40,7 @@ class ImageRequest(BaseModel):
     cfg: float = 7.5        
     model: str
     output: str
-    reference_image_key: str = ""                               # face reference (FaceID): file key of the contact's current profile image on the hub
+    reference_image_key: str = ""                               # face reference (FaceID): file key of the current profile image on the hub (contact or user)
     reference_image_b64: str = Field(default="", exclude=True)  # the image bytes of reference_image_key (base64)
 
     @model_serializer(mode="wrap")
