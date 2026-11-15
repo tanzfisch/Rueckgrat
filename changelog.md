@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.28.0
+------
+
+- #192 reduce user profile to minimum
+
 0.27.0
 ------
 
