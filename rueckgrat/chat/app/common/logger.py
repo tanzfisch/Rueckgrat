@@ -4,6 +4,8 @@ import logging
 import threading
 import argparse
 from pathlib import Path
+from contextvars import ContextVar
+from contextlib import contextmanager
 
 # ANSI color codes
 RESET = "\033[0m"
@@ -96,6 +98,22 @@ class ColorFormatter(logging.Formatter):
         
         return super().format(record)
 
+current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
+
+@contextmanager
+def logger_context(user_id: str):
+    token = current_user_id.set(user_id)
+    try:
+        yield
+    finally:
+        current_user_id.reset(token)
+
+class UserFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        uid = current_user_id.get()
+        record.user_prefix = f"[{uid}] " if uid else ""
+        return True
+
 class LockedStreamHandler(logging.StreamHandler):
     def __init__(self, lock, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -133,7 +151,7 @@ class Logger:
                 fh.setLevel(level)
                 fh.setFormatter(ColorFormatter(
                     use_colors=False,
-                    fmt="%(levelname)s %(message)s\n          %(pathname)s",
+                    fmt="%(levelname)s %(user_prefix)s%(message)s\n          %(pathname)s"
                 ))
                 self._logger.addHandler(fh)
                 self._logger.debug(f"logging to file {logfile_path}")
@@ -142,13 +160,14 @@ class Logger:
             ch.setLevel(level)
             ch.setFormatter(ColorFormatter(
                 use_colors=True,
-                fmt="%(levelname)s %(message)s\n          %(pathname)s",
+                fmt="%(levelname)s %(user_prefix)s%(message)s\n          %(pathname)s",
             ))
             self._logger.addHandler(ch)
+            self._logger.addFilter(UserFilter())
 
         access = logging.getLogger("uvicorn.access")
         if not any(isinstance(f, HealthFilter) for f in access.filters):
-            access.addFilter(HealthFilter())
+            access.addFilter(HealthFilter())            
 
     def get_logger(self):
         return self._logger

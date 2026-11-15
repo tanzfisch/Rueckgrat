@@ -792,10 +792,6 @@ class ChatDB:
         return []
 
     def get_user_images(self, user_id: int, limit: int = 60, offset: int = 0) -> list[dict]:
-        """every image of this user, newest first, for the gallery: the contacts' images (profile, conversation_images),
-        images attached to messages of their conversations and the done images of the image tool (no contact).
-        an image in several places is one row: its first created_at, its contact and conversation if it has one.
-        [{file_key, contact_id, contact_name, conversation_id, created_at, has_generation}], contact_* None for image tool images"""
         with self.get_connection() as conn:
             try:
                 rows = conn.execute("""

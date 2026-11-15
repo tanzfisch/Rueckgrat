@@ -5,6 +5,7 @@ Changelog
 ------
 
 - #192 reduce user profile to minimum
+- #207 add user id to logs in hub
 
 0.27.0
 ------
