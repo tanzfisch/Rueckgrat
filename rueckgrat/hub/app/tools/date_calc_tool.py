@@ -1,8 +1,9 @@
 from typing import Dict,  Any
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from .tool import Tool
 from . import prompts
-from .current_time_tool import resolve_timezone
+from .current_time_tool import call_timezone
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -14,12 +15,10 @@ class DateCalcError(Exception):
     pass
 
 
-def _parse_date(text, timezone) -> date:
+def _parse_date(text, zone: ZoneInfo) -> date:
+    """YYYY-MM-DD, or "today" in zone"""
     text = str(text).strip().lower()
     if text in ("today", "now", ""):
-        zone = resolve_timezone(timezone)
-        if zone is None:
-            raise DateCalcError(f"unknown time zone or city '{timezone}'")
         return datetime.now(zone).date()
     try:
         return date.fromisoformat(text)
@@ -31,12 +30,12 @@ def _show(d: date) -> str:
     return f"{d.isoformat()} ({d.strftime('%A')})"
 
 
-def date_calc(start, end=None, days=None, timezone="UTC") -> str:
-    """'end' given: days between start and end. 'days' given: start plus days (negative goes back)"""
-    start_date = _parse_date(start, timezone)
+def date_calc(start, end=None, days=None, zone: ZoneInfo = ZoneInfo("UTC")) -> str:
+    """'end' given: days between start and end. 'days' given: start plus days (negative goes back). zone: whose today"""
+    start_date = _parse_date(start, zone)
 
     if end is not None:
-        end_date = _parse_date(end, timezone)
+        end_date = _parse_date(end, zone)
         delta = (end_date - start_date).days
         weeks, rest = divmod(abs(delta), 7)
         return f"from {_show(start_date)} to {_show(end_date)}: {delta} days ({weeks} weeks {rest} days)"
@@ -60,10 +59,12 @@ def date_calc(start, end=None, days=None, timezone="UTC") -> str:
 
 class DateCalcTool(Tool):
     description = prompts.DATE_CALC_DESCRIPTION
-    thresholds = (0.5, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.55, 0.6)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask how many days, weeks or months are left until something or have passed since something?",
-        "Does the user ask how long it is until or since a day, a date, a holiday or an event?",
+        "Does the user ask what day of the week a date is?",
+        "Does the user ask how long it is until or since a date, a birthday or a holiday?",
+        "Does the user ask what date it is a number of days from today?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
@@ -81,13 +82,15 @@ class DateCalcTool(Tool):
         MessageQueue().send_status_message("calculating dates")
 
         try:
+            zone, note = call_timezone(self.tool_call.get("timezone"), self.db, self.get_user_id())
             text = date_calc(
                 start=self.tool_call["start"],
                 end=self.tool_call.get("end"),
                 days=self.tool_call.get("days"),
-                timezone=self.tool_call.get("timezone", "UTC")
+                zone=zone
             )
-            result = {"tool": self.name(), "text": text}
+            today_used = any(str(self.tool_call.get(key)).strip().lower() in ("today", "now", "") for key in ("start", "end") if key in self.tool_call)
+            result = {"tool": self.name(), "text": text + (note if today_used else "")}
         except DateCalcError as e:
             logger.warning(f"date_calc failed: {e}")
             result = {"tool": self.name(), "error": str(e)}

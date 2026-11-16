@@ -4,11 +4,13 @@ from datetime import datetime
 from zoneinfo import ZoneInfo, available_timezones
 from .tool import Tool
 from . import prompts
+from app.utils.clock import user_timezone
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 TIMEZONE_ALIASES = {"utc": "UTC", "gmt": "UTC", "z": "UTC", "zulu": "UTC"}
+USER_TIMEZONE_WORDS = {"", "local", "user", "me", "my", "mine", "here", "home", "none", "null"}    # a call's timezone that means the user's own
 
 # well known cities -> IANA zone, mainly the ones whose name is not part of a zone name ("munich", "san francisco").
 # keys are lowercase with single spaces, see _city_key() for the normalization of the lookup
@@ -105,6 +107,20 @@ def resolve_timezone(text: Optional[str]) -> Optional[ZoneInfo]:
     return ZoneInfo(name) if name else None
 
 
+def call_timezone(text: Optional[str], db, user_id: Optional[int]) -> tuple[ZoneInfo, str]:
+    """the zone of a tool call's timezone (resolve_timezone): the user's own (clock.user_timezone, UTC without a user)
+    when it is missing, "local" or no zone or city has the name ("Kai"). returns (zone, note), the note says when and
+    why the user's zone was taken, "" for the zone asked for"""
+    key = _city_key(str(text or ""))
+    zone = None if key in USER_TIMEZONE_WORDS else resolve_timezone(key)
+    if zone is not None:
+        return zone, ""
+    own = user_timezone(db, user_id) if db is not None and user_id is not None else ZoneInfo("UTC")
+    if key in USER_TIMEZONE_WORDS:
+        return own, " (the user's time zone)"
+    return own, f" ('{text}' is no known time zone or city, this is the user's time zone)"
+
+
 def format_time(now: datetime) -> str:
     offset = now.strftime("%z")
     return f"{now.strftime('%A, %d %B %Y, %H:%M')} ({now.tzinfo.key}, UTC{offset[:3]}:{offset[3:]}, {now.tzname()})"
@@ -112,7 +128,7 @@ def format_time(now: datetime) -> str:
 
 class CurrentTimeTool(Tool):
     description = prompts.CURRENT_TIME_DESCRIPTION
-    thresholds = (0.65, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.6, 0.65)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user want to know the current time or date somewhere?",
         "Does the user ask what time it is at a place, a region or a coast?"
@@ -126,15 +142,11 @@ class CurrentTimeTool(Tool):
         return "current_time"
 
     def execute(self) -> None:
-        timezone = self.tool_call.get("timezone", "UTC")
         MessageQueue().send_status_message("checking the time")
 
         try:
-            zone = resolve_timezone(timezone)
-            if zone is None:
-                result = {"tool": self.name(), "error": f"unknown time zone or city '{timezone}'"}
-            else:
-                result = {"tool": self.name(), "text": f"current time: {format_time(datetime.now(zone))}"}
+            zone, note = call_timezone(self.tool_call.get("timezone"), self.db, self.get_user_id())
+            result = {"tool": self.name(), "text": f"current time: {format_time(datetime.now(zone))}{note}"}
         except Exception as e:
             logger.error(f"failed to get current time {repr(e)}")
             result = {"tool": self.name(), "error": "time lookup failed"}

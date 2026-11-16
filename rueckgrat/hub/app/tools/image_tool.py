@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Dict, Any
 
 from .tool import Tool
@@ -21,7 +22,7 @@ class ImageTool(Tool):
             return
         try:
             image_filename = f"{Utils.hash_image_request(image_task.build_request())}.png"
-            self._attach_image(self.db, self.user_id, self.conversation_id, message_id, image_filename, True)
+            self._attach_image(self.db, self.get_user_id(), self.get_conversation_id(), message_id, image_filename, True)
         except Exception as e:
             logger.error(f"{self.name()}: failed to attach the planned image {repr(e)}")
 
@@ -41,7 +42,9 @@ class ImageTool(Tool):
     def _attach_image(db, user_id: int, conversation_id: int, message_id: int, image_filename: str, push: bool) -> None:
         """the image file (it may not exist yet) as an attachment of the message. push: tell the client now (the user has
         an open /ws), the image itself takes minutes. it shows the placeholder and starts the download"""
-        db.add_attachment(message_id, image_filename, f"images/{image_filename}", "image/png", 0)
+        path = Path(f"/hub/images/{image_filename}")
+        size = path.stat().st_size if path.is_file() else 0     # 0 until ImageTask writes the file and records its size
+        db.add_attachment(message_id, image_filename, f"images/{image_filename}", "image/png", size)
         logger.debug(f"attached image {image_filename} to message {message_id}")
         if push:
             MessageQueue().send_data({

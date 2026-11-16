@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from app.common import get_logger
 logger = get_logger()
 
-# users without a timezone setting (PUT /users/me/timezone)
+# users without a timezone setting (PUT /users/me/timezone) whose app sent none either (/login, /refresh)
 DEFAULT_TIMEZONE = os.environ.get("DEFAULT_TIMEZONE", "UTC")
 
 DB_FORMAT = "%Y-%m-%d %H:%M:%S"   # like sqlite's CURRENT_TIMESTAMP, UTC
@@ -21,8 +21,23 @@ def to_db(dt: datetime) -> str:
 def from_db(text: str) -> datetime:
     return datetime.strptime(text, DB_FORMAT).replace(tzinfo=timezone.utc)
 
+def user_timezone_name(db, user_id: int) -> tuple[str, str]:
+    """(IANA name, source) of the user's timezone: the one they chose ("setting"), else their device's ("device"),
+    else DEFAULT_TIMEZONE ("default")"""
+    for source, name in (("setting", db.get_user_timezone(user_id)), ("device", db.get_device_timezone(user_id))):
+        if name:
+            return name, source
+    return DEFAULT_TIMEZONE, "default"
+
+def valid_timezone(name: str) -> bool:
+    """an IANA name zoneinfo knows, e.g. Pacific/Auckland"""
+    try:
+        return bool(name) and ZoneInfo(name) is not None
+    except Exception:
+        return False
+
 def user_timezone(db, user_id: int) -> ZoneInfo:
-    name = db.get_user_timezone(user_id) or DEFAULT_TIMEZONE
+    name, _ = user_timezone_name(db, user_id)
     try:
         return ZoneInfo(name)
     except Exception:

@@ -43,10 +43,11 @@ class BashTool(Tool):
         "Does the message ask to copy, move, rename, delete, list or unzip files or folders that already exist?",
         "Does the message ask to run git, like clone, pull or status?",
         "Does the message ask to install a package with pip, apt or npm?",
-        "Does the message ask how much disk space, memory or CPU the computer uses or has left?",
-        "Does the message ask to create a new folder?",
+        "Does the user ask to see which processes run or how much memory or disk is used?",
+        "Does the user ask to find files or to search for a word in files?",
         "Does the message ask to change the permissions of a file?",
         "Does the message ask to search inside files or count the lines of a file?",
+        "Does the message ask to make a new directory with mkdir?",
     ]
 
     @classmethod
@@ -71,9 +72,9 @@ class BashTool(Tool):
         """the tool result {"tool", "text"|"error"} of one command"""
         configs = {**RUNTIME_CONFIGS, "user": SANDBOX_USER, "environment": dict(ENVIRONMENT)}
         try:
-            restore = RESTORE.format(state=SandboxVolume.shell_state(self.conversation_id),
-                                     workdir=SandboxVolume.workdir(self.conversation_id))
-            with SandboxVolume(self.user_id, self.contact_id).session(configs, lang="python",
+            restore = RESTORE.format(state=SandboxVolume.shell_state(self.get_conversation_id()),
+                                     workdir=SandboxVolume.workdir(self.get_conversation_id()))
+            with SandboxVolume(self.get_user_id(), self.contact_id).session(configs, lang="python",
                                                                       skip_environment_setup=True) as session:
                 started = time.monotonic()
                 result = session.execute_command(f"timeout {COMMAND_TIMEOUT} bash -c {shlex.quote(restore + command)}",

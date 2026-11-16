@@ -18,7 +18,6 @@ class WriteFileTool(ShareFileTool):
     # laya, not a prompt tool: a file is only made when the message asks for one, not on every turn
     thresholds = (0.45, 0.5)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
-        "Does the user want what you write delivered as a file?",
         "Does the user ask to save, export or download something as a text, CSV, markdown or Word file?",
     ]
 

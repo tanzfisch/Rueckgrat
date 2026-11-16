@@ -66,13 +66,12 @@ def get_weather(location: str) -> str:
 class WeatherTool(Tool):
     description = prompts.WEATHER_DESCRIPTION
     requires = ("internet",)
-    thresholds = (0.5, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.45, 0.5)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
-        "Does the user want the weather or forecast somewhere, like rain, sun or wind?",
+        "Does the user want a weather forecast or the current temperature for a place?",
         "Does the user ask if they need an umbrella, a jacket or sunscreen?",
         "Does the user ask how hot, cold, rainy or windy a day will be?",
-        "Does the user ask whether a day will be good weather for going out?",
-        "Does the user ask about the temperature outside right now?"
+        "Does the user ask about the temperature outside right now?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

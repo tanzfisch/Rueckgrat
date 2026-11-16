@@ -11,14 +11,14 @@ MAX_OPTION_LENGTH = 80
 
 class PollTool(Tool):
     description = prompts.POLL_DESCRIPTION
-    thresholds = (0.75, 0.8)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.7, 0.75)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask you to make a poll or a vote?",
-        "Does the user ask to be given options or choices to pick from?",
-        "Does the user ask you to quiz, test or interview them?",
+        "Does the user ask you to create a quiz or a questionnaire for them?",
         "Does the user ask you to quiz them or ask them questions one at a time?",
         "Does the user ask you to guide them through questions in several rounds?",
-        "Does the user ask your to create a questionnaire?",
+        "Does the user ask you to ask them some questions to help them choose or decide?",
+        "Does the user ask you to ask them questions to find out what suits them?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

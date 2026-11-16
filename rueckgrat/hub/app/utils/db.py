@@ -247,14 +247,16 @@ class ChatDB:
             END
         """)
 
-        # per user settings. profile: the user's profile json (get_user_data). timezone: IANA name, the companion plans in it
-        # (timestamps stay UTC). profile_image_key: current user avatar in /hub/images, NULL if none
+        # per user settings. profile: the user's profile json (get_user_data). timezone: IANA name the user chose, the companion
+        # plans in it (timestamps stay UTC). device_timezone: the one the app sent at login, used while timezone is NULL.
+        # profile_image_key: current user avatar in /hub/images, NULL if none
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
             user_id INTEGER PRIMARY KEY,
             profile TEXT,
             timezone TEXT,
             profile_image_key TEXT,
+            device_timezone TEXT DEFAULT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
 
@@ -375,7 +377,6 @@ class ChatDB:
 
         # text files of write_file. real_name is the path the AI wrote (css/style.css).
         # stored_name is the hashed file in files/<user_id>/<conversation_id>/<message_id>/.
-        # additive: SCHEMA_VERSION stays put, because bumping it wipes the database before 1.0
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS message_files (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -400,7 +401,6 @@ class ChatDB:
         # text stays as recognised (voice commands are read from it), edited: the user's text for the segment, NULL if not edited.
         # kind 'heading': a heading the user added after the recording, text its words, start = end between its neighbours.
         # title: '' = the app names it by its date, an enhanced copy is named after its original.
-        # additive like message_files: SCHEMA_VERSION stays put
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS transcripts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -430,14 +430,6 @@ class ChatDB:
             label TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
         )""")
-        # the columns these tables got after they were first made (CREATE TABLE IF NOT EXISTS does not add them)
-        for table, column, definition in (("transcripts", "title", "TEXT NOT NULL DEFAULT ''"),
-                                          ("transcript_segments", "edited", "TEXT DEFAULT NULL"),
-                                          ("transcript_segments", "kind", "TEXT NOT NULL DEFAULT ''"),
-                                          ("transcript_bookmarks", "label", "TEXT NOT NULL DEFAULT ''")):
-            if column not in [row[1] for row in cursor.execute(f"PRAGMA table_info({table})")]:
-                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-
         # sqlite does not index foreign keys by itself: the lookups by conversation, contact and message
         for index, table_columns in (
             ("idx_messages_conversation", "messages(conversation_id)"),
@@ -1088,12 +1080,6 @@ class ChatDB:
                     contact = dict(row)
 
                     # Deserialize JSON fields
-                    if contact.get("rules"):
-                        try:
-                            contact["rules"] = json.loads(contact["rules"])
-                        except Exception:
-                            pass  # fallback to raw string if malformed
-
                     if contact.get("profile"):
                         profile = json.loads(contact["profile"])
                         contact.pop("profile")
@@ -1715,6 +1701,27 @@ class ChatDB:
                 logger.error(f"failed copying transcript {transcript.get('id')}: {e}")
         return 0
 
+    def delete_empty_transcripts(self, user_id: int, min_age_seconds: int, keep=()) -> int:
+        """deletes the user's transcripts without text, bookmarks and title (a recording that got nothing) made more than
+        min_age_seconds ago, except the ids in keep (being recorded). returns how many"""
+        keep = [int(transcript_id) for transcript_id in keep]
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute(f"""
+                    DELETE FROM transcripts WHERE user_id = ? AND title = ''
+                        AND created_at < datetime('now', ?)
+                        AND NOT EXISTS (SELECT 1 FROM transcript_segments s WHERE s.transcript_id = transcripts.id)
+                        AND NOT EXISTS (SELECT 1 FROM transcript_bookmarks b WHERE b.transcript_id = transcripts.id)
+                        AND id NOT IN ({",".join("?" * len(keep))})
+                """, (user_id, f"-{int(min_age_seconds)} seconds", *keep))
+                conn.commit()
+                if cursor.rowcount:
+                    logger.info(f"deleted {cursor.rowcount} empty transcripts of user {user_id}")
+                return cursor.rowcount
+            except Exception as e:
+                logger.error(f"failed deleting the empty transcripts of user {user_id}: {e}")
+        return 0
+
     def delete_transcript(self, user_id: int, transcript_id: int) -> bool:
         """the transcript with its segments and bookmarks. False for foreign and unknown transcripts"""
         with self.get_connection() as conn:
@@ -2047,6 +2054,17 @@ class ChatDB:
         
         return -1
     
+    def set_attachment_size(self, file_url: str, file_size: int) -> int:
+        """the size of the attachments of file_url, for images attached before they exist (ImageTool). returns how many"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute("UPDATE attachments SET file_size = ? WHERE file_url = ?", (file_size, file_url))
+                conn.commit()
+                return cursor.rowcount
+            except Exception as e:
+                logger.error(f"failed setting the size of {file_url}: {e}")
+        return 0
+
     def get_attachments_for_message(self, message_id: int) -> list:
         with self.get_connection() as conn:
             try:
@@ -2345,7 +2363,23 @@ class ChatDB:
             row = conn.execute("SELECT timezone FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
             return row["timezone"] if row and row["timezone"] else None
 
-    def set_user_timezone(self, user_id: int, timezone: str) -> bool:
+    def get_device_timezone(self, user_id: int) -> str | None:
+        """the timezone of the device the user logged in with last (set_device_timezone), None if none sent one"""
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT device_timezone FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
+            return row["device_timezone"] if row and row["device_timezone"] else None
+
+    def set_device_timezone(self, user_id: int, timezone: str) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                INSERT INTO user_settings (user_id, device_timezone) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET device_timezone = excluded.device_timezone
+            """, (user_id, timezone))
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def set_user_timezone(self, user_id: int, timezone: str | None) -> bool:
+        """the timezone the user chose, None clears it (their device's counts again, get_device_timezone)"""
         with self.get_connection() as conn:
             cursor = conn.execute("""
                 INSERT INTO user_settings (user_id, timezone) VALUES (?, ?)

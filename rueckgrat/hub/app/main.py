@@ -3,7 +3,6 @@ import json
 import random
 import re
 import asyncio
-import threading
 import os
 import io
 import wave
@@ -30,10 +29,9 @@ from app.tasks.transcript_tasks import TranscriptSummaryTask, TranscriptEnhanceT
 from app.tasks.turns import Turns
 from app.utils.tts_stream import TtsStreams
 from app.companion import CompanionScheduler
-from app.utils.clock import DEFAULT_TIMEZONE
+from app.utils.clock import user_timezone_name, valid_timezone
 from app.maintenance import MaintenanceSweeper, maintenance_tasks
 from collections import Counter
-from zoneinfo import ZoneInfo
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
@@ -306,6 +304,12 @@ def get_signup_mode():
 class LoginRequest(BaseModel):
     user_name: str
     user_passwd: str
+    timezone: str = ""      # the device's IANA timezone, used while the user has not chosen one (remember_device_timezone)
+
+def remember_device_timezone(user_id: int, timezone: str):
+    """the timezone the app's device is in (/login, /refresh): the user's time while they have not chosen one in the settings"""
+    if valid_timezone(timezone):
+        app.state.db.set_device_timezone(user_id, timezone)
 
 @app.post("/login")
 def login(data: LoginRequest):
@@ -317,6 +321,7 @@ def login(data: LoginRequest):
     if not verify_password(data.user_passwd or "", user["password"]):
         raise HTTPException(status_code=401)
 
+    remember_device_timezone(user["id"], data.timezone)
     return session_response(user)
 
 def session_response(user: dict, refresh_token: str | None = None) -> dict:
@@ -334,6 +339,7 @@ def session_response(user: dict, refresh_token: str | None = None) -> dict:
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+    timezone: str = ""      # see LoginRequest
 
 @app.post("/refresh")
 def refresh(data: RefreshRequest):
@@ -349,6 +355,7 @@ def refresh(data: RefreshRequest):
             else:
                 logger.debug(f"refresh refused: {reason}")
             raise HTTPException(status_code=401, detail="Invalid token")
+        remember_device_timezone(user_id, data.timezone)
         return session_response(user, new_token)
 
 class LogoutRequest(BaseModel):
@@ -392,16 +399,22 @@ class TimezoneRequest(BaseModel):
 
 @app.get("/users/me/timezone")
 def get_timezone(username: str = Depends(get_current_user)):
-    return {"timezone": app.state.db.get_user_timezone(app.state.db.get_user_id(username)) or DEFAULT_TIMEZONE}
+    """the user's timezone and where it comes from: "setting" (they chose it), "device" (their app's), "default" """
+    timezone, source = user_timezone_name(app.state.db, app.state.db.get_user_id(username))
+    return {"timezone": timezone, "source": source}
 
 @app.put("/users/me/timezone")
 def set_timezone(request: TimezoneRequest, username: str = Depends(get_current_user)):
     """IANA name, e.g. Pacific/Auckland. the companion plans and keeps quiet hours in it"""
-    try:
-        ZoneInfo(request.timezone)
-    except Exception:
+    if not valid_timezone(request.timezone):
         raise HTTPException(status_code=400, detail="unknown timezone")
     app.state.db.set_user_timezone(app.state.db.get_user_id(username), request.timezone)
+    return {"status": "ok"}
+
+@app.delete("/users/me/timezone")
+def clear_timezone(username: str = Depends(get_current_user)):
+    """drops the chosen timezone: the user's time follows their device again (user_timezone_name)"""
+    app.state.db.set_user_timezone(app.state.db.get_user_id(username), None)
     return {"status": "ok"}
 
 class EmailRequest(BaseModel):
@@ -655,6 +668,8 @@ def delete_contact_memory(contact_id: int, memory_id: int, username: str = Depen
 def get_conversations(contact_id: int, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
     with logger_context(user_id):
+        if not app.state.db.owns_contact(user_id, contact_id):
+            raise HTTPException(status_code=404, detail="contact not found")
         conversations = app.state.db.get_conversations(user_id, contact_id)
         return {"conversations": conversations}
 
@@ -722,7 +737,7 @@ def get_messages(message_id: int, username: str = Depends(get_current_user)):
 ########### text to speech
 @app.post("/tts")
 def text_to_speech(request: HubTTSRequest, username: str = Depends(get_current_user)):
-    wav = app.state.infrastructure.tts(request.text, request.voice)
+    wav = app.state.infrastructure.tts(request.text, own_voice(app.state.db.get_user_id(username), request.voice))
     if wav is None:
         raise HTTPException(status_code=503, detail="text to speech not available")
     return Response(content=wav, media_type="audio/wav")
@@ -759,7 +774,7 @@ async def tts_endpoint(websocket: WebSocket, username: str = Depends(get_current
                 if "speak" in data:
                     speak = data["speak"]
                     reply, sent = TtsStreams.start(app.state.infrastructure, user_id, speak["reply_id"], speak.get("text", ""),
-                                                speak.get("voice", ""), speak.get("message_id"), speak.get("language", ""),
+                                                own_voice(user_id, speak.get("voice", "")), speak.get("message_id"), speak.get("language", ""),
                                                 final=not speak.get("stream")), -1
                 elif "text" in data:
                     streaming = TtsStreams.get(user_id, data["text"]["reply_id"])
@@ -884,6 +899,15 @@ def resolve_voice_id(user_id: int, value: str) -> str:
         return voice_id
     logger.warning(f"unknown voice {value} for user {user_id}, using no voice")
     return ""
+
+def own_voice(user_id: int, voice: str) -> str:
+    """voice ("" the default) if it is one of the user's voices, else "": no one speaks with another user's voice"""
+    if not voice:
+        return ""
+    own = app.state.db.find_user_voice(user_id, voice)
+    if not own:
+        logger.warning(f"user {user_id} asked for a voice not theirs: {voice}, using the default")
+    return own or ""
 
 def resolve_contact_voice(user_id: int, contact_data: dict):
     """resolves profile.tts_parameters.voice_id in place, so the db always holds the user's uuid"""
@@ -1024,11 +1048,23 @@ def create_transcript(request: CreateTranscriptRequest, username: str = Depends(
             raise HTTPException(status_code=500, detail="transcript could not be created")
         return {"transcript_id": transcript_id}
 
+RECORDING_TRANSCRIPTS = Counter()  # transcript id -> the /ws/audio connections recording into it now
+EMPTY_TRANSCRIPT_SECONDS = 3600     # an empty transcript (a recording that got no text) older than this is dropped
+
+def recording_transcript(transcript_id: int, change: int):
+    """counts a /ws/audio connection recording into transcript_id (+1) or done with it (-1), RECORDING_TRANSCRIPTS"""
+    if transcript_id:
+        RECORDING_TRANSCRIPTS[transcript_id] += change
+        if RECORDING_TRANSCRIPTS[transcript_id] <= 0:
+            del RECORDING_TRANSCRIPTS[transcript_id]
+
 @app.get("/transcripts")
 def get_transcripts(username: str = Depends(get_current_user)):
-    """the user's transcripts, newest first, without their text (see ChatDB.get_transcripts)"""
+    """the user's transcripts, newest first, without their text (see ChatDB.get_transcripts). the empty ones left by
+    older apps (a recording without text, the app deletes those itself now) go first, not the ones being recorded"""
     user_id = app.state.db.get_user_id(username)
     with logger_context(user_id):
+        app.state.db.delete_empty_transcripts(user_id, EMPTY_TRANSCRIPT_SECONDS, keep=list(RECORDING_TRANSCRIPTS))
         return {"transcripts": app.state.db.get_transcripts(user_id)}
 
 @app.get("/transcripts/{transcript_id}")
@@ -1278,21 +1314,23 @@ def zip_conversation_files(conversation_id: int, path: str = "", exclude: bool =
 ########### downloads
 @app.get("/downloads/{file_path:path}")
 async def download_file(file_path: str, username: str = Depends(get_current_user)):
-    # needs a valid token (401 without). only the image directory is served: files in it have hash names,
-    # /hub also holds the database, the voices and the config, which no client asks for
+    # needs a valid token (401 without). only the image directory is served (/hub also holds the database, the voices
+    # and the config, which no client asks for), and only the user's own images (db.user_has_image: their gallery).
+    # 404 for a foreign, unknown or missing one alike (the app retries an image that is still being made)
     base_path = Path("/hub").resolve()
     path = (base_path / file_path).resolve()
+    user_id = app.state.db.get_user_id(username)
 
-    if path.parent != base_path / "images":
-        logger.error(f"invalid path {path}")
-        return {"error": "Invalid path"}
+    if path.parent != base_path / "images" or not app.state.db.user_has_image(user_id, path.name):
+        logger.warning(f"user {user_id}: no image of theirs at {file_path}")
+        raise HTTPException(status_code=404, detail="file not found")
 
     if not os.path.exists(path):
         await run_in_threadpool(app.state.image_store.ensure, path.name)
 
     if not os.path.exists(path):
         logger.error(f"file not found {path}")
-        return {"error": "File not found"}
+        raise HTTPException(status_code=404, detail="file not found")
 
     file_size = os.path.getsize(path)
     filename = path.name
@@ -1314,10 +1352,11 @@ async def download_file(file_path: str, username: str = Depends(get_current_user
 async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_current_user_ws)):
     await websocket.accept()
 
-    loop = asyncio.get_running_loop()
-    done_queue = asyncio.Queue()
     closed = asyncio.Event()
     user_id = app.state.db.get_user_id(username)
+    # the websocket's own queue: what its requests produce (the jobs, their status and results) comes back to it,
+    # not to the user's other websockets (another device), MessageQueue.connect
+    session = MessageQueue().connect(user_id)
     with logger_context(user_id):
         app.state.connections[user_id] += 1
 
@@ -1330,16 +1369,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                     # already closed at ASGI level
                     pass
 
-        def pump_done_jobs():
-            # wakes up to notice the close: a thread still waiting after it would take the next done job and drop it
-            while not closed.is_set():
-                job = app.state.task_queue.get_done(user_id, timeout=0.5)   # only this user's finished jobs
-                if job:
-                    loop.call_soon_threadsafe(done_queue.put_nowait, job)
-
-        threading.Thread(target=pump_done_jobs, daemon=True).start()
-
-        # recieve from client
+        # receive from client
         async def receiver():
             try:
                 while not closed.is_set():
@@ -1428,7 +1458,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
         async def sender():
             try:
                 while not closed.is_set():
-                    message = MessageQueue().pop_message(user_id)   # only this user's messages
+                    message = MessageQueue().pop_message(session=session)   # only this websocket's messages
                     if message:
                         try:
                             await websocket.send_text(json.dumps(message))
@@ -1445,33 +1475,24 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                 logger.error(f"sender failure {repr(e)}")
                 await safe_close(code=1011)
 
-        # send back to client
-        async def finish_task():
-            while not closed.is_set():
-                task = await done_queue.get()
-
-                if closed.is_set():
-                    break
-
-                if task.has_response():
-                    MessageQueue().send_data(task.get_result(), user_id=user_id)
-
-        receiver_task = asyncio.create_task(receiver())
-        finish_job_task = asyncio.create_task(finish_task())
+        with MessageQueue.user_scope(user_id, session):     # the task copies it: the receiver's jobs answer this websocket (TaskQueue.add)
+            receiver_task = asyncio.create_task(receiver())
         sender_task = asyncio.create_task(sender())
 
-        done, pending = await asyncio.wait(
-            [receiver_task, sender_task, finish_job_task],
-            return_when=asyncio.FIRST_EXCEPTION
-        )
+        try:
+            await asyncio.wait(
+                [receiver_task, sender_task],
+                return_when=asyncio.FIRST_EXCEPTION
+            )
 
-        await safe_close()
-        app.state.connections[user_id] -= 1
+            await safe_close()
+        finally:    # also when the handler is cancelled: an open session would swallow the user's messages
+            MessageQueue().disconnect(session)
+            app.state.connections[user_id] -= 1
+            for task in (receiver_task, sender_task):
+                task.cancel()
 
-        for task in pending:
-            task.cancel()
-
-        await asyncio.gather(*pending, return_exceptions=True)        
+        await asyncio.gather(receiver_task, sender_task, return_exceptions=True)
 
 SPEECH = 0.5
 SILENCE_MS = 2000
@@ -1568,10 +1589,12 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
                     data = json.loads(msg["text"])
                     if data.get("type") == "audio.start":
                         meta.update({k: data[k] for k in ("sample_rate", "channels", "encoding", "language") if k in data})
+                        recording_transcript(transcript_id, -1)     # a second audio.start: the earlier one is over
                         transcript_id = int(data.get("transcript_id") or 0)
                         if transcript_id and not app.state.db.owns_transcript(user_id, transcript_id):
                             logger.warning(f"audio for transcript {transcript_id} of another user, not stored")
                             transcript_id = 0
+                        recording_transcript(transcript_id, +1)     # not dropped as empty while it records
                         offset = max(0.0, float(data.get("offset") or 0))
                         if await app.state.infrastructure.wait_available("stt", STT_WAIT_SECONDS):
                             await websocket.send_json({"type": "audio.ready"})
@@ -1620,5 +1643,6 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
             pass
         finally:
             reader.cancel()
+            recording_transcript(transcript_id, -1)
             if transcript_id:
                 app.state.db.set_transcript_duration(transcript_id, seconds(position))

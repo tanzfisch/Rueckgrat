@@ -138,7 +138,7 @@ class ContactWizardForm(ft.Column):
             wizard_row("Style", self.image_style),
             wizard_row(label = "Persistent", 
                        control = self.persistent_switch,
-                       description = "Running as persistant Companion with it's own shedule."),
+                       description = "Runs as a persistent companion with its own schedule."),
         ]
         if Hub.nsfw_allowed:
             self.controls.append(

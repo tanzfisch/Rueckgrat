@@ -19,17 +19,18 @@ logger = get_logger()
 class WebsearchTool(Tool):
     description = prompts.WEBSEARCH_DESCRIPTION
     requires = ("internet",)    # also fetch_url and price_finder, they build on it
-    thresholds = (0.7, 0.75)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.65, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
-        "Does the user ask about recent news, like an election, protests, a disaster or a new product?",
-        "Did the user ask who won last night's or this week's game?",
-        "Does the user want to find a shop, restaurant or business in a town?",
+        "Does the user ask you to search the internet for something?",
+        "Does the user ask where to buy something or for the best deal on a product?",
+        "Does the user ask for the score or result of a sports game?",
+        "Does the user ask for reviews, ratings or comparisons of a product or service?",
+        "Does the user ask what is showing in cinemas or on TV, or what is on this week?",
         "Does the user ask about the opening hours of a shop, museum or supermarket?",
-        "Does the user ask the live market price of a stock or a crypto coin like bitcoin?",
-        "Does the user ask who is currently the leader or head of a country or company?",
-        "Does the user ask what events, games or concerts are coming up somewhere?",
-        "Does the user ask you to search the web, look something up online or google it?",
         "Does the user want the latest news or updates on a topic?",
+        "Does the user ask for the current price of a stock, a crypto coin or a product?",
+        "Does the user ask who is currently the leader or head of a country or company?",
+        "Does the user want to find a shop, restaurant or business in a town?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

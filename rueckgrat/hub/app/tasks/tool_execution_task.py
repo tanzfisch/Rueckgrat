@@ -1,10 +1,12 @@
 import time
+import traceback
 import json
 from .task_queue import Task
 from typing import Dict, Any, List, Optional, Callable
 from ..utils.tool_prompt_compiler import ToolPromptCompiler
 from ..utils.prompt_compiler import build_context
 from ..utils.trace import Trace
+from ..utils.clock import user_timezone
 from ..tools import prompts as tool_prompts
 
 from app.common import get_logger, ChatRequest, Utils
@@ -19,8 +21,7 @@ class ToolExecutionTask(Task):
                  message_id: int = None, excluded_tools: tuple = (), llm_timeout: Optional[float] = None,
                  recommended_tools: List[str] = (), detach: Optional[Callable[[], bool]] = None,
                  tool_calls: Optional[List[Dict[str, Any]]] = None, fix_rounds: int = 0, history: int = 0):
-        super().__init__()
-        self.user_id = user_id
+        super().__init__(user_id=user_id)
         self.request = request
         self.context = context
         self.db = db
@@ -86,7 +87,7 @@ class ToolExecutionTask(Task):
             logger.debug(f"execution task results:\n{Utils.pretty_print(self.tool_response)}")
 
         except Exception as e:
-            logger.error(f"failed to direct tools {repr(e)}")
+            logger.error(f"failed to direct tools {repr(e)}\n{traceback.format_exc()}")
 
     def _rounds(self, mandatory: List[str], recommended: List[str], prompt_text: str, step: str = "",
                 also: List[str] = ()) -> tuple[List[str], Optional[List[Dict[str, Any]]]]:
@@ -151,8 +152,9 @@ class ToolExecutionTask(Task):
         could repair: failed calls, a cut off reply)"""
         compiler = ToolPromptCompiler(prompt_text, self.tool_response, self.tool_registry, tools, recommended,
                                       history=self._history(),
-                                      scope={"user_id": self.user_id, "contact_id": self.request.contact_id,
-                                             "conversation_id": self.request.conversation_id})
+                                      scope={"user_id": self.get_user_id(), "contact_id": self.request.contact_id,
+                                             "conversation_id": self.request.conversation_id},
+                                      timezone=self._timezone())
         messages = []
         context_prompt = build_context(self.request.name, self.context) if self.context else ""
         if context_prompt:
@@ -198,6 +200,10 @@ class ToolExecutionTask(Task):
         self.tool_registry.merge_results(self.tool_response, cut_off)
         return tool_calls, self.tool_registry.problems(results) + problems
 
+    def _timezone(self):
+        """the user's timezone for the setup prompt (clock.user_timezone), None without a user or db"""
+        return user_timezone(self.db, self.get_user_id()) if self.db is not None and self.get_user_id() is not None else None
+
     def _fix(self, problems: List[str]) -> None:
         """a worker's fix rounds (fix_rounds, 0: none): while bash, run_code or write_file calls failed, were cut off or
         files were not attached, those tools get one more pass with the results so far and what went wrong, at most
@@ -225,7 +231,7 @@ class ToolExecutionTask(Task):
         """runs the calls together, their results go into tool_response. returns them ({tool name: result}, None for none)"""
         start = time.monotonic()
         tool_call_result = self.tool_registry.execute(
-            user_id=self.user_id,
+            user_id=self.get_user_id(),
             contact_id=self.request.contact_id,
             conversation_id=self.request.conversation_id,
             tool_calls=[dict(call, llm_timeout=self.llm_timeout) if self.llm_timeout else call for call in tool_calls],

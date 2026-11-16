@@ -44,12 +44,12 @@ class PriceFinderTool(WebsearchTool):
     is shown under the answer: a podium of the best three and a list of more finds (the message's "prices" data, the client's
     PriceView), the reply gets the finds as text"""
     description = prompts.PRICE_FINDER_DESCRIPTION
-    thresholds = (0.65, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.55, 0.6)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask for the best price or the cheapest offer for a product?",
-        "Does the user ask you to find them a product to buy that has certain features, like size, power or engine?",
         "Does the user ask you to search the shops for a product?",
-        "Does the user ask for the current price of an item like a gadget, an appliance or a tool?",
+        "Does the user ask for the price of a specific product model?",
+        "Does the user ask which product they should buy, like the best value drill or a monitor with certain features?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

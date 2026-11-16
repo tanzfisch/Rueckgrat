@@ -244,7 +244,7 @@ class LoginPage(BasePage):
             self.on_successful_login()
 
     def on_successful_login(self):
-        if not Hub.get_user_data():
+        if not (Hub.get_user_data() or {}).get("profile"):     # /users/me always carries profile_image_key
             self.navigator("user_profile_wizz", first_setup=True)
         else:
             self.navigator("contacts")

@@ -1,7 +1,9 @@
 from .task_queue import Task
 from ..utils.prompt_compiler import PromptCompiler
+from ..utils.clock import user_timezone
+from ..utils import prompts
 from .tool_execution_task import ToolExecutionTask
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from urllib.parse import urlparse
 
 from app.common import get_logger, ChatRequest, Utils
@@ -11,9 +13,13 @@ class ChatTask(Task):
     MIN_HISTORY = 10    # the history grows from MIN_HISTORY to MIN_HISTORY + HISTORY_STEP - 1 messages and is then cut back
     HISTORY_STEP = 10   # in one go, so the start of the chat stays the same for llama-server's prompt cache between cuts
 
-    def __init__(self, request: ChatRequest, db, infrastructure, callback=None, tool_execution_results = None, tool_registry=None):
-        """tool_registry: given, the reply may call its REPLY_TOOLS at its end (MetaTask runs them)"""
+    def __init__(self, request: ChatRequest, db, infrastructure, callback=None, tool_execution_results = None, tool_registry=None,
+                 seed: Optional[int] = None):
+        """tool_registry: given, the reply may call its REPLY_TOOLS at its end (MetaTask runs them).
+        seed: one per turn (MetaTask: the reply's message id). the same seed every turn draws the same random numbers,
+        the reply then easily follows the last reply word for word (answers the message before again). None: the conversation id"""
         super().__init__()
+        self.seed = seed
         self.tool_registry = tool_registry
         self.request = request
         self.db = db
@@ -30,7 +36,8 @@ class ChatTask(Task):
             compiler = PromptCompiler(
                 contact=contact,
                 conversation=conversation,
-                user_role_name=self.request.name
+                user_role_name=self.request.name,
+                timezone=user_timezone(self.db, self.get_user_id()) if self.get_user_id() is not None else None
             )
 
             system_prompt, situation_prompt = compiler.build_prompt()
@@ -63,7 +70,7 @@ class ChatTask(Task):
             self.stream_id = self.infrastructure.chat(
                 messages=messages,
                 temperature=self.request.temperature,
-                seed=self.request.conversation_id,
+                seed=self.seed if self.seed is not None else self.request.conversation_id,
                 stream=True,
                 callback=self.callback
             )
@@ -79,12 +86,13 @@ class ChatTask(Task):
 
     @staticmethod
     def _add_to_latest_user_message(messages: list, text: str):
-        """puts text in front of the content of the last user message, a new user message when there is none"""
+        """puts text in front of the content of the last user message, which is marked as the new message
+        (NEW_MESSAGE_PART), a new user message when there is none"""
         if not text:
             return
         for message in reversed(messages):
             if message["role"] == "user":
-                message["content"] = f"{text}\n\n{message['content']}"
+                message["content"] = prompts.NEW_MESSAGE_PART.format(before=text, message=message["content"])
                 return
         messages.append({"role": "user", "content": text})
 

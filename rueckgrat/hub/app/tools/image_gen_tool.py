@@ -8,11 +8,11 @@ logger = get_logger()
 
 class ImageGenTool(ImageTool):
     description = prompts.IMAGE_GEN_DESCRIPTION
-    thresholds = (0.55, 0.6)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.5, 0.55)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask you to paint, draw or generate a picture of something?",
-        "Does the user ask you to draw, paint or illustrate a subject, like a cat, a dragon, a logo or a mountain wallpaper?",
         "Does the user want a logo, a poster or an icon made as an image?",
+        "Does the user ask you to design a poster, a flyer, a logo or an icon?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
@@ -29,7 +29,7 @@ class ImageGenTool(ImageTool):
             logger.error("invalid generate_image")
             return None
         return RequestedImageTask(self.tool_call["positive_prompt"], self.contact_id, self.db, self.infrastructure,
-                                 conversation_id=self.conversation_id)
+                                 conversation_id=self.get_conversation_id())
 
     def execute(self) -> None:
         image_task = self.create_image_job()

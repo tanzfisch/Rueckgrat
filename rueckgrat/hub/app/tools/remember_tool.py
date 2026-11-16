@@ -34,20 +34,20 @@ class RememberTool(Tool):
         # embed first: a memory that means the same as one the contact already has is not saved again
         vector = embed_text(self.infrastructure, text)
         if vector is not None:
-            closest = self.db.nearest_contact_memories(self.user_id, self.contact_id, vector, k=1)
+            closest = self.db.nearest_contact_memories(self.get_user_id(), self.contact_id, vector, k=1)
             if closest and closest[0]["distance"] < DUPLICATE_DISTANCE:
                 logger.debug(f"remember: contact {self.contact_id} already remembers this as memory {closest[0]['id']}, nothing saved")
                 self.add_result({"tool": self.name(), "text": f"already remembered: {closest[0]['text']}"})
                 return
 
-        memory_id = self.db.add_contact_memory(self.user_id, self.contact_id, text)
+        memory_id = self.db.add_contact_memory(self.get_user_id(), self.contact_id, text)
         if memory_id is None:
-            logger.error(f"remember: not saved, contact {self.contact_id} is not a contact of user {self.user_id}")
+            logger.error(f"remember: not saved, contact {self.contact_id} is not a contact of user {self.get_user_id()}")
             result = {"tool": self.name(), "error": "could not save the memory"}
         else:
-            logger.debug(f"remembered memory {memory_id} for user {self.user_id} contact {self.contact_id} ({len(text)} characters)")
+            logger.debug(f"remembered memory {memory_id} for user {self.get_user_id()} contact {self.contact_id} ({len(text)} characters)")
             # the memory is saved either way, without a vector search_memory just won't find it
-            if vector is None or not self.db.set_memory_embedding(self.user_id, memory_id, vector):
+            if vector is None or not self.db.set_memory_embedding(self.get_user_id(), memory_id, vector):
                 logger.warning(f"remember: memory {memory_id} saved without a vector")
             result = {"tool": self.name(), "text": f"saved: {text}"}
 

@@ -28,6 +28,7 @@ class ImageTask(Task):
     def _execute(self) -> None:
         if self.request.output and Path(f"/hub/images/{self.request.output}").exists():
             self.response = {"image": {"filename": self.request.output, "image_path": f"images/{self.request.output}"}}
+            self._record_size(self.request.output)
             return
         try:
             if self.db and self.request.output:
@@ -49,6 +50,7 @@ class ImageTask(Task):
                     source_path=f"{image_path}",
                     download_path=f"/hub/images",
                     asynchronous=False)
+                self._record_size(image_filename)
 
                 self.response = {
                     "image": {
@@ -58,6 +60,12 @@ class ImageTask(Task):
                 }
         except Exception as e:
             logger.error(f"failed to execute ImageTask {repr(e)}")                    
+
+    def _record_size(self, image_filename: str) -> None:
+        """the file's size in the attachments that got the image before it existed (ImageTool attaches it planned)"""
+        path = Path(f"/hub/images/{image_filename}")
+        if self.db and path.is_file():
+            self.db.set_attachment_size(f"images/{image_filename}", path.stat().st_size)
 
     def get_result(self) -> Dict[str, Any]:
         return self.response

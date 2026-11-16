@@ -8,10 +8,9 @@ logger = get_logger()
 
 class RequestedImageTask(Task):
     def __init__(self, prompt: str, contact_id: int, db, infrastructure, conversation_id: int = None):
-        super().__init__()
+        super().__init__(conversation_id=conversation_id)
         self.prompt = prompt
         self.contact_id = contact_id
-        self.conversation_id = conversation_id
         self.db = db
         self.infrastructure = infrastructure
         self.response = None

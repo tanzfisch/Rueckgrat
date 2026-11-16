@@ -15,12 +15,10 @@ class Tool(Task):
     requires = ()       # the capabilities it needs (Infrastructure.available: "image", "embedding", "internet" ...), without one it is not offered
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
-        super().__init__()
+        super().__init__(user_id=user_id, conversation_id=conversation_id)
         self.db = db
         self.infrastructure = infrastructure
-        self.user_id=user_id
         self.contact_id=contact_id
-        self.conversation_id=conversation_id
         self.tool_call=tool_call
         self._response: Dict[str, Any] = {}
         self.message_id: Optional[int] = None
@@ -47,8 +45,8 @@ class Tool(Task):
         if not self.has_message():
             return
         self.db.set_message_data(self.message_id, kind, value)
-        MessageQueue().send_data({"data": {"conversation_id": self.conversation_id, "message_id": self.message_id, "kind": kind, "value": value}},
-                                 user_id=self.user_id)
+        MessageQueue().send_data({"data": {"conversation_id": self.get_conversation_id(), "message_id": self.message_id, "kind": kind, "value": value}},
+                                 user_id=self.get_user_id())
 
     @classmethod
     def sharing(cls):
