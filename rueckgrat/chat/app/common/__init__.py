@@ -1,4 +1,4 @@
-from .logger import get_logger, set_log_level
+from .logger import get_logger, set_log_level, logger_context
 from .download_queue import DownloadQueue, DownloadJob
 from .common_types import (
     ChatRequest, ChatResponse, ImageRequest, ImageResponse, ChatRequestLlama, 
@@ -18,6 +18,7 @@ from .companion_settings import (
 __all__ = [
     "get_logger",
     "set_log_level",
+    "logger_context",
     "DownloadQueue", 
     "DownloadJob", 
     "ChatRequest", 

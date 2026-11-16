@@ -7,26 +7,28 @@ logger = get_logger()
 
 class ToolPromptCompiler:
     def __init__(self, prompt: str, previous_results: Dict[str, Any], tool_registry: ToolRegistry = None, tool_names: Optional[List[str]] = None,
-                 recommended: Optional[List[str]] = None, history: str = ""):
-        """history: the last messages before the prompt (ToolExecutionTask._history), "" for none"""
+                 recommended: Optional[List[str]] = None, history: str = "", scope: Optional[Dict[str, int]] = None):
+        """history: the last messages before the prompt (ToolExecutionTask._history), "" for none. scope: {user_id,
+        contact_id, conversation_id} of the setup, for the tools' prompt_for (None: their plain prompt)"""
         self.prompt = prompt
         self.history = prompts.TOOL_SETUP_HISTORY_PART.format(history=history) if history else ""
         self.previous_results = previous_results
         self.tool_names = tool_names
         self.recommended = list(recommended or [])
         self.tool_registry = tool_registry
+        self.scope = scope
 
     def _tools_definition(self) -> str:
-        """the surely detected tools must be called, the recommended ones and the PROMPT_TOOLS (remember, search_memory,
-        take_photo) the model decides about"""
+        """the surely detected tools must be called, the recommended ones and the optional ones (PROMPT_TOOLS: remember,
+        search_memory, take_photo; companions: share_file) the model decides about"""
         mandatory, recommended, optional = self.tool_registry.split_tools(self.tool_names, self.recommended)
         sections = []
         if mandatory:
-            sections.append(prompts.TOOL_SETUP_MANDATORY_PART + self.tool_registry.get_tools_hydrated(mandatory))
+            sections.append(prompts.TOOL_SETUP_MANDATORY_PART + self.tool_registry.get_tools_hydrated(mandatory, scope=self.scope))
         if recommended:
-            sections.append(prompts.TOOL_SETUP_RECOMMENDED_PART + self.tool_registry.get_tools_hydrated(recommended, kind="recommended"))
+            sections.append(prompts.TOOL_SETUP_RECOMMENDED_PART + self.tool_registry.get_tools_hydrated(recommended, kind="recommended", scope=self.scope))
         if optional:
-            sections.append(prompts.TOOL_SETUP_OPTIONAL_PART + self.tool_registry.get_tools_hydrated(optional, kind="optional"))
+            sections.append(prompts.TOOL_SETUP_OPTIONAL_PART + self.tool_registry.get_tools_hydrated(optional, kind="optional", scope=self.scope))
         return "\n".join(sections)
 
     def _build_first_prompt(self) -> tuple[str, str]:

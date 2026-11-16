@@ -3,76 +3,25 @@ import flet as ft
 from app.ui import theme
 
 from app.utils import Hub
-from app.ui.wizzard_base import WizardPage, wizard_row, ASSETS_DIR
-from app.ui.widgets import RowSelector, MessageBox
+from app.ui.wizzard_base import WizardPage, wizard_row
+from app.ui.widgets import RowSelector, MessageBox, ProfileImageSlot
 from app.ui.settings_page import timezone_options
 
 
 class UserProfileForm(ft.Column):
     """the user's own character: name, gender, age, hair, eyes, ethnicity, body type and backstory"""
 
-    # icon names, theme.icon() picks the light or dark drawing when the page is built
-    _male_age_icons = {
-        "18": "male_teen",
-        "22": "male_20s",
-        "27": "male_30s",
-        "45": "male_40s",
-        "60": "male_old",
-    }
 
-    _female_age_icons = {
-        "18": "female_teen",
-        "22": "female_20s",
-        "27": "female_30s",
-        "45": "female_40s",
-        "60": "female_old",
-    }
-
-    hair_color = {
-        "black": f"{ASSETS_DIR}/icons/hair_black.png",
-        "dark brown": f"{ASSETS_DIR}/icons/hair_dark_brown.png",
-        "brown": f"{ASSETS_DIR}/icons/hair_brown.png",
-        "bright brown": f"{ASSETS_DIR}/icons/hair_bright_brown.png",
-        "blonde": f"{ASSETS_DIR}/icons/hair_blonde.png",
-        "red": f"{ASSETS_DIR}/icons/hair_red.png",
-        "gray": f"{ASSETS_DIR}/icons/hair_gray.png",
-    }
-
-    eye_color = {
-        "black": f"{ASSETS_DIR}/icons/eye_black.png",
-        "dark brown": f"{ASSETS_DIR}/icons/eye_dark_brown.png",
-        "bright brown": f"{ASSETS_DIR}/icons/eye_bright_brown.png",
-        "green": f"{ASSETS_DIR}/icons/eye_green.png",
-        "blue": f"{ASSETS_DIR}/icons/eye_blue.png",
-        "gray": f"{ASSETS_DIR}/icons/eye_gray.png",
-        "red": f"{ASSETS_DIR}/icons/eye_red.png",
-    }
-
-    ethnicity_options = {
-        "East Asian": "",
-        "South Asian": "",
-        "Southeast Asian": "",
-        "Middle Eastern": "",
-        "African": "",
-        "European": "",
-        "Latino": "",
-        "Native American": "",
-        "Oceanian": "",
-    }
-
-    _body_type_icons = {
-        "underweight": "body_underweight",
-        "athletic": "body_normal",
-        "curvy": "body_overweight",
-        "overweight": "body_obese",
-        "obese": "body_morbidly_obese",
-    }
-
-    def __init__(self, profile: dict = None):
+    def __init__(self, profile: dict = None, image_key: str | None = None):
         super().__init__(expand=True, spacing=14, scroll=ft.ScrollMode.AUTO)
-        self.male_ages = {k: theme.icon(v) for k, v in self._male_age_icons.items()}
-        self.female_ages = {k: theme.icon(v) for k, v in self._female_age_icons.items()}
-        self.body_type = {k: theme.icon(v) for k, v in self._body_type_icons.items()}
+
+        self.profile_image = ProfileImageSlot(
+            title="Profile image",
+            file_key=image_key,
+            on_upload=Hub.upload_user_image,
+            on_pick=Hub.pick_user_image,
+            on_remove=Hub.remove_user_image,
+        )
 
         self.name_input = ft.TextField(
             value=((profile or {}).get("name") or "").strip(),
@@ -86,28 +35,7 @@ class UserProfileForm(ft.Column):
         )
 
         self.gender = RowSelector({"male": theme.icon("male"), "female": theme.icon("female")})
-        self.gender.on_selection_changed = self.on_gender_changed
         self.gender.select(profile["gender"] if profile else "male")
-
-        self.age = RowSelector(self.male_ages)
-        if profile:
-            ages = [int(k) for k in self.male_ages]
-            closest = min(ages, key=lambda x: abs(x - profile["age"]))
-            self.age.select(str(closest))
-        else:
-            self.age.select("22")
-
-        self.hair = RowSelector(self.hair_color, True, 7)
-        self.hair.select(profile["hair_color"]) if profile else self.hair.select_random()
-
-        self.eye = RowSelector(self.eye_color, True, 7)
-        self.eye.select(profile["eye_color"]) if profile else self.eye.select_random()
-
-        self.ethnicity = RowSelector(self.ethnicity_options, False, 3)
-        self.ethnicity.select(profile["ethnicity"]) if profile else self.ethnicity.select_random()
-
-        self.body = RowSelector(self.body_type, True, 5)
-        self.body.select(profile["body_type"]) if profile else self.body.select_random()
 
         self.backstory = ft.TextField(
             hint_text="Type optional backstory here ...",
@@ -122,18 +50,13 @@ class UserProfileForm(ft.Column):
         )
 
         self.controls = [
+            self.profile_image,
             wizard_row("Name", self.name_input),
             wizard_row("Gender", self.gender),
-            wizard_row("Age", self.age),
-            wizard_row("Hair", self.hair),
-            wizard_row("Eyes", self.eye),
-            wizard_row("Ethnicity", self.ethnicity),
-            wizard_row("Body Type", self.body),
-            wizard_row("Backstory", self.backstory),
+            wizard_row("Backstory", self.backstory)
         ]
 
     def on_name_changed(self, e=None):
-        # clear the validation message once the user starts typing
         if self.name_input.error:
             self.name_input.error = None
             self.name_input.update()
@@ -145,18 +68,10 @@ class UserProfileForm(ft.Column):
         self.name_input.update()
         return False
 
-    def on_gender_changed(self, gender: str):
-        self.age.update_images(self.male_ages if gender == "male" else self.female_ages)
-
     def get_values(self):
         return {
             "name": (self.name_input.value or "").strip(),
             "gender": self.gender.get_selected(),
-            "age": int(self.age.get_selected()),
-            "hair_color": self.hair.get_selected(),
-            "eye_color": self.eye.get_selected(),
-            "ethnicity": self.ethnicity.get_selected(),
-            "body_type": self.body.get_selected(),
             "backstory": self.backstory.value or "",
         }
 
@@ -267,8 +182,8 @@ class UserProfileWizard(WizardPage):
 
     def on_enter(self, **kwargs):
         self.first_setup = kwargs.get("first_setup", False)
-        data = Hub.get_user_data()
-        self.form = UserProfileForm(profile=data["profile"] if data and "profile" in data else None)
+        data = Hub.get_user_data() or {}
+        self.form = UserProfileForm(profile=data.get("profile"), image_key=data.get("profile_image_key"))
         if self.first_setup:
             self.where = WhereForm()
             self._show_where()

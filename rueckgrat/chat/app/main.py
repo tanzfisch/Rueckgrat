@@ -20,11 +20,12 @@ from app.ui import (
     TranslatePage,
     ImagePage,
     GalleryPage,
+    TranscribePage,
 )
 from app.ui import theme
 from app.ui.widgets import ImageOverlay, TextPreview, MessageBox, ConnectionBanner
 
-from app.utils import Paths, Notifier
+from app.utils import Paths, Notifier, KeepAlive, Capabilities
 from app.utils.config import RueckgratConfig
 
 from app.common import get_logger, set_log_level
@@ -45,6 +46,7 @@ PAGES = {
     "translate": TranslatePage,
     "image": ImagePage,
     "gallery": GalleryPage,
+    "transcribe": TranscribePage,
 }
 ROOT_PAGES = {"login", "initial_settings", "contacts"}
 MAX_STACK = 20
@@ -225,13 +227,20 @@ class App:
         MessageBox.error(self.page, "your session has expired, please log in again", title="Logged out")
 
     async def _heartbeat_loop(self):
+        await self._check_health()      # right away: the capabilities before the first page is used
         while True:
             await asyncio.sleep(10)
-            Hub.check_health()
+            await self._check_health()
 
             if Hub.refresh_token and (not Hub.access_token or time.time() - Hub.token_time > TOKEN_REFRESH_SECONDS):
                 if await Hub.refresh_session() is False:
                     await self._session_expired()
+
+    async def _check_health(self):
+        """the hub's health off the ui loop (an unreachable hub takes up to 30 s), then its capabilities show or hide the
+        features (Capabilities) on the ui loop"""
+        await asyncio.to_thread(Hub.check_health)
+        Capabilities.update(Hub.capabilities, Hub.expected)
 
     async def _on_disconnect(self, e):
         await Hub.stop_websocket()
@@ -292,6 +301,7 @@ def main():
         theme.apply_theme(page, config.theme, config.font_scale)
         Text_To_Speech.attach(page)
         Notifier.attach(page)
+        KeepAlive.attach(page)
         page.padding = 0
         App(page, config.has_config())
 

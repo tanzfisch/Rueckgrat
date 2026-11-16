@@ -35,6 +35,10 @@ class ImageGen:
         self.output_dir = Path("/node/images")
         os.makedirs(self.output_dir, exist_ok=True)
 
+    def ready(self) -> bool:
+        """the module is there (Modules, the node's /capabilities). the image models load per request, by the model asked for"""
+        return True
+
     def _file_lock(self, file_key: str) -> Lock:
         with self.file_locks_guard:
             return self.file_locks.setdefault(file_key, Lock())
@@ -141,6 +145,9 @@ class ImageGen:
             if hasattr(pipe, "vae"):
                 pipe.vae.enable_slicing()
                 pipe.vae.enable_tiling()
+                # reduce chance of running out of mem
+                pipe.vae.tile_sample_min_size = 512
+                pipe.vae.tile_latent_min_size = 512 // (2 ** (len(pipe.vae.config.block_out_channels) - 1))
             if hasattr(pipe, "enable_attention_slicing"):
                 pipe.enable_attention_slicing()
 

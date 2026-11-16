@@ -49,12 +49,15 @@ Each task has a role (one or two words, e.g. researcher, analyst, writer) and a 
 The results of the steps before are added to each task automatically, so write every task self-contained and never use placeholders like {{design_context}} for them.
 Each worker can use the hub's tools on its own, e.g. a web search, reading a web page, wikipedia, the weather, calculations and conversions,
 writing files and generating images the user gets with the job's report. A task that makes files names each file and its path (e.g. index.html, css/style.css).
+A software project lives in its own folder ~/projects/<project-name>/ (short, lowercase, e.g. fractal_explorer): every task of the project names that folder,
+the task that creates the project also writes its PROJECT.md there (first line: what the project is in one sentence, then its status and how to run it).
+To change an existing project, its tasks work in its folder.
 When the job makes code or something that runs (a program, a script, a website, a software project), add a last step with a tester task, unless the job is tiny.
 Write the tester's prompt as the commands it runs, in order and all at once, with no "if" steps: list the files, set up what the project needs
 (e.g. python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt), check every file the job asks for by name
 (e.g. python3 -m py_compile a.py b.py, node --check, cmake -B build && cmake --build build), so a missing one fails, run the tests (e.g. pytest)
 and run the program with a time limit (e.g. timeout 10 python3 main.py, exit code 124 means it was still running, that passed).
-What fails it fixes and runs again in its fix rounds. Then it attaches the finished files with write_file and reports each command it ran with its exit code. A job that only makes text, data or images does not need it.
+What fails it fixes and runs again in its fix rounds. Then it updates the project's PROJECT.md (status, how to run it), shares the finished project folder with share_file and reports each command it ran with its exit code. A job that only makes text, data or images does not need it.
 Say in a task's prompt what it has to look up. A research task names the time period (e.g. "2021 to 2031"), the scope
 (e.g. country, measure, which kind of predictions) and the sources it must check (e.g. the central bank, the statistics office, the big banks).
 

@@ -28,6 +28,7 @@ from .price_finder_tool import PriceFinderTool
 from .code_tool import RunCodeTool
 from .bash_tool import BashTool
 from .write_file_tool import WriteFileTool
+from .share_file_tool import ShareFileTool
 from .find_tools_tool import FindToolsTool
 
 from app.common import get_logger, Utils, MessageQueue
@@ -40,13 +41,13 @@ class ToolRegistry:
         "date_calc",
         ("search_memory", "find_tools", "wikipedia", "websearch", "fetch_url", "weather", "price_finder"),
         "convert",
-        ("calculate", "run_code", "bash"),
+        ("calculate", "run_code", "bash", "share_file"),    # share_file in bash's round: it runs after the calls that make the files
         ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember"),
     ]
 
     TOOL_RANK = {name: rank for rank, entry in enumerate(TOOL_ORDER) for name in ((entry,) if isinstance(entry, str) else entry)}
     PROMPT_TOOLS = ["remember", "search_memory", "take_photo", "find_tools"]   # find_tools shares search_memory's round, no extra setup call
-    FIX_TOOLS = ["run_code", "bash", "write_file"]     # offered again in a worker's fix rounds (ToolExecutionTask), in this order
+    FIX_TOOLS = ["run_code", "bash", "share_file", "write_file"]     # offered again in a worker's fix rounds (ToolExecutionTask), in this order
     RUN_TOOLS = ("run_code", "bash")    # a worker's mandatory one with no call is a problem for its fix rounds (not_called)
     PRIORITY_TOOL = "spawn_job"   # overrides all other tools
     WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "poll", "show_map")
@@ -64,7 +65,7 @@ class ToolRegistry:
         self.infrastructure = infrastructure     
         self.task_queue = task_queue
 
-        self.tools: Dict[str, type[Tool]] = {}
+        self._registered: Dict[str, type[Tool]] = {}    # every tool, self.tools the ones that can be used now
         self._register_tool(WebsearchTool)
         self._register_tool(ImageGenTool)
         self._register_tool(TakePhotoTool)
@@ -84,20 +85,31 @@ class ToolRegistry:
         self._register_tool(RunCodeTool)
         self._register_tool(BashTool)
         self._register_tool(WriteFileTool)
+        self._register_tool(ShareFileTool)
         self._register_tool(FindToolsTool)
 
-        temp = ", ".join(self.tools)
+        temp = ", ".join(self._registered)
         logger.debug(f"registered tools: {temp}")
 
     def _register_tool(self, cls: type[Tool]):
-        self.tools[cls.name()] = cls
+        self._registered[cls.name()] = cls
+
+    @property
+    def tools(self) -> Dict[str, type[Tool]]:
+        """the registered tools that can be used now: every capability a tool needs (Tool.requires) is available. the others
+        are not detected, offered, listed or run, e.g. no image generation: no generate_image and take_photo"""
+        return {name: tool for name, tool in self._registered.items() if self.usable(tool)}
+
+    def usable(self, tool: type[Tool]) -> bool:
+        """the capabilities tool needs are available now (Infrastructure.available)"""
+        return not tool.requires or self.infrastructure is None or all(self.infrastructure.available(name) for name in tool.requires)
 
     def attach_held(self, db, user_id: int, conversation_id: int, message_id: int, attachments: List[Dict[str, Any]], push: bool = True) -> None:
         """attaches the files tools held without a message (their results' "attachments", each names its tool) to message_id,
         by that tool's attach_held. push: the user has an open /ws. a file that fails is logged and skipped"""
         for held in attachments or []:
             try:
-                self.tools[held["tool"]].attach_held(db, user_id, conversation_id, message_id, held, push)
+                self._registered[held["tool"]].attach_held(db, user_id, conversation_id, message_id, held, push)
                 Trace.write(conversation_id, "held attachment attached", name=held.get("name"), tool=held.get("tool"), message_id=message_id)
             except Exception as e:
                 logger.error(f"held attachment {held.get('name')} of {held.get('tool')} not attached {repr(e)}")
@@ -127,8 +139,18 @@ class ToolRegistry:
         return self.ranked_groups(names)
 
     def available(self, tool_names: List[str], excluded: tuple = ()) -> List[str]:
-        """the registered names of tool_names without the excluded ones, in their order, no duplicates"""
-        return [name for name in dict.fromkeys(tool_names or []) if name in self.tools and name not in excluded]
+        """the names of tool_names that can be used now (tools) without the excluded ones, in their order, no duplicates"""
+        tools = self.tools
+        return [name for name in dict.fromkeys(tool_names or []) if name in tools and name not in excluded]
+
+    def companions(self, tool_names: List[str], excluded: tuple = ()) -> List[str]:
+        """the tools offered with one of tool_names (Tool.offered_with) that are not among them or excluded"""
+        return [name for name, tool in self.tools.items() if set(tool.offered_with) & set(tool_names or [])
+                and name not in (tool_names or []) and name not in excluded]
+
+    def optional(self, name: str) -> bool:
+        """the model decides on its own whether to call it: the PROMPT_TOOLS and the companions (Tool.offered_with)"""
+        return name in self.PROMPT_TOOLS or bool(getattr(self.tools.get(name), "offered_with", ()))
 
     def project_tools(self, excluded: tuple = ()) -> List[str]:
         """the PROJECT_TOOLS a fix or change of an existing project selects, without the excluded ones"""
@@ -151,7 +173,8 @@ class ToolRegistry:
         return sorted(unique, key=key)
 
     def ranked_groups(self, tool_names: List[str]) -> List[List[str]]:
-        names = [name for name in self.ordered_names(tool_names or []) if name in self.tools]
+        tools = self.tools
+        names = [name for name in self.ordered_names(tool_names or []) if name in tools]
         if names and all(name in self.PROMPT_TOOLS for name in names):
             return [names]
         ranked_groups = []
@@ -166,12 +189,13 @@ class ToolRegistry:
     def _tool_job(self, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any],
                   message_id: Optional[int] = None) -> Optional[Tool]:
         tool_name = tool_call.get("tool")
-        if tool_name not in self.tools:
-            logger.error(f"unknown tool: {tool_name}")
+        tool = self.tools.get(tool_name)
+        if tool is None:
+            logger.error(f"unknown or not available tool: {tool_name}")
             return None
 
         logger.debug(f"executing:\n{Utils.pretty_print(tool_call)}")
-        tool_job = self.tools[tool_name](
+        tool_job = tool(
             db=self.db,
             infrastructure=self.infrastructure,
             user_id=user_id,
@@ -294,7 +318,7 @@ class ToolRegistry:
     def problems(self, results: Optional[Mapping[str, Any]]) -> List[str]:
         """what went wrong in {tool name: result} that a fix round could repair (each tool's problems())"""
         return [problem for name, result in (results or {}).items() if isinstance(result, dict)
-                for problem in self.tools.get(name, Tool).problems(result)]
+                for problem in self._registered.get(name, Tool).problems(result)]
 
     def detachable(self, tool_job: Tool) -> bool:
         return tool_job.name() in self.DETACHED_TOOLS and tool_job.has_message() and tool_job.runs_detached()
@@ -307,15 +331,17 @@ class ToolRegistry:
         logger.debug(f"detached: {tool_job.name()} for message {tool_job.message_id}")
         threading.Thread(target=contextvars.copy_context().run, args=(run,), name=f"detached-{tool_job.name()}", daemon=True).start()
 
-    def get_tools_prompt(self, skill_names: Optional[List[str]] = None) -> str:
+    def get_tools_prompt(self, skill_names: Optional[List[str]] = None, scope: Optional[Dict[str, int]] = None) -> str:
+        """the instructions of the tools. scope: {user_id, contact_id, conversation_id} of the setup, the tools' prompt_for"""
+        tools = self.tools
         if not skill_names:
-            selected = self.tools.values()
+            selected = tools.values()
         else:
-            selected = [self.tools[name] for name in skill_names if name in self.tools]
+            selected = [tools[name] for name in skill_names if name in tools]
 
         result = ""
         for tool in selected:
-            result += f"{tool.prompt()}"
+            result += f"{tool.prompt_for(**scope) if scope else tool.prompt()}"
         
         return result
 
@@ -327,22 +353,22 @@ class ToolRegistry:
             if not isinstance(known, dict) or not isinstance(value, dict):
                 target[name] = value
                 continue
-            tool = (self.tools or {}).get(name, Tool)
+            tool = self._registered.get(name, Tool)
             target[name] = tool.merge(known, value)
         return target    
 
     def split_tools(self, tool_names: List[str], recommended: List[str] = ()) -> tuple[List[str], List[str], List[str]]:
-        """(mandatory, recommended, optional): PROMPT_TOOLS are optional, the recommended ones the detection was not sure
-        about, every other tool was detected and must be called"""
+        """(mandatory, recommended, optional): PROMPT_TOOLS and companions are optional (optional()), the recommended ones
+        the detection was not sure about, every other tool was detected and must be called"""
         names = list(tool_names or [])
-        return ([name for name in names if name not in self.PROMPT_TOOLS and name not in recommended],
-                [name for name in names if name in recommended and name not in self.PROMPT_TOOLS],
-                [name for name in names if name in self.PROMPT_TOOLS])
+        return ([name for name in names if not self.optional(name) and name not in recommended],
+                [name for name in names if name in recommended and not self.optional(name)],
+                [name for name in names if self.optional(name)])
 
-    def get_tools_hydrated(self, tool_names: List[str], kind: str = "mandatory") -> str:
+    def get_tools_hydrated(self, tool_names: List[str], kind: str = "mandatory", scope: Optional[Dict[str, int]] = None) -> str:
         """the tools' instructions and how to call them. kind: "mandatory" (must be called), "recommended" (detected, but
-        the model decides) or "optional" (PROMPT_TOOLS, the model decides on its own)"""
-        tools = self.get_tools_prompt(tool_names)
+        the model decides) or "optional" (PROMPT_TOOLS and companions, the model decides on its own). scope: see get_tools_prompt"""
+        tools = self.get_tools_prompt(tool_names, scope)
 
         if kind == "recommended":
             return prompts.TOOLS_RECOMMENDED_PART.format(tools=tools)
@@ -356,8 +382,9 @@ class ToolRegistry:
         return prompts.TOOLS_MANDATORY_PART.format(tools=tools)
     
     def reply_tools_prompt(self) -> str:
-        """the REPLY_TOOLS for the chat's system prompt"""
-        return self.get_tools_hydrated(list(self.REPLY_TOOLS), kind="reply")
+        """the REPLY_TOOLS that can be used now for the chat's system prompt, "" when none can"""
+        names = self.available(list(self.REPLY_TOOLS))
+        return self.get_tools_hydrated(names, kind="reply") if names else ""
 
     def split_reply(self, text: str, final: bool = True) -> tuple[str, List[Dict]]:
         """(the text for the user, the REPLY_TOOLS calls) of a chat reply, the calls are the json lines at its end.
@@ -412,6 +439,7 @@ class ToolRegistry:
         """json objects that name a registered tool. braces inside strings count, so a file can contain code"""
         tool_calls = []
         cleaned_text = text or ""
+        tools = self.tools
         for match in self._json_objects(cleaned_text):
             if '"tool"' not in match:
                 continue
@@ -420,7 +448,7 @@ class ToolRegistry:
             except Exception as e:
                 logger.error(f"failed to extract tool calls {repr(e)}")
                 return None, None
-            if data and data.get("tool") in self.tools:
+            if data and data.get("tool") in tools:
                 tool_calls.append(data)
                 cleaned_text = cleaned_text.replace(match, "").strip()
 

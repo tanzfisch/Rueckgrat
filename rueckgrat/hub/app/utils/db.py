@@ -14,7 +14,7 @@ logger = get_logger()
 # a different model with another size needs this changed and SCHEMA_VERSION bumped
 MEMORY_EMBEDDING_DIM = 384
 # PRAGMA user_version of a db made by this hub. bump it on every schema change: until 1.0 an older db is wiped, never migrated
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 # #174 job protocols older than this are deleted (save_protocol and hub start), they are for looking into recent jobs
 PROTOCOL_RETENTION_HOURS = 24
 
@@ -248,12 +248,13 @@ class ChatDB:
         """)
 
         # per user settings. profile: the user's profile json (get_user_data). timezone: IANA name, the companion plans in it
-        # (timestamps stay UTC)
+        # (timestamps stay UTC). profile_image_key: current user avatar in /hub/images, NULL if none
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
             user_id INTEGER PRIMARY KEY,
             profile TEXT,
             timezone TEXT,
+            profile_image_key TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
 
@@ -393,6 +394,50 @@ class ChatDB:
         )""")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_files_message ON message_files(message_id)")
 
+        # #198 the recordings of the transcribe app, per user. duration: seconds recorded so far.
+        # a segment is the text of one utterance, a bookmark the moment it was tapped, both in seconds of the recording
+        # (only to place the bookmark in the text and to skip audio sent twice, the audio is not kept). label: the user's name for it.
+        # text stays as recognised (voice commands are read from it), edited: the user's text for the segment, NULL if not edited.
+        # kind 'heading': a heading the user added after the recording, text its words, start = end between its neighbours.
+        # title: '' = the app names it by its date, an enhanced copy is named after its original.
+        # additive like message_files: SCHEMA_VERSION stays put
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS transcripts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            language TEXT NOT NULL DEFAULT '',
+            duration REAL NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            title TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS transcript_segments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transcript_id INTEGER NOT NULL,
+            start_time REAL NOT NULL,
+            end_time REAL NOT NULL,
+            text TEXT NOT NULL,
+            edited TEXT DEFAULT NULL,
+            kind TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
+        )""")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS transcript_bookmarks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transcript_id INTEGER NOT NULL,
+            at_time REAL NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
+        )""")
+        # the columns these tables got after they were first made (CREATE TABLE IF NOT EXISTS does not add them)
+        for table, column, definition in (("transcripts", "title", "TEXT NOT NULL DEFAULT ''"),
+                                          ("transcript_segments", "edited", "TEXT DEFAULT NULL"),
+                                          ("transcript_segments", "kind", "TEXT NOT NULL DEFAULT ''"),
+                                          ("transcript_bookmarks", "label", "TEXT NOT NULL DEFAULT ''")):
+            if column not in [row[1] for row in cursor.execute(f"PRAGMA table_info({table})")]:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
         # sqlite does not index foreign keys by itself: the lookups by conversation, contact and message
         for index, table_columns in (
             ("idx_messages_conversation", "messages(conversation_id)"),
@@ -402,6 +447,9 @@ class ChatDB:
             ("idx_contact_memories_contact", "contact_memories(user_id, contact_id)"),
             ("idx_companion_log_contact", "companion_log(contact_id)"),
             ("idx_jobs_conversation", "jobs(conversation_id)"),
+            ("idx_transcripts_user", "transcripts(user_id)"),
+            ("idx_transcript_segments_transcript", "transcript_segments(transcript_id)"),
+            ("idx_transcript_bookmarks_transcript", "transcript_bookmarks(transcript_id)"),
         ):
             cursor.execute(f"CREATE INDEX IF NOT EXISTS {index} ON {table_columns}")
 
@@ -792,10 +840,6 @@ class ChatDB:
         return []
 
     def get_user_images(self, user_id: int, limit: int = 60, offset: int = 0) -> list[dict]:
-        """every image of this user, newest first, for the gallery: the contacts' images (profile, conversation_images),
-        images attached to messages of their conversations and the done images of the image tool (no contact).
-        an image in several places is one row: its first created_at, its contact and conversation if it has one.
-        [{file_key, contact_id, contact_name, conversation_id, created_at, has_generation}], contact_* None for image tool images"""
         with self.get_connection() as conn:
             try:
                 rows = conn.execute("""
@@ -812,6 +856,9 @@ class ChatDB:
                         UNION ALL
                         SELECT file_name, NULL, NULL, created_at FROM generated_images
                         WHERE user_id = ? AND status = 'done' AND file_name IS NOT NULL
+                        UNION ALL
+                        SELECT profile_image_key, NULL, NULL, NULL FROM user_settings
+                        WHERE user_id = ? AND profile_image_key IS NOT NULL AND profile_image_key != ''
                     ), grouped AS (
                         SELECT file_key, MAX(contact_id) AS contact_id, MAX(conversation_id) AS conversation_id, MIN(created_at) AS created_at
                         FROM all_images WHERE file_key IS NOT NULL AND file_key != ''
@@ -822,7 +869,7 @@ class ChatDB:
                     FROM grouped g LEFT JOIN contacts ct ON ct.id = g.contact_id
                     ORDER BY g.created_at DESC, g.file_key DESC
                     LIMIT ? OFFSET ?
-                """, (user_id, user_id, user_id, limit, offset)).fetchall()
+                """, (user_id, user_id, user_id, user_id, limit, offset)).fetchall()
                 return [dict(row) for row in rows]
             except Exception as e:
                 logger.error(f"failed reading images of user {user_id}: {e}")
@@ -1210,6 +1257,24 @@ class ChatDB:
                 logger.error(f"failed reading the last activity of conversation {conversation_id}: {e}")
                 return ""   # not None: a failed read must not remove its files
 
+    def contact_last_activity(self, contact_id: int) -> str | None:
+        """the time of the latest message in any conversation of the contact (db format, UTC), the latest conversation's
+        creation without messages, "" without conversations, None if the contact is gone"""
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("""
+                    SELECT ct.id, MAX(COALESCE(m.timestamp, c.created_at))
+                    FROM contacts ct
+                    LEFT JOIN conversations c ON c.contact_id = ct.id
+                    LEFT JOIN messages m ON m.conversation_id = c.id
+                    WHERE ct.id = ?
+                    GROUP BY ct.id
+                """, (contact_id,)).fetchone()
+                return (row[1] or "") if row else None
+            except Exception as e:
+                logger.error(f"failed reading the last activity of contact {contact_id}: {e}")
+                return ""   # not None: a failed read must not remove its files
+
     def get_conversation_image_keys(self, conversation_id: int) -> list[str]:
         """file keys of the hub images attached to messages of this conversation (images/<file_key>)"""
         with self.get_connection() as conn:
@@ -1262,8 +1327,10 @@ class ChatDB:
                     if drop_conversation_images:
                         cursor.execute("DELETE FROM contact_images WHERE file_key = ? AND type = 'conversation_images'", (file_key,))
 
-                    # a profile image keeps its file and generation
+                    # a contact or user profile image keeps its file and generation
                     if cursor.execute("SELECT 1 FROM contact_images WHERE file_key = ? LIMIT 1", (file_key,)).fetchone():
+                        continue
+                    if cursor.execute("SELECT 1 FROM user_settings WHERE profile_image_key = ? LIMIT 1", (file_key,)).fetchone():
                         continue
 
                     # an image tool image picked as a contact image stays in the image tool's list
@@ -1309,7 +1376,8 @@ class ChatDB:
         return False
 
     def user_has_image(self, user_id: int, file_key: str) -> bool:
-        """True if the image is in the user's gallery (get_user_images): a contact image, a chat attachment or an image tool image"""
+        """True if the image is in the user's gallery (get_user_images): a contact image, a chat attachment,
+        an image tool image or the user's current profile image"""
         with self.get_connection() as conn:
             try:
                 row = conn.execute("""
@@ -1319,18 +1387,25 @@ class ChatDB:
                     WHERE a.file_name = ? AND cv.user_id = ? AND a.file_url = 'images/' || a.file_name
                     UNION ALL
                     SELECT 1 FROM generated_images WHERE file_name = ? AND user_id = ? AND status = 'done'
+                    UNION ALL
+                    SELECT 1 FROM user_settings WHERE profile_image_key = ? AND user_id = ?
                     LIMIT 1
-                """, (file_key, user_id, file_key, user_id, file_key, user_id)).fetchone()
+                """, (file_key, user_id, file_key, user_id, file_key, user_id, file_key, user_id)).fetchone()
                 return row is not None
             except Exception as e:
                 logger.error(f"failed checking image of user: {e}")
         return False
 
     def owns_image(self, user_id: int, file_key: str) -> bool:
-        """False for foreign and unknown images alike, an image belongs to the owner of its contact"""
+        """False for foreign and unknown images alike: the image belongs to this user as a contact image or their profile image"""
         with self.get_connection() as conn:
             try:
-                row = conn.execute("SELECT 1 FROM contact_images ci JOIN contacts c ON c.id = ci.contact_id WHERE ci.file_key = ? AND c.user_id = ?", (file_key, user_id)).fetchone()
+                row = conn.execute("""
+                    SELECT 1 FROM contact_images ci JOIN contacts c ON c.id = ci.contact_id WHERE ci.file_key = ? AND c.user_id = ?
+                    UNION ALL
+                    SELECT 1 FROM user_settings WHERE profile_image_key = ? AND user_id = ?
+                    LIMIT 1
+                """, (file_key, user_id, file_key, user_id)).fetchone()
                 return row is not None
             except Exception as e:
                 logger.error(f"failed checking image owner: {e}")
@@ -1443,6 +1518,212 @@ class ChatDB:
                 return cursor.rowcount > 0
             except Exception as e:
                 logger.error(f"failed deleting contact memory: {e}")
+        return False
+
+    ########### transcribe app (#198)
+
+    # a segment sent again after a reconnect (the app replays the audio the hub had not answered yet) overlaps the stored one
+    SEGMENT_OVERLAP = 0.25
+
+    def create_transcript(self, user_id: int, language: str = "") -> int:
+        """a recording was started. returns its id, 0 if it could not be saved"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute("INSERT INTO transcripts (user_id, language) VALUES (?, ?)", (user_id, language))
+                conn.commit()
+                return cursor.lastrowid
+            except Exception as e:
+                logger.error(f"failed creating a transcript: {e}")
+        return 0
+
+    def owns_transcript(self, user_id: int, transcript_id: int) -> bool:
+        """False for foreign and unknown transcripts alike"""
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("SELECT 1 FROM transcripts WHERE id = ? AND user_id = ?", (transcript_id, user_id)).fetchone()
+                return row is not None
+            except Exception as e:
+                logger.error(f"failed checking transcript owner: {e}")
+        return False
+
+    def get_transcripts(self, user_id: int, limit: int = 100) -> list[dict]:
+        """the user's transcripts, newest first, without their text: id, language, duration, created_at, title,
+        segments and bookmarks (counts) and preview (the start of the first segment)"""
+        with self.get_connection() as conn:
+            try:
+                rows = conn.execute("""
+                    SELECT t.id, t.language, t.duration, t.created_at, t.title,
+                        (SELECT COUNT(*) FROM transcript_segments s WHERE s.transcript_id = t.id) AS segments,
+                        (SELECT COUNT(*) FROM transcript_bookmarks b WHERE b.transcript_id = t.id) AS bookmarks,
+                        COALESCE((SELECT substr(s.text, 1, 100) FROM transcript_segments s WHERE s.transcript_id = t.id
+                                  ORDER BY s.start_time LIMIT 1), '') AS preview
+                    FROM transcripts t WHERE t.user_id = ? ORDER BY t.id DESC LIMIT ?
+                """, (user_id, limit)).fetchall()
+                return [dict(row) for row in rows]
+            except Exception as e:
+                logger.error(f"failed reading transcripts of user {user_id}: {e}")
+        return []
+
+    def get_transcript(self, transcript_id: int) -> dict | None:
+        """one transcript with its segments [{id, start, end, text, edited, kind}] and bookmarks [{id, at, label}], both in time order"""
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("SELECT id, language, duration, created_at, title FROM transcripts WHERE id = ?", (transcript_id,)).fetchone()
+                if row is None:
+                    return None
+                segments = conn.execute("""SELECT id, start_time AS start, end_time AS end, text, edited, kind FROM transcript_segments
+                                           WHERE transcript_id = ? ORDER BY start_time, id""", (transcript_id,)).fetchall()
+                bookmarks = conn.execute("""SELECT id, at_time AS at, label FROM transcript_bookmarks
+                                            WHERE transcript_id = ? ORDER BY at_time, id""", (transcript_id,)).fetchall()
+                return {**dict(row), "segments": [dict(s) for s in segments], "bookmarks": [dict(b) for b in bookmarks]}
+            except Exception as e:
+                logger.error(f"failed reading transcript {transcript_id}: {e}")
+        return None
+
+    def add_transcript_segment(self, transcript_id: int, start: float, end: float, text: str) -> int:
+        """the text of one utterance, start / end in seconds of the recording. returns the row id,
+        0 if it overlaps a stored segment by more than SEGMENT_OVERLAP (the same audio again) or could not be saved"""
+        with self.get_connection() as conn:
+            try:
+                if conn.execute("""SELECT 1 FROM transcript_segments WHERE transcript_id = ?
+                                   AND end_time > ? + ? AND start_time < ? - ? LIMIT 1""",
+                                (transcript_id, start, self.SEGMENT_OVERLAP, end, self.SEGMENT_OVERLAP)).fetchone():
+                    return 0
+                cursor = conn.execute("INSERT INTO transcript_segments (transcript_id, start_time, end_time, text) VALUES (?, ?, ?, ?)",
+                                      (transcript_id, start, end, text))
+                conn.commit()
+                return cursor.lastrowid
+            except Exception as e:
+                logger.error(f"failed adding a segment to transcript {transcript_id}: {e}")
+        return 0
+
+    def add_transcript_heading(self, transcript_id: int, at: float, text: str) -> int:
+        """a heading the user added at second at (between two segments, no overlap check), returns its id or 0"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute("""INSERT INTO transcript_segments (transcript_id, start_time, end_time, text, kind)
+                                         VALUES (?, ?, ?, ?, 'heading')""", (transcript_id, at, at, text))
+                conn.commit()
+                return cursor.lastrowid
+            except Exception as e:
+                logger.error(f"failed adding a heading to transcript {transcript_id}: {e}")
+        return 0
+
+    def split_transcript_segment(self, transcript_id: int, segment_id: int, parts: list[dict]) -> list[int]:
+        """the segment becomes parts [{start, end, text, kind}] in one go (a marked text made a heading): the first
+        keeps its row, the others are new rows. each part's text is its text from now on (edited cleared), its times
+        inside the segment's. returns the ids in order, [] if the segment is not there, a time is outside or it failed"""
+        with self.get_connection() as conn:
+            try:
+                row = conn.execute("SELECT start_time, end_time FROM transcript_segments WHERE id = ? AND transcript_id = ?",
+                                   (segment_id, transcript_id)).fetchone()
+                if row is None or not parts:
+                    return []
+                low, high = min(row[0], row[1]) - 1e-6, max(row[0], row[1]) + 1e-6
+                if any(not (low <= p["start"] <= high and low <= p["end"] <= high) for p in parts):
+                    return []
+                first, rest = parts[0], parts[1:]
+                conn.execute("""UPDATE transcript_segments SET start_time = ?, end_time = ?, text = ?, edited = NULL, kind = ?
+                                WHERE id = ?""", (first["start"], first["end"], first["text"], first["kind"], segment_id))
+                ids = [segment_id]
+                for p in rest:
+                    cursor = conn.execute("""INSERT INTO transcript_segments (transcript_id, start_time, end_time, text, kind)
+                                             VALUES (?, ?, ?, ?, ?)""", (transcript_id, p["start"], p["end"], p["text"], p["kind"]))
+                    ids.append(cursor.lastrowid)
+                conn.commit()
+                return ids
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"failed splitting segment {segment_id}: {e}")
+        return []
+
+    def edit_transcript_segment(self, transcript_id: int, segment_id: int, text: str | None) -> bool:
+        """the user's text for a segment (None: back to the recognised one), the recognised text stays"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute("UPDATE transcript_segments SET edited = ? WHERE id = ? AND transcript_id = ?",
+                                      (text, segment_id, transcript_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"failed editing segment {segment_id}: {e}")
+        return False
+
+    def set_transcript_duration(self, transcript_id: int, duration: float) -> bool:
+        """the seconds recorded so far, a shorter value (a replay after a reconnect) keeps the longer one"""
+        with self.get_connection() as conn:
+            try:
+                conn.execute("UPDATE transcripts SET duration = MAX(duration, ?) WHERE id = ?", (duration, transcript_id))
+                conn.commit()
+                return True
+            except Exception as e:
+                logger.error(f"failed setting the duration of transcript {transcript_id}: {e}")
+        return False
+
+    def add_transcript_bookmark(self, transcript_id: int, at: float, label: str = "") -> int:
+        """a bookmark at second at of the recording, returns its id (0 if it could not be saved)"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute("INSERT INTO transcript_bookmarks (transcript_id, at_time, label) VALUES (?, ?, ?)",
+                                      (transcript_id, at, label))
+                conn.commit()
+                return cursor.lastrowid
+            except Exception as e:
+                logger.error(f"failed adding a bookmark to transcript {transcript_id}: {e}")
+        return 0
+
+    def rename_transcript_bookmark(self, transcript_id: int, bookmark_id: int, label: str) -> bool:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute("UPDATE transcript_bookmarks SET label = ? WHERE id = ? AND transcript_id = ?",
+                                      (label, bookmark_id, transcript_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"failed renaming bookmark {bookmark_id}: {e}")
+        return False
+
+    def delete_transcript_bookmark(self, transcript_id: int, bookmark_id: int) -> bool:
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute("DELETE FROM transcript_bookmarks WHERE id = ? AND transcript_id = ?", (bookmark_id, transcript_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"failed deleting bookmark {bookmark_id}: {e}")
+        return False
+
+    def copy_transcript(self, user_id: int, transcript: dict, title: str, texts: dict[int, str]) -> int:
+        """a new transcript of the user, a copy of transcript (get_transcript) named title: the same segments (times,
+        kinds, edits) and bookmarks, the segments in texts (id -> text) with that text instead (their edit cleared).
+        all or nothing, returns the copy's id or 0"""
+        with self.get_connection() as conn:
+            try:
+                copy_id = conn.execute("INSERT INTO transcripts (user_id, language, duration, title) VALUES (?, ?, ?, ?)",
+                                       (user_id, transcript.get("language", ""), transcript.get("duration", 0.0), title)).lastrowid
+                for s in transcript.get("segments", []):
+                    text, edited = (texts[s["id"]], None) if s["id"] in texts else (s["text"], s.get("edited"))
+                    conn.execute("""INSERT INTO transcript_segments (transcript_id, start_time, end_time, text, edited, kind)
+                                    VALUES (?, ?, ?, ?, ?, ?)""", (copy_id, s["start"], s["end"], text, edited, s.get("kind") or ""))
+                for b in transcript.get("bookmarks", []):
+                    conn.execute("INSERT INTO transcript_bookmarks (transcript_id, at_time, label) VALUES (?, ?, ?)",
+                                 (copy_id, b["at"], b.get("label", "")))
+                conn.commit()
+                return copy_id
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"failed copying transcript {transcript.get('id')}: {e}")
+        return 0
+
+    def delete_transcript(self, user_id: int, transcript_id: int) -> bool:
+        """the transcript with its segments and bookmarks. False for foreign and unknown transcripts"""
+        with self.get_connection() as conn:
+            try:
+                cursor = conn.execute("DELETE FROM transcripts WHERE id = ? AND user_id = ?", (transcript_id, user_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"failed deleting transcript {transcript_id}: {e}")
         return False
 
     ########### conversation summaries (#147, app/maintenance)
@@ -2072,6 +2353,33 @@ class ChatDB:
             """, (user_id, timezone))
             conn.commit()
             return cursor.rowcount == 1
+
+    def get_user_profile_image_key(self, user_id: int) -> str | None:
+        """the current profile image file key, None if the user has none"""
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT profile_image_key FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
+            return row["profile_image_key"] if row and row["profile_image_key"] else None
+
+    def get_current_user_profile_image_key(self, user_id: int, image_dir: str = "/hub/images") -> str:
+        """file key of the user's current profile image if the file exists, otherwise "".
+        same existence check as get_current_profile_image_key: a lost upload or a key not on disk is skipped,
+        so image generation can run without a face reference"""
+        file_key = self.get_user_profile_image_key(user_id)
+        if file_key and "/" not in file_key and (Path(image_dir) / file_key).is_file():
+            return file_key
+        return ""
+
+    def set_user_profile_image_key(self, user_id: int, file_key: str | None) -> str | None:
+        """sets the current profile image (None clears it). returns the previous key, if any"""
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT profile_image_key FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
+            previous = row["profile_image_key"] if row and row["profile_image_key"] else None
+            conn.execute("""
+                INSERT INTO user_settings (user_id, profile_image_key) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET profile_image_key = excluded.profile_image_key
+            """, (user_id, file_key))
+            conn.commit()
+            return previous
 
     ########### companion calendar
 

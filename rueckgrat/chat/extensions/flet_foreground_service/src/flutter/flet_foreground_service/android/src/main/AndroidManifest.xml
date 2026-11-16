@@ -1,12 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application>
         <!-- flutter_foreground_task ships the service class but not its <service> entry.
-             Android 14+ requires the type here to match the one passed to startForeground. -->
+             Android 14+ requires the types passed to startForeground to be listed here. -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
-            android:foregroundServiceType="microphone"
-            android:exported="false" />
+            android:foregroundServiceType="specialUse|microphone"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the connection to the user's self-hosted Rueckgrat hub open while logged in, so replies and notifications arrive with the app in the background." />
+        </service>
     </application>
 </manifest>

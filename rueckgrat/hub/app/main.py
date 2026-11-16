@@ -26,6 +26,7 @@ from app.tools import ToolRegistry, SpawnAgentJobTool
 from app.tools.map_tool import get_tile
 from app.agent_jobs import AgentJob
 from app.tasks import TaskQueue, MetaTask, AssistantImageTask, ContactGeneratorTask, TranslateTask, GenerateImageTask
+from app.tasks.transcript_tasks import TranscriptSummaryTask, TranscriptEnhanceTask, enhanceable
 from app.tasks.turns import Turns
 from app.utils.tts_stream import TtsStreams
 from app.companion import CompanionScheduler
@@ -38,7 +39,8 @@ from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
-from app.common import get_logger, set_log_level, Utils, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
+from app.common import get_logger, logger_context, set_log_level, Utils, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
+from app.common.transcript_commands import parse_command, next_bookmark_label, BOOKMARK, HEADING
 logger = get_logger()
 
 DB_PATH = "/hub/db/chat.db"
@@ -203,8 +205,10 @@ def get_users():
 @app.get("/users/me")
 def get_user_data(username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    user_data = app.state.db.get_user_data(user_id)
-    return {"user_data": user_data}  
+    with logger_context(user_id):
+        user_data = app.state.db.get_user_data(user_id) or {}
+        user_data["profile_image_key"] = app.state.db.get_user_profile_image_key(user_id)
+        return {"user_data": user_data}
 
 class UpdateUserDataRequest(BaseModel):
     user_id: int
@@ -213,16 +217,17 @@ class UpdateUserDataRequest(BaseModel):
 @app.patch("/users/me")
 def update_contact(request: UpdateUserDataRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    if user_id != request.user_id:
-        return {"status": "wrong user"}
+    with logger_context(user_id):
+        if user_id != request.user_id:
+            return {"status": "wrong user"}
 
-    if app.state.db.update_user_data(
-        user_id = request.user_id,
-        user_data = request.user_data
-    ):
-        return {"status": "ok"}
-    else:
-        return {"status": "failed"}
+        if app.state.db.update_user_data(
+            user_id = request.user_id,
+            user_data = request.user_data
+        ):
+            return {"status": "ok"}
+        else:
+            return {"status": "failed"}
 
 # "open": anyone can create an account (default, fine for local use)
 # "invite": signup needs a valid invite token, use this when the hub is reachable from the internet
@@ -275,7 +280,8 @@ def create_user(user: UserCreate):
     if SIGNUP_MODE == "open":
         user_id = app.state.db.create_user(user.user_name, hash_password(user.user_passwd))
         if user_id:
-            add_default_contact(user_id)
+            with logger_context(user_id):
+                add_default_contact(user_id)
         return {"user_id": user_id}
 
     if not user.invite_token:
@@ -335,14 +341,15 @@ def refresh(data: RefreshRequest):
     expired, already used or its user is gone. old jwt refresh tokens (before #146) are unknown: log in once"""
     new_token = create_refresh_token()
     user_id, reason = app.state.db.rotate_refresh_token(data.refresh_token, new_token, REFRESH_TOKEN_EXPIRE_DAYS)
-    user = app.state.db.get_user_by_id(user_id) if user_id is not None else None
-    if not user:
-        if reason == "reused":
-            logger.warning("a refresh token was used twice, all sessions of its user are revoked")
-        else:
-            logger.debug(f"refresh refused: {reason}")
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return session_response(user, new_token)
+    with logger_context(user_id):
+        user = app.state.db.get_user_by_id(user_id) if user_id is not None else None
+        if not user:
+            if reason == "reused":
+                logger.warning("a refresh token was used twice, all sessions of its user are revoked")
+            else:
+                logger.debug(f"refresh refused: {reason}")
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return session_response(user, new_token)
 
 class LogoutRequest(BaseModel):
     refresh_token: str = ""
@@ -351,11 +358,12 @@ class LogoutRequest(BaseModel):
 def logout(data: LogoutRequest, username: str = Depends(get_current_user)):
     """revokes the session (refresh token) of this device. the access token runs out by itself (minutes)"""
     user_id = app.state.db.get_user_id(username)
-    if user_id is None:
-        raise HTTPException(status_code=401)
-    if data.refresh_token:
-        app.state.db.delete_refresh_token(user_id, data.refresh_token)
-    return {"status": "ok"}
+    with logger_context(user_id):
+        if user_id is None:
+            raise HTTPException(status_code=401)
+        if data.refresh_token:
+            app.state.db.delete_refresh_token(user_id, data.refresh_token)
+        return {"status": "ok"}
 
 class ChangePasswordRequest(BaseModel):
     current_passwd: str
@@ -402,32 +410,43 @@ class EmailRequest(BaseModel):
 @app.get("/users/me/email")
 def get_email(username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    if user_id is None:
-        raise HTTPException(status_code=401)
-    return {"email": app.state.db.get_email(user_id)}
+    with logger_context(user_id):
+        if user_id is None:
+            raise HTTPException(status_code=401)
+        return {"email": app.state.db.get_email(user_id)}
 
 @app.put("/users/me/email")
 def set_email(request: EmailRequest, username: str = Depends(get_current_user)):
     # empty means no email, anything else is stored as typed
     user_id = app.state.db.get_user_id(username)
-    if user_id is None:
-        raise HTTPException(status_code=401)
-    if request.email and not EMAIL_PATTERN.fullmatch(request.email):
-        raise HTTPException(status_code=400, detail="not a valid email address")
-    if not app.state.db.set_email(user_id, request.email):
-        raise HTTPException(status_code=500, detail="failed to save email")
-    return {"status": "ok"}
+    with logger_context(user_id):
+        if user_id is None:
+            raise HTTPException(status_code=401)
+        if request.email and not EMAIL_PATTERN.fullmatch(request.email):
+            raise HTTPException(status_code=400, detail="not a valid email address")
+        if not app.state.db.set_email(user_id, request.email):
+            raise HTTPException(status_code=500, detail="failed to save email")
+        return {"status": "ok"}
 
 ########### system handling
 @app.get("/health")
 def health():
+    """the app's heartbeat (every 10 s): the status and the capabilities, so the app shows only what works now"""
     status = app.state.infrastructure.get_status()
+    capabilities = app.state.infrastructure.capabilities()
     missing = [f"{node.url} {node.error}" for node in status.nodes if not node.ok]
     if missing:
         logger.warning(f"health degraded: {', '.join(missing)}")
-        return {"status": "degraded", "message": f"{len(missing)} node(s) not reachable, see the hub log"}
+        return {"status": "degraded", "message": f"{len(missing)} node(s) not reachable, see the hub log", "capabilities": capabilities,
+                "expected": app.state.infrastructure.expected()}
 
-    return {"status": "ok"}
+    return {"status": "ok", "capabilities": capabilities, "expected": app.state.infrastructure.expected()}
+
+@app.get("/capabilities")
+def get_capabilities():
+    """what can be used now: {"llm", "tts", "stt", "image", "decision", "embedding", "internet": bool, "expected": [names]}.
+    expected: what the system is set up for (configured, the internet always), not available there means missing. no login, like /signup-mode"""
+    return {**app.state.infrastructure.capabilities(), "expected": app.state.infrastructure.expected()}
 
 @app.put("/log-level/{level}")
 def _set_log_level(level: str, username: str = Depends(get_current_user)):
@@ -444,31 +463,34 @@ def _set_log_level(level: str, username: str = Depends(get_current_user)):
 @app.get("/contacts")
 def get_contacts(username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    contacts = app.state.db.get_contacts(user_id)
+    with logger_context(user_id):
+        contacts = app.state.db.get_contacts(user_id)
 
-    for contact in contacts:
-        images = app.state.db.get_contact_images(contact["id"])
-        contact["images"] = images
+        for contact in contacts:
+            images = app.state.db.get_contact_images(contact["id"])
+            contact["images"] = images
 
-    return {"contacts": contacts}
+        return {"contacts": contacts}
 
 @app.get("/contact/{contact_id}")
 def get_contact(contact_id: int, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_contact(user_id, contact_id):
-        raise HTTPException(status_code=404, detail="contact not found")
-    contact = app.state.db.get_contact_by_id(contact_id)
-    images = app.state.db.get_contact_images(contact_id)
-    contact["images"] = images
+    with logger_context(user_id):
+        if not app.state.db.owns_contact(user_id, contact_id):
+            raise HTTPException(status_code=404, detail="contact not found")
+        contact = app.state.db.get_contact_by_id(contact_id)
+        images = app.state.db.get_contact_images(contact_id)
+        contact["images"] = images
 
-    return {"contact": contact}
+        return {"contact": contact}
 
 @app.post("/contacts")
 def create_contact(username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    contact_name = f"new_contact_{random.randint(0,100000)}"
-    contact_id = app.state.db.create_contact(user_id, contact_name)
-    return {"contact_id": contact_id}
+    with logger_context(user_id):
+        contact_name = f"new_contact_{random.randint(0,100000)}"
+        contact_id = app.state.db.create_contact(user_id, contact_name)
+        return {"contact_id": contact_id}
 
 class UpdateContactRequest(BaseModel):
     contact_data: dict
@@ -476,28 +498,29 @@ class UpdateContactRequest(BaseModel):
 @app.patch("/contacts/{contact_id}")
 def update_contact(contact_id: int, request: UpdateContactRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_contact(user_id, contact_id):
-        raise HTTPException(status_code=404, detail="contact not found")
-    resolve_contact_voice(user_id, request.contact_data)
+    with logger_context(user_id):
+        if not app.state.db.owns_contact(user_id, contact_id):
+            raise HTTPException(status_code=404, detail="contact not found")
+        resolve_contact_voice(user_id, request.contact_data)
 
-    job = AssistantImageTask(
-        user_id = user_id,
-        contact_id = contact_id,
-        db = app.state.db, 
-        infrastructure = app.state.infrastructure, 
-        image_type = ImageType.UpperBody,
-        store_image_as = "profile",
-        width = 1024,
-        height = 1024,
-    )        
-    image_before = profile_image_hash(job)
-    app.state.db.update_contact(user_id, contact_id, request.contact_data)
+        job = AssistantImageTask(
+            user_id = user_id,
+            contact_id = contact_id,
+            db = app.state.db, 
+            infrastructure = app.state.infrastructure, 
+            image_type = ImageType.UpperBody,
+            store_image_as = "profile",
+            width = 1024,
+            height = 1024,
+        )        
+        image_before = profile_image_hash(job)
+        app.state.db.update_contact(user_id, contact_id, request.contact_data)
 
-    # an unchanged look keeps the current profile image, e.g. one the user uploaded or picked from the gallery
-    if image_before is None or profile_image_hash(job) != image_before or not app.state.db.get_current_profile_image_key(contact_id):
-        app.state.task_queue.add(job)
+        # an unchanged look keeps the current profile image, e.g. one the user uploaded or picked from the gallery
+        if image_before is None or profile_image_hash(job) != image_before or not app.state.db.get_current_profile_image_key(contact_id):
+            app.state.task_queue.add(job)
 
-    return {"status": "ok"}
+        return {"status": "ok"}
 
 def profile_image_hash(job: AssistantImageTask) -> str | None:
     """hash (= file name) of the profile image the contact's data asks for, None if the data can't make one yet"""
@@ -506,24 +529,31 @@ def profile_image_hash(job: AssistantImageTask) -> str | None:
     except Exception:
         return None
 
-########### contact image: upload or pick from the gallery
-MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024
+########### contact and user images: upload or pick from the gallery
 
-def image_extension(data: bytes) -> str | None:
-    """file extension from the first bytes, None if it is no png, jpeg or webp"""
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return "jpg"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "webp"
-    return None
+def store_uploaded_image(data: bytes) -> str:
+    """raw png, jpeg or webp bytes as /hub/images/<sha256>.<ext>. raises HTTPException on bad input.
+    the same bytes again reuse that file. an upload has no stored generation, so ImageStore.ensure
+    never generates it again: a lost upload is gone"""
+    try:
+        return app.state.image_store.store_uploaded_image(data)
+    except ValueError as e:
+        detail = str(e)
+        raise HTTPException(status_code=413 if detail == "image too large" else 400, detail=detail)
 
 def set_contact_image(contact_id: int, file_key: str) -> dict:
     """the image becomes the contact's current profile image (the newest 'profile' row), older ones stay"""
     if app.state.db.add_contact_image(contact_id, file_key, "profile") == -1:
         raise HTTPException(status_code=500, detail="failed to set the contact image")
     return {"status": "ok", "file_key": file_key}
+
+def set_user_image(user_id: int, file_key: str | None) -> dict:
+    """the image becomes the user's current profile image, or None clears it.
+    a previous key that nothing else uses is released (file and generation go)"""
+    previous = app.state.db.set_user_profile_image_key(user_id, file_key)
+    if previous and previous != file_key:
+        app.state.image_store.release([previous])
+    return {"status": "ok", "file_key": file_key} if file_key else {"status": "ok"}
 
 @app.post("/contacts/{contact_id}/image")
 async def upload_contact_image(contact_id: int, request: Request, username: str = Depends(get_current_user)):
@@ -533,35 +563,46 @@ async def upload_contact_image(contact_id: int, request: Request, username: str 
     an upload has no stored generation, so ImageStore.ensure never generates it again: a lost upload is gone
     """
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_contact(user_id, contact_id):
-        raise HTTPException(status_code=404, detail="contact not found")
-    data = await request.body()
-    if not data:
-        raise HTTPException(status_code=400, detail="empty upload")
-    if len(data) > MAX_IMAGE_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="image too large")
-    extension = image_extension(data)
-    if not extension:
-        raise HTTPException(status_code=400, detail="not a png, jpeg or webp image")
-
-    file_key = f"{hashlib.sha256(data).hexdigest()}.{extension}"
-    path = app.state.image_store.path(file_key)
-    if not path.exists():
-        part = path.with_name(file_key + ".part")
-        part.write_bytes(data)
-        part.replace(path)
-    return set_contact_image(contact_id, file_key)
+    with logger_context(user_id):
+        if not app.state.db.owns_contact(user_id, contact_id):
+            raise HTTPException(status_code=404, detail="contact not found")
+        return set_contact_image(contact_id, store_uploaded_image(await request.body()))
 
 @app.put("/contacts/{contact_id}/image/{file_key}")
 def pick_contact_image(contact_id: int, file_key: str, username: str = Depends(get_current_user)):
     """an image from the user's gallery becomes the contact's image. the file and its stored generation
     (if it has one, then it can still be generated again) are shared, only a new contact_images row points to it"""
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_contact(user_id, contact_id):
-        raise HTTPException(status_code=404, detail="contact not found")
-    if not app.state.db.user_has_image(user_id, file_key) or not app.state.image_store.ensure(file_key):
-        raise HTTPException(status_code=404, detail="image not found")
-    return set_contact_image(contact_id, file_key)
+    with logger_context(user_id):
+        if not app.state.db.owns_contact(user_id, contact_id):
+            raise HTTPException(status_code=404, detail="contact not found")
+        if not app.state.db.user_has_image(user_id, file_key) or not app.state.image_store.ensure(file_key):
+            raise HTTPException(status_code=404, detail="image not found")
+        return set_contact_image(contact_id, file_key)
+
+@app.post("/users/me/image")
+async def upload_user_image(request: Request, username: str = Depends(get_current_user)):
+    """raw image bytes in the body (png, jpeg or webp), no multipart, like POST /contacts/{id}/image.
+    stored as /hub/images/<sha256>.<ext> and becomes the user's current profile image"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        return set_user_image(user_id, store_uploaded_image(await request.body()))
+
+@app.put("/users/me/image/{file_key}")
+def pick_user_image(file_key: str, username: str = Depends(get_current_user)):
+    """an image from the user's gallery becomes their profile image. the file is shared, only the key changes"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        if not app.state.db.user_has_image(user_id, file_key) or not app.state.image_store.ensure(file_key):
+            raise HTTPException(status_code=404, detail="image not found")
+        return set_user_image(user_id, file_key)
+
+@app.delete("/users/me/image")
+def delete_user_image(username: str = Depends(get_current_user)):
+    """clears the user's profile image. the file stays if the gallery or a contact still uses it"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        return set_user_image(user_id, None)
 
 class CompanionRequest(BaseModel):
     enabled: bool
@@ -570,53 +611,61 @@ class CompanionRequest(BaseModel):
 def set_companion(contact_id: int, request: CompanionRequest, username: str = Depends(get_current_user)):
     """a companion has a life of its own and may write first (app/companion). off drops its calendar"""
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.set_contact_companion(user_id, contact_id, request.enabled):
-        raise HTTPException(status_code=404, detail="contact not found")
-    app.state.companion.wake()
-    return {"status": "ok"}
+    with logger_context(user_id):
+        if not app.state.db.set_contact_companion(user_id, contact_id, request.enabled):
+            raise HTTPException(status_code=404, detail="contact not found")
+        app.state.companion.wake()
+        return {"status": "ok"}
 
 @app.delete("/contacts/{contact_id}")
 def delete_contact(contact_id: int, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_contact(user_id, contact_id):
-        raise HTTPException(status_code=404, detail="contact not found")
-    image_keys = app.state.db.get_contact_image_keys(contact_id)
-    if app.state.db.delete_contact(contact_id):
-        released_images = app.state.image_store.release(image_keys, drop_conversation_images=False)
-        return {"status": "ok", "released_images": released_images}
-    else:
-        return {"status": "failed to delete contact"}
+    with logger_context(user_id):
+        if not app.state.db.owns_contact(user_id, contact_id):
+            raise HTTPException(status_code=404, detail="contact not found")
+        image_keys = app.state.db.get_contact_image_keys(contact_id)
+        if app.state.db.delete_contact(contact_id):
+            released_images = app.state.image_store.release(image_keys, drop_conversation_images=False)
+            from app.utils.sandbox_volume import SandboxVolume
+            SandboxVolume(user_id, contact_id).remove()
+            return {"status": "ok", "released_images": released_images}
+        else:
+            return {"status": "failed to delete contact"}
 
 @app.get("/contacts/{contact_id}/memories")
 def get_contact_memories(contact_id: int, username: str = Depends(get_current_user)):
     """what the contact remembered of the logged in user (remember tool), texts only"""
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_contact(user_id, contact_id):
-        raise HTTPException(status_code=404, detail="contact not found")
-    return {"memories": app.state.db.get_contact_memories(user_id, contact_id)}
+    with logger_context(user_id):
+        if not app.state.db.owns_contact(user_id, contact_id):
+            raise HTTPException(status_code=404, detail="contact not found")
+        return {"memories": app.state.db.get_contact_memories(user_id, contact_id)}
 
 @app.delete("/contacts/{contact_id}/memories/{memory_id}")
 def delete_contact_memory(contact_id: int, memory_id: int, username: str = Depends(get_current_user)):
     """removes one memory (and its vector) the contact has of the logged in user"""
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.delete_contact_memory(user_id, contact_id, memory_id):
-        raise HTTPException(status_code=404, detail="memory not found")
-    return {"status": "ok"}
+    with logger_context(user_id):
+        if not app.state.db.delete_contact_memory(user_id, contact_id, memory_id):
+            raise HTTPException(status_code=404, detail="memory not found")
+        return {"status": "ok"}
 
 ########### conversations handling
 @app.get("/contacts/{contact_id}/conversations")
 def get_conversations(contact_id: int, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    conversations = app.state.db.get_conversations(user_id, contact_id)
-    return {"conversations": conversations}
+    with logger_context(user_id):
+        conversations = app.state.db.get_conversations(user_id, contact_id)
+        return {"conversations": conversations}
 
 @app.get("/conversations/{conversation_id}")
 def get_conversation(conversation_id: int, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_conversation(user_id, conversation_id):
-        raise HTTPException(status_code=404, detail="conversation not found")
-    conversation = app.state.db.get_conversation(conversation_id)
-    return {"conversation": conversation}
+    with logger_context(user_id):
+        if not app.state.db.owns_conversation(user_id, conversation_id):
+            raise HTTPException(status_code=404, detail="conversation not found")
+        conversation = app.state.db.get_conversation(conversation_id)
+        return {"conversation": conversation}
 
 class CreateConversationRequest(BaseModel):
     contact_id: int
@@ -624,49 +673,51 @@ class CreateConversationRequest(BaseModel):
 @app.post("/conversations")
 def create_conversation(request: CreateConversationRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_contact(user_id, request.contact_id):
-        raise HTTPException(status_code=404, detail="contact not found")
-    conversation_id = app.state.db.create_conversation(user_id, request.contact_id)
-    return {"conversation_id": conversation_id}
+    with logger_context(user_id):
+        if not app.state.db.owns_contact(user_id, request.contact_id):
+            raise HTTPException(status_code=404, detail="contact not found")
+        conversation_id = app.state.db.create_conversation(user_id, request.contact_id)
+        return {"conversation_id": conversation_id}
 
 @app.delete("/conversations/{conversation_id}")
 def delete_conversation(conversation_id: int, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_conversation(user_id, conversation_id):
-        raise HTTPException(status_code=404, detail="conversation not found")
-    image_keys = app.state.db.get_conversation_image_keys(conversation_id)
-    if app.state.db.delete_conversation(conversation_id):
-        released_images = app.state.image_store.release(image_keys)
-        from app.utils.text_files import remove_conversation_files
-        remove_conversation_files(user_id, conversation_id)
-        from app.utils.conversation_volume import ConversationVolume
-        ConversationVolume(user_id, conversation_id).remove()
-        return {"status": "ok", "released_images": released_images}
-    else:
-        return {"status": "failed to delete conversation"}
+    with logger_context(user_id):
+        if not app.state.db.owns_conversation(user_id, conversation_id):
+            raise HTTPException(status_code=404, detail="conversation not found")
+        image_keys = app.state.db.get_conversation_image_keys(conversation_id)
+        if app.state.db.delete_conversation(conversation_id):
+            released_images = app.state.image_store.release(image_keys)
+            from app.utils.text_files import remove_conversation_files
+            remove_conversation_files(user_id, conversation_id)
+            return {"status": "ok", "released_images": released_images}
+        else:
+            return {"status": "failed to delete conversation"}
 
 @app.get("/conversations/{conversation_id}/messages")
 def get_messages(conversation_id: int, request: GetMessagesRequest, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_conversation(user_id, conversation_id):
-        raise HTTPException(status_code=404, detail="conversation not found")
-    messages = app.state.db.get_messages_by_conversation(conversation_id, request.max_messages) or []
-    attachments = app.state.db.get_attachments_for_messages([message["id"] for message in messages])
-    from app.utils.text_files import payloads_for_messages
-    text_files = payloads_for_messages(app.state.db, [message["id"] for message in messages])
-    for message in messages:
-        message["attachments"] = attachments.get(message["id"], [])
-        if message["id"] in text_files:
-            message["text_files"] = text_files[message["id"]]
-    return {"messages": messages}
+    with logger_context(user_id):
+        if not app.state.db.owns_conversation(user_id, conversation_id):
+            raise HTTPException(status_code=404, detail="conversation not found")
+        messages = app.state.db.get_messages_by_conversation(conversation_id, request.max_messages) or []
+        attachments = app.state.db.get_attachments_for_messages([message["id"] for message in messages])
+        from app.utils.text_files import payloads_for_messages
+        text_files = payloads_for_messages(app.state.db, [message["id"] for message in messages])
+        for message in messages:
+            message["attachments"] = attachments.get(message["id"], [])
+            if message["id"] in text_files:
+                message["text_files"] = text_files[message["id"]]
+        return {"messages": messages}
 
 @app.get("/messages/{message_id}/attachments")
 def get_messages(message_id: int, username: str = Depends(get_current_user)):
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_message(user_id, message_id):
-        raise HTTPException(status_code=404, detail="message not found")
-    attachments = app.state.db.get_attachments_for_message(message_id)
-    return {"attachments": attachments}
+    with logger_context(user_id):
+        if not app.state.db.owns_message(user_id, message_id):
+            raise HTTPException(status_code=404, detail="message not found")
+        attachments = app.state.db.get_attachments_for_message(message_id)
+        return {"attachments": attachments}
 
 ########### text to speech
 @app.post("/tts")
@@ -684,60 +735,61 @@ async def tts_endpoint(websocket: WebSocket, username: str = Depends(get_current
     (only then the hub forgets it), {"stop": reply_id} drops it. hub: {"reply_id", "piece"}, or {"gone": reply_id}"""
     await websocket.accept()
     user_id = app.state.db.get_user_id(username)
-    reply, sent = None, -1  # sent: the last seq sent on this connection
-    inbox = asyncio.Queue()
+    with logger_context(user_id):        
+        reply, sent = None, -1  # sent: the last seq sent on this connection
+        inbox = asyncio.Queue()
 
-    async def read():
-        try:
-            while (msg := await websocket.receive())["type"] != "websocket.disconnect":
-                inbox.put_nowait(msg)
-        finally:
-            inbox.put_nowait({"type": "websocket.disconnect"})
-
-    reader = asyncio.create_task(read())
-    try:
-        while True:
+        async def read():
             try:
-                msg = await asyncio.wait_for(inbox.get(), 0.02)
-            except asyncio.TimeoutError:
-                msg = None
-            if msg and msg["type"] == "websocket.disconnect":
-                break  # the reply stays queued for a resume
-            data = json.loads(msg["text"]) if msg and msg.get("text") else {}
-            if "speak" in data:
-                speak = data["speak"]
-                reply, sent = TtsStreams.start(app.state.infrastructure, user_id, speak["reply_id"], speak.get("text", ""),
-                                               speak.get("voice", ""), speak.get("message_id"), speak.get("language", ""),
-                                               final=not speak.get("stream")), -1
-            elif "text" in data:
-                streaming = TtsStreams.get(user_id, data["text"]["reply_id"])
-                if streaming:
-                    streaming.set_text(data["text"].get("text", ""), bool(data["text"].get("final")))
-            elif "resume" in data:
-                reply_id, sent = data["resume"]["reply_id"], data["resume"]["last_seq"]
-                reply = TtsStreams.get(user_id, reply_id)
-                if reply is None:
-                    await websocket.send_json({"gone": reply_id})
-                elif reply.ack(sent):
-                    TtsStreams.stop(user_id, reply_id)
-                    reply = None
-            elif "ack" in data and reply and reply.ack(data["ack"]):
-                TtsStreams.stop(user_id, reply.reply_id)  # the client has the whole reply
-                reply = None
-            elif "stop" in data:
-                TtsStreams.stop(user_id, data["stop"])
-                reply = None
+                while (msg := await websocket.receive())["type"] != "websocket.disconnect":
+                    inbox.put_nowait(msg)
+            finally:
+                inbox.put_nowait({"type": "websocket.disconnect"})
 
-            if reply and reply.dropped.is_set():
-                await websocket.send_json({"gone": reply.reply_id})
-                reply = None
-            for piece in reply.after(sent) if reply else []:
-                await websocket.send_json({"reply_id": reply.reply_id, "piece": piece})
-                sent = piece["seq"]
-    except WebSocketDisconnect:
-        pass
-    finally:
-        reader.cancel()
+        reader = asyncio.create_task(read())
+        try:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(inbox.get(), 0.02)
+                except asyncio.TimeoutError:
+                    msg = None
+                if msg and msg["type"] == "websocket.disconnect":
+                    break  # the reply stays queued for a resume
+                data = json.loads(msg["text"]) if msg and msg.get("text") else {}
+                if "speak" in data:
+                    speak = data["speak"]
+                    reply, sent = TtsStreams.start(app.state.infrastructure, user_id, speak["reply_id"], speak.get("text", ""),
+                                                speak.get("voice", ""), speak.get("message_id"), speak.get("language", ""),
+                                                final=not speak.get("stream")), -1
+                elif "text" in data:
+                    streaming = TtsStreams.get(user_id, data["text"]["reply_id"])
+                    if streaming:
+                        streaming.set_text(data["text"].get("text", ""), bool(data["text"].get("final")))
+                elif "resume" in data:
+                    reply_id, sent = data["resume"]["reply_id"], data["resume"]["last_seq"]
+                    reply = TtsStreams.get(user_id, reply_id)
+                    if reply is None:
+                        await websocket.send_json({"gone": reply_id})
+                    elif reply.ack(sent):
+                        TtsStreams.stop(user_id, reply_id)
+                        reply = None
+                elif "ack" in data and reply and reply.ack(data["ack"]):
+                    TtsStreams.stop(user_id, reply.reply_id)  # the client has the whole reply
+                    reply = None
+                elif "stop" in data:
+                    TtsStreams.stop(user_id, data["stop"])
+                    reply = None
+
+                if reply and reply.dropped.is_set():
+                    await websocket.send_json({"gone": reply.reply_id})
+                    reply = None
+                for piece in reply.after(sent) if reply else []:
+                    await websocket.send_json({"reply_id": reply.reply_id, "piece": piece})
+                    sent = piece["seq"]
+        except WebSocketDisconnect:
+            pass
+        finally:
+            reader.cancel()
 
 ########### voice handling
 MAX_VOICE_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -799,14 +851,15 @@ async def upload_voice(request: Request, username: str = Depends(get_current_use
     saves the file as /hub/voices/<uuid>.wav and returns the uuid. the voice is not linked to a contact yet
     """
     user_id = app.state.db.get_user_id(username)
-    data = await request.body()
-    if not data:
-        raise HTTPException(status_code=400, detail="empty upload")
-    if len(data) > MAX_VOICE_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="voice file too large")
+    with logger_context(user_id):
+        data = await request.body()
+        if not data:
+            raise HTTPException(status_code=400, detail="empty upload")
+        if len(data) > MAX_VOICE_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="voice file too large")
 
-    voice_id = store_voice(user_id, data)
-    return {"status": "ok", "voice_id": voice_id}
+        voice_id = store_voice(user_id, data)
+        return {"status": "ok", "voice_id": voice_id}
 
 def find_stored_predefined_voice(user_id: int, entry: dict) -> str:
     """uuid of the user's stored copy of a predefined voice, "" if not stored yet. uploads never match"""
@@ -843,14 +896,15 @@ def get_predefined_voices(username: str = Depends(get_current_user)):
     # only what the client needs to show a selection, the id is the key.
     # voice_id lets the client map a contact's stored voice back to the predefined entry it came from
     user_id = app.state.db.get_user_id(username)
-    voices = [
-        {
-            "id": v["id"], "name": v["name"], "description": v.get("description", ""), "gender": v.get("gender", ""), "language": v.get("language", ""),
-            "voice_id": find_stored_predefined_voice(user_id, v),
-        }
-        for v in load_predefined_voices()
-    ]
-    return {"voices": voices}
+    with logger_context(user_id):
+        voices = [
+            {
+                "id": v["id"], "name": v["name"], "description": v.get("description", ""), "gender": v.get("gender", ""), "language": v.get("language", ""),
+                "voice_id": find_stored_predefined_voice(user_id, v),
+            }
+            for v in load_predefined_voices()
+        ]
+        return {"voices": voices}
 
 def read_predefined_voice(predefined_id: str) -> bytes:
     """wav bytes of a predefined voice, raises 404 for an unknown id"""
@@ -877,30 +931,33 @@ def use_predefined_voice(predefined_id: str, username: str = Depends(get_current
     returns the uuid of the stored voice, the same predefined voice always maps to the same uuid per user
     """
     user_id = app.state.db.get_user_id(username)
-    data = read_predefined_voice(predefined_id)
-    voice_id = store_voice(user_id, data, predefined_id)
-    return {"status": "ok", "voice_id": voice_id}
+    with logger_context(user_id):
+        data = read_predefined_voice(predefined_id)
+        voice_id = store_voice(user_id, data, predefined_id)
+        return {"status": "ok", "voice_id": voice_id}
 
 @app.delete("/voices/{voice_id}")
 def delete_voice(voice_id: str, username: str = Depends(get_current_user)):
     # only the owner can remove a voice, an unknown or foreign id looks the same to the client
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.remove_voice(voice_id, user_id):
-        raise HTTPException(status_code=404, detail="voice not found")
-    app.state.infrastructure.drop_voice(voice_id)
-    return {"status": "ok", "voice_id": voice_id}
+    with logger_context(user_id):
+        if not app.state.db.remove_voice(voice_id, user_id):
+            raise HTTPException(status_code=404, detail="voice not found")
+        app.state.infrastructure.drop_voice(voice_id)
+        return {"status": "ok", "voice_id": voice_id}
 
 ########### image generation info
 @app.get("/images/{file_key}/generation")
 def get_image_generation(file_key: str, username: str = Depends(get_current_user)):
     """everything that went into one image (prompts, seed, model, size, steps, cfg)"""
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_image(user_id, file_key):
-        raise HTTPException(status_code=404, detail="no generation info for this image")
-    generation = app.state.db.get_image_generation(file_key)
-    if generation is None:
-        raise HTTPException(status_code=404, detail="no generation info for this image")
-    return {"file_key": file_key, "generation": generation}
+    with logger_context(user_id):
+        if not app.state.db.owns_image(user_id, file_key):
+            raise HTTPException(status_code=404, detail="no generation info for this image")
+        generation = app.state.db.get_image_generation(file_key)
+        if generation is None:
+            raise HTTPException(status_code=404, detail="no generation info for this image")
+        return {"file_key": file_key, "generation": generation}
 
 ########### image generation tool
 @app.get("/generated-images")
@@ -908,7 +965,200 @@ def get_generated_images(username: str = Depends(get_current_user)):
     """the latest prompts of the image tool (pending, done or failed, file_name only when done), oldest first.
     only their own, the user comes from the token"""
     user_id = app.state.db.get_user_id(username)
-    return {"images": app.state.db.get_generated_images(user_id)}
+    with logger_context(user_id):
+        return {"images": app.state.db.get_generated_images(user_id)}
+
+########### transcribe app (#198)
+# the app records through /ws/audio with the transcript's id in audio.start: the hub stores every final text there
+# (start / end in seconds of the recording), the bookmarks come through here. continuing a transcript records on
+# after its end: the app's offset starts there
+class CreateTranscriptRequest(BaseModel):
+    language: str = ""      # whisper language code, "" = detected per utterance
+
+class TranscriptBookmarkRequest(BaseModel):
+    at: float               # seconds of the recording
+    label: str = ""
+
+class TranscriptBookmarkLabelRequest(BaseModel):
+    label: str
+
+class TranscriptSegmentRequest(BaseModel):
+    text: str | None        # the user's text for the segment, None: back to the recognised one
+
+class TranscriptHeadingRequest(BaseModel):
+    at: float               # seconds of the recording, between the segments it goes between
+    text: str
+
+class TranscriptPart(BaseModel):
+    start: float
+    end: float
+    text: str
+    kind: str = ""          # "" or "heading"
+
+class TranscriptSplitRequest(BaseModel):
+    parts: list[TranscriptPart]     # in order: [before], heading, [after]
+
+class TranscriptSummaryRequest(BaseModel):
+    text: str               # the transcript as the app shows it (Transcript.plain_text), headings as "## ..." lines
+
+class TranscriptEnhanceRequest(BaseModel):
+    title: str = ""         # the copy's name: the app's title of the original plus " (enhanced)"
+
+TRANSCRIPT_TITLE_MAX = 200
+
+SEGMENT_TEXT_MAX = 20000
+
+BOOKMARK_LABEL_MAX = 200
+
+def owned_transcript(user_id: int, transcript_id: int):
+    if not app.state.db.owns_transcript(user_id, transcript_id):
+        raise HTTPException(status_code=404, detail="transcript not found")
+
+@app.post("/transcripts")
+def create_transcript(request: CreateTranscriptRequest, username: str = Depends(get_current_user)):
+    """a new, empty recording: {"transcript_id"}"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        transcript_id = app.state.db.create_transcript(user_id, request.language)
+        if not transcript_id:
+            raise HTTPException(status_code=500, detail="transcript could not be created")
+        return {"transcript_id": transcript_id}
+
+@app.get("/transcripts")
+def get_transcripts(username: str = Depends(get_current_user)):
+    """the user's transcripts, newest first, without their text (see ChatDB.get_transcripts)"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        return {"transcripts": app.state.db.get_transcripts(user_id)}
+
+@app.get("/transcripts/{transcript_id}")
+def get_transcript(transcript_id: int, username: str = Depends(get_current_user)):
+    """one transcript with its segments and bookmarks"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        transcript = app.state.db.get_transcript(transcript_id)
+        if transcript is None:
+            raise HTTPException(status_code=500, detail="transcript could not be read")
+        return {"transcript": transcript}
+
+@app.delete("/transcripts/{transcript_id}")
+def delete_transcript(transcript_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        if not app.state.db.delete_transcript(user_id, transcript_id):
+            raise HTTPException(status_code=404, detail="transcript not found")
+        return {"status": "ok"}
+
+@app.post("/transcripts/{transcript_id}/bookmarks")
+def add_transcript_bookmark(transcript_id: int, request: TranscriptBookmarkRequest, username: str = Depends(get_current_user)):
+    """{"bookmark_id"}"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        bookmark_id = app.state.db.add_transcript_bookmark(transcript_id, max(0.0, request.at), request.label.strip()[:BOOKMARK_LABEL_MAX])
+        if not bookmark_id:
+            raise HTTPException(status_code=500, detail="bookmark could not be saved")
+        return {"bookmark_id": bookmark_id}
+
+@app.post("/transcripts/{transcript_id}/headings")
+def add_transcript_heading(transcript_id: int, request: TranscriptHeadingRequest, username: str = Depends(get_current_user)):
+    """the user added a heading after the recording: {"segment_id"}, edited (emptied) like any segment"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        text = request.text.strip()[:SEGMENT_TEXT_MAX]
+        segment_id = app.state.db.add_transcript_heading(transcript_id, request.at, text) if text else 0
+        if not segment_id:
+            raise HTTPException(status_code=500, detail="heading could not be saved")
+        return {"segment_id": segment_id}
+
+@app.post("/transcripts/{transcript_id}/summary")
+def summarize_transcript(transcript_id: int, request: TranscriptSummaryRequest, username: str = Depends(get_current_user)):
+    """a summary in a few sentences, made by the llm while the app waits: {"summary"}. not stored"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        if not request.text.strip():
+            raise HTTPException(status_code=400, detail="nothing to summarize")
+        job = TranscriptSummaryTask(app.state.infrastructure, request.text.strip())
+        app.state.task_queue.run(job)
+        if not job.summary:
+            raise HTTPException(status_code=502, detail="the summary could not be made")
+        return {"summary": job.summary}
+
+@app.post("/transcripts/{transcript_id}/enhance")
+def enhance_transcript(transcript_id: int, request: TranscriptEnhanceRequest, username: str = Depends(get_current_user)):
+    """a new transcript, a copy with what was said cleaned up by the llm (filler words out, grammar fixed) segment by
+    segment, so its headings and bookmarks stay where they were. the original stays as it is.
+    {"transcript_id", "enhanced": segments changed, "segments": segments sent}. takes a while: the app waits"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        transcript = app.state.db.get_transcript(transcript_id)
+        if transcript is None:
+            raise HTTPException(status_code=500, detail="transcript could not be read")
+        said = [(s["id"], text) for s in transcript["segments"] if (text := enhanceable(s))]
+        if not said:
+            raise HTTPException(status_code=400, detail="nothing to enhance")
+        job = TranscriptEnhanceTask(app.state.infrastructure, [text for _, text in said])
+        app.state.task_queue.run(job)
+        texts = {segment_id: text for (segment_id, _), text in zip(said, job.texts) if text}
+        if not texts:
+            raise HTTPException(status_code=502, detail="the transcript could not be enhanced")
+        copy_id = app.state.db.copy_transcript(user_id, transcript, request.title.strip()[:TRANSCRIPT_TITLE_MAX], texts)
+        if not copy_id:
+            raise HTTPException(status_code=500, detail="the enhanced copy could not be saved")
+        return {"transcript_id": copy_id, "enhanced": len(texts), "segments": len(said)}
+
+@app.post("/transcripts/{transcript_id}/segments/{segment_id}/split")
+def split_transcript_segment(transcript_id: int, segment_id: int, request: TranscriptSplitRequest,
+                             username: str = Depends(get_current_user)):
+    """a marked text made a heading: the segment becomes its parts at once (see ChatDB.split_transcript_segment),
+    {"segment_ids"} in order, the first is the segment's own"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        parts = [{"start": p.start, "end": max(p.end, p.start),
+                  "text": p.text.strip()[:SEGMENT_TEXT_MAX], "kind": p.kind} for p in request.parts]
+        if not 1 <= len(parts) <= 3 or any(not p["text"] or p["kind"] not in ("", HEADING) for p in parts):
+            raise HTTPException(status_code=400, detail="parts must be 1 to 3 with text, kind '' or 'heading'")
+        ids = app.state.db.split_transcript_segment(transcript_id, segment_id, parts)
+        if not ids:
+            raise HTTPException(status_code=404, detail="segment not found or a part outside it")
+        return {"segment_ids": ids}
+
+@app.patch("/transcripts/{transcript_id}/segments/{segment_id}")
+def edit_transcript_segment(transcript_id: int, segment_id: int, request: TranscriptSegmentRequest,
+                            username: str = Depends(get_current_user)):
+    """the user edited the text of a segment after the recording"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        text = None if request.text is None else request.text.strip()[:SEGMENT_TEXT_MAX]
+        if not app.state.db.edit_transcript_segment(transcript_id, segment_id, text):
+            raise HTTPException(status_code=404, detail="segment not found")
+        return {"status": "ok"}
+
+@app.patch("/transcripts/{transcript_id}/bookmarks/{bookmark_id}")
+def rename_transcript_bookmark(transcript_id: int, bookmark_id: int, request: TranscriptBookmarkLabelRequest,
+                               username: str = Depends(get_current_user)):
+    """a new label for the bookmark"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        if not app.state.db.rename_transcript_bookmark(transcript_id, bookmark_id, request.label.strip()[:BOOKMARK_LABEL_MAX]):
+            raise HTTPException(status_code=404, detail="bookmark not found")
+        return {"status": "ok"}
+
+@app.delete("/transcripts/{transcript_id}/bookmarks/{bookmark_id}")
+def delete_transcript_bookmark(transcript_id: int, bookmark_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        if not app.state.db.delete_transcript_bookmark(transcript_id, bookmark_id):
+            raise HTTPException(status_code=404, detail="bookmark not found")
+        return {"status": "ok"}
 
 ########### gallery
 GALLERY_MAX_LIMIT = 200
@@ -919,16 +1169,17 @@ def get_gallery(limit: int = 60, offset: int = 0, username: str = Depends(get_cu
     next_offset is None on the last page. an image whose file is gone and that has no stored generation
     can't be downloaded (or generated again), it is left out. a profile still rendering has its generation already"""
     user_id = app.state.db.get_user_id(username)
-    limit = max(1, min(limit, GALLERY_MAX_LIMIT))
-    offset = max(0, offset)
-    rows = app.state.db.get_user_images(user_id, limit, offset)
-    image_dir = Path("/hub/images")
-    images = [
-        {k: v for k, v in row.items() if k != "has_generation"}
-        for row in rows
-        if row["has_generation"] or (image_dir / row["file_key"]).is_file()
-    ]
-    return {"images": images, "next_offset": offset + len(rows) if len(rows) == limit else None}
+    with logger_context(user_id):
+        limit = max(1, min(limit, GALLERY_MAX_LIMIT))
+        offset = max(0, offset)
+        rows = app.state.db.get_user_images(user_id, limit, offset)
+        image_dir = Path("/hub/images")
+        images = [
+            {k: v for k, v in row.items() if k != "has_generation"}
+            for row in rows
+            if row["has_generation"] or (image_dir / row["file_key"]).is_file()
+        ]
+        return {"images": images, "next_offset": offset + len(rows) if len(rows) == limit else None}
 
 ########### model handling
 @app.get("/models/{model_name}/url", response_model=GetModelURLResponse)
@@ -953,35 +1204,37 @@ def download_message_file(message_id: int, stored_name: str, username: str = Dep
     """the text file attached to a message, saved under the AI's real name"""
     from app.utils.text_files import FILES_ROOT, _STORED, message_dir
     user_id = app.state.db.get_user_id(username)
-    if not _STORED.fullmatch(stored_name) or not app.state.db.owns_message(user_id, message_id):
-        raise HTTPException(status_code=404, detail="file not found")
-    row = app.state.db.get_message_file(message_id, stored_name)
-    if row is None or row["user_id"] != user_id:
-        raise HTTPException(status_code=404, detail="file not found")
-    path = message_dir(row["user_id"], row["conversation_id"], row["message_id"], FILES_ROOT) / stored_name
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="file not found")
-    download_name = row["real_name"].rsplit("/", 1)[-1] or "file"
-    return Response(content=path.read_bytes(), media_type=row["file_type"], headers=attachment_headers(download_name))
+    with logger_context(user_id):
+        if not _STORED.fullmatch(stored_name) or not app.state.db.owns_message(user_id, message_id):
+            raise HTTPException(status_code=404, detail="file not found")
+        row = app.state.db.get_message_file(message_id, stored_name)
+        if row is None or row["user_id"] != user_id:
+            raise HTTPException(status_code=404, detail="file not found")
+        path = message_dir(row["user_id"], row["conversation_id"], row["message_id"], FILES_ROOT) / stored_name
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="file not found")
+        download_name = row["real_name"].rsplit("/", 1)[-1] or "file"
+        return Response(content=path.read_bytes(), media_type=row["file_type"], headers=attachment_headers(download_name))
 
-########### conversation files (the sandbox volume of bash and run_code)
+########### conversation files (the sandbox volume of bash and run_code, shared by all conversations of the contact)
 def conversation_files(username: str, conversation_id: int, read):
-    """read(volume) on the logged in user's conversation volume: 404 for a conversation not theirs or a path that
-    isn't there, 400 for a path leaving the files, 503 without docker"""
+    """read(volume) on the volume of the logged in user's conversation's contact: 404 for a conversation not theirs or
+    a path that isn't there, 400 for a path leaving the files, 503 without docker"""
     from docker.errors import DockerException
-    from app.utils.conversation_volume import ConversationVolume
+    from app.utils.sandbox_volume import SandboxVolume
     user_id = app.state.db.get_user_id(username)
-    if not app.state.db.owns_conversation(user_id, conversation_id):
-        raise HTTPException(status_code=404, detail="conversation not found")
-    try:
-        return read(ConversationVolume(user_id, conversation_id))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="file not found")
-    except DockerException as e:
-        logger.error(f"conversation {conversation_id} files: {repr(e)}")
-        raise HTTPException(status_code=503, detail="the files are not available")
+    with logger_context(user_id):
+        if not app.state.db.owns_conversation(user_id, conversation_id):
+            raise HTTPException(status_code=404, detail="conversation not found")
+        try:
+            return read(SandboxVolume.of_conversation(app.state.db, user_id, conversation_id))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="file not found")
+        except DockerException as e:
+            logger.error(f"conversation {conversation_id} files: {repr(e)}")
+            raise HTTPException(status_code=503, detail="the files are not available")
 
 def attachment_headers(name: str, size: int | None = None) -> dict:
     from urllib.parse import quote
@@ -1005,7 +1258,7 @@ def download_conversation_file(conversation_id: int, path: str, username: str = 
 def zip_conversation_files(conversation_id: int, path: str = "", exclude: bool = True,
                            username: str = Depends(get_current_user)):
     """a folder of the conversation's files ("" all of them) as one zip. exclude: without .git, caches and installed
-    packages (EXCLUDED in conversation_volume)"""
+    packages (EXCLUDED in sandbox_volume)"""
     import tempfile
     target = tempfile.SpooledTemporaryFile(max_size=32 * 1024 * 1024)
     try:
@@ -1064,260 +1317,308 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
     loop = asyncio.get_running_loop()
     done_queue = asyncio.Queue()
     closed = asyncio.Event()
-    logger.debug(f"username: {username}")
     user_id = app.state.db.get_user_id(username)
-    app.state.connections[user_id] += 1
+    with logger_context(user_id):
+        app.state.connections[user_id] += 1
 
-    async def safe_close(code: int = 1000):
-        if not closed.is_set():
-            closed.set()
+        async def safe_close(code: int = 1000):
+            if not closed.is_set():
+                closed.set()
+                try:
+                    await websocket.close(code=code)
+                except RuntimeError:
+                    # already closed at ASGI level
+                    pass
+
+        def pump_done_jobs():
+            # wakes up to notice the close: a thread still waiting after it would take the next done job and drop it
+            while not closed.is_set():
+                job = app.state.task_queue.get_done(user_id, timeout=0.5)   # only this user's finished jobs
+                if job:
+                    loop.call_soon_threadsafe(done_queue.put_nowait, job)
+
+        threading.Thread(target=pump_done_jobs, daemon=True).start()
+
+        # recieve from client
+        async def receiver():
             try:
-                await websocket.close(code=code)
-            except RuntimeError:
-                # already closed at ASGI level
-                pass
+                while not closed.is_set():
+                    text = await websocket.receive_text()
+                    data = json.loads(text)
 
-    def pump_done_jobs():
-        # wakes up to notice the close: a thread still waiting after it would take the next done job and drop it
-        while not closed.is_set():
-            job = app.state.task_queue.get_done(user_id, timeout=0.5)   # only this user's finished jobs
-            if job:
-                loop.call_soon_threadsafe(done_queue.put_nowait, job)
+                    if "chat" in data:
+                        chat_request = ChatRequest(**data["chat"])
 
-    threading.Thread(target=pump_done_jobs, daemon=True).start()
+                        # conversation and contact ids come from the client: only their owner may write into them
+                        # (and get the replies, the contact's profile and memories that go into them)
+                        if not (app.state.db.owns_conversation(user_id, chat_request.conversation_id)
+                                and app.state.db.owns_contact(user_id, chat_request.contact_id)):
+                            logger.warning(f"user {user_id} sent a chat message to foreign or unknown conversation {chat_request.conversation_id} / contact {chat_request.contact_id}")
+                            await websocket.send_text(json.dumps({"error": "conversation not found"}))
+                            continue
 
-    # recieve from client
-    async def receiver():
-        try:
-            while not closed.is_set():
-                text = await websocket.receive_text()
-                data = json.loads(text)
+                        if chat_request.poll_answer:   # the poll is locked with the choice, the content is the answer for the model
+                            answer = chat_request.poll_answer
+                            try:
+                                chosen = app.state.db.answer_poll(int(answer.get("message_id")), chat_request.conversation_id, list(answer.get("chosen") or []))
+                            except (TypeError, ValueError):
+                                chosen = None
+                            if chosen is None:
+                                logger.warning(f"user {user_id}: poll answer for message {answer.get('message_id')} not stored, no open poll or invalid choice")
 
-                if "chat" in data:
-                    chat_request = ChatRequest(**data["chat"])
-
-                    # conversation and contact ids come from the client: only their owner may write into them
-                    # (and get the replies, the contact's profile and memories that go into them)
-                    if not (app.state.db.owns_conversation(user_id, chat_request.conversation_id)
-                            and app.state.db.owns_contact(user_id, chat_request.contact_id)):
-                        logger.warning(f"user {user_id} sent a chat message to foreign or unknown conversation {chat_request.conversation_id} / contact {chat_request.contact_id}")
-                        await websocket.send_text(json.dumps({"error": "conversation not found"}))
-                        continue
-
-                    if chat_request.poll_answer:   # the poll is locked with the choice, the content is the answer for the model
-                        answer = chat_request.poll_answer
-                        try:
-                            chosen = app.state.db.answer_poll(int(answer.get("message_id")), chat_request.conversation_id, list(answer.get("chosen") or []))
-                        except (TypeError, ValueError):
-                            chosen = None
-                        if chosen is None:
-                            logger.warning(f"user {user_id}: poll answer for message {answer.get('message_id')} not stored, no open poll or invalid choice")
-
-                    if chat_request.content == "ping":
-                        MessageQueue().send_data({ 
-                            "chat": {
-                                "conversation_id": chat_request.conversation_id,
-                                "role": "assistant",
-                                "content": "pong",
-                                "tool_calls": [] 
-                            }
-                        }, user_id=user_id)
-                    else:
-                        # unfenced code gets ``` fences 
-                        fenced = chat_request.content if chat_request.poll_answer else fence_code(chat_request.content)
-                        if fenced != chat_request.content:
-                            chat_request.content = fenced
-                            MessageQueue().send_data({"fenced": {"conversation_id": chat_request.conversation_id, "content": fenced}}, user_id=user_id)
-                        
-                        SpawnAgentJobTool.add_message(user_id, chat_request.conversation_id, chat_request.content)
-                        job = MetaTask(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.turns)
-                        app.state.turns.start(job)  # stores the user message, or merges it into the reply still being made
+                        if chat_request.content == "ping":
+                            MessageQueue().send_data({ 
+                                "chat": {
+                                    "conversation_id": chat_request.conversation_id,
+                                    "role": "assistant",
+                                    "content": "pong",
+                                    "tool_calls": [] 
+                                }
+                            }, user_id=user_id)
+                        else:
+                            # unfenced code gets ``` fences 
+                            fenced = chat_request.content if chat_request.poll_answer else fence_code(chat_request.content)
+                            if fenced != chat_request.content:
+                                chat_request.content = fenced
+                                MessageQueue().send_data({"fenced": {"conversation_id": chat_request.conversation_id, "content": fenced}}, user_id=user_id)
+                            
+                            SpawnAgentJobTool.add_message(user_id, chat_request.conversation_id, chat_request.content)
+                            job = MetaTask(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.turns)
+                            app.state.turns.start(job)  # stores the user message, or merges it into the reply still being made
+                            app.state.task_queue.add(job)
+                    elif "cancel_job" in data:
+                        # #152 the cancel button of a job's progress row, only the job's own user can cancel it
+                        SpawnAgentJobTool.cancel(user_id, str((data["cancel_job"] or {}).get("job_id") or ""))
+                    elif "generate" in data:
+                        generate = data["generate"]
+                        if "generate_profile" in generate:
+                            user_input = generate["generate_profile"]
+                            if "voice_id" in user_input:
+                                user_input["voice_id"] = resolve_voice_id(user_id, user_input["voice_id"])
+                            job = ContactGeneratorTask(user_input, user_id, app.state.db, app.state.infrastructure)
+                            app.state.task_queue.add(job)
+                        else:
+                            logger.error(f"unknown generation request")
+                            await websocket.send_text(
+                                json.dumps({"status": "unknown generation request"})
+                            )
+                    elif "translate" in data:
+                        translate = data["translate"]   # translator mode, the result goes back as {"translate": ...}
+                        job = TranslateTask(app.state.infrastructure, translate["from_language"], translate["to_language"],
+                                        translate["text"], translate.get("request_id", ""), user_id=user_id)
                         app.state.task_queue.add(job)
-                elif "cancel_job" in data:
-                    # #152 the cancel button of a job's progress row, only the job's own user can cancel it
-                    SpawnAgentJobTool.cancel(user_id, str((data["cancel_job"] or {}).get("job_id") or ""))
-                elif "generate" in data:
-                    generate = data["generate"]
-                    if "generate_profile" in generate:
-                        user_input = generate["generate_profile"]
-                        if "voice_id" in user_input:
-                            user_input["voice_id"] = resolve_voice_id(user_id, user_input["voice_id"])
-                        job = ContactGeneratorTask(user_input, user_id, app.state.db, app.state.infrastructure)
+                    elif "generate_image" in data:
+                        generate_image = data["generate_image"]   # image tool, the result goes back as {"generated_image": ...}
+                        job = GenerateImageTask(user_id, generate_image["prompt"], app.state.db, app.state.infrastructure, generate_image.get("request_id", ""))
                         app.state.task_queue.add(job)
-                    else:
-                        logger.error(f"unknown generation request")
+                    else:                    
+                        logger.error(f"unknown request {data}")
                         await websocket.send_text(
-                            json.dumps({"status": "unknown generation request"})
+                            json.dumps({"error": "unknown request"})
                         )
-                elif "translate" in data:
-                    translate = data["translate"]   # translator mode, the result goes back as {"translate": ...}
-                    job = TranslateTask(app.state.infrastructure, translate["from_language"], translate["to_language"],
-                                       translate["text"], translate.get("request_id", ""), user_id=user_id)
-                    app.state.task_queue.add(job)
-                elif "generate_image" in data:
-                    generate_image = data["generate_image"]   # image tool, the result goes back as {"generated_image": ...}
-                    job = GenerateImageTask(user_id, generate_image["prompt"], app.state.db, app.state.infrastructure, generate_image.get("request_id", ""))
-                    app.state.task_queue.add(job)
-                else:                    
-                    logger.error(f"unknown request {data}")
-                    await websocket.send_text(
-                        json.dumps({"error": "unknown request"})
-                    )
 
-        except WebSocketDisconnect:
-            print("Client disconnected (receiver)")
-            await safe_close()
+            except WebSocketDisconnect:
+                print("Client disconnected (receiver)")
+                await safe_close()
 
-        except Exception as e:
-            logger.error(f"receiver failure {repr(e)}")
-            await safe_close(code=1011)
+            except Exception as e:
+                logger.error(f"receiver failure {repr(e)}")
+                await safe_close(code=1011)
 
-    async def sender():
-        try:
+        async def sender():
+            try:
+                while not closed.is_set():
+                    message = MessageQueue().pop_message(user_id)   # only this user's messages
+                    if message:
+                        try:
+                            await websocket.send_text(json.dumps(message))
+                        except RuntimeError:
+                            break
+                    else:
+                        await asyncio.sleep(0.01)  # or use a proper event/queue
+
+            except WebSocketDisconnect:
+                print("Client disconnected (sender)")
+                await safe_close()
+
+            except Exception as e:
+                logger.error(f"sender failure {repr(e)}")
+                await safe_close(code=1011)
+
+        # send back to client
+        async def finish_task():
             while not closed.is_set():
-                message = MessageQueue().pop_message(user_id)   # only this user's messages
-                if message:
-                    try:
-                        await websocket.send_text(json.dumps(message))
-                    except RuntimeError:
-                        break
-                else:
-                    await asyncio.sleep(0.01)  # or use a proper event/queue
+                task = await done_queue.get()
 
-        except WebSocketDisconnect:
-            print("Client disconnected (sender)")
-            await safe_close()
+                if closed.is_set():
+                    break
 
-        except Exception as e:
-            logger.error(f"sender failure {repr(e)}")
-            await safe_close(code=1011)
+                if task.has_response():
+                    MessageQueue().send_data(task.get_result(), user_id=user_id)
 
-    # send back to client
-    async def finish_task():
-        while not closed.is_set():
-            task = await done_queue.get()
+        receiver_task = asyncio.create_task(receiver())
+        finish_job_task = asyncio.create_task(finish_task())
+        sender_task = asyncio.create_task(sender())
 
-            if closed.is_set():
-                break
+        done, pending = await asyncio.wait(
+            [receiver_task, sender_task, finish_job_task],
+            return_when=asyncio.FIRST_EXCEPTION
+        )
 
-            if task.has_response():
-                MessageQueue().send_data(task.get_result(), user_id=user_id)
+        await safe_close()
+        app.state.connections[user_id] -= 1
 
-    receiver_task = asyncio.create_task(receiver())
-    finish_job_task = asyncio.create_task(finish_task())
-    sender_task = asyncio.create_task(sender())
+        for task in pending:
+            task.cancel()
 
-    done, pending = await asyncio.wait(
-        [receiver_task, sender_task, finish_job_task],
-        return_when=asyncio.FIRST_EXCEPTION
-    )
-
-    await safe_close()
-    app.state.connections[user_id] -= 1
-
-    for task in pending:
-        task.cancel()
-
-    await asyncio.gather(*pending, return_exceptions=True)        
+        await asyncio.gather(*pending, return_exceptions=True)        
 
 SPEECH = 0.5
 SILENCE_MS = 2000
 PARTIAL_MS = 1000
+TRANSCRIPT_UTTERANCE_MS = 30000     # transcribe app: a longer utterance is finished anyway, it may talk without a pause
+STT_WAIT_SECONDS = 5                # a final waits this long for speech recognition to come back (node reconnecting), then the app gets an error
+STT_UNAVAILABLE = "speech recognition is not available right now"
 
 def pcm16_to_float(b: bytes) -> np.ndarray:
     return np.frombuffer(b, dtype=np.int16).astype(np.float32) / 32768.0
 
 @app.websocket("/ws/audio")
 async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_current_user_ws)):
-    await websocket.accept()
-    utterance = []
-    voiced = False
-    silence = 0
-    spoken_ms = 0
-    busy = False
-    buf = bytearray()
-    meta = {"sample_rate": 16000, "channels": 1, "encoding": "pcm_s16le", "language": ""}  # language "" = whisper detects it
-    frame = 512
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
 
-    async def transcribe(wav, kind: str):
-        nonlocal busy
-        if kind == "partial" and busy:
-            return
-        node = app.state.infrastructure.node_by_type.get("speech_to_text")
-        if node and not node.is_connected():
-            if kind == "partial":
+        await websocket.accept()
+        utterance = []
+        voiced = False
+        silence = 0
+        spoken_ms = 0
+        busy = False
+        buf = bytearray()
+        meta = {"sample_rate": 16000, "channels": 1, "encoding": "pcm_s16le", "language": ""}  # language "" = whisper detects it
+        frame = 512
+        # transcribe app (#198): finals are stored in this transcript. offset: seconds of the recording before the first
+        # sample of this connection (the app counts them, also across reconnects), position: samples through the vad since
+        transcript_id = 0
+        offset = 0.0
+        position = 0
+        utterance_start = 0
+        voiced_end = 0
+
+        def seconds(samples: int) -> float:
+            return round(offset + samples / 16000, 2)
+
+        async def transcribe(wav, kind: str, start: float = 0.0, end: float = 0.0):
+            nonlocal busy
+            if kind == "partial" and (busy or not app.state.infrastructure.available("stt")):
                 return
-            while not node.is_connected():
-                await asyncio.sleep(0.5)
-        busy = True
+            if not await app.state.infrastructure.wait_available("stt", STT_WAIT_SECONDS):
+                logger.warning(f"{STT_UNAVAILABLE}, the utterance is lost")
+                await websocket.send_json({"type": "error", "text": STT_UNAVAILABLE})
+                return
+            busy = True
+            try:
+                pcm16 = (np.clip(wav, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+                text = await asyncio.to_thread(app.state.infrastructure.stt, pcm16, kind, meta["language"])
+                stored = {}
+                if kind == "final" and text and transcript_id:
+                    stored["id"] = await asyncio.to_thread(app.state.db.add_transcript_segment, transcript_id, start, end, text)
+                    command = parse_command(text)
+                    if stored["id"] and command and command[0] == BOOKMARK:   # "bookmark <label>": stored like a tapped one
+                        label = command[1]
+                        if not label:       # "bookmark" alone: Bookmark n, like a tapped one
+                            stored_transcript = await asyncio.to_thread(app.state.db.get_transcript, transcript_id)
+                            label = next_bookmark_label([b["label"] for b in (stored_transcript or {}).get("bookmarks", [])])
+                        bookmark_id = await asyncio.to_thread(app.state.db.add_transcript_bookmark, transcript_id, start, label)
+                        stored["bookmark"] = {"id": bookmark_id, "at": start, "label": label}
+                if text or (kind == "final" and text is not None):
+                    await websocket.send_json({"type": kind, "text": text, **({"start": start, "end": end, **stored} if kind == "final" else {})})
+            finally:
+                busy = False
+
+        async def finish_utterance():
+            nonlocal utterance, voiced, silence, spoken_ms
+            if voiced and utterance:
+                await transcribe(np.concatenate(utterance), "final", seconds(utterance_start), seconds(voiced_end))
+            utterance = []
+            voiced = False
+            silence = 0
+            spoken_ms = 0
+
+        inbox = asyncio.Queue()
+
+        async def read():
+            # always reading: uvicorn stops reading at 32 queued messages, then the client's pings
+            # go unanswered while stt runs and it drops the connection
+            try:
+                while (msg := await websocket.receive())["type"] != "websocket.disconnect":
+                    inbox.put_nowait(msg)
+            finally:
+                inbox.put_nowait({"type": "websocket.disconnect"})
+
+        reader = asyncio.create_task(read())
         try:
-            pcm16 = (np.clip(wav, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
-            text = await asyncio.to_thread(app.state.infrastructure.stt, pcm16, kind, meta["language"])
-            if text or (kind == "final" and text is not None):
-                await websocket.send_json({"type": kind, "text": text})
-        finally:
-            busy = False
-
-    inbox = asyncio.Queue()
-
-    async def read():
-        # always reading: uvicorn stops reading at 32 queued messages, then the client's pings
-        # go unanswered while stt runs and it drops the connection
-        try:
-            while (msg := await websocket.receive())["type"] != "websocket.disconnect":
-                inbox.put_nowait(msg)
-        finally:
-            inbox.put_nowait({"type": "websocket.disconnect"})
-
-    reader = asyncio.create_task(read())
-    try:
-        while True:
-            await asyncio.sleep(0)  # lets the reader run between messages
-            msg = await inbox.get()
-            if msg.get("type") == "websocket.disconnect":
-                break
-
-            if "text" in msg and msg["text"]:
-                data = json.loads(msg["text"])
-                if data.get("type") == "audio.start":
-                    meta.update({k: data[k] for k in ("sample_rate", "channels", "encoding", "language") if k in data})
-                    await websocket.send_json({"type": "audio.ready"})
-                elif data.get("type") == "audio.stop":
+            while True:
+                await asyncio.sleep(0)  # lets the reader run between messages
+                msg = await inbox.get()
+                if msg.get("type") == "websocket.disconnect":
                     break
-                continue
 
-            chunk = msg.get("bytes")
-            if not chunk:
-                continue
-            buf.extend(chunk)
-            audio = pcm16_to_float(bytes(buf))
+                if "text" in msg and msg["text"]:
+                    data = json.loads(msg["text"])
+                    if data.get("type") == "audio.start":
+                        meta.update({k: data[k] for k in ("sample_rate", "channels", "encoding", "language") if k in data})
+                        transcript_id = int(data.get("transcript_id") or 0)
+                        if transcript_id and not app.state.db.owns_transcript(user_id, transcript_id):
+                            logger.warning(f"audio for transcript {transcript_id} of another user, not stored")
+                            transcript_id = 0
+                        offset = max(0.0, float(data.get("offset") or 0))
+                        if await app.state.infrastructure.wait_available("stt", STT_WAIT_SECONDS):
+                            await websocket.send_json({"type": "audio.ready"})
+                        else:
+                            await websocket.send_json({"type": "error", "text": STT_UNAVAILABLE})
+                    elif data.get("type") == "audio.stop":
+                        # the app stops on purpose: the words still in the utterance are transcribed, then the hub closes
+                        await finish_utterance()
+                        await websocket.close()
+                        break
+                    continue
 
-            while len(audio) >= frame:
-                piece = audio[:frame]
-                audio = audio[frame:]
-                buf = bytearray(audio.astype(np.int16).tobytes())
-                prob = app.state.vad(torch.from_numpy(piece), 16000).item()
-                if prob >= SPEECH:
-                    voiced = True
-                    silence = 0
-                    utterance.append(piece)
-                    spoken_ms += frame / 16
-                    if spoken_ms >= PARTIAL_MS and inbox.empty():
-                        spoken_ms = 0
-                        wav = np.concatenate(utterance)
-                        await transcribe(wav, "partial")
-                elif voiced:
-                    silence += frame / 16
-                    utterance.append(piece)
-                    if silence >= SILENCE_MS:
-                        wav = np.concatenate(utterance)
-                        await transcribe(wav, "final")
-                        utterance = []
-                        voiced = False
+                chunk = msg.get("bytes")
+                if not chunk:
+                    continue
+                buf.extend(chunk)
+                audio = pcm16_to_float(bytes(buf))
+
+                while len(audio) >= frame:
+                    piece = audio[:frame]
+                    audio = audio[frame:]
+                    buf = bytearray(audio.astype(np.int16).tobytes())
+                    position += frame
+                    prob = app.state.vad(torch.from_numpy(piece), 16000).item()
+                    if prob >= SPEECH:
+                        if not voiced:
+                            utterance_start = position - frame
+                        voiced = True
+                        voiced_end = position
                         silence = 0
-                        spoken_ms = 0
+                        utterance.append(piece)
+                        spoken_ms += frame / 16
+                        if transcript_id and len(utterance) * frame >= TRANSCRIPT_UTTERANCE_MS * 16:
+                            await finish_utterance()
+                        elif spoken_ms >= PARTIAL_MS and inbox.empty():
+                            spoken_ms = 0
+                            wav = np.concatenate(utterance)
+                            await transcribe(wav, "partial")
+                    elif voiced:
+                        silence += frame / 16
+                        utterance.append(piece)
+                        if silence >= SILENCE_MS:
+                            await finish_utterance()
 
-    except WebSocketDisconnect:
-        pass
-    finally:
-        reader.cancel()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            reader.cancel()
+            if transcript_id:
+                app.state.db.set_transcript_duration(transcript_id, seconds(position))

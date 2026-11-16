@@ -5,7 +5,7 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import RowSelector, Header, MessageBox
+from app.ui.widgets import RowSelector, Header, MessageBox, ProfileImageView
 from app.utils import RueckgratConfig, Hub
 
 # common IANA zones, east to west. the hub accepts any IANA name, one not listed here is added when it is the stored one
@@ -92,22 +92,30 @@ class ProfileSettingsPage(ft.Column):
 
     @staticmethod
     def _profile_summary() -> list:
-        # text only. the page is built on every visit, so this is always the stored profile
-        profile = (Hub.get_user_data() or {}).get("profile") or {}
+        # the settings page is built on every visit (including back from edit profile), so this is the stored profile
+        data = Hub.get_user_data() or {}
+        profile = data.get("profile") or {}
         name = (profile.get("name") or "").strip()
-        hair, eyes = profile.get("hair_color"), profile.get("eye_color")
-        attributes = [profile.get("gender"), profile.get("age"), hair and f"{hair} hair", eyes and f"{eyes} eyes", profile.get("ethnicity"), profile.get("body_type")]
+        attributes = [
+            profile.get("gender")
+        ]
         attributes = ", ".join(str(a) for a in attributes if a)
         backstory = (profile.get("backstory") or "").strip()
 
-        texts = []
+        image = ft.Row(
+            [ProfileImageView(file_key=data.get("profile_image_key"))],
+            alignment=ft.MainAxisAlignment.CENTER,
+        )
+        texts = [image]
         if name:
             texts.append(ft.Text(name, weight=ft.FontWeight.BOLD))
         if attributes:
             texts.append(ft.Text(attributes))
         if backstory:
             texts.append(ft.Text(backstory, color=theme.TEXT_DIM, size=12, max_lines=3, overflow=ft.TextOverflow.ELLIPSIS))
-        return texts or [ft.Text("no profile yet", color=theme.TEXT_DIM, size=12)]
+        if not (name or attributes or backstory):
+            texts.append(ft.Text("no profile yet", color=theme.TEXT_DIM, size=12))
+        return texts
 
 
     def on_click_user_profile(self, e=None):

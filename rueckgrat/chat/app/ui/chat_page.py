@@ -5,9 +5,9 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, PriceView, FileCards, FilesPanel
+from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, PriceView, FileCards, FilesPanel, MessageBox
 from app.audio import Text_To_Speech
-from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig
+from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig, Capabilities
 from app.common import get_logger, Utils
 
 logger = get_logger()
@@ -108,6 +108,12 @@ class ChatPage(BasePage):
 
         self.wave_bars, self.wave = self._make_wave()            # over the mic button
         self.tts_wave_bars, self.tts_wave = self._make_wave()    # over the mute button
+        # speech and the mic only while the hub can do them (Capabilities, live)
+        self.mute_slot = Capabilities.bind(ft.Container(content=ft.Stack(expand=True, controls=[self.mute_btn, self.tts_wave])), "tts")
+        self.mic_slot = Capabilities.bind(ft.Container(
+            padding=ft.Padding(left=8, top=0, right=8, bottom=0),
+            content=ft.Stack(expand=True, controls=[self.mic_btn, self.wave]),
+        ), "stt")
 
         self.bubble = ft.Container(
             border_radius=20,
@@ -131,19 +137,8 @@ class ChatPage(BasePage):
                                         controls=[
                                             ft.Container(expand=True),  # spacer
                                             self.emoji_btn,
-                                            ft.Container(
-                                                content=ft.Stack(
-                                                    expand=True,
-                                                    controls=[self.mute_btn, self.tts_wave],
-                                                ),
-                                            ),
-                                            ft.Container(
-                                                padding=ft.Padding(left=8, top=0, right=8, bottom=0),
-                                                content=ft.Stack(
-                                                    expand=True,
-                                                    controls=[self.mic_btn, self.wave],
-                                                ),
-                                            ),                                            
+                                            self.mute_slot,
+                                            self.mic_slot,
                                             self.send_btn,
                                         ]
                                     )
@@ -262,6 +257,7 @@ class ChatPage(BasePage):
 
         self.temperature = float(self.contact.get_llm_temperature())
         Hub.register_incomming_message(self.on_incomming_message)
+        Capabilities.listen(self._on_capabilities)
 
     def on_leave(self):
         if self.page:
@@ -269,6 +265,19 @@ class ChatPage(BasePage):
             if self.page.on_resize == self._on_resize:
                 self.page.on_resize = self._prev_resize
         Hub.unregister_incomming_message(self.on_incomming_message)
+        Capabilities.unlisten(self._on_capabilities)
+
+    def _on_capabilities(self, lost: set):
+        """speech or the mic went away while in use: they stop (their buttons are hidden by Capabilities.bind)"""
+        if "tts" in lost:
+            if self.mute_btn.selected:
+                self.on_mute_toggle()       # off, stops the speech
+            elif Text_To_Speech.state != "idle":
+                Text_To_Speech.kill_current_speech()
+        if "stt" in lost and self.mic_btn.selected:
+            self.on_mic_toggle()
+            if self.page:
+                MessageBox.error(self.page, "Speech recognition is not available right now, the mic is off.", title="Mic off")
 
     def on_mic_toggle(self, e=None):
         self.mic_btn.selected = not self.mic_btn.selected
@@ -340,6 +349,11 @@ class ChatPage(BasePage):
             if self.mic_btn.selected:
                 self.on_mic_toggle()
             return
+        if kind == "error":     # the hub can't transcribe (speech recognition down): the mic goes off and says why
+            if self.mic_btn.selected:
+                self.on_mic_toggle()
+                MessageBox.error(self.page, f"{(payload.get('text') or 'speech recognition failed').capitalize()}, the mic is off.", title="Mic off")
+            return
         text = (payload.get("text") or "").strip()
         if not text:
             return
@@ -369,10 +383,10 @@ class ChatPage(BasePage):
             if message_id is not None:
                 self._bubbles[message_id] = bubble
             if role == "assistant":
-                bubble.action_row.add_button(ft.IconButton(
+                bubble.action_row.add_button(Capabilities.bind(ft.IconButton(
                     icon=ft.Icons.PLAY_ARROW, icon_size=16, tooltip="Play",
                     on_click=lambda e, b=bubble: self._on_play(e.control, b),
-                ))
+                ), "tts"))
             if sources:
                 bubble.action_row.set_sources(sources)
 

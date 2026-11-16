@@ -18,6 +18,7 @@ logger = get_logger()
 
 class WebsearchTool(Tool):
     description = prompts.WEBSEARCH_DESCRIPTION
+    requires = ("internet",)    # also fetch_url and price_finder, they build on it
     thresholds = (0.7, 0.75)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask about recent news, like an election, protests, a disaster or a new product?",

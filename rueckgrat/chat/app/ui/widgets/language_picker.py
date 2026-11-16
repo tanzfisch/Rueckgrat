@@ -10,12 +10,20 @@ def flag_text(code: str, size: int = 22) -> ft.Text:
 
 
 class LanguagePicker:
-    """dialog with the translator languages, open() returns the picked code or "" """
+    """dialog with the translator languages, open() returns the picked code or "" (dismissed).
+    auto: a first entry, the globe "Auto-detect" (whisper detects the language), picking it returns AUTO, current "" selects it"""
+    AUTO = "auto"
 
-    def __init__(self, page: ft.Page, current: str):
+    def __init__(self, page: ft.Page, current: str, auto: bool = False):
         self.page = page
         self._future = None
-        tiles = [
+        tiles = [ft.ListTile(
+            leading=ft.Icon(ft.Icons.LANGUAGE),
+            title=ft.Text("Auto-detect"),
+            selected=not current,
+            on_click=lambda e: self._pick(self.AUTO),
+        )] if auto else []
+        tiles += [
             ft.ListTile(
                 leading=flag_text(code),
                 title=ft.Text(language["name"]),
@@ -41,8 +49,8 @@ class LanguagePicker:
             self._future.set_result("")
 
     @classmethod
-    async def open(cls, page: ft.Page, current: str) -> str:
-        picker = cls(page, current)
+    async def open(cls, page: ft.Page, current: str, auto: bool = False) -> str:
+        picker = cls(page, current, auto)
         picker._future = asyncio.get_running_loop().create_future()
         page.show_dialog(picker.dialog)
         page.update()

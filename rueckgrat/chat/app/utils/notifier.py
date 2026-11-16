@@ -1,6 +1,7 @@
 import shutil
 import subprocess
 import threading
+from typing import Callable
 
 import flet as ft
 
@@ -26,6 +27,7 @@ class Notifier:
     _page = None
     _android = None    # Notifications service
     _active = True     # app in front with input focus, driven by on_app_lifecycle_state_change
+    _lifecycle_handlers: list[Callable[[ft.AppLifecycleState], None]] = []
 
     @classmethod
     def attach(cls, page: ft.Page):
@@ -38,8 +40,18 @@ class Notifier:
             page.run_task(cls._request_permission)
 
     @classmethod
+    def register_lifecycle(cls, callback: Callable[[ft.AppLifecycleState], None]):
+        """the page has one on_app_lifecycle_state_change: Notifier owns it and passes the state on"""
+        cls._lifecycle_handlers.append(callback)
+
+    @classmethod
     def _on_lifecycle(cls, e: ft.AppLifecycleStateChangeEvent):
         cls._active = e.state == ft.AppLifecycleState.RESUME
+        for cb in list(cls._lifecycle_handlers):
+            try:
+                cb(e.state)
+            except Exception as ex:
+                logger.error(f"lifecycle handler {cb!r} failed: {ex!r}")
 
     @classmethod
     async def _request_permission(cls):

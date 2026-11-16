@@ -1,5 +1,5 @@
 name: flet_foreground_service
-description: Flet extension - Android microphone foreground service
+description: Flet extension - Android foreground service (connection, microphone)
 version: 0.1.0
 publish_to: none
 

@@ -152,7 +152,7 @@ class ContactImagePromptCompiler:
 
             # portrait
             if self.image_type == ImageType.Portrait or self.image_type == ImageType.UpperBody or self.image_type == ImageType.FullBody:            
-                # skip everything that could be derived from a reference image
+                # skip everything that could be derived from a reference image (FaceID of that person)
                 if self.use_facial_features:
                     assistant_stack.append(Utils.get_nested_value(self.contact, ["identity", "gender"], ""))
                     assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "general"], ""))
@@ -160,16 +160,12 @@ class ContactImagePromptCompiler:
                     assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "face"], ""))
                     assistant_stack.append(Utils.get_nested_value(self.profile, ["appearance", "skin"], ""))
 
-                # only needed when the user is in the picture. a new user has no user data yet
-                if self.show_user and self.user_data:
+                # only needed when the user is in the picture. a new user has no user data yet.
+                # when the reference is the user, skip gender too: FaceID already provides identity
+                if self.show_user and self.user_data and self.use_facial_features:
                     user_profile = json.loads(self.user_data["profile"])
                     user_gender = Utils.get_nested_value(user_profile, ["gender"], "")
-                    user_age = self.age_to_text(int(Utils.get_nested_value(user_profile, ["age"], "")))
-                    user_hair_color = Utils.get_nested_value(user_profile, ["hair_color"], "")
-                    user_eye_color = Utils.get_nested_value(user_profile, ["eye_color"], "")
-                    user_ethnicity = Utils.get_nested_value(user_profile, ["ethnicity"], "")
-                    user_body_type = Utils.get_nested_value(user_profile, ["body_type"], "")
-                    user_def = f"{user_gender}, {user_age}, {user_body_type}, {user_ethnicity}, {user_hair_color} hair, {user_eye_color} eyes, "
+                    user_def = f"{user_gender}"
                     user_stack.append(user_def)
 
                 if self.context:
@@ -208,12 +204,18 @@ class ContactImagePromptCompiler:
 
             if self.show_assistant:
                 assistant_prompt = ", ".join(x for x in assistant_stack if x)
-                assistant_prompt = f"Person A: {assistant_prompt}"
+                if self.show_user:
+                    assistant_prompt = f"Person A: {assistant_prompt}"
+                else:
+                    assistant_prompt = f"{assistant_prompt}"
                 result += f"{assistant_prompt}\n"
 
             if self.show_user:
                 user_prompt = ", ".join(x for x in user_stack if x)
-                user_prompt = f"Person B: {user_prompt}"
+                if self.show_assistant:
+                    user_prompt = f"Person B: {user_prompt}"
+                else:
+                    user_prompt = f"{user_prompt}"
                 result += f"{user_prompt}\n"
 
             return result

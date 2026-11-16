@@ -12,6 +12,7 @@ DUPLICATE_DISTANCE = 0.05
 
 class RememberTool(Tool):
     description = prompts.REMEMBER_DESCRIPTION
+    requires = ("embedding",)
     question = []
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

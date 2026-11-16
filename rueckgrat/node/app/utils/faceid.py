@@ -1,8 +1,8 @@
 """
 face reference for sdxl image generation: IP-Adapter FaceID PlusV2 (h94/IP-Adapter-FaceID).
 
-the hub sends the contact's current profile image (ImageRequest.reference_image_key + reference_image_b64). from it
-we take the largest face: the insightface (buffalo_l) identity embedding plus the CLIP ViT-H hidden states of
+the hub sends the current profile image of the person in the shot, the contact or the user
+(ImageRequest.reference_image_key + reference_image_b64). from it we take the largest face: the insightface (buffalo_l) identity embedding plus the CLIP ViT-H hidden states of
 the aligned face crop (PlusV2 "clip_embeds", shortcut on). both are cached by reference_image_key, in memory (LRU)
 and on disk. the key is the hub's content hash of the image, so a new profile image is a new key and an old
 entry is never stale, it only ages out (see CACHE_MAX_AGE_SECONDS).

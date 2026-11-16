@@ -1,11 +1,22 @@
-"""the persistent files of a conversation: a docker named volume, mounted at MOUNT_PATH into its bash and run_code
-sandboxes. a named volume and not a hub folder: the sandboxes are started through the host's docker.sock, a bind path
-would be a host path. removed with the conversation, or by the maintenance (ConversationVolumeMaintenanceTask) after
-STALE_DAYS without a message in the conversation. the user browses and downloads them through a short lived reader
-container (ConversationVolume.entries, read_file, write_zip, files): the hub has no volume mounted"""
+"""the persistent sandbox files of one contact: a docker named volume, mounted at MOUNT_PATH into the bash and run_code
+sandboxes of all the contact's conversations, so projects outlive a conversation. a named volume and not a hub folder:
+the sandboxes are started through the host's docker.sock, a bind path would be a host path. removed with the contact,
+or by the maintenance (ConversationVolumeMaintenanceTask) when the contact is gone or after STALE_DAYS without a message
+in any of its conversations. the user browses and downloads them through a short lived reader container
+(SandboxVolume.entries, read_file, write_zip, files): the hub has no volume mounted.
+
+the layout (LAYOUT, made at every sandbox start):
+  projects/<name>/        one folder per project, its PROJECT.md says what it is, its status and how to run it
+  workdir/<conversation>/ where bash and run_code of a conversation start, its scratch work
+  data/documents/<hash>/  the files write_file writes, <hash> of the content: a write never overwrites another
+  data/images/            generated images
+  data/tts/               generated text to speach files
+  .cache/rueckgrat/shell/<conversation>/  the bash terminal of a conversation (its folder, variables, functions)"""
+import hashlib
 import io
 import posixpath
 import tarfile
+import time
 import zipfile
 from contextlib import contextmanager, ExitStack
 from contextvars import ContextVar
@@ -14,19 +25,29 @@ from typing import BinaryIO, Iterator
 from app.common import get_logger
 logger = get_logger()
 
-MOUNT_PATH = "/sandbox/files"
+MOUNT_PATH = "/home"
 SANDBOX_USER = "1000:1000"      # owns the files, the bash tool runs as it. run_code runs as root, the files are handed back after
-STALE_DAYS = 7
-LABEL = "rueckgrat.conversation_files"
+SANDBOX_UID = 1000
+STALE_DAYS = 30
+LABEL = "rueckgrat.contact_files"
+PROJECTS = "projects"
+PROJECT_FILE = "PROJECT.md"
+WORKDIR = "workdir"
+DOCUMENTS = "data/documents"
+IMAGES = "data/images"
+TTS = "data/tts"
+LAYOUT = (PROJECTS, WORKDIR, DOCUMENTS, IMAGES, TTS)
+SHELL_STATE = ".cache/rueckgrat/shell"
+HASH_CHARS = 12         # of the sha256 of a document's content, its folder in DOCUMENTS
 # the image of the reader container: the python sandbox, in the image cache already (keep_template), it has find
 READER_IMAGE = "ghcr.io/vndee/sandbox-python-311-bullseye"
 READER_TIMEOUT = 30     # seconds for listing a folder
 CHUNK = 64 * 1024
 # left out of a zip on request: version control, caches and installed packages, not the user's work
 EXCLUDED = frozenset({".git", ".cache", ".local", ".npm", "__pycache__", "node_modules", ".venv", "venv"})
-# the type bits of go's os.FileMode in get_archive's stat: dir, symlink, device, named pipe, socket, char device, irregular
 # the open sandboxes of a sharing() block: {"stack": ExitStack, "sessions": {key: (its ExitStack, session)}}
 _SHARED: ContextVar[dict | None] = ContextVar("rueckgrat_shared_sessions", default=None)
+# the type bits of go's os.FileMode in get_archive's stat: dir, symlink, device, named pipe, socket, char device, irregular
 _NOT_A_FILE = (1 << 31) | (1 << 27) | (1 << 26) | (1 << 25) | (1 << 24) | (1 << 21) | (1 << 19)
 
 
@@ -35,14 +56,22 @@ def _client():
     return docker.from_env()
 
 
-class ConversationVolume:
-    def __init__(self, user_id: int, conversation_id: int):
+class SandboxVolume:
+    def __init__(self, user_id: int, contact_id: int):
         self.user_id = int(user_id)
-        self.conversation_id = int(conversation_id)
+        self.contact_id = int(contact_id)
+
+    @classmethod
+    def of_conversation(cls, db, user_id: int, conversation_id: int) -> "SandboxVolume":
+        """the volume of the conversation's contact. ValueError when the conversation is gone"""
+        conversation = db.get_conversation(conversation_id)
+        if not conversation:
+            raise ValueError(f"conversation {conversation_id} not found")
+        return cls(user_id, conversation["contact_id"])
 
     @property
     def name(self) -> str:
-        return f"rueckgrat-files-{self.conversation_id}"
+        return f"rueckgrat-files-contact-{self.contact_id}"
 
     @staticmethod
     def clean_path(path: str) -> str:
@@ -54,6 +83,54 @@ class ConversationVolume:
         path = posixpath.normpath(path) if path else ""
         return "" if path == "." else path
 
+    @staticmethod
+    def workdir(conversation_id: int) -> str:
+        """the folder a conversation's bash and run_code start in, absolute"""
+        return f"{MOUNT_PATH}/{WORKDIR}/{int(conversation_id)}"
+
+    @staticmethod
+    def shell_state(conversation_id: int) -> str:
+        """the folder of the conversation's bash terminal state (BashTool), absolute"""
+        return f"{MOUNT_PATH}/{SHELL_STATE}/{int(conversation_id)}"
+
+    @staticmethod
+    def document_path(name: str, data: bytes) -> str:
+        """where write_file keeps the file name (a relative path) with these bytes: DOCUMENTS/<hash>/<name>"""
+        return f"{DOCUMENTS}/{hashlib.sha256(data).hexdigest()[:HASH_CHARS]}/{name}"
+
+    def current_dir(self, conversation_id: int) -> str:
+        """the folder the conversation's bash ended in (its shell state), relative to MOUNT_PATH, its workdir when it
+        has none yet or it is outside the files"""
+        default = self.clean_path(self.workdir(conversation_id).removeprefix(MOUNT_PATH + "/"))
+        try:
+            _, _, chunks = self.read_file(f"{self.shell_state(conversation_id)}/cwd".removeprefix(MOUNT_PATH + "/"))
+            cwd = b"".join(chunks).decode("utf-8", errors="replace").strip()
+        except FileNotFoundError:
+            return default
+        if cwd == MOUNT_PATH:
+            return ""
+        try:
+            return self.clean_path(cwd.removeprefix(MOUNT_PATH + "/")) if cwd.startswith(MOUNT_PATH + "/") else default
+        except ValueError:
+            return default
+
+    def resolve(self, path: str, conversation_id: int) -> str:
+        """a path as the AI gives it, absolute under MOUNT_PATH or relative to the conversation's current folder
+        (current_dir), as a clean_path. ValueError when it is outside the files"""
+        path = (path or "").replace("\\", "/").strip()
+        if path == MOUNT_PATH or path.startswith(MOUNT_PATH + "/"):
+            joined = path.removeprefix(MOUNT_PATH).lstrip("/")
+        elif path.startswith("/") or path.startswith("~"):
+            if not (path == "~" or path.startswith("~/")):
+                raise ValueError(f"{path} is outside your files")
+            joined = path[1:].lstrip("/")
+        else:
+            joined = posixpath.join(self.current_dir(conversation_id), path)
+        joined = posixpath.normpath(joined) if joined else ""
+        if joined.startswith("..") or joined.startswith("/"):
+            raise ValueError(f"{path} is outside your files")
+        return self.clean_path("" if joined == "." else joined)
+
     def exists(self) -> bool:
         from docker.errors import NotFound
         try:
@@ -63,10 +140,10 @@ class ConversationVolume:
             return False
 
     @classmethod
-    def all(cls, user_id: int | None = None) -> list["ConversationVolume"]:
+    def all(cls, user_id: int | None = None) -> list["SandboxVolume"]:
         """the volumes there are, of one user (None = all users)"""
         filters = {"label": [LABEL] + ([f"user_id={int(user_id)}"] if user_id is not None else [])}
-        return [cls(volume.attrs["Labels"]["user_id"], volume.attrs["Labels"]["conversation_id"])
+        return [cls(volume.attrs["Labels"]["user_id"], volume.attrs["Labels"]["contact_id"])
                 for volume in _client().volumes.list(filters=filters)]
 
     def _mount(self, read_only: bool = False):
@@ -74,20 +151,30 @@ class ConversationVolume:
         from docker.types import Mount
         if not read_only and not self.exists():
             _client().volumes.create(self.name, labels={LABEL: "1", "user_id": str(self.user_id),
-                                                        "conversation_id": str(self.conversation_id)})
+                                                        "contact_id": str(self.contact_id)})
         return Mount(target=MOUNT_PATH, source=self.name, type="volume", read_only=read_only)
 
     @contextmanager
-    def _reader(self, command: list[str] | None = None):
-        """a created (not started) container with the volume read only at MOUNT_PATH, no network, removed when the
-        block ends. get_archive reads from it as it is, a command (find) needs start()"""
-        container = _client().containers.create(READER_IMAGE, command, mounts=[self._mount(read_only=True)],
+    def _reader(self, command: list[str] | None = None, read_only: bool = True):
+        """a created (not started) container with the volume at MOUNT_PATH (read only unless read_only False), no network,
+        removed when the block ends. get_archive and put_archive work on it as it is, a command (find) needs start()"""
+        container = _client().containers.create(READER_IMAGE, command, mounts=[self._mount(read_only=read_only)],
                                                 user=SANDBOX_USER, network_disabled=True, mem_limit="128m",
                                                 labels={LABEL: "reader"})
         try:
             yield container
         finally:
             container.remove(force=True)
+
+    def _output(self, command: list[str]) -> bytes | None:
+        """the stdout of command in a reader container, None when it failed. no volume: None"""
+        if not self.exists():
+            return None
+        with self._reader(command) as container:
+            container.start()
+            status = container.wait(timeout=READER_TIMEOUT)
+            output = container.logs(stdout=True, stderr=False)
+        return None if status.get("StatusCode") else output
 
     def entries(self, path: str = "") -> list[dict]:
         """the folder's files and folders [{"name", "path", "type" file|dir|link, "size", "modified" epoch}], folders
@@ -99,12 +186,8 @@ class ConversationVolume:
             return []
         folder = posixpath.join(MOUNT_PATH, path) if path else MOUNT_PATH
         # \0 ends a line: a name may hold tabs and newlines. -P (the default): links are listed, never followed
-        command = ["find", folder, "-mindepth", "1", "-maxdepth", "1", "-printf", "%y\\t%s\\t%T@\\t%f\\0"]
-        with self._reader(command) as container:
-            container.start()
-            status = container.wait(timeout=READER_TIMEOUT)
-            output = container.logs(stdout=True, stderr=False)
-        if status.get("StatusCode"):
+        output = self._output(["find", folder, "-mindepth", "1", "-maxdepth", "1", "-printf", "%y\\t%s\\t%T@\\t%f\\0"])
+        if output is None:
             raise FileNotFoundError(path)
         kinds = {"d": "dir", "f": "file", "l": "link"}
         entries = []
@@ -118,9 +201,19 @@ class ConversationVolume:
         return sorted(entries, key=lambda entry: (entry["type"] != "dir", entry["name"].lower()))
 
     def has_project(self) -> bool:
-        """whether the files hold the user's work: a file or folder at the top that is not hidden or EXCLUDED (the bash
-        tool keeps its shell state in .cache). False without a volume"""
-        return any(not entry["name"].startswith(".") and entry["name"] not in EXCLUDED for entry in self.entries())
+        """whether the files hold the user's work: anything not hidden in PROJECTS or WORKDIR (of any conversation).
+        False without a volume"""
+        output = self._output(["sh", "-c", f"find {MOUNT_PATH}/{PROJECTS} {MOUNT_PATH}/{WORKDIR} -mindepth 1 "
+                                            "-not -name '.*' -print -quit 2>/dev/null; true"])
+        return bool((output or b"").strip())
+
+    def projects(self) -> list[tuple[str, str]]:
+        """(folder name, first line of its PROJECT_FILE or "") of every project in PROJECTS, by name. [] without a volume"""
+        script = (f'for d in {MOUNT_PATH}/{PROJECTS}/*/; do [ -d "$d" ] || continue; '
+                  f'printf "%s\\t%s\\0" "$(basename "$d")" "$(head -n 1 "${{d}}{PROJECT_FILE}" 2>/dev/null | cut -c1-200)"; done')
+        output = self._output(["sh", "-c", script]) or b""
+        projects = [tuple(line.split("\t", 1)) for line in output.decode("utf-8", errors="replace").split("\0") if "\t" in line]
+        return sorted(((name, first.strip().lstrip("#").strip()) for name, first in projects), key=lambda p: p[0].lower())
 
     def read_file(self, path: str) -> tuple[str, int, Iterator[bytes]]:
         """(name, size, chunks) of one regular file, the reader container stays until the chunks are read (or closed).
@@ -149,6 +242,30 @@ class ConversationVolume:
                 while source and (data := source.read(CHUNK)):
                     yield data
         return posixpath.basename(path), int(stat["size"]), chunks()
+
+    def write_file(self, path: str, data: bytes) -> str:
+        """writes data as the file path (a clean_path, its folders made), owned by SANDBOX_USER, through a reader
+        container with the volume writable. an existing file is replaced. returns path"""
+        path = self.clean_path(path)
+        if not path:
+            raise ValueError("no file name")
+        archive = io.BytesIO()
+        now = time.time()
+        with tarfile.open(fileobj=archive, mode="w") as tar:
+            parts = path.split("/")
+            for depth in range(1, len(parts)):
+                folder = tarfile.TarInfo("/".join(parts[:depth]))
+                folder.type, folder.mode, folder.mtime = tarfile.DIRTYPE, 0o755, now
+                folder.uid = folder.gid = SANDBOX_UID
+                tar.addfile(folder)
+            member = tarfile.TarInfo(path)
+            member.size, member.mode, member.mtime = len(data), 0o644, now
+            member.uid = member.gid = SANDBOX_UID
+            tar.addfile(member, io.BytesIO(data))
+        with self._reader(read_only=False) as container:
+            if not container.put_archive(MOUNT_PATH, archive.getvalue()):
+                raise OSError(f"{path} could not be written")
+        return path
 
     def _walk(self, path: str, exclude: bool) -> Iterator[tuple[list[str], tarfile.TarInfo, tarfile.TarFile]]:
         """(parts below path, member, its tar) of the folders and regular files at path (a clean_path), read from a
@@ -179,7 +296,7 @@ class ConversationVolume:
         names (.git, caches, installed packages) anywhere below it. links and special files are left out. no volume
         is an empty zip. returns the zip's file name. FileNotFoundError when path isn't there"""
         path = self.clean_path(path)
-        top = posixpath.basename(path) or f"conversation_{self.conversation_id}_files"
+        top = posixpath.basename(path) or "files"
         with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
             for parts, member, tar in self._walk(path, exclude):
                 name = "/".join([top, *parts])
@@ -201,9 +318,12 @@ class ConversationVolume:
                 data = tar.extractfile(member).read() if max_bytes is None or member.size <= max_bytes else None
                 yield "/".join([part for part in (path, *parts) if part]), member.size, data
 
-    def _own(self, container) -> None:
-        """hands every file to SANDBOX_USER: a new volume belongs to root, and so do the files a root run_code wrote"""
-        container.exec_run(f"chown -R {SANDBOX_USER} {MOUNT_PATH}", user="root")
+    def _own(self, container, layout: bool = False) -> None:
+        """hands every file to SANDBOX_USER: a new volume belongs to root, and so do the files a root run_code wrote.
+        layout: the LAYOUT folders are made first"""
+        folders = " ".join(f"{MOUNT_PATH}/{folder}" for folder in LAYOUT)
+        container.exec_run(["sh", "-c", (f"mkdir -p {folders} && " if layout else "") + f"chown -R {SANDBOX_USER} {MOUNT_PATH}"],
+                           user="root")
 
     @classmethod
     @contextmanager
@@ -250,7 +370,7 @@ class ConversationVolume:
         from llm_sandbox import SandboxSession
         configs = {**runtime_configs, "mounts": [*runtime_configs.get("mounts", []), self._mount()]}
         with SandboxSession(keep_template=True, runtime_configs=configs, encoding_errors="replace", **kwargs) as session:
-            self._own(session.container)
+            self._own(session.container, layout=True)
             try:
                 yield session
             finally:
@@ -262,16 +382,15 @@ class ConversationVolume:
             from docker.errors import NotFound
             try:
                 _client().volumes.get(self.name).remove(force=True)
-                logger.info(f"files of conversation {self.conversation_id} removed")
+                logger.info(f"files of contact {self.contact_id} removed")
             except NotFound:
                 pass
         except Exception as e:
-            logger.error(f"files of conversation {self.conversation_id} not removed {repr(e)}")
+            logger.error(f"files of contact {self.contact_id} not removed {repr(e)}")
 
 
 def _zip_info(name: str, member: tarfile.TarInfo) -> zipfile.ZipInfo:
     """a zip entry with the tar member's time and permissions (zip times start in 1980)"""
-    import time
     info = zipfile.ZipInfo(name, time.localtime(max(member.mtime, 315532800))[:6])
     info.external_attr = (member.mode & 0xFFFF | (0o040000 if member.isdir() else 0o100000)) << 16
     info.compress_type = zipfile.ZIP_DEFLATED

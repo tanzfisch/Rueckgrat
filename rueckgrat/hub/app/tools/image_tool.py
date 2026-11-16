@@ -9,6 +9,7 @@ class ImageTool(Tool):
     """a tool that makes one image (generate_image, take_photo). with a message the planned file is attached before the
     image exists. without one (agent jobs, companions) the file is held in the result's "attachments" and attached by
     attach_held to the message the job posts later"""
+    requires = ("image",)
 
     def attach_planned_image(self, image_task) -> None:
         """attaches the image file of image_task (not started yet) to the message in self.message_id (set by ToolRegistry, the assistant message being made).

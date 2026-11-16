@@ -27,7 +27,7 @@ URL_PATTERN = re.compile(rf"""
 class ToolDetectionTask(Task):
     """detecting possible tools requests so we can offer the tools to the AI to use"""
     def __init__(self, prompt: str, tool_registry, infrastructure, excluded_tools: tuple = (), volume=None):
-        """volume: the conversation's files (ConversationVolume), the PROJECT_QUESTIONS are asked. None: they are not"""
+        """volume: the contact's files (SandboxVolume), the PROJECT_QUESTIONS are asked. None: they are not"""
         super().__init__()
         self.prompt = prompt
         self.excluded_tools = excluded_tools
@@ -59,7 +59,8 @@ class ToolDetectionTask(Task):
         """one laya question per id "<tool>__<i>", a tool without questions gets one from its description"""
         questions = {}
         for name, cls in self.tool_registry.tools.items():
-            if name in self.tool_registry.PROMPT_TOOLS or name in self.excluded_tools or name == "fetch_url":
+            # the optional ones (PROMPT_TOOLS, companions like share_file) are offered without a question
+            if self.tool_registry.optional(name) or name in self.excluded_tools or name == "fetch_url":
                 continue
 
             tool_questions = cls.question or [f"Does answering the user's latest message need the tool '{name}': {cls.get_description()}?"]
@@ -82,11 +83,11 @@ class ToolDetectionTask(Task):
         return getattr(cls, "thresholds", None) or (RECOMMENDED_THRESHOLD, MANDATORY_THRESHOLD)
 
     def _has_project(self) -> bool:
-        """whether the conversation's files hold a project (ConversationVolume.has_project), False when they can't be read"""
+        """whether the contact's files hold a project (SandboxVolume.has_project), False when they can't be read"""
         try:
             self.project = self.volume.has_project()
         except Exception as e:
-            logger.error(f"files of the conversation not checked for a project {repr(e)}")
+            logger.error(f"files of the contact not checked for a project {repr(e)}")
             self.project = False
         return self.project
 

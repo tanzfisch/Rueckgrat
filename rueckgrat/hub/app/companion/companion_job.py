@@ -35,7 +35,7 @@ class CompanionJob(AgentJob):
     (run_tools), one decision call with their results, then the answer is applied: calendar rows, maybe a message.
     the scheduler runs it on its own thread (run()) and re-arms or closes the row"""
     # it may take a photo (sent with its message), not make pictures or files: those are for jobs the user asked for
-    EXCLUDED_TOOLS = ("generate_image", "write_file")
+    EXCLUDED_TOOLS = ("generate_image", "write_file", "share_file")
 
     def __init__(self, row: dict, db, infrastructure, tool_registry, tz, now: datetime):
         super().__init__("companion", row["kind"], infrastructure=infrastructure)

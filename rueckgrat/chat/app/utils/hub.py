@@ -21,7 +21,10 @@ class Hub:
     ws_task = None
     websocket_client = None
     _last_health: Optional[str] = None
+    capabilities: Optional[dict] = None    # the hub's at the last heartbeat (check_health), see Capabilities
+    expected: Optional[list] = None        # the capabilities the system is set up for, same heartbeat
     _refresh_lock: Optional[asyncio.Lock] = None
+    _session_handlers: list[Callable[[bool], None]] = []
 
     @classmethod
     def init(cls, config):
@@ -111,6 +114,20 @@ class Hub:
         cls.user_name = data.get("user_name", cls.user_name)
         cls.nsfw_allowed = bool(data.get("nsfw_allowed", False))
         cls.config.refresh_token = cls.refresh_token
+        cls._notify_session(True)
+
+    @classmethod
+    def register_session_change(cls, callback: Callable[[bool], None]):
+        """callback(True) after a login or session refresh, callback(False) on logout"""
+        cls._session_handlers.append(callback)
+
+    @classmethod
+    def _notify_session(cls, logged_in: bool):
+        for cb in list(cls._session_handlers):
+            try:
+                cb(logged_in)
+            except Exception as e:
+                logger.error(f"session handler {cb!r} failed: {e!r}")
 
     @classmethod
     def has_stored_session(cls) -> bool:
@@ -188,12 +205,18 @@ class Hub:
         cls.user_id = -1
         cls.user_name = ""
         cls.nsfw_allowed = False
+        cls._notify_session(False)
 
     @classmethod
     async def _start_websocket(cls, token: str):
         # supervised: reconnects after drops. a second login replaces the old token's supervisor
         await cls.websocket_client.close()
         cls.websocket_client.start(token)
+
+    @classmethod
+    async def check_connection(cls) -> bool:
+        """see WebSocketClient.check_alive, e.g. when the app comes back from the background"""
+        return await cls.websocket_client.check_alive()
 
     @classmethod
     def register_connection_state(cls, callback: Callable[[str], None]):
@@ -247,7 +270,8 @@ class Hub:
 
     @classmethod
     def check_health(cls):
-        """returns True when everything is up. only logs when the state changes"""
+        """returns True when everything is up. only logs when the state changes. keeps the hub's capabilities (what can be
+        used now) in capabilities. not reachable: the last ones stay"""
         url = f"{cls.url}/health"
         try:
             response = requests.get(url, timeout=30, verify=cls.server_cert)
@@ -255,6 +279,8 @@ class Hub:
                 data = response.json()
                 status = data.get("status", "error")
                 message = data.get("message", "")
+                cls.capabilities = data.get("capabilities", cls.capabilities)
+                cls.expected = data.get("expected", cls.expected)
             else:
                 status, message = "unreachable", f"http {response.status_code}"
         except Exception as e:
@@ -488,10 +514,93 @@ class Hub:
             )
             if response.status_code == 200:
                 return response.json()
-            logger.error(f"get gallery - {response.status_code} {response.reason}")
+            logger.error(f"failed to get gallery {response.status_code} {response.reason}")
         except Exception as e:
             logger.error(f"failed to get_gallery {repr(e)}")
         return None
+
+    @classmethod
+    def _transcripts(cls, send, route: str = "", timeout: float = 10, **kwargs):
+        """#198 the hub's json answer of /transcripts{route}, None on an error"""
+        try:
+            response = send(
+                f"{cls.url}/transcripts{route}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=timeout,
+                verify=cls.server_cert,
+                **kwargs,
+            )
+            if response.status_code == 200:
+                return response.json()
+            logger.error(f"transcripts{route} - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to reach transcripts{route} {repr(e)}")
+        return None
+
+    @classmethod
+    def create_transcript(cls, language: str = "") -> int:
+        """a new recording of the transcribe app, its id or 0"""
+        data = cls._transcripts(requests.post, json={"language": language})
+        return data.get("transcript_id", 0) if data else 0
+
+    @classmethod
+    def get_transcripts(cls) -> list | None:
+        """the user's transcripts, newest first: [{id, language, duration, created_at, segments, bookmarks, preview}]. None on an error"""
+        data = cls._transcripts(requests.get)
+        return data.get("transcripts", []) if data else None
+
+    @classmethod
+    def get_transcript(cls, transcript_id: int) -> dict | None:
+        """{id, language, duration, created_at, segments: [{id, start, end, text, edited}], bookmarks: [{id, at, label}]}, None on an error"""
+        data = cls._transcripts(requests.get, f"/{transcript_id}")
+        return data.get("transcript") if data else None
+
+    @classmethod
+    def delete_transcript(cls, transcript_id: int) -> bool:
+        return cls._transcripts(requests.delete, f"/{transcript_id}") is not None
+
+    @classmethod
+    def add_transcript_bookmark(cls, transcript_id: int, at: float, label: str = "") -> int:
+        """a bookmark at second at of the recording, its id or 0"""
+        data = cls._transcripts(requests.post, f"/{transcript_id}/bookmarks", json={"at": at, "label": label})
+        return data.get("bookmark_id", 0) if data else 0
+
+    @classmethod
+    def add_transcript_heading(cls, transcript_id: int, at: float, text: str) -> int:
+        """a heading added at second at (between two segments), its segment id or 0"""
+        data = cls._transcripts(requests.post, f"/{transcript_id}/headings", json={"at": at, "text": text})
+        return data.get("segment_id", 0) if data else 0
+
+    @classmethod
+    def summarize_transcript(cls, transcript_id: int, text: str) -> str | None:
+        """a summary of text (Transcript.plain_text) in a few sentences by the hub's llm, None on an error. slow"""
+        data = cls._transcripts(requests.post, f"/{transcript_id}/summary", timeout=600, json={"text": text})
+        return data.get("summary") if data else None
+
+    @classmethod
+    def enhance_transcript(cls, transcript_id: int, title: str) -> int:
+        """an enhanced copy (filler words out, grammar fixed) named title, its id or 0. slow: the llm goes through all of it"""
+        data = cls._transcripts(requests.post, f"/{transcript_id}/enhance", timeout=3600, json={"title": title})
+        return data.get("transcript_id", 0) if data else 0
+
+    @classmethod
+    def split_transcript_segment(cls, transcript_id: int, segment_id: int, parts: list[dict]) -> list[int]:
+        """the segment becomes parts [{start, end, text, kind}] at once, their ids in order or [] on an error"""
+        data = cls._transcripts(requests.post, f"/{transcript_id}/segments/{segment_id}/split", json={"parts": parts})
+        return data.get("segment_ids", []) if data else []
+
+    @classmethod
+    def edit_transcript_segment(cls, transcript_id: int, segment_id: int, text: str | None) -> bool:
+        """the user's text for a segment, None: back to the recognised one"""
+        return cls._transcripts(requests.patch, f"/{transcript_id}/segments/{segment_id}", json={"text": text}) is not None
+
+    @classmethod
+    def rename_transcript_bookmark(cls, transcript_id: int, bookmark_id: int, label: str) -> bool:
+        return cls._transcripts(requests.patch, f"/{transcript_id}/bookmarks/{bookmark_id}", json={"label": label}) is not None
+
+    @classmethod
+    def delete_transcript_bookmark(cls, transcript_id: int, bookmark_id: int) -> bool:
+        return cls._transcripts(requests.delete, f"/{transcript_id}/bookmarks/{bookmark_id}") is not None
 
     @classmethod
     def upload_contact_image(cls, contact_id: int, data: bytes) -> Optional[str]:
@@ -502,6 +611,33 @@ class Hub:
     def pick_contact_image(cls, contact_id: int, file_key: str) -> Optional[str]:
         """an image of the gallery becomes the contact's profile image, returns its file key or None"""
         return cls._set_contact_image(requests.put, f"contacts/{contact_id}/image/{file_key}")
+
+    @classmethod
+    def upload_user_image(cls, data: bytes) -> Optional[str]:
+        """png, jpeg or webp bytes become the user's profile image, returns its file key or None"""
+        return cls._set_contact_image(requests.post, "users/me/image", data)
+
+    @classmethod
+    def pick_user_image(cls, file_key: str) -> Optional[str]:
+        """an image of the gallery becomes the user's profile image, returns its file key or None"""
+        return cls._set_contact_image(requests.put, f"users/me/image/{file_key}")
+
+    @classmethod
+    def remove_user_image(cls) -> bool:
+        """clears the user's profile image. True if the hub accepted it"""
+        try:
+            response = requests.delete(
+                f"{cls.url}/users/me/image",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=60,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return True
+            logger.error(f"remove user image - {response.status_code} {response.text}")
+        except Exception as e:
+            logger.error(f"failed to remove the user image {repr(e)}")
+        return False
 
     @classmethod
     def _set_contact_image(cls, send, path: str, data: bytes | None = None) -> Optional[str]:
@@ -515,9 +651,9 @@ class Hub:
             )
             if response.status_code == 200:
                 return response.json().get("file_key")
-            logger.error(f"set contact image - {response.status_code} {response.text}")
+            logger.error(f"set image - {response.status_code} {response.text}")
         except Exception as e:
-            logger.error(f"failed to set the contact image {repr(e)}")
+            logger.error(f"failed to set the image {repr(e)}")
         return None
 
     @classmethod

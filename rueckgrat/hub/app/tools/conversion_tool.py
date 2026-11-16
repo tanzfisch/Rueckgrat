@@ -218,12 +218,15 @@ class LiveRateProvider:
     _lock = threading.Lock()
 
     @classmethod
-    def get_table(cls, code: str) -> Dict[str, Any]:
-        """returns {"date": "YYYY-MM-DD", "rates": {code: rate}} where rate = units of code per 1 base"""
+    def get_table(cls, code: str, online: bool = True) -> Dict[str, Any]:
+        """returns {"date": "YYYY-MM-DD", "rates": {code: rate}} where rate = units of code per 1 base.
+        online False (the hub has no internet): only a cached table, no request that would wait for its timeout"""
         with cls._lock:
             cached = cls._cache.get(code)
             if cached and time.time() - cached[0] < LIVE_RATE_CACHE_SECONDS:
                 return cached[1]
+        if not online:
+            raise ConversionError("exchange rates need the internet, which is not available right now")
 
         last_error = None
         for url in LIVE_RATE_URLS:
@@ -245,11 +248,11 @@ class LiveRateProvider:
         raise ConversionError(f"exchange rate service unreachable ({type(last_error).__name__})")
 
     @classmethod
-    def rate(cls, from_code: str, to_code: str) -> Tuple[float, str]:
+    def rate(cls, from_code: str, to_code: str, online: bool = True) -> Tuple[float, str]:
         """units of to_code per 1 from_code, plus the rate date"""
         if from_code == to_code:
             return 1.0, "n/a"
-        table = cls.get_table(from_code)
+        table = cls.get_table(from_code, online)
         rate = table["rates"].get(to_code)
         if rate is None:
             raise ConversionError(f"unknown unit or currency '{to_code.upper()}'")
@@ -323,8 +326,9 @@ def _format(value: float) -> str:
     return text.rstrip("0").rstrip(".") if "." in text else text
 
 
-def convert(amount: Any, from_unit: str, to_unit: str) -> Dict[str, Any]:
-    """core conversion, no side effects. raises ConversionError for user facing problems"""
+def convert(amount: Any, from_unit: str, to_unit: str, online: bool = True) -> Dict[str, Any]:
+    """core conversion, no side effects. raises ConversionError for user facing problems.
+    online False: units only, the live rates (currencies, metals) only from the cache"""
     try:
         value = float(str(amount).replace(",", "").replace("_", "").strip())
     except ValueError:
@@ -345,7 +349,7 @@ def convert(amount: Any, from_unit: str, to_unit: str) -> Dict[str, Any]:
         }
 
     if src["kind"] == "live" and dst["kind"] == "live":
-        rate, date = LiveRateProvider.rate(src["code"], dst["code"])
+        rate, date = LiveRateProvider.rate(src["code"], dst["code"], online)
         result = value * src["multiplier"] * rate / dst["multiplier"]
         unit_rate = src["multiplier"] * rate / dst["multiplier"]
         return {
@@ -390,11 +394,15 @@ class ConversionTool(Tool):
         MessageQueue().send_status_message("converting")
 
         try:
-            result = convert(amount, from_unit, to_unit)
+            # units work offline, the currencies and metals need the internet (Infrastructure.available)
+            online = self.infrastructure is None or self.infrastructure.available("internet")
+            result = convert(amount, from_unit, to_unit, online)
             self.add_result({"tool": self.name(), "text": result['text']})
             return
         except ConversionError as e:
             logger.error(f"convert {amount} {from_unit} -> {to_unit} failed: {e}")
+            self.add_result({"tool": self.name(), "text": f"convert {amount} {from_unit} -> {to_unit} failed: {e}"})
+            return
         except Exception as e:
             logger.error(f"failed to convert {repr(e)}")
 
