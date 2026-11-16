@@ -29,9 +29,12 @@ MAX_RETRY_DELAY = 2
 RESEND_BYTES = SAMPLE_RATE * 2 * 60
 
 class AudioStreamer:
-    def __init__(self, uri: str, token: str, cert=None, on_message=None, language: str = ""):
+    def __init__(self, uri: str, token: str, cert=None, on_message=None, language: str = "", transcript_id: int = 0,
+                 start_offset: float = 0.0):
         self.uri = uri
         self.language = language  # whisper language code, "" = the hub's stt detects it
+        self.transcript_id = transcript_id  # transcribe app (#198): the hub stores the finals there, 0 = nowhere
+        self.start_offset = start_offset    # seconds of the transcript before this recording (continued), the clock starts there
         self.token = token
         self.cert = cert
         self.on_message = on_message
@@ -48,6 +51,10 @@ class AudioStreamer:
         self._queued_buffer = bytearray()
         self._skip_partials = False
         self._resample_pos = 0.0
+        self._captured = 0                      # bytes recorded since start(), the clock of position
+        self._finishing = threading.Event()     # finish(): send what is left, then audio.stop
+        self._finished = threading.Event()      # the hub closed after audio.stop
+        self._stop_sent = False
         self.recorder = far.AudioRecorder(
             configuration=self._recorder_config(SAMPLE_RATE),
             on_stream=self._on_flet_stream,
@@ -124,10 +131,18 @@ class AudioStreamer:
         self._resample_pos = pos - len(samples)
         return out.tobytes()
 
+    @property
+    def position(self) -> float:
+        """seconds of the recording: start_offset + recorded since start(). the hub tells the times of the finals in the same clock"""
+        return self.start_offset + self._captured / (SAMPLE_RATE * 2)
+
     async def start(self):
         if self._send_thread and self._send_thread.is_alive():
             return
         self._stop.clear()
+        self._finishing.clear()
+        self._finished.clear()
+        self._captured = 0
         self._send_thread = threading.Thread(target=self._thread_main, daemon=True)
         self._send_thread.start()
         if self._is_mobile():
@@ -165,8 +180,16 @@ class AudioStreamer:
                 return
         raise RuntimeError("start_recording returned False")
 
-    async def stop(self):
-        self._stop.set()
+    async def finish(self, timeout: float = 60):
+        """a stop that loses nothing: the mic goes off, the audio not sent yet is sent, audio.stop makes the hub transcribe
+        the last words and close. then stop(), also when the hub did not answer within timeout seconds"""
+        await self._stop_mic()
+        self._finishing.set()
+        if not await asyncio.to_thread(self._finished.wait, timeout):
+            logger.warning("the hub did not finish the audio within %ss, the last words may be missing", timeout)
+        await self.stop()
+
+    async def _stop_mic(self):
         if self._stream:
             self._stream.stop()
             self._stream.close()
@@ -177,6 +200,10 @@ class AudioStreamer:
         except Exception:
             pass
         await KeepAlive.set_microphone(False)
+
+    async def stop(self):
+        self._stop.set()
+        await self._stop_mic()
         if self._ws and self._loop:
             try:
                 asyncio.run_coroutine_threadsafe(self._ws.close(), self._loop)
@@ -214,12 +241,16 @@ class AudioStreamer:
                 async with websockets.connect(self.uri, **kwargs) as ws:
                     self._ws = ws
                     delay = 0.5
+                    self._stop_sent = False
+                    # the first byte sent now is the oldest the hub has not answered (replay) or the next one recorded
+                    offset = self.start_offset + (self._captured - len(self._buffer) - len(self._queued_buffer)) / (SAMPLE_RATE * 2)
                     await ws.send(json.dumps({
                         "type": "audio.start",
                         "sample_rate": SAMPLE_RATE,
                         "channels": CHANNELS,
                         "encoding": "pcm_s16le",
                         "language": self.language,
+                        **({"transcript_id": self.transcript_id, "offset": offset} if self.transcript_id else {}),
                     }))
                     if self._buffer or self._queued_buffer:
                         logger.info("audio ws back, sending %.1fs of buffered audio", (len(self._queued_buffer) + len(self._buffer)) / SEND_PIECE)
@@ -230,6 +261,10 @@ class AudioStreamer:
                             self._notify(json.loads(message))
                     finally:
                         sender.cancel()
+                    if self._stop_sent:     # the hub closed after audio.stop: everything is transcribed
+                        self._ws = None
+                        self._finished.set()
+                        break
             except InvalidStatus as e:
                 if e.response.status_code in (401, 403):
                     logger.error("audio ws rejected the token, not reconnecting")
@@ -276,6 +311,7 @@ class AudioStreamer:
                 self._notify({"type": "mic.off"})
                 return
             self._buffer.extend(chunk)
+            self._captured += len(chunk)
 
     async def _collect(self):
         while not self._stop.is_set():
@@ -296,6 +332,10 @@ class AudioStreamer:
             self._queued_buffer.extend(replay)
         while not self._stop.is_set():
             if not self._buffer:
+                if self._finishing.is_set() and self._q.empty():
+                    await ws.send(json.dumps({"type": "audio.stop"}))
+                    self._stop_sent = True
+                    return
                 await asyncio.sleep(0.01)
                 continue
             await self._send(ws, self._buffer)

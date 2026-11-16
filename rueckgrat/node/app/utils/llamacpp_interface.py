@@ -6,14 +6,23 @@ from app.common import get_logger, ChatRequestLlama, ChatResponse
 logger = get_logger()
 
 LLAMA_TIMEOUT = 240     # seconds, when the request has no timeout (chat). jobs send a longer one
+READY_TIMEOUT = 2       # seconds for llama-server's /health in ready()
 
 class LLamaCppInterface:
     def __init__(self, host: str, port: int):
         self.url = f"http://{host}:{port}/v1/chat/completions"
+        self.health_url = f"http://{host}:{port}/health"     # 200 once the model is loaded, 503 while it loads
         self._cancelled = set()  # stream ids the hub cancelled, checked per streamed line
 
         logger.info(f"startup llama interface")
         logger.info(f"llama.cpp url: {self.url}")
+
+    def ready(self) -> bool:
+        """llama-server is up and its model loaded (Modules, the node's /capabilities)"""
+        try:
+            return requests.get(self.health_url, timeout=READY_TIMEOUT).status_code == 200
+        except requests.exceptions.RequestException:
+            return False
 
     def extract_think_and_response(self, content):
         match = re.search(r'<think>(.*?)</think>', content, re.DOTALL)

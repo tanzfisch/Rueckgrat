@@ -4,9 +4,9 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, Header, LanguagePicker, flag_text
+from app.ui.widgets import ChatBubble, Header, LanguagePicker, MessageBox, flag_text
 from app.audio import Text_To_Speech
-from app.utils import Hub, AudioStreamer, RueckgratConfig
+from app.utils import Hub, AudioStreamer, RueckgratConfig, Capabilities
 from app.common import get_logger
 from app.common.languages import LANGUAGES, language_name
 
@@ -26,7 +26,8 @@ class MessageRow(ft.Row):
     def __init__(self, text: str, own: bool, language: str, on_play, speakable: bool = True):
         self.language = language
         self.bubble = ChatBubble("user" if own else "assistant", "")
-        self.play_btn = ft.IconButton(icon=ft.Icons.PLAY_ARROW, icon_size=20, on_click=lambda e: on_play(self))
+        # only while the hub can speak (Capabilities, live), typing and translating need the llm alone
+        self.play_btn = Capabilities.bind(ft.IconButton(icon=ft.Icons.PLAY_ARROW, icon_size=20, on_click=lambda e: on_play(self)), "tts")
         slot = ft.Container(content=self.bubble, expand=85, **theme.STYLES["chat_user" if own else "chat_assistant"])
         spacer = ft.Container(expand=15)
         super().__init__(
@@ -70,7 +71,7 @@ class TranslateHalf(ft.Container):
             text_style=ft.TextStyle(font_family="DejaVu Sans", font_family_fallback=["Noto Color Emoji"]),
         )
         self.flag_btn = ft.IconButton(icon=flag_text(language), on_click=lambda e: owner.page.run_task(owner.pick_language, self))
-        self.mic_btn = ft.IconButton(icon=ft.Icons.MIC_OFF, icon_size=24, on_click=lambda e: owner.toggle_mic(self))
+        self.mic_btn = Capabilities.bind(ft.IconButton(icon=ft.Icons.MIC_OFF, icon_size=24, on_click=lambda e: owner.toggle_mic(self)), "stt")
         self.send_btn = ft.IconButton(icon=ft.Icons.SEND, icon_size=24, on_click=lambda e: owner.send(self))
         bar = ft.Container(
             border_radius=20,
@@ -150,13 +151,23 @@ class TranslatePage(BasePage):
 
     def on_enter(self, **kwargs):
         Hub.register_incomming_message(self.on_incomming_message)
+        Capabilities.listen(self._on_capabilities)
 
     def on_leave(self):
         Hub.unregister_incomming_message(self.on_incomming_message)
+        Capabilities.unlisten(self._on_capabilities)
         if self._playing:
             Text_To_Speech.kill_current_speech()
         if self.audio_streamer:
             self.page.run_task(self._stop_mic)
+
+    def _on_capabilities(self, lost: set):
+        """speech or the mic went away while in use: they stop (their buttons are hidden by Capabilities.bind)"""
+        if "tts" in lost and self._playing:
+            Text_To_Speech.kill_current_speech()
+        if "stt" in lost and self._mic_half:
+            self.page.run_task(self._stop_mic)
+            MessageBox.error(self.page, "Speech recognition is not available right now, the mic is off. Typing still works.", title="Mic off")
 
     def other(self, half: TranslateHalf) -> TranslateHalf:
         return self.lower if half is self.upper else self.upper
@@ -260,6 +271,11 @@ class TranslatePage(BasePage):
         kind = payload.get("type")
         if kind == "mic.off":
             await self._stop_mic()
+            return
+        if kind == "error":     # the hub can't transcribe (speech recognition down)
+            await self._stop_mic()
+            MessageBox.error(self.page, f"{(payload.get('text') or 'speech recognition failed').capitalize()}, the mic is off. Typing still works.",
+                             title="Mic off")
             return
         text = (payload.get("text") or "").strip()
         if not text:

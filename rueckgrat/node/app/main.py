@@ -14,6 +14,7 @@ import os
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 from app.utils import ModelRegistry, LLamaCppInterface, CleanupWorker
+from app.utils.capabilities import Modules
 
 from app.common import (
     get_logger, set_log_level, ChatRequestLlama, ChatResponse, ImageRequest, ImageResponse, 
@@ -23,55 +24,52 @@ from app.common import (
 )
 logger = get_logger()
 
+def _llama():
+    return LLamaCppInterface("host.docker.internal", os.getenv("LLAMA_SERVER_PORT"))
+
+def _image_gen():
+    from app.utils.image_gen import ImageGen
+    return ImageGen()
+
+def _tts():
+    from app.utils.tts import TextToSpeech
+    return TextToSpeech()
+
+def _stt():
+    from app.utils.stt import SpeechToText
+    return SpeechToText()
+
+def _embedder():
+    from app.utils.embedding import TextEmbedder
+    return TextEmbedder()
+
+def _decision():
+    from app.utils.decision import DecisionModel
+    return DecisionModel()
+
+# the modules of a node: (service type the hub knows it by, the env flag that installs it, how it is made)
+MODULES = [
+    ("text_to_text", "USE_LLAMA", _llama),
+    ("text_to_image", "USE_IMAGE_GEN", _image_gen),
+    ("text_to_speech", "USE_TTS", _tts),
+    ("speech_to_text", "USE_STT", _stt),
+    ("text_to_embedding", "USE_EMBEDDING", _embedder),
+    ("text_to_decision", "USE_DECISION", _decision),
+]
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if os.getenv("USE_LLAMA") == "true":
-        host = "host.docker.internal"
-        app.state.llamacpp = LLamaCppInterface(host, os.getenv("LLAMA_SERVER_PORT"))
-    else:
-        app.state.llamacpp = None
-
-    if os.getenv("USE_IMAGE_GEN") == "true":
-        from app.utils.image_gen import ImageGen
-        app.state.image_gen = ImageGen()  
-    else:
-        app.state.image_gen = None
-
-    if os.getenv("USE_TTS") == "true":
-        from app.utils.tts import TextToSpeech
-        app.state.tts = TextToSpeech()
-        logger.debug(f"pre loading text to speech")
-        app.state.tts.preload()
-    else:
-        app.state.tts = None
-
-    if os.getenv("USE_STT") == "true":
-        from app.utils.stt import SpeechToText
-        app.state.stt = SpeechToText()
-        logger.debug(f"pre loading speech to text")
-        app.state.stt.preload()
-    else:
-        app.state.stt = None
-
-    if os.getenv("USE_EMBEDDING") == "true":
-        from app.utils.embedding import TextEmbedder
-        app.state.embedder = TextEmbedder()
-        try:
-            app.state.embedder.preload()
-        except Exception as e:
-            logger.error(f"embedding model not loaded: {e}")
-    else:
-        app.state.embedder = None
-
-    if os.getenv("USE_DECISION") == "true":
-        from app.utils.decision import DecisionModel
-        app.state.decision = DecisionModel()
-        try:
-            app.state.decision.preload()
-        except Exception as e:
-            logger.error(f"decision model not loaded: {e}")
-    else:
-        app.state.decision = None
+    # every module by the service type the hub knows it by. a module that fails to start or load its model is logged and
+    # reported as not loaded (GET /capabilities), it never stops the node: the other modules, the llm too, keep working
+    app.state.modules = modules = Modules()
+    for service, flag, factory in MODULES:
+        modules.add(service, factory if os.getenv(flag) == "true" else None)
+    app.state.llamacpp = modules.get("text_to_text")
+    app.state.image_gen = modules.get("text_to_image")
+    app.state.tts = modules.get("text_to_speech")
+    app.state.stt = modules.get("speech_to_text")
+    app.state.embedder = modules.get("text_to_embedding")
+    app.state.decision = modules.get("text_to_decision")
 
     # keep image cache clean
     app.state.cleanup_worker = CleanupWorker(folder="/node/images")
@@ -95,6 +93,12 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.get("/capabilities")
+def capabilities():
+    """which modules can serve now, by service type: {"services": {"text_to_speech": true, ...}}. the hub asks (the node
+    does not know the hub): when it connects, after a reconnect and every 30 s"""
+    return {"services": app.state.modules.report()}
 
 @app.put("/log-level/{level}")
 def _set_log_level(level: str):

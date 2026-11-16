@@ -12,6 +12,7 @@ class Tool(Task):
     thresholds = None   # (recommended, mandatory) for the question scores, None: ToolDetectionTask's RECOMMENDED_THRESHOLD and MANDATORY_THRESHOLD
     sequential = False  # the calls of sequential tools in one round run one after another in their order (they share the sandbox files)
     offered_with = ()   # names of tools this one is offered with as an optional tool (ToolRegistry.companions), no laya question of its own
+    requires = ()       # the capabilities it needs (Infrastructure.available: "image", "embedding", "internet" ...), without one it is not offered
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
         super().__init__()

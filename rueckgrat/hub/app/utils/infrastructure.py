@@ -1,8 +1,11 @@
 
+import asyncio
 import base64
 import json
 import os
 import requests
+import threading
+import time
 import uuid
 from tqdm import tqdm
 from urllib.parse import urlparse
@@ -21,6 +24,23 @@ LONG_REPLY_SHARE = 0.5          # of a llama slot's context for a long reply (to
 MIN_LONG_REPLY_TOKENS = 4096    # also when the context is unknown
 DECIDE_BATCH = 64               # questions per /decide request, the node's MAX_DECIDE_QUESTIONS
 HUB_IMAGE_DIR = Path("/hub/images")
+
+# capabilities: what the system can do right now, by the names the hub and the app use -> the node service type of each
+CAPABILITY_SERVICES = {
+    "llm": "text_to_text",
+    "tts": "text_to_speech",
+    "stt": "speech_to_text",
+    "image": "text_to_image",
+    "decision": "text_to_decision",
+    "embedding": "text_to_embedding",
+}
+INTERNET = "internet"               # the capability of the tools that fetch from the web, the hub probes it
+CAPABILITY_TICK_SECONDS = 2         # how often the watcher looks at the node connections, a (re)connect asks the node right away
+CAPABILITY_REFRESH_SECONDS = 30     # a connected node is asked for its loaded modules this often
+CAPABILITY_TIMEOUT = 5              # seconds for a node's /capabilities
+INTERNET_PROBE_SECONDS = 60
+INTERNET_PROBE_TIMEOUT = 3
+INTERNET_PROBE_URLS = ("https://1.1.1.1", "https://www.google.com/generate_204")     # any answer of one of them: online
 
 @dataclass
 class ServerResult:
@@ -42,6 +62,27 @@ class WebSocketClientNode(WebSocketClient):
         self.uri = f"ws://{self.addr}:{self.port}/ws"
         logger.debug(f"connecting to node at {self.uri}")
         super().__init__(self.uri)
+        # the node's GET /capabilities: service type -> its module is loaded. None: not asked yet or an older node
+        # without it, then its configured services count as loaded
+        self.services: Optional[dict[str, bool]] = None
+
+    def fetch_services(self) -> None:
+        """asks the node which of its modules can serve now. the node does not know the hub, the hub asks.
+        not reachable or an error: the last answer stays, the websocket tells whether the node is there"""
+        try:
+            response = requests.get(f"http://{self.addr}:{self.port}/capabilities", timeout=CAPABILITY_TIMEOUT)
+            if response.status_code == 404:
+                self.services = None    # an older node
+            elif response.status_code == 200:
+                self.services = {str(k): bool(v) for k, v in (response.json().get("services") or {}).items()}
+            else:
+                logger.warning(f"capabilities of node {self.uri}: {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.debug(f"capabilities of node {self.uri} not fetched {repr(e)}")
+
+    def has(self, service_type: str) -> bool:
+        """the node's module of service_type is loaded, by its last answer"""
+        return self.services is None or self.services.get(service_type, False)
 
 class Infrastructure:
     callback_handlers: Dict[str, tuple[int, Callable[[str], None]]] = {}
@@ -66,6 +107,12 @@ class Infrastructure:
         return max(MIN_LONG_REPLY_TOKENS, int(slot * LONG_REPLY_SHARE)) if slot else MIN_LONG_REPLY_TOKENS
 
     def __init__(self):
+        self.node_by_type: dict[str, WebSocketClientNode] = {}
+        self.nodes: list[WebSocketClientNode] = []
+        self.internet: Optional[bool] = None    # the last internet probe, None: not probed yet (counts as online)
+        self._live = False                      # connected to the nodes' websockets and watching their capabilities
+        self._capability_state: dict = {}
+        self._watch_stop = threading.Event()
         logger.info(f"llm slot context {self.slot_context() or 'unknown'}, long replies {self.long_reply_tokens()} tokens")
         if not INFRASTRUCTURE_CONFIG_PATH.exists():
             logger.error(f"no infrastructure config found at {INFRASTRUCTURE_CONFIG_PATH}")
@@ -125,6 +172,86 @@ class Infrastructure:
 
         if not "text_to_decision" in self.node_by_type:
             logger.info("couldn't find text_to_decision service, no laya decisions")
+
+        if connect:
+            self._live = True
+            threading.Thread(target=self._watch_capabilities, name="capabilities", daemon=True).start()
+
+    ########### capabilities: which optional parts are there right now. only the llm is mandatory
+    def available(self, name: str) -> bool:
+        """capability name (CAPABILITY_SERVICES or INTERNET) can be used now: its service is configured, its node connected and
+        the module loaded there (the node's last /capabilities). hub management (connect_nodes(connect=False)) has no websockets
+        and does not watch: configured is enough there"""
+        if name == INTERNET:
+            return self.internet is not False
+        service_type = CAPABILITY_SERVICES.get(name)
+        node = self.node_by_type.get(service_type) if service_type else None
+        if node is None:
+            return False
+        if not self._live:
+            return True
+        return node.is_connected() and node.has(service_type)
+
+    def capabilities(self) -> dict[str, bool]:
+        """every capability -> available(), for the hub's /capabilities and /health"""
+        return {name: self.available(name) for name in [*CAPABILITY_SERVICES, INTERNET]}
+
+    def expected(self) -> list[str]:
+        """the capabilities this system is set up for: its service is configured in infrastructure.json, the internet always.
+        one of them not available is missing (the app shows it), one not configured is simply not installed"""
+        return [name for name, service_type in CAPABILITY_SERVICES.items() if service_type in self.node_by_type] + [INTERNET]
+
+    async def wait_available(self, name: str, seconds: float) -> bool:
+        """available(name), waiting up to seconds for it (a node that is reconnecting). False when it is not there by then"""
+        deadline = time.monotonic() + seconds
+        while not self.available(name):
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.5)
+        return True
+
+    def probe_internet(self) -> bool:
+        """online when one of INTERNET_PROBE_URLS answers at all, sets self.internet"""
+        for url in INTERNET_PROBE_URLS:
+            try:
+                requests.head(url, timeout=INTERNET_PROBE_TIMEOUT, allow_redirects=False)
+                self.internet = True
+                return True
+            except requests.exceptions.RequestException:
+                continue
+        self.internet = False
+        return False
+
+    def _watch_capabilities(self):
+        """asks a node for its loaded modules when it connects or reconnects and every CAPABILITY_REFRESH_SECONDS while it is
+        connected, probes the internet every INTERNET_PROBE_SECONDS. a change is logged"""
+        connected: dict[WebSocketClientNode, bool] = {}
+        asked: dict[WebSocketClientNode, float] = {}
+        probed = None
+        while True:
+            try:
+                now = time.monotonic()
+                for node in self.nodes:
+                    up = node.is_connected()
+                    if up and (not connected.get(node) or now - asked.get(node, 0.0) >= CAPABILITY_REFRESH_SECONDS):
+                        node.fetch_services()
+                        asked[node] = now
+                    connected[node] = up
+                if probed is None or now - probed >= INTERNET_PROBE_SECONDS:
+                    self.probe_internet()
+                    probed = now
+                self._log_capabilities()
+            except Exception as e:
+                logger.error(f"capability watcher {repr(e)}")
+            if self._watch_stop.wait(CAPABILITY_TICK_SECONDS):
+                return
+
+    def _log_capabilities(self):
+        state = self.capabilities()
+        if state != self._capability_state:
+            missing = [name for name, ok in state.items() if not ok]
+            logger.info(f"capabilities changed, not available: {', '.join(missing) or 'none'}")
+            self._capability_state = state
 
     def get_status(self) -> StatusResult:
         # the websocket supervisor already tracks every node, no need to poll them over http
@@ -193,7 +320,7 @@ class Infrastructure:
         return payload
 
     def image(self, image_request: ImageRequest) -> str:
-        if not "text_to_image" in self.node_by_type:
+        if not self.available("image"):
             logger.error("no text to image generator available")
             return None
         
@@ -204,7 +331,7 @@ class Infrastructure:
             response = requests.post(
                 url_image_request,
                 json=self._image_payload(image_request),
-                timeout=240,
+                timeout=480,
             )
         
             if response.status_code == 200:
@@ -230,7 +357,7 @@ class Infrastructure:
         if (wav := self._tts_cache.get(key)) is not None:
             logger.debug("tts: using cached wav")
             return wav
-        if not "text_to_speech" in self.node_by_type:
+        if not self.available("tts"):
             logger.error("no text to speech generator available")
             return None
 
@@ -253,7 +380,7 @@ class Infrastructure:
     def stt(self, pcm16: bytes, kind: str, language: str = "") -> Optional[str]:
         """forward 16 kHz mono pcm_s16le audio to the stt node, returns the text or None.
         kind: final (accurate model) or partial (fast model). language "" = whisper detects it"""
-        if not "speech_to_text" in self.node_by_type:
+        if not self.available("stt"):
             logger.error("no speech to text recognizer available")
             return None
 
@@ -278,8 +405,8 @@ class Infrastructure:
     def embed(self, texts: list[str], query: bool = False) -> Optional[list[list[float]]]:
         """text embeddings from the embedding node, one vector per text, or None.
         query: True for search queries, False for texts that are stored"""
-        if not "text_to_embedding" in self.node_by_type:
-            return None    # warned once at startup
+        if not self.available("embedding"):
+            return None    # not configured: warned once at startup, down: the capability watcher logs it
 
         node = self.node_by_type["text_to_embedding"]
         url = f"http://{node.addr}:{node.port}/embed"
@@ -297,8 +424,8 @@ class Infrastructure:
         """laya typed decisions about state from the decision node, one forward pass per DECIDE_BATCH questions.
         questions: {id: {"type": "choice"|"score"|"noul", "instructions": ..., "criteria": ...}}
         returns the answers by id (noul: {"noul": P(true), ...}, choice: {"choice": label, ...}) or None when any batch failed"""
-        if not "text_to_decision" in self.node_by_type:
-            return None
+        if not self.available("decision"):
+            return None     # the callers go on without laya (tool detection: the regex and prompt tools, memory: all candidates)
 
         items = list(questions.items())
         answers = {}
@@ -400,11 +527,6 @@ class Infrastructure:
             node.send_message(json.dumps({"cancel": stream_id}))
 
     def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 1024, context_size: int=8192, timeout: Optional[float] = None, json_schema: Optional[dict] = None, info: Optional[dict] = None) -> str:
-        """stream: returns the stream id at once, the reply goes to callback. otherwise returns the reply.
-        timeout: seconds for the node's llama call (jobs), the hub waits a bit longer. None = 240 like before
-        json_schema: the reply is json matching this schema, None = free text
-        info: a dict given, a reply (not streamed) fills in what the node knows: finish_reason ("length": cut off),
-        prompt_tokens, completion_tokens"""
         try:
             chat_request = ChatRequestLlama(
                 messages=messages,

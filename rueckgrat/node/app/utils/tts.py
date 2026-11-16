@@ -86,6 +86,10 @@ class TextToSpeech:
         self.model_dir = MODELS_BASE_DIR / registry.get_install_path(TTS_MODEL)
         return self.model_dir
 
+    def ready(self) -> bool:
+        """the model is loaded (Modules, the node's /capabilities)"""
+        return self.model is not None
+
     def preload(self):
         """optional warm up: install (if needed) and load the model now so the first request does not wait for it.
         nothing calls this automatically. does nothing if the model is already loaded.

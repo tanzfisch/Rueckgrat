@@ -39,6 +39,10 @@ class DecisionModel:
                 logger.info(f"decision model {path} loaded on {self.agent.device} by {source}")
             return self.agent
 
+    def ready(self) -> bool:
+        """the model is loaded (Modules, the node's /capabilities)"""
+        return self.agent is not None
+
     def preload(self):
         """optional warm up, errors go to the caller and the first request tries again"""
         self._load(source="preload")

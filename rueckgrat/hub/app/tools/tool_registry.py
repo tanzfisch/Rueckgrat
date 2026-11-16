@@ -65,7 +65,7 @@ class ToolRegistry:
         self.infrastructure = infrastructure     
         self.task_queue = task_queue
 
-        self.tools: Dict[str, type[Tool]] = {}
+        self._registered: Dict[str, type[Tool]] = {}    # every tool, self.tools the ones that can be used now
         self._register_tool(WebsearchTool)
         self._register_tool(ImageGenTool)
         self._register_tool(TakePhotoTool)
@@ -88,18 +88,28 @@ class ToolRegistry:
         self._register_tool(ShareFileTool)
         self._register_tool(FindToolsTool)
 
-        temp = ", ".join(self.tools)
+        temp = ", ".join(self._registered)
         logger.debug(f"registered tools: {temp}")
 
     def _register_tool(self, cls: type[Tool]):
-        self.tools[cls.name()] = cls
+        self._registered[cls.name()] = cls
+
+    @property
+    def tools(self) -> Dict[str, type[Tool]]:
+        """the registered tools that can be used now: every capability a tool needs (Tool.requires) is available. the others
+        are not detected, offered, listed or run, e.g. no image generation: no generate_image and take_photo"""
+        return {name: tool for name, tool in self._registered.items() if self.usable(tool)}
+
+    def usable(self, tool: type[Tool]) -> bool:
+        """the capabilities tool needs are available now (Infrastructure.available)"""
+        return not tool.requires or self.infrastructure is None or all(self.infrastructure.available(name) for name in tool.requires)
 
     def attach_held(self, db, user_id: int, conversation_id: int, message_id: int, attachments: List[Dict[str, Any]], push: bool = True) -> None:
         """attaches the files tools held without a message (their results' "attachments", each names its tool) to message_id,
         by that tool's attach_held. push: the user has an open /ws. a file that fails is logged and skipped"""
         for held in attachments or []:
             try:
-                self.tools[held["tool"]].attach_held(db, user_id, conversation_id, message_id, held, push)
+                self._registered[held["tool"]].attach_held(db, user_id, conversation_id, message_id, held, push)
                 Trace.write(conversation_id, "held attachment attached", name=held.get("name"), tool=held.get("tool"), message_id=message_id)
             except Exception as e:
                 logger.error(f"held attachment {held.get('name')} of {held.get('tool')} not attached {repr(e)}")
@@ -129,8 +139,9 @@ class ToolRegistry:
         return self.ranked_groups(names)
 
     def available(self, tool_names: List[str], excluded: tuple = ()) -> List[str]:
-        """the registered names of tool_names without the excluded ones, in their order, no duplicates"""
-        return [name for name in dict.fromkeys(tool_names or []) if name in self.tools and name not in excluded]
+        """the names of tool_names that can be used now (tools) without the excluded ones, in their order, no duplicates"""
+        tools = self.tools
+        return [name for name in dict.fromkeys(tool_names or []) if name in tools and name not in excluded]
 
     def companions(self, tool_names: List[str], excluded: tuple = ()) -> List[str]:
         """the tools offered with one of tool_names (Tool.offered_with) that are not among them or excluded"""
@@ -162,7 +173,8 @@ class ToolRegistry:
         return sorted(unique, key=key)
 
     def ranked_groups(self, tool_names: List[str]) -> List[List[str]]:
-        names = [name for name in self.ordered_names(tool_names or []) if name in self.tools]
+        tools = self.tools
+        names = [name for name in self.ordered_names(tool_names or []) if name in tools]
         if names and all(name in self.PROMPT_TOOLS for name in names):
             return [names]
         ranked_groups = []
@@ -177,12 +189,13 @@ class ToolRegistry:
     def _tool_job(self, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any],
                   message_id: Optional[int] = None) -> Optional[Tool]:
         tool_name = tool_call.get("tool")
-        if tool_name not in self.tools:
-            logger.error(f"unknown tool: {tool_name}")
+        tool = self.tools.get(tool_name)
+        if tool is None:
+            logger.error(f"unknown or not available tool: {tool_name}")
             return None
 
         logger.debug(f"executing:\n{Utils.pretty_print(tool_call)}")
-        tool_job = self.tools[tool_name](
+        tool_job = tool(
             db=self.db,
             infrastructure=self.infrastructure,
             user_id=user_id,
@@ -305,7 +318,7 @@ class ToolRegistry:
     def problems(self, results: Optional[Mapping[str, Any]]) -> List[str]:
         """what went wrong in {tool name: result} that a fix round could repair (each tool's problems())"""
         return [problem for name, result in (results or {}).items() if isinstance(result, dict)
-                for problem in self.tools.get(name, Tool).problems(result)]
+                for problem in self._registered.get(name, Tool).problems(result)]
 
     def detachable(self, tool_job: Tool) -> bool:
         return tool_job.name() in self.DETACHED_TOOLS and tool_job.has_message() and tool_job.runs_detached()
@@ -320,10 +333,11 @@ class ToolRegistry:
 
     def get_tools_prompt(self, skill_names: Optional[List[str]] = None, scope: Optional[Dict[str, int]] = None) -> str:
         """the instructions of the tools. scope: {user_id, contact_id, conversation_id} of the setup, the tools' prompt_for"""
+        tools = self.tools
         if not skill_names:
-            selected = self.tools.values()
+            selected = tools.values()
         else:
-            selected = [self.tools[name] for name in skill_names if name in self.tools]
+            selected = [tools[name] for name in skill_names if name in tools]
 
         result = ""
         for tool in selected:
@@ -339,7 +353,7 @@ class ToolRegistry:
             if not isinstance(known, dict) or not isinstance(value, dict):
                 target[name] = value
                 continue
-            tool = (self.tools or {}).get(name, Tool)
+            tool = self._registered.get(name, Tool)
             target[name] = tool.merge(known, value)
         return target    
 
@@ -368,8 +382,9 @@ class ToolRegistry:
         return prompts.TOOLS_MANDATORY_PART.format(tools=tools)
     
     def reply_tools_prompt(self) -> str:
-        """the REPLY_TOOLS for the chat's system prompt"""
-        return self.get_tools_hydrated(list(self.REPLY_TOOLS), kind="reply")
+        """the REPLY_TOOLS that can be used now for the chat's system prompt, "" when none can"""
+        names = self.available(list(self.REPLY_TOOLS))
+        return self.get_tools_hydrated(names, kind="reply") if names else ""
 
     def split_reply(self, text: str, final: bool = True) -> tuple[str, List[Dict]]:
         """(the text for the user, the REPLY_TOOLS calls) of a chat reply, the calls are the json lines at its end.
@@ -424,6 +439,7 @@ class ToolRegistry:
         """json objects that name a registered tool. braces inside strings count, so a file can contain code"""
         tool_calls = []
         cleaned_text = text or ""
+        tools = self.tools
         for match in self._json_objects(cleaned_text):
             if '"tool"' not in match:
                 continue
@@ -432,7 +448,7 @@ class ToolRegistry:
             except Exception as e:
                 logger.error(f"failed to extract tool calls {repr(e)}")
                 return None, None
-            if data and data.get("tool") in self.tools:
+            if data and data.get("tool") in tools:
                 tool_calls.append(data)
                 cleaned_text = cleaned_text.replace(match, "").strip()
 

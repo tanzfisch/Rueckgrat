@@ -42,6 +42,10 @@ class TextEmbedder:
                 logger.info(f"embedding model {path} loaded by {source}")
             return self.model
 
+    def ready(self) -> bool:
+        """the model is loaded (Modules, the node's /capabilities)"""
+        return self.model is not None
+
     def preload(self):
         """optional warm up, errors go to the caller and the first request tries again"""
         self._load(source="preload")

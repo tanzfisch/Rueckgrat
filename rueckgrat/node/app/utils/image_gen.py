@@ -35,6 +35,10 @@ class ImageGen:
         self.output_dir = Path("/node/images")
         os.makedirs(self.output_dir, exist_ok=True)
 
+    def ready(self) -> bool:
+        """the module is there (Modules, the node's /capabilities). the image models load per request, by the model asked for"""
+        return True
+
     def _file_lock(self, file_key: str) -> Lock:
         with self.file_locks_guard:
             return self.file_locks.setdefault(file_key, Lock())

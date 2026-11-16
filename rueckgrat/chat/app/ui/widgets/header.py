@@ -1,13 +1,14 @@
 import flet as ft
 from app.ui import theme
-from app.utils import Contact, Hub, Paths
+from app.utils import Contact, Hub, Paths, Capabilities
 
-# the app level views, in the order of the tools grid: (route, icon, label)
+# the app level views, in the order of the tools grid: (route, icon, label, the capabilities it needs to be offered)
 TOOLS = [
-    ("translate", ft.Icons.TRANSLATE, "translate"),
-    ("contacts", ft.Icons.CHAT, "charaters"),
-    ("image", ft.Icons.IMAGE, "image generation"),
-    ("gallery", ft.Icons.PHOTO_LIBRARY, "gallery"),
+    ("translate", ft.Icons.TRANSLATE, "translate", ()),     # typing works with the llm alone, its mic and speech hide on their own
+    ("contacts", ft.Icons.CHAT, "charaters", ()),
+    ("image", ft.Icons.IMAGE, "image generation", ("image",)),
+    ("gallery", ft.Icons.PHOTO_LIBRARY, "gallery", ()),
+    ("transcribe", ft.Icons.TRANSCRIBE, "transcribe", ()),   # the saved transcripts work without stt, its record button shows it
 ]
 
 
@@ -122,7 +123,7 @@ class Header(ft.Row):
                     tight=True,
                 ),
             )
-            for route, icon, label in TOOLS
+            for route, icon, label, needs in TOOLS if Capabilities.has(*needs)
         ]
         tile, gap, columns = 120, 10, 2      # square tiles, the dialog is as high as its rows
         rows = (len(tiles) + columns - 1) // columns
