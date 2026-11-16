@@ -65,6 +65,7 @@ def get_weather(location: str) -> str:
 
 class WeatherTool(Tool):
     description = prompts.WEATHER_DESCRIPTION
+    requires = ("internet",)
     thresholds = (0.5, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user want the weather or forecast somewhere, like rain, sun or wind?",

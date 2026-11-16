@@ -6,7 +6,7 @@ from app.ui import theme
 
 from app.ui import BasePage
 from app.ui.widgets import ChatBubble, Header, Image
-from app.utils import Hub, Paths
+from app.utils import Hub, Paths, Capabilities
 from app.common import get_logger
 
 logger = get_logger()
@@ -57,17 +57,19 @@ class ImagePage(BasePage):
             border=ft.NoInputBorder(),
         )
         self.send_btn = ft.IconButton(icon=ft.Icons.SEND, icon_size=24, on_click=self.send)
-        bar = ft.Container(
+        # new images only while the hub can make them (Capabilities, live), the earlier ones stay
+        self.prompt_bar = Capabilities.bind(ft.Container(
             border_radius=20,
             bgcolor=theme.INPUT_BAR,
             padding=8,
             content=ft.Row(controls=[self.prompt_box, self.send_btn]),
-        )
+        ), "image")
+        self.no_image = Capabilities.bind(ft.Text("Image generation is not available right now.", color=theme.TEXT_DIM), "image", available=False)
         self.controls = [
             ft.Container(
                 expand=True,
                 margin=20,
-                content=ft.Column(expand=True, controls=[self.header, self.results, bar]),
+                content=ft.Column(expand=True, controls=[self.header, self.results, self.no_image, self.prompt_bar]),
             ),
         ]
 

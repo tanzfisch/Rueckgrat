@@ -91,11 +91,16 @@ class AssistantImageTask(Task):
         image_request = self.build_request()
         image_gen_hash = Utils.hash_image_request(image_request)
         self.output_file = f"{image_gen_hash}.png"
+        downloaded_file = Path(f"/hub/images/{self.output_file}")
+        # no image generation now (not installed or down): no image, e.g. a new contact has no profile image, nothing
+        # is recorded that would point to a file that never comes
+        if not downloaded_file.exists() and not self.infrastructure.available("image"):
+            logger.info(f"image generation not available, no {self.store_image_as} image for contact {self.contact_id}")
+            return
         self.db.add_contact_image(self.contact_id, self.output_file, self.store_image_as)
         image_request.output = self.output_file
 
         # skip generation if it already exists
-        downloaded_file = Path(f"/hub/images/{self.output_file}")
         if not downloaded_file.exists():
             image_task = ImageTask(image_request, self.infrastructure, self.db)
             self.add_sub_task(image_task)

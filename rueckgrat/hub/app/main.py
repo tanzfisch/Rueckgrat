@@ -26,6 +26,7 @@ from app.tools import ToolRegistry, SpawnAgentJobTool
 from app.tools.map_tool import get_tile
 from app.agent_jobs import AgentJob
 from app.tasks import TaskQueue, MetaTask, AssistantImageTask, ContactGeneratorTask, TranslateTask, GenerateImageTask
+from app.tasks.transcript_tasks import TranscriptSummaryTask, TranscriptEnhanceTask, enhanceable
 from app.tasks.turns import Turns
 from app.utils.tts_stream import TtsStreams
 from app.companion import CompanionScheduler
@@ -39,6 +40,7 @@ from jose import jwt
 from datetime import datetime, timedelta, timezone
 
 from app.common import get_logger, logger_context, set_log_level, Utils, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
+from app.common.transcript_commands import parse_command, next_bookmark_label, BOOKMARK, HEADING
 logger = get_logger()
 
 DB_PATH = "/hub/db/chat.db"
@@ -429,13 +431,22 @@ def set_email(request: EmailRequest, username: str = Depends(get_current_user)):
 ########### system handling
 @app.get("/health")
 def health():
+    """the app's heartbeat (every 10 s): the status and the capabilities, so the app shows only what works now"""
     status = app.state.infrastructure.get_status()
+    capabilities = app.state.infrastructure.capabilities()
     missing = [f"{node.url} {node.error}" for node in status.nodes if not node.ok]
     if missing:
         logger.warning(f"health degraded: {', '.join(missing)}")
-        return {"status": "degraded", "message": f"{len(missing)} node(s) not reachable, see the hub log"}
+        return {"status": "degraded", "message": f"{len(missing)} node(s) not reachable, see the hub log", "capabilities": capabilities,
+                "expected": app.state.infrastructure.expected()}
 
-    return {"status": "ok"}
+    return {"status": "ok", "capabilities": capabilities, "expected": app.state.infrastructure.expected()}
+
+@app.get("/capabilities")
+def get_capabilities():
+    """what can be used now: {"llm", "tts", "stt", "image", "decision", "embedding", "internet": bool, "expected": [names]}.
+    expected: what the system is set up for (configured, the internet always), not available there means missing. no login, like /signup-mode"""
+    return {**app.state.infrastructure.capabilities(), "expected": app.state.infrastructure.expected()}
 
 @app.put("/log-level/{level}")
 def _set_log_level(level: str, username: str = Depends(get_current_user)):
@@ -957,6 +968,198 @@ def get_generated_images(username: str = Depends(get_current_user)):
     with logger_context(user_id):
         return {"images": app.state.db.get_generated_images(user_id)}
 
+########### transcribe app (#198)
+# the app records through /ws/audio with the transcript's id in audio.start: the hub stores every final text there
+# (start / end in seconds of the recording), the bookmarks come through here. continuing a transcript records on
+# after its end: the app's offset starts there
+class CreateTranscriptRequest(BaseModel):
+    language: str = ""      # whisper language code, "" = detected per utterance
+
+class TranscriptBookmarkRequest(BaseModel):
+    at: float               # seconds of the recording
+    label: str = ""
+
+class TranscriptBookmarkLabelRequest(BaseModel):
+    label: str
+
+class TranscriptSegmentRequest(BaseModel):
+    text: str | None        # the user's text for the segment, None: back to the recognised one
+
+class TranscriptHeadingRequest(BaseModel):
+    at: float               # seconds of the recording, between the segments it goes between
+    text: str
+
+class TranscriptPart(BaseModel):
+    start: float
+    end: float
+    text: str
+    kind: str = ""          # "" or "heading"
+
+class TranscriptSplitRequest(BaseModel):
+    parts: list[TranscriptPart]     # in order: [before], heading, [after]
+
+class TranscriptSummaryRequest(BaseModel):
+    text: str               # the transcript as the app shows it (Transcript.plain_text), headings as "## ..." lines
+
+class TranscriptEnhanceRequest(BaseModel):
+    title: str = ""         # the copy's name: the app's title of the original plus " (enhanced)"
+
+TRANSCRIPT_TITLE_MAX = 200
+
+SEGMENT_TEXT_MAX = 20000
+
+BOOKMARK_LABEL_MAX = 200
+
+def owned_transcript(user_id: int, transcript_id: int):
+    if not app.state.db.owns_transcript(user_id, transcript_id):
+        raise HTTPException(status_code=404, detail="transcript not found")
+
+@app.post("/transcripts")
+def create_transcript(request: CreateTranscriptRequest, username: str = Depends(get_current_user)):
+    """a new, empty recording: {"transcript_id"}"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        transcript_id = app.state.db.create_transcript(user_id, request.language)
+        if not transcript_id:
+            raise HTTPException(status_code=500, detail="transcript could not be created")
+        return {"transcript_id": transcript_id}
+
+@app.get("/transcripts")
+def get_transcripts(username: str = Depends(get_current_user)):
+    """the user's transcripts, newest first, without their text (see ChatDB.get_transcripts)"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        return {"transcripts": app.state.db.get_transcripts(user_id)}
+
+@app.get("/transcripts/{transcript_id}")
+def get_transcript(transcript_id: int, username: str = Depends(get_current_user)):
+    """one transcript with its segments and bookmarks"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        transcript = app.state.db.get_transcript(transcript_id)
+        if transcript is None:
+            raise HTTPException(status_code=500, detail="transcript could not be read")
+        return {"transcript": transcript}
+
+@app.delete("/transcripts/{transcript_id}")
+def delete_transcript(transcript_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        if not app.state.db.delete_transcript(user_id, transcript_id):
+            raise HTTPException(status_code=404, detail="transcript not found")
+        return {"status": "ok"}
+
+@app.post("/transcripts/{transcript_id}/bookmarks")
+def add_transcript_bookmark(transcript_id: int, request: TranscriptBookmarkRequest, username: str = Depends(get_current_user)):
+    """{"bookmark_id"}"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        bookmark_id = app.state.db.add_transcript_bookmark(transcript_id, max(0.0, request.at), request.label.strip()[:BOOKMARK_LABEL_MAX])
+        if not bookmark_id:
+            raise HTTPException(status_code=500, detail="bookmark could not be saved")
+        return {"bookmark_id": bookmark_id}
+
+@app.post("/transcripts/{transcript_id}/headings")
+def add_transcript_heading(transcript_id: int, request: TranscriptHeadingRequest, username: str = Depends(get_current_user)):
+    """the user added a heading after the recording: {"segment_id"}, edited (emptied) like any segment"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        text = request.text.strip()[:SEGMENT_TEXT_MAX]
+        segment_id = app.state.db.add_transcript_heading(transcript_id, request.at, text) if text else 0
+        if not segment_id:
+            raise HTTPException(status_code=500, detail="heading could not be saved")
+        return {"segment_id": segment_id}
+
+@app.post("/transcripts/{transcript_id}/summary")
+def summarize_transcript(transcript_id: int, request: TranscriptSummaryRequest, username: str = Depends(get_current_user)):
+    """a summary in a few sentences, made by the llm while the app waits: {"summary"}. not stored"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        if not request.text.strip():
+            raise HTTPException(status_code=400, detail="nothing to summarize")
+        job = TranscriptSummaryTask(app.state.infrastructure, request.text.strip())
+        app.state.task_queue.run(job)
+        if not job.summary:
+            raise HTTPException(status_code=502, detail="the summary could not be made")
+        return {"summary": job.summary}
+
+@app.post("/transcripts/{transcript_id}/enhance")
+def enhance_transcript(transcript_id: int, request: TranscriptEnhanceRequest, username: str = Depends(get_current_user)):
+    """a new transcript, a copy with what was said cleaned up by the llm (filler words out, grammar fixed) segment by
+    segment, so its headings and bookmarks stay where they were. the original stays as it is.
+    {"transcript_id", "enhanced": segments changed, "segments": segments sent}. takes a while: the app waits"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        transcript = app.state.db.get_transcript(transcript_id)
+        if transcript is None:
+            raise HTTPException(status_code=500, detail="transcript could not be read")
+        said = [(s["id"], text) for s in transcript["segments"] if (text := enhanceable(s))]
+        if not said:
+            raise HTTPException(status_code=400, detail="nothing to enhance")
+        job = TranscriptEnhanceTask(app.state.infrastructure, [text for _, text in said])
+        app.state.task_queue.run(job)
+        texts = {segment_id: text for (segment_id, _), text in zip(said, job.texts) if text}
+        if not texts:
+            raise HTTPException(status_code=502, detail="the transcript could not be enhanced")
+        copy_id = app.state.db.copy_transcript(user_id, transcript, request.title.strip()[:TRANSCRIPT_TITLE_MAX], texts)
+        if not copy_id:
+            raise HTTPException(status_code=500, detail="the enhanced copy could not be saved")
+        return {"transcript_id": copy_id, "enhanced": len(texts), "segments": len(said)}
+
+@app.post("/transcripts/{transcript_id}/segments/{segment_id}/split")
+def split_transcript_segment(transcript_id: int, segment_id: int, request: TranscriptSplitRequest,
+                             username: str = Depends(get_current_user)):
+    """a marked text made a heading: the segment becomes its parts at once (see ChatDB.split_transcript_segment),
+    {"segment_ids"} in order, the first is the segment's own"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        parts = [{"start": p.start, "end": max(p.end, p.start),
+                  "text": p.text.strip()[:SEGMENT_TEXT_MAX], "kind": p.kind} for p in request.parts]
+        if not 1 <= len(parts) <= 3 or any(not p["text"] or p["kind"] not in ("", HEADING) for p in parts):
+            raise HTTPException(status_code=400, detail="parts must be 1 to 3 with text, kind '' or 'heading'")
+        ids = app.state.db.split_transcript_segment(transcript_id, segment_id, parts)
+        if not ids:
+            raise HTTPException(status_code=404, detail="segment not found or a part outside it")
+        return {"segment_ids": ids}
+
+@app.patch("/transcripts/{transcript_id}/segments/{segment_id}")
+def edit_transcript_segment(transcript_id: int, segment_id: int, request: TranscriptSegmentRequest,
+                            username: str = Depends(get_current_user)):
+    """the user edited the text of a segment after the recording"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        text = None if request.text is None else request.text.strip()[:SEGMENT_TEXT_MAX]
+        if not app.state.db.edit_transcript_segment(transcript_id, segment_id, text):
+            raise HTTPException(status_code=404, detail="segment not found")
+        return {"status": "ok"}
+
+@app.patch("/transcripts/{transcript_id}/bookmarks/{bookmark_id}")
+def rename_transcript_bookmark(transcript_id: int, bookmark_id: int, request: TranscriptBookmarkLabelRequest,
+                               username: str = Depends(get_current_user)):
+    """a new label for the bookmark"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        if not app.state.db.rename_transcript_bookmark(transcript_id, bookmark_id, request.label.strip()[:BOOKMARK_LABEL_MAX]):
+            raise HTTPException(status_code=404, detail="bookmark not found")
+        return {"status": "ok"}
+
+@app.delete("/transcripts/{transcript_id}/bookmarks/{bookmark_id}")
+def delete_transcript_bookmark(transcript_id: int, bookmark_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        owned_transcript(user_id, transcript_id)
+        if not app.state.db.delete_transcript_bookmark(transcript_id, bookmark_id):
+            raise HTTPException(status_code=404, detail="bookmark not found")
+        return {"status": "ok"}
+
 ########### gallery
 GALLERY_MAX_LIMIT = 200
 
@@ -1273,6 +1476,9 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
 SPEECH = 0.5
 SILENCE_MS = 2000
 PARTIAL_MS = 1000
+TRANSCRIPT_UTTERANCE_MS = 30000     # transcribe app: a longer utterance is finished anyway, it may talk without a pause
+STT_WAIT_SECONDS = 5                # a final waits this long for speech recognition to come back (node reconnecting), then the app gets an error
+STT_UNAVAILABLE = "speech recognition is not available right now"
 
 def pcm16_to_float(b: bytes) -> np.ndarray:
     return np.frombuffer(b, dtype=np.int16).astype(np.float32) / 32768.0
@@ -1291,25 +1497,53 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
         buf = bytearray()
         meta = {"sample_rate": 16000, "channels": 1, "encoding": "pcm_s16le", "language": ""}  # language "" = whisper detects it
         frame = 512
+        # transcribe app (#198): finals are stored in this transcript. offset: seconds of the recording before the first
+        # sample of this connection (the app counts them, also across reconnects), position: samples through the vad since
+        transcript_id = 0
+        offset = 0.0
+        position = 0
+        utterance_start = 0
+        voiced_end = 0
 
-        async def transcribe(wav, kind: str):
+        def seconds(samples: int) -> float:
+            return round(offset + samples / 16000, 2)
+
+        async def transcribe(wav, kind: str, start: float = 0.0, end: float = 0.0):
             nonlocal busy
-            if kind == "partial" and busy:
+            if kind == "partial" and (busy or not app.state.infrastructure.available("stt")):
                 return
-            node = app.state.infrastructure.node_by_type.get("speech_to_text")
-            if node and not node.is_connected():
-                if kind == "partial":
-                    return
-                while not node.is_connected():
-                    await asyncio.sleep(0.5)
+            if not await app.state.infrastructure.wait_available("stt", STT_WAIT_SECONDS):
+                logger.warning(f"{STT_UNAVAILABLE}, the utterance is lost")
+                await websocket.send_json({"type": "error", "text": STT_UNAVAILABLE})
+                return
             busy = True
             try:
                 pcm16 = (np.clip(wav, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
                 text = await asyncio.to_thread(app.state.infrastructure.stt, pcm16, kind, meta["language"])
+                stored = {}
+                if kind == "final" and text and transcript_id:
+                    stored["id"] = await asyncio.to_thread(app.state.db.add_transcript_segment, transcript_id, start, end, text)
+                    command = parse_command(text)
+                    if stored["id"] and command and command[0] == BOOKMARK:   # "bookmark <label>": stored like a tapped one
+                        label = command[1]
+                        if not label:       # "bookmark" alone: Bookmark n, like a tapped one
+                            stored_transcript = await asyncio.to_thread(app.state.db.get_transcript, transcript_id)
+                            label = next_bookmark_label([b["label"] for b in (stored_transcript or {}).get("bookmarks", [])])
+                        bookmark_id = await asyncio.to_thread(app.state.db.add_transcript_bookmark, transcript_id, start, label)
+                        stored["bookmark"] = {"id": bookmark_id, "at": start, "label": label}
                 if text or (kind == "final" and text is not None):
-                    await websocket.send_json({"type": kind, "text": text})
+                    await websocket.send_json({"type": kind, "text": text, **({"start": start, "end": end, **stored} if kind == "final" else {})})
             finally:
                 busy = False
+
+        async def finish_utterance():
+            nonlocal utterance, voiced, silence, spoken_ms
+            if voiced and utterance:
+                await transcribe(np.concatenate(utterance), "final", seconds(utterance_start), seconds(voiced_end))
+            utterance = []
+            voiced = False
+            silence = 0
+            spoken_ms = 0
 
         inbox = asyncio.Queue()
 
@@ -1334,8 +1568,19 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
                     data = json.loads(msg["text"])
                     if data.get("type") == "audio.start":
                         meta.update({k: data[k] for k in ("sample_rate", "channels", "encoding", "language") if k in data})
-                        await websocket.send_json({"type": "audio.ready"})
+                        transcript_id = int(data.get("transcript_id") or 0)
+                        if transcript_id and not app.state.db.owns_transcript(user_id, transcript_id):
+                            logger.warning(f"audio for transcript {transcript_id} of another user, not stored")
+                            transcript_id = 0
+                        offset = max(0.0, float(data.get("offset") or 0))
+                        if await app.state.infrastructure.wait_available("stt", STT_WAIT_SECONDS):
+                            await websocket.send_json({"type": "audio.ready"})
+                        else:
+                            await websocket.send_json({"type": "error", "text": STT_UNAVAILABLE})
                     elif data.get("type") == "audio.stop":
+                        # the app stops on purpose: the words still in the utterance are transcribed, then the hub closes
+                        await finish_utterance()
+                        await websocket.close()
                         break
                     continue
 
@@ -1349,13 +1594,19 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
                     piece = audio[:frame]
                     audio = audio[frame:]
                     buf = bytearray(audio.astype(np.int16).tobytes())
+                    position += frame
                     prob = app.state.vad(torch.from_numpy(piece), 16000).item()
                     if prob >= SPEECH:
+                        if not voiced:
+                            utterance_start = position - frame
                         voiced = True
+                        voiced_end = position
                         silence = 0
                         utterance.append(piece)
                         spoken_ms += frame / 16
-                        if spoken_ms >= PARTIAL_MS and inbox.empty():
+                        if transcript_id and len(utterance) * frame >= TRANSCRIPT_UTTERANCE_MS * 16:
+                            await finish_utterance()
+                        elif spoken_ms >= PARTIAL_MS and inbox.empty():
                             spoken_ms = 0
                             wav = np.concatenate(utterance)
                             await transcribe(wav, "partial")
@@ -1363,14 +1614,11 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
                         silence += frame / 16
                         utterance.append(piece)
                         if silence >= SILENCE_MS:
-                            wav = np.concatenate(utterance)
-                            await transcribe(wav, "final")
-                            utterance = []
-                            voiced = False
-                            silence = 0
-                            spoken_ms = 0
+                            await finish_utterance()
 
         except WebSocketDisconnect:
             pass
         finally:
             reader.cancel()
+            if transcript_id:
+                app.state.db.set_transcript_duration(transcript_id, seconds(position))

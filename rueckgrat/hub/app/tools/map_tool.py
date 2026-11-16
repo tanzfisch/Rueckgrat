@@ -186,6 +186,7 @@ def get_tile(z: int, x: int, y: int) -> Optional[bytes]:
 
 class MapTool(Tool):
     description = prompts.MAP_DESCRIPTION
+    requires = ("internet",)    # geocoding and the map tiles
     thresholds = (0.45, 0.5)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask how to get to a place?",

@@ -57,6 +57,10 @@ class SpeechToText:
                 raise RuntimeError(f"stt model {model_name} could not be installed")
         return registry.get_install_path(model_name)
 
+    def ready(self) -> bool:
+        """the accurate model of the finals is loaded (Modules, the node's /capabilities). the partials' one loads on its first request"""
+        return "final" in self.models
+
     def preload(self):
         """optional warm up: install (if needed) and load every model in STT_MODELS now,
         so the first request does not wait. nothing calls this automatically. models already loaded are skipped.

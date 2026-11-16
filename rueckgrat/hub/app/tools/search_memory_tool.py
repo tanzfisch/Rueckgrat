@@ -15,6 +15,7 @@ CONVERSATION_THRESHOLD = 0.5   # relevant above this P(true). a guess, like the 
 
 class SearchMemoryTool(Tool):
     description = prompts.SEARCH_MEMORY_DESCRIPTION
+    requires = ("embedding",)
     question = []
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

@@ -2,7 +2,7 @@ import random
 import flet as ft
 from app.ui import theme
 
-from app.utils import Hub
+from app.utils import Hub, Capabilities
 from app.audio import Text_To_Speech
 from app.ui.wizzard_base import WizardPage, wizard_row, ASSETS_DIR
 from app.ui.widgets import RowSelector, VoiceSelector
@@ -133,7 +133,7 @@ class ContactWizardForm(ft.Column):
         self.controls = [
             wizard_row("Name", self.name_input),
             wizard_row("Gender", self.gender),
-            wizard_row("Voice", self.voice_selector),
+            Capabilities.bind(wizard_row("Voice", self.voice_selector), "tts"),     # only while the hub can speak
             wizard_row("Backstory", self.backstory),
             wizard_row("Style", self.image_style),
             wizard_row(label = "Persistent", 

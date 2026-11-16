@@ -11,6 +11,7 @@ from .user_profile_wizzard import UserProfileWizard
 from .translate_page import TranslatePage
 from .image_page import ImagePage
 from .gallery_page import GalleryPage
+from .transcribe_page import TranscribePage
 
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     "TranslatePage",
     "ImagePage",
     "GalleryPage",
+    "TranscribePage",
 ]

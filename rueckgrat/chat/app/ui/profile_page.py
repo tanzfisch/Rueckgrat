@@ -5,7 +5,7 @@ from app.ui import theme
 
 from app.ui import BasePage
 from app.ui.widgets import Header, VoiceSelector, ProfileImageSlot
-from app.utils import Contact, Hub
+from app.utils import Contact, Hub, Capabilities
 from app.audio import Text_To_Speech
 from app.common import (get_logger, Utils, IMAGE_STYLE_OPTIONS, IMAGE_STYLE_ICONS, CHATTINESS_OPTIONS, QUIET_HOUR_OPTIONS, PHOTO_OPTIONS,
                         put_companion_switch, pop_companion_switch)
@@ -212,12 +212,12 @@ class ProfilePage(BasePage):
                                 self.age,
                                 self.companion_switch,
                                 self.companion_settings,
-                                ft.Row(
+                                Capabilities.bind(ft.Row(     # only while the hub can speak
                                     controls=[
                                         ft.Text("Voice"),
                                         ft.Container(content=self.voice_selector, expand=True),
                                     ]
-                                ),
+                                ), "tts"),
                                 self.role,
                                 self.personality,
                                 *profile_controls,

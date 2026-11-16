@@ -9,6 +9,8 @@ Changelog
 - #191 prevent android disconnect when in backgrond
 - #206 settled bash vs write_file conflict by introducing share_file and let write file only write to agent fs
 - #205 added profile picture for user
+- #198 added transcribe app
+- #194 improve handling of missing services
 
 0.27.0
 ------
