@@ -21,9 +21,10 @@ from app.ui import (
     ImagePage,
     GalleryPage,
     TranscribePage,
+    TasksPage,
 )
 from app.ui import theme
-from app.ui.widgets import ImageOverlay, TextPreview, MessageBox, ConnectionBanner
+from app.ui.widgets import ImageOverlay, TextPreview, MessageBox, ConnectionBanner, AlarmBox
 
 from app.utils import Paths, Notifier, KeepAlive, Capabilities
 from app.utils.config import RueckgratConfig
@@ -47,6 +48,7 @@ PAGES = {
     "image": ImagePage,
     "gallery": GalleryPage,
     "transcribe": TranscribePage,
+    "tasks": TasksPage,
 }
 ROOT_PAGES = {"login", "initial_settings", "contacts"}
 MAX_STACK = 20
@@ -270,7 +272,10 @@ def on_incomming_message(msg: dict):
             if filename:
                 get_image(filename)
         if "chat" in msg and msg["chat"].get("role") == "assistant":
-            Notifier.notify("Reply ready", msg["chat"].get("content", ""))
+            if msg["chat"].get("alarm"):    # #170 a task with its alarm: rings
+                AlarmBox.show(msg["chat"].get("content", ""))
+            else:
+                Notifier.notify("Reply ready", msg["chat"].get("content", ""))
         if "error" in msg:
             error = msg["error"]
             logger.error(f"[{error['src']}] {error['msg']}")
@@ -301,6 +306,7 @@ def main():
         theme.apply_theme(page, config.theme, config.font_scale)
         Text_To_Speech.attach(page)
         Notifier.attach(page)
+        AlarmBox.attach(page)
         KeepAlive.attach(page)
         page.padding = 0
         App(page, config.has_config())

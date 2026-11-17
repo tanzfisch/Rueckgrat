@@ -92,8 +92,8 @@ class ToolExecutionTask(Task):
     def _rounds(self, mandatory: List[str], recommended: List[str], prompt_text: str, step: str = "",
                 also: List[str] = ()) -> tuple[List[str], Optional[List[Dict[str, Any]]]]:
         """the rounds of a tool setup (ToolRegistry.rounds), also: optional tools offered in the last round (no round of
-        their own). returns (what a fix round could repair, the find_tools calls), None for the calls when the
-        PRIORITY_TOOL was called: it is the only tool, nothing runs after it"""
+        their own). returns (what a fix round could repair, the find_tools calls), None for the calls when one of the
+        PRIORITY_TOOLS was called: nothing runs after it (ToolRegistry.ends_setup)"""
         ranked_groups = self.tool_registry.rounds(mandatory, recommended)
         if ranked_groups and also:
             ranked_groups[-1] += [name for name in also if name not in ranked_groups[-1]]
@@ -106,8 +106,9 @@ class ToolExecutionTask(Task):
             tool_calls, found = self._round(label, tools, recommended, prompt_text)
             problems += found
             requests += [call for call in tool_calls if call.get("tool") == self.FIND_TOOLS]
-            if any(call.get("tool") == self.tool_registry.PRIORITY_TOOL for call in tool_calls):
-                logger.debug(f"{self.tool_registry.PRIORITY_TOOL} was called, it is the only tool")
+            priority = self.tool_registry.ends_setup(tool_calls)
+            if priority:
+                logger.debug(f"{priority} was called, nothing runs after it")
                 return problems, None
         return problems, requests
 

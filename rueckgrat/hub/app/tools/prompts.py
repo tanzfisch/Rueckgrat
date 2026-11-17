@@ -465,7 +465,7 @@ Example:
 
 # ---------------------------------------------------------------- spawn_job
 
-SPAWN_JOB_DESCRIPTION = "hands a task to a background job: long or multi-step work, research with its own analysis, watching something, or repeating on a schedule and reporting back later"
+SPAWN_JOB_DESCRIPTION = "hands a task to a background job now: long or multi-step work, building a program, research with its own analysis, reporting back when it is done"
 
 SPAWN_JOB_REPORT_PROMPT = """A background job you started for the user has finished.
 
@@ -515,17 +515,59 @@ SPAWN_JOB_STARTED_PART = "a background job was started and is doing the task now
 SPAWN_JOB_PROMPT = """
 SPAWN_JOB:
 Use to hand a task to a background job, so the conversation can go on meanwhile.
-Use it for tasks that take long, have several steps, keep watching something, or repeat on a schedule and report back later.
+Use it for tasks that take long or have several steps, it starts right away and reports back when it is done.
+Not for anything at a later time or repeating (reminders, alarms, every day, every hour, watching a price): that is the task tool.
 A conversation has one job at a time: while it runs, the user's messages go to it and it adjusts its plan.
 
 Parameters:
-- prompt (string, required): the full instructions for the job, in the user's own words. Keep every detail the user gave: what to do, when or how often, and when to report back. Never add names, numbers, tickers or places the user did not say. If the user says "these" or "my" without naming them, keep it like that and add: ask the user which ones.
+- prompt (string, required): the full instructions for the job, in the user's own words. Keep every detail the user gave: what to do and what to report back. Never add names, numbers, tickers or places the user did not say. If the user says "these" or "my" without naming them, keep it like that and add: ask the user which ones.
 To fix or change a program or project made earlier, say that it is in your files already and is changed there, not made again, name it if you know it, and keep what the user says is wrong or wants changed.
 
 Examples:
 {"tool": "spawn_job", "prompt": "find three reviews of the new Pixel phone and summarize them"}
 {"tool": "spawn_job", "prompt": "the snake game in your files crashes when space is pressed: fix it there, not made again, and test it"}
-{"tool": "spawn_job", "prompt": "every Friday check the prices of my two favourite games and message me if one is on sale (ask the user which games)"}
+{"tool": "spawn_job", "prompt": "compare the prices of my two favourite games in three shops and tell me where they are cheapest (ask the user which games)"}
+"""
+
+# ---------------------------------------------------------------- task (#170)
+
+TASK_DESCRIPTION = ("does something for the user at a set time, once or repeating: reminders, alarms, wake up calls, daily news "
+                    "or weather, checking a price every hour. also lists, changes and cancels these tasks")
+
+TASK_CREATED_PART = "task #{id} is set: {task}. Tell the user in a few words when it runs."
+TASK_COMPANION_PART = " Companion mode was switched on for this contact, tasks only run in companion mode: tell the user that too."
+TASK_CHANGED_PART = "task #{id} is changed: {task}"
+TASK_CANCELLED_PART = "task #{id} is cancelled: {task}"
+TASK_LIST_PART = "the user's open tasks with you:\n{tasks}"
+TASK_NONE_PART = "the user has no open tasks with you"
+TASK_OTHERS_PART = "\n{count} more with other contacts, they are on the tasks page of the app"
+TASK_LINE = "- {task}"
+TASK_UNKNOWN_ACTION_PART = "unknown action {action!r}: create, list, edit or cancel"
+TASK_NO_ID_PART = "the task's id is missing, it is the number in YOUR OPEN TASKS"
+
+TASK_OPEN_PART = """
+YOUR OPEN TASKS for the user (max {max_tasks} over all contacts, repeating at most every {min_interval} minutes):
+{tasks}
+"""
+
+TASK_PROMPT = """
+TASK:
+Use when the user wants something done at a later time or again and again: a reminder, an alarm or wake up call, a daily summary, checking something every hour. Also to list, change or cancel their tasks.
+At its time you do the task yourself: you look things up and write the user the result in this conversation.
+
+Parameters:
+- action (string, required): "create", "list", "edit" or "cancel"
+- task (string, create, edit): what to do then, in the user's own words with every detail ("remind me to call mum", "check the bitcoin price and tell me only if it is below 50k")
+- when (string, create, edit): the user's local time "07:30", "tomorrow 07:30", "friday 18:00", "2026-11-18 07:30" or a delay "in 20 minutes". Leave it out for "every N minutes or hours" from now on
+- repeat (string, optional): "once" (default), "hourly", "daily", "weekdays", "weekly", "every 30 minutes", "every 2 hours"
+- alarm (boolean, optional): true rings the user's app: alarms, wake up calls, "ring me", "wake me"
+- id (number, edit, cancel): the task's number
+{open_tasks}
+Examples:
+{{"tool": "task", "action": "create", "when": "in 20 minutes", "task": "remind me to take the pizza out of the oven", "alarm": true}}
+{{"tool": "task", "action": "create", "when": "07:00", "repeat": "weekdays", "task": "wake me up and tell me the weather in Berlin", "alarm": true}}
+{{"tool": "task", "action": "create", "repeat": "hourly", "task": "check the bitcoin price and tell me only if it is below 50k"}}
+{{"tool": "task", "action": "cancel", "id": 3}}
 """
 
 # ---------------------------------------------------------------- take_photo

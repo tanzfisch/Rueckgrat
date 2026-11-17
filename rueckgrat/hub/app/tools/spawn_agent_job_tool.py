@@ -25,8 +25,6 @@ class SpawnAgentJobTool(Tool):
         "Is the user asking you to build a complete multi-file software project?",
         "Does the user ask you to program a whole game or app?",
         "Does the user ask you to do a long task in the background while they wait?",
-        "Is the user telling you to monitor something and alert them when it changes?",
-        "Is the user asking you to check something regularly or watch for a change?",
         "Does the user ask you to research and compare several products using reviews from the web?",
     ]
 

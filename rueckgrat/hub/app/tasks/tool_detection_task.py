@@ -128,7 +128,9 @@ class ToolDetectionTask(Task):
         recommended = [name for name, p in probabilities.items() if self.thresholds(name)[0] <= p < self.thresholds(name)[1]]
 
         probabilities["fetch_url"] = 1.0 if url_check else 0.0
-        logger.debug(f"tool probabilities:\n{Utils.pretty_scores(probabilities, 20, (RECOMMENDED_THRESHOLD, MANDATORY_THRESHOLD))}")
+        logger.debug("tool probabilities:\n" + Utils.pretty_scores({
+            name: {"value": p, "recommended_threshold": self.thresholds(name)[0], "mandatory_threshold": self.thresholds(name)[1]}
+            for name, p in probabilities.items()}, 20))
 
         # add fetch_url if detected
         if url_check:

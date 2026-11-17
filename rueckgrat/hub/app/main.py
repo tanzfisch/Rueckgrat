@@ -21,7 +21,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from app.utils import ChatDB, Infrastructure, ImageType, ImageStore, fence_code
-from app.tools import ToolRegistry, SpawnAgentJobTool
+from app.tools import ToolRegistry, SpawnAgentJobTool, TaskTool
 from app.tools.map_tool import get_tile
 from app.agent_jobs import AgentJob
 from app.tasks import TaskQueue, MetaTask, AssistantImageTask, ContactGeneratorTask, TranslateTask, GenerateImageTask
@@ -29,6 +29,7 @@ from app.tasks.transcript_tasks import TranscriptSummaryTask, TranscriptEnhanceT
 from app.tasks.turns import Turns
 from app.utils.tts_stream import TtsStreams
 from app.companion import CompanionScheduler
+from app.companion.user_tasks import UserTasks, TaskError, TaskNotFound
 from app.utils.clock import user_timezone_name, valid_timezone
 from app.maintenance import MaintenanceSweeper, maintenance_tasks
 from collections import Counter
@@ -81,6 +82,9 @@ async def lifespan(app: FastAPI):
     # proactive companions: a CompanionJob per due row of their calendars
     app.state.companion = CompanionScheduler(app.state.db, app.state.infrastructure, app.state.tool_registry)
     app.state.companion.start()
+    # #170 the user's tasks: the task tool and the /tasks routes, the scheduler fires them
+    app.state.tasks = UserTasks(app.state.db, wake=app.state.companion.wake)
+    TaskTool.tasks = app.state.tasks
 
     # nightly maintenance in each user's quiet hours (HUB_MAINTENANCE_START/END), waits while a reply is being made
     app.state.maintenance = MaintenanceSweeper(app.state.db, app.state.task_queue, maintenance_tasks(app.state.db, app.state.infrastructure),
@@ -628,6 +632,58 @@ def set_companion(contact_id: int, request: CompanionRequest, username: str = De
         if not app.state.db.set_contact_companion(user_id, contact_id, request.enabled):
             raise HTTPException(status_code=404, detail="contact not found")
         app.state.companion.wake()
+        return {"status": "ok"}
+
+########### #170 the user's tasks (app/companion/user_tasks.py), the same checks and limits as the task tool
+class CreateTaskRequest(BaseModel):
+    contact_id: int
+    task: str
+    when: str = ""      # the user's local time: "07:30", "tomorrow 07:30", "2026-11-18 07:30", "in 20 minutes"
+    repeat: str = ""    # once, hourly, daily, weekdays, weekly, every N minutes / hours
+    alarm: bool = False
+
+class EditTaskRequest(BaseModel):
+    task: str | None = None
+    when: str | None = None
+    repeat: str | None = None
+    alarm: bool | None = None
+
+def _task_call(call):
+    """runs a UserTasks call: TaskError -> 400 with its reason, TaskNotFound -> 404"""
+    try:
+        return call()
+    except TaskNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except TaskError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/tasks")
+def get_tasks(username: str = Depends(get_current_user)):
+    """the user's open tasks over all contacts, next first, and the limits"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        return {"tasks": app.state.tasks.list(user_id), "limits": app.state.tasks.limits()}
+
+@app.post("/tasks")
+def create_task(request: CreateTaskRequest, username: str = Depends(get_current_user)):
+    """a new task, in the contact's latest conversation. a contact that is no companion is switched to one
+    ("companion_switched_on" in the task), tasks only run for companions"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        return {"task": _task_call(lambda: app.state.tasks.create(user_id, request.contact_id, request.task, request.when,
+                                                                  request.repeat, request.alarm))}
+
+@app.patch("/tasks/{task_id}")
+def edit_task(task_id: int, request: EditTaskRequest, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        return {"task": _task_call(lambda: app.state.tasks.edit(user_id, task_id, request.task, request.when, request.repeat, request.alarm))}
+
+@app.delete("/tasks/{task_id}")
+def delete_task(task_id: int, username: str = Depends(get_current_user)):
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        _task_call(lambda: app.state.tasks.cancel(user_id, task_id))
         return {"status": "ok"}
 
 @app.delete("/contacts/{contact_id}")

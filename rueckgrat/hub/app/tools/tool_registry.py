@@ -30,6 +30,7 @@ from .bash_tool import BashTool
 from .write_file_tool import WriteFileTool
 from .share_file_tool import ShareFileTool
 from .find_tools_tool import FindToolsTool
+from .task_tool import TaskTool
 
 from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
@@ -37,7 +38,7 @@ logger = get_logger()
 class ToolRegistry:
     # the order the tools are to be executed
     TOOL_ORDER = [
-        ("spawn_job", "current_time"),
+        ("spawn_job", "current_time", "task"),
         "date_calc",
         ("search_memory", "find_tools", "wikipedia", "websearch", "fetch_url", "weather", "price_finder"),
         "convert",
@@ -49,8 +50,8 @@ class ToolRegistry:
     PROMPT_TOOLS = ["remember", "search_memory", "take_photo", "find_tools"]   # find_tools shares search_memory's round, no extra setup call
     FIX_TOOLS = ["run_code", "bash", "share_file", "write_file"]     # offered again in a worker's fix rounds (ToolExecutionTask), in this order
     RUN_TOOLS = ("run_code", "bash")    # a worker's mandatory one with no call is a problem for its fix rounds (not_called)
-    PRIORITY_TOOL = "spawn_job"   # overrides all other tools
-    WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "poll", "show_map")
+    PRIORITY_TOOLS = ("task", "spawn_job")   # highest first: one overrides all other tools and the ones after it here
+    WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "poll", "show_map", "task")   # AgentJob.ALLOWED_TOOLS: a task's pass may spawn a job, task and companion passes show polls and maps
     DETACHED_TOOLS = ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember")
     REPLY_TOOLS = ("remember", "take_photo")    # a chat reply calls these itself at its end (MetaTask), not the tool setup
     REPLY_CALL = re.compile(r'(?:^|\n)[ \t]*(?:```(?:json)?\s*)?\{\s*"tool"')   # where the calls at the end of a reply start
@@ -87,6 +88,7 @@ class ToolRegistry:
         self._register_tool(WriteFileTool)
         self._register_tool(ShareFileTool)
         self._register_tool(FindToolsTool)
+        self._register_tool(TaskTool)
 
         temp = ", ".join(self._registered)
         logger.debug(f"registered tools: {temp}")
@@ -115,28 +117,74 @@ class ToolRegistry:
                 logger.error(f"held attachment {held.get('name')} of {held.get('tool')} not attached {repr(e)}")
                 Trace.write(conversation_id, "held attachment NOT attached", name=held.get("name"), tool=held.get("tool"), error=repr(e))
 
+    def outranks(self, name: str, other: str) -> bool:
+        """name is one of the PRIORITY_TOOLS and other is not, or comes after it there"""
+        if name not in self.PRIORITY_TOOLS:
+            return False
+        return other not in self.PRIORITY_TOOLS or self.PRIORITY_TOOLS.index(name) < self.PRIORITY_TOOLS.index(other)
+
+    def top_priority(self, tool_names: List[str]) -> Optional[str]:
+        """the highest of the PRIORITY_TOOLS among tool_names, None when there is none"""
+        return next((name for name in self.PRIORITY_TOOLS if name in (tool_names or [])), None)
+
+    @staticmethod
+    def held_data(results: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+        """the {kind: value} the tools' show_data held without a stored message (Tool.HELD_DATA), from {tool name: result}"""
+        held: Dict[str, Any] = {}
+        for result in (results or {}).values():
+            if isinstance(result, dict):
+                held.update(result.get(Tool.HELD_DATA) or {})
+        return held
+
+    def show_held(self, db, user_id: int, conversation_id: int, message_id: int, data: Dict[str, Any], push: bool = True) -> None:
+        """shows the held data (held_data) under message_id like show_data does in a reply: the price ranking, a map.
+        push: the user has an open /ws. a kind that fails is logged and skipped"""
+        for kind, value in (data or {}).items():
+            try:
+                Tool.send_data(db, user_id, conversation_id, message_id, kind, value, push)
+                Trace.write(conversation_id, "held data shown", kind=kind, message_id=message_id)
+            except Exception as e:
+                logger.error(f"held {kind} data not shown {repr(e)}")
+                Trace.write(conversation_id, "held data NOT shown", kind=kind, message_id=message_id, error=repr(e))
+
     def prioritized(self, tool_names: List[str]) -> List[str]:
-        """only the PRIORITY_TOOL when it is among tool_names, else tool_names"""
-        return [self.PRIORITY_TOOL] if self.PRIORITY_TOOL in (tool_names or []) else list(tool_names or [])
+        """only the highest PRIORITY_TOOLS one when one is among tool_names, else tool_names"""
+        top = self.top_priority(tool_names)
+        return [top] if top else list(tool_names or [])
+
+    def overridden(self, tool_names: List[str]) -> set:
+        """the tools the usable ones among tool_names override (Tool.overrides)"""
+        tools = self.tools
+        return {other for name in tool_names or [] if name in tools for other in tools[name].overrides}
 
     def bands(self, mandatory: List[str], recommended: List[str]) -> tuple[List[str], List[str]]:
-        """(mandatory, recommended) of a detection: a mandatory PRIORITY_TOOL is the only tool, a tool in both is mandatory"""
+        """(mandatory, recommended) of a detection: a mandatory PRIORITY_TOOLS one is the only mandatory tool and keeps only
+        the recommended ones that outrank it (task over spawn_job), a tool in both is mandatory. a tool another one overrides
+        (Tool.overrides) is dropped: by a mandatory one from both bands, by a recommended one only from the recommended band,
+        an uncertain tool does not take over from a sure one"""
         mandatory = self.prioritized(mandatory)
-        if self.PRIORITY_TOOL in mandatory:
-            return mandatory, []
-        return mandatory, [name for name in dict.fromkeys(recommended or []) if name not in mandatory]
+        top = self.top_priority(mandatory)
+        recommended = [name for name in dict.fromkeys(recommended or []) if name not in mandatory]
+        if top:
+            return mandatory, [name for name in recommended if self.outranks(name, top)]
+        mandatory = [name for name in mandatory if name not in self.overridden(mandatory)]
+        return mandatory, [name for name in recommended if name not in self.overridden(mandatory + recommended)]
 
     def rounds(self, tool_names: List[str], recommended: List[str] = ()) -> List[List[str]]:
-        """the rounds of a tool setup (ranked_groups of all tools). a recommended PRIORITY_TOOL is a round on its own: the first
-        when no other tool was detected as mandatory (the PROMPT_TOOLS always are), else the last, so an uncertain one does
-        not take over from a sure tool. ToolExecutionTask stops after it when it was called"""
+        """the rounds of a tool setup (ranked_groups of all tools). a recommended PRIORITY_TOOLS one is a round on its own,
+        highest first: before the others when it outranks every mandatory tool (none but the PROMPT_TOOLS, which always are,
+        or only a lower PRIORITY_TOOLS one), else after them, so an uncertain one does not take over from a sure tool.
+        ToolExecutionTask stops after a round that called one (ends_setup)"""
         names = list(dict.fromkeys(list(tool_names or []) + list(recommended or [])))
-        if self.PRIORITY_TOOL in (recommended or []) and self.PRIORITY_TOOL not in (tool_names or []):
-            rest = self.ranked_groups([name for name in names if name != self.PRIORITY_TOOL])
-            if any(name not in self.PROMPT_TOOLS for name in tool_names or []):
-                return rest + [[self.PRIORITY_TOOL]]
-            return [[self.PRIORITY_TOOL]] + rest
-        return self.ranked_groups(names)
+        own = [name for name in self.PRIORITY_TOOLS if name in (recommended or []) and name not in (tool_names or [])]
+        sure = [name for name in tool_names or [] if name not in self.PROMPT_TOOLS]
+        rest = self.ranked_groups([name for name in names if name not in own])
+        first = [[name] for name in own if all(other in self.PRIORITY_TOOLS and self.outranks(name, other) for other in sure)]
+        return first + rest + [[name] for name in own if [name] not in first]
+
+    def ends_setup(self, tool_calls: List[Dict[str, Any]]) -> Optional[str]:
+        """the PRIORITY_TOOLS one among the calls, nothing runs after its round. None when there is none"""
+        return self.top_priority([call.get("tool") for call in tool_calls or []])
 
     def available(self, tool_names: List[str], excluded: tuple = ()) -> List[str]:
         """the names of tool_names that can be used now (tools) without the excluded ones, in their order, no duplicates"""

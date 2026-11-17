@@ -9,6 +9,7 @@ TOOLS = [
     ("image", ft.Icons.IMAGE, "image generation", ("image",)),
     ("gallery", ft.Icons.PHOTO_LIBRARY, "gallery", ()),
     ("transcribe", ft.Icons.TRANSCRIBE, "transcribe", ()),   # the saved transcripts work without stt, its record button shows it
+    ("tasks", ft.Icons.ALARM, "tasks", ()),     # #170 the user's tasks with all contacts
 ]
 
 

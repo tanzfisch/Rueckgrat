@@ -647,9 +647,11 @@ setup() {
                 --arg fetch_allow "${HUB_FETCH_ALLOW:-}" \
                 --arg m_start "$HUB_MAINTENANCE_START" --arg m_end "$HUB_MAINTENANCE_END" --arg m_batch "$HUB_MAINTENANCE_BATCH" \
                 --arg m_interval "$HUB_MAINTENANCE_INTERVAL" --arg m_small "$HUB_MAINTENANCE_SMALL_BATCH" \
+                --arg t_max "$HUB_TASKS_MAX" --arg t_interval "$HUB_TASKS_MIN_INTERVAL" \
                 '. + {hub: ({port: ($port | tonumber), signup_mode: $signup_mode,
                              maintenance: {start: $m_start, end: $m_end, batch: ($m_batch | tonumber),
-                                           interval: ($m_interval | tonumber), small_batch: ($m_small | tonumber)}}
+                                           interval: ($m_interval | tonumber), small_batch: ($m_small | tonumber)},
+                             tasks: {max: ($t_max | tonumber), min_interval: ($t_interval | tonumber)}}
                             + (if $secret_key == "" then {} else {secret_key: $secret_key} end)
                             + (if $fetch_allow == "" then {} else {fetch_allow: $fetch_allow} end))}' <<< "$host_json")
         fi
@@ -817,6 +819,18 @@ select_maintenance() {
     echo -e "\e[1A\e[K     Items per daytime run: $HUB_MAINTENANCE_SMALL_BATCH"
 }
 
+# select_tasks - the limits of the users' tasks (#170, the task tool and the tasks page of the app), per user
+# Sets: HUB_TASKS_MAX, HUB_TASKS_MIN_INTERVAL
+select_tasks() {
+    local number='^[0-9]+$' positive='^[1-9][0-9]*$'
+    read_setting "Open tasks per user, at most?" "$HUB_TASKS_MAX_DEFAULT" "$number"
+    HUB_TASKS_MAX=$REPLY
+    echo -e "\e[1A\e[K     Tasks per user: $HUB_TASKS_MAX"
+    read_setting "A task repeats at most every how many minutes?" "$HUB_TASKS_MIN_INTERVAL_DEFAULT" "$positive"
+    HUB_TASKS_MIN_INTERVAL=$REPLY
+    echo -e "\e[1A\e[K     Tasks repeat at most every: $HUB_TASKS_MIN_INTERVAL min"
+}
+
 # select_tts_model - Ask which Chatterbox model the TTS node of this host uses.
 # Saved in the host's tts service as "model", so a reinstall from the config (-c) uses it again.
 # Configs from before this option have no "model" there -> chatterbox (English)
@@ -877,6 +891,7 @@ select_components() {
         SIGNUP_MODE=$REPLY
         echo -e "\e[1A\e[K     Signup: $SIGNUP_MODE"
         select_maintenance
+        select_tasks
         select_hub_secret
     fi
 
@@ -1044,11 +1059,14 @@ deploy_hub() {
     set_env_value HUB_MAINTENANCE_BATCH "${HUB_MAINTENANCE_BATCH:-$HUB_MAINTENANCE_BATCH_DEFAULT}"
     set_env_value HUB_MAINTENANCE_INTERVAL "${HUB_MAINTENANCE_INTERVAL:-$HUB_MAINTENANCE_INTERVAL_DEFAULT}"
     set_env_value HUB_MAINTENANCE_SMALL_BATCH "${HUB_MAINTENANCE_SMALL_BATCH:-$HUB_MAINTENANCE_SMALL_BATCH_DEFAULT}"
+    set_env_value HUB_TASKS_MAX "${HUB_TASKS_MAX:-$HUB_TASKS_MAX_DEFAULT}"
+    set_env_value HUB_TASKS_MIN_INTERVAL "${HUB_TASKS_MIN_INTERVAL:-$HUB_TASKS_MIN_INTERVAL_DEFAULT}"
 
     echo "   signup mode  ${SIGNUP_MODE:-$SIGNUP_MODE_DEFAULT}"
     echo "   maintenance  ${HUB_MAINTENANCE_START:-$HUB_MAINTENANCE_START_DEFAULT}-${HUB_MAINTENANCE_END:-$HUB_MAINTENANCE_END_DEFAULT}" \
          "${HUB_MAINTENANCE_BATCH:-$HUB_MAINTENANCE_BATCH_DEFAULT} items, every ${HUB_MAINTENANCE_INTERVAL:-$HUB_MAINTENANCE_INTERVAL_DEFAULT} min" \
          "${HUB_MAINTENANCE_SMALL_BATCH:-$HUB_MAINTENANCE_SMALL_BATCH_DEFAULT} items"
+    echo "   tasks        ${HUB_TASKS_MAX:-$HUB_TASKS_MAX_DEFAULT} per user, repeating at most every ${HUB_TASKS_MIN_INTERVAL:-$HUB_TASKS_MIN_INTERVAL_DEFAULT} min"
     echo "   port         ${HUB_PORT:-$HUB_PORT_DEFAULT}"
     echo "   secret key   $( [[ -n "${HUB_SECRET_KEY:-}" ]] && echo "from config (${#HUB_SECRET_KEY} characters)" || echo "not in config" )"
 
@@ -1520,6 +1538,8 @@ parse_host_config() {
     HUB_MAINTENANCE_BATCH=""
     HUB_MAINTENANCE_INTERVAL=""
     HUB_MAINTENANCE_SMALL_BATCH=""
+    HUB_TASKS_MAX=""
+    HUB_TASKS_MIN_INTERVAL=""
     STT_WORKERS=""
     NODE_PORT=""
     LLAMA_SERVER_PORT=""
@@ -1543,6 +1563,9 @@ parse_host_config() {
         HUB_MAINTENANCE_BATCH=$(echo "$host_config" | jq -r '.hub.maintenance.batch // empty')
         HUB_MAINTENANCE_INTERVAL=$(echo "$host_config" | jq -r '.hub.maintenance.interval // empty')
         HUB_MAINTENANCE_SMALL_BATCH=$(echo "$host_config" | jq -r '.hub.maintenance.small_batch // empty')
+        # configs from before #170 have no "tasks" -> the defaults
+        HUB_TASKS_MAX=$(echo "$host_config" | jq -r '.hub.tasks.max // empty')
+        HUB_TASKS_MIN_INTERVAL=$(echo "$host_config" | jq -r '.hub.tasks.min_interval // empty')
     fi
 
     if echo "$host_config" | jq -e '.chat' >/dev/null; then
@@ -2163,6 +2186,8 @@ readonly HUB_MAINTENANCE_END_DEFAULT="05:00"
 readonly HUB_MAINTENANCE_BATCH_DEFAULT=50        # items per task and user and night
 readonly HUB_MAINTENANCE_INTERVAL_DEFAULT=15     # minutes between daytime runs, 0 = off
 readonly HUB_MAINTENANCE_SMALL_BATCH_DEFAULT=10  # items per task and user and daytime run
+readonly HUB_TASKS_MAX_DEFAULT=20                # open tasks per user (#170 task tool)
+readonly HUB_TASKS_MIN_INTERVAL_DEFAULT=15       # minutes, the shortest repeat of a task
 readonly STT_WORKERS_DEFAULT=4                   # parallel speech to text transcriptions
 readonly HOST_MODELS_DIR_DEFAULT="/var/lib/Rueckgrat/models"
 

@@ -6,5 +6,6 @@ from .audio_streamer import AudioStreamer
 from .notifier import Notifier
 from .keep_alive import KeepAlive
 from .capabilities import Capabilities
+from .alarm import Alarm
 
-__all__ = ["Hub", "Contact", "RueckgratConfig", "Paths", "AudioStreamer", "Notifier", "KeepAlive", "Capabilities"]
+__all__ = ["Hub", "Contact", "RueckgratConfig", "Paths", "AudioStreamer", "Notifier", "KeepAlive", "Capabilities", "Alarm"]
