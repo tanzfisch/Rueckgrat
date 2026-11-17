@@ -209,16 +209,19 @@ MAX_DECIDE_CHARS = 4000
 class DecideRequest(BaseModel):
     state: str                              # the text the questions are about
     questions: Dict[str, Dict[str, Any]]    # laya questions by id: {"type": "choice"|"score"|"noul", "instructions": ..., "criteria": ...}
+    whole: List[str] = []                   # ids of questions also judged on the whole state, not only chunk by chunk
 
 @app.post("/decide")
 async def decide(request: DecideRequest):
-    """laya typed decisions, all questions in one forward pass: {"answers": {id: {"type": "noul", "noul": P(true), ...}}}"""
+    """laya typed decisions, all questions in one forward pass per chunk of the state: {"answers": {id: {"type": "noul",
+    "noul": P(true), ...}}, "whole_answers": {id: ...}}. whole_answers: the whole ids judged on the whole state, {} for a
+    state of a single chunk"""
     if not app.state.decision:
         raise HTTPException(status_code=503, detail="Node has no decision module loaded")
     if not request.state or len(request.state) > MAX_DECIDE_CHARS or not request.questions or len(request.questions) > MAX_DECIDE_QUESTIONS:
         raise HTTPException(status_code=400, detail=f"a state of max {MAX_DECIDE_CHARS} characters and 1 to {MAX_DECIDE_QUESTIONS} questions")
     try:
-        answers = await asyncio.to_thread(app.state.decision.decide, request.state, request.questions)
+        answers, whole_answers = await asyncio.to_thread(app.state.decision.decide, request.state, request.questions, tuple(request.whole))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
@@ -226,7 +229,7 @@ async def decide(request: DecideRequest):
     except Exception as e:
         logger.error(f"decision failed: {e!r}")
         raise HTTPException(status_code=500, detail="decision failed")
-    return {"answers": answers}
+    return {"answers": answers, "whole_answers": whole_answers}
 
 VOICE_ID_PATTERN = r"[\w.-]+"
 MAX_VOICE_BYTES = 20 * 1024 * 1024

@@ -46,13 +46,13 @@ def sanitize_relative_path(path: str) -> str | None:
     return real if len(real) <= 180 else None
 
 
-def check_file(path: str, content: str | bytes) -> tuple[str, bytes]:
+def check_file(path: str, content: str | bytes, max_bytes: int = MAX_ATTACH_BYTES) -> tuple[str, bytes]:
     """(the real relative path, the bytes) of a valid file, ValueError if it is not one. content str: text the AI
-    wrote, at most MAX_FILE_BYTES. bytes: a file copied from the sandbox files, also binary, at most MAX_ATTACH_BYTES"""
+    wrote, at most MAX_FILE_BYTES. bytes: a file copied from the sandbox files, also binary, at most max_bytes"""
     real = sanitize_relative_path(path)
     if not real or not isinstance(content, (str, bytes)):
         raise ValueError(f"invalid file {path!r}")
-    data, limit = (content.encode("utf-8"), MAX_FILE_BYTES) if isinstance(content, str) else (content, MAX_ATTACH_BYTES)
+    data, limit = (content.encode("utf-8"), MAX_FILE_BYTES) if isinstance(content, str) else (content, max_bytes)
     if isinstance(content, str) and b"\0" in data:
         raise ValueError(f"{real} is not plain text")
     if len(data) > limit:
@@ -153,9 +153,9 @@ def payloads_for_messages(db, message_ids: list[int]) -> dict[int, list[dict]]:
 
 
 def attach_message_file(db, user_id: int, conversation_id: int, message_id: int, path: str, content: str | bytes,
-                        root: Path = FILES_ROOT) -> dict:
-    """writes one file for this message id and records its real name. returns the chat payload. content: see check_file"""
-    real, data = check_file(path, content)
+                        root: Path = FILES_ROOT, max_bytes: int = MAX_ATTACH_BYTES) -> dict:
+    """writes one file for this message id and records its real name. returns the chat payload. content, max_bytes: see check_file"""
+    real, data = check_file(path, content, max_bytes)
     stored = stored_name_for(real, data)
     file_type = mime_type(real, data)
     write_blob(user_id, conversation_id, message_id, stored, data, root)

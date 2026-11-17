@@ -1045,6 +1045,29 @@ class Hub:
         return None
 
     @classmethod
+    def save_message_file(cls, message_id: int, stored_name: str, path: str) -> bool:
+        """streams the attached file into path (an audio file is up to 100 MB, it is never held in memory as a whole).
+        False when the hub has no such file or writing failed"""
+        try:
+            with requests.get(
+                f"{cls.url}/messages/{message_id}/files/{stored_name}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=30,
+                verify=cls.server_cert,
+                stream=True,
+            ) as response:
+                if response.status_code != 200:
+                    logger.error(f"save message file - {response.status_code} {response.reason}")
+                    return False
+                with open(path, "wb") as f:
+                    for chunk in response.iter_content(64 * 1024):
+                        f.write(chunk)
+            return True
+        except Exception as e:
+            logger.error(f"failed to save_message_file {repr(e)}")
+            return False
+
+    @classmethod
     def _get_conversation_files(cls, conversation_id: int, route: str, params: dict, timeout: int):
         """the hub's answer for the conversation's sandbox files, None on an error"""
         try:

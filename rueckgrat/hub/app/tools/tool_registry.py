@@ -31,6 +31,7 @@ from .write_file_tool import WriteFileTool
 from .share_file_tool import ShareFileTool
 from .find_tools_tool import FindToolsTool
 from .task_tool import TaskTool
+from .text_to_speech_tool import TextToSpeechTool
 
 from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
@@ -44,6 +45,7 @@ class ToolRegistry:
         "convert",
         ("calculate", "run_code", "bash", "share_file"),    # share_file in bash's round: it runs after the calls that make the files
         ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember"),
+        "text_to_speech",   # after write_file and bash: it speaks the files they wrote
     ]
 
     TOOL_RANK = {name: rank for rank, entry in enumerate(TOOL_ORDER) for name in ((entry,) if isinstance(entry, str) else entry)}
@@ -52,7 +54,7 @@ class ToolRegistry:
     RUN_TOOLS = ("run_code", "bash")    # a worker's mandatory one with no call is a problem for its fix rounds (not_called)
     PRIORITY_TOOLS = ("task", "spawn_job")   # highest first: one overrides all other tools and the ones after it here
     WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "poll", "show_map", "task")   # AgentJob.ALLOWED_TOOLS: a task's pass may spawn a job, task and companion passes show polls and maps
-    DETACHED_TOOLS = ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember")
+    DETACHED_TOOLS = ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember", "text_to_speech")
     REPLY_TOOLS = ("remember", "take_photo")    # a chat reply calls these itself at its end (MetaTask), not the tool setup
     REPLY_CALL = re.compile(r'(?:^|\n)[ \t]*(?:```(?:json)?\s*)?\{\s*"tool"')   # where the calls at the end of a reply start
     PROJECT_QUESTIONS = [
@@ -89,6 +91,7 @@ class ToolRegistry:
         self._register_tool(ShareFileTool)
         self._register_tool(FindToolsTool)
         self._register_tool(TaskTool)
+        self._register_tool(TextToSpeechTool)
 
         temp = ", ".join(self._registered)
         logger.debug(f"registered tools: {temp}")

@@ -42,14 +42,11 @@ def best_thresholds(examples: List[dict], tool: str, scores: List[Dict[str, floa
 
 
 def tool_scores(text: str, registry: ToolRegistry, infrastructure: Infrastructure) -> Dict[str, float]:
-    """each tool's score as the hub's ToolDetectionTask gets it: the best of its questions"""
+    """each tool's score as the hub's ToolDetectionTask gets it: the best of its questions, also on the whole message
+    (Tool.whole_message), and its Tool.text_score"""
     task = ToolDetectionTask(text, registry, infrastructure)
     task.execute()
-    scores: Dict[str, float] = {}
-    for key, (score, _) in task.scores.items():
-        tool = key.rsplit("__", 1)[0]
-        scores[tool] = max(scores.get(tool, 0.0), score)
-    return scores
+    return task.tool_scores()
 
 
 def main():

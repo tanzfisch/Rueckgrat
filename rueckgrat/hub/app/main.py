@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import StreamingResponse, Response, FileResponse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer
 from fastapi.concurrency import run_in_threadpool
@@ -1306,7 +1306,8 @@ def download_message_file(message_id: int, stored_name: str, username: str = Dep
         if not path.is_file():
             raise HTTPException(status_code=404, detail="file not found")
         download_name = row["real_name"].rsplit("/", 1)[-1] or "file"
-        return Response(content=path.read_bytes(), media_type=row["file_type"], headers=attachment_headers(download_name))
+        # streamed: an attached audio file is up to 100 MB (TextToSpeechTool.max_attach_bytes)
+        return FileResponse(path, media_type=row["file_type"], headers=attachment_headers(download_name))
 
 ########### conversation files (the sandbox volume of bash and run_code, shared by all conversations of the contact)
 def conversation_files(username: str, conversation_id: int, read):

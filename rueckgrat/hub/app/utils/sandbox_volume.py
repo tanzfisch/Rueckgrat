@@ -38,7 +38,7 @@ IMAGES = "data/images"
 TTS = "data/tts"
 LAYOUT = (PROJECTS, WORKDIR, DOCUMENTS, IMAGES, TTS)
 SHELL_STATE = ".cache/rueckgrat/shell"
-HASH_CHARS = 12         # of the sha256 of a document's content, its folder in DOCUMENTS
+HASH_CHARS = 12         # of the sha256 of a document's (or audio file's) content, its folder in DOCUMENTS (TTS)
 # the image of the reader container: the python sandbox, in the image cache already (keep_template), it has find
 READER_IMAGE = "ghcr.io/vndee/sandbox-python-311-bullseye"
 READER_TIMEOUT = 30     # seconds for listing a folder
@@ -96,7 +96,17 @@ class SandboxVolume:
     @staticmethod
     def document_path(name: str, data: bytes) -> str:
         """where write_file keeps the file name (a relative path) with these bytes: DOCUMENTS/<hash>/<name>"""
-        return f"{DOCUMENTS}/{hashlib.sha256(data).hexdigest()[:HASH_CHARS]}/{name}"
+        return SandboxVolume._hashed_path(DOCUMENTS, name, data)
+
+    @staticmethod
+    def tts_path(name: str, data: bytes) -> str:
+        """where text_to_speech keeps the audio file name with these bytes: TTS/<hash>/<name>"""
+        return SandboxVolume._hashed_path(TTS, name, data)
+
+    @staticmethod
+    def _hashed_path(folder: str, name: str, data: bytes) -> str:
+        """folder/<hash of the content>/name: a file kept this way never overwrites another"""
+        return f"{folder}/{hashlib.sha256(data).hexdigest()[:HASH_CHARS]}/{name}"
 
     def current_dir(self, conversation_id: int) -> str:
         """the folder the conversation's bash ended in (its shell state), relative to MOUNT_PATH, its workdir when it

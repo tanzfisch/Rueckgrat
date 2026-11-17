@@ -4,7 +4,8 @@ Changelog
 0.29.0
 ------
 
-- #170 added task tool
+- #170 added task tool which creates repeating or one of tasks in the background 
+- #197 added tts tool which turns text in to speech for the user to donwload
 
 0.28.1
 ------
