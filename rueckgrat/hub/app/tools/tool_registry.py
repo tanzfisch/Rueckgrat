@@ -5,7 +5,7 @@ import threading
 import contextvars
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
-from typing import Dict, List, Optional, Any, Mapping, Union, Callable
+from typing import Dict, List, Optional, Any, Mapping, Union, Callable, Tuple
 from .tool import Tool
 from . import prompts
 from app.utils.trace import Trace
@@ -32,6 +32,7 @@ from .share_file_tool import ShareFileTool
 from .find_tools_tool import FindToolsTool
 from .task_tool import TaskTool
 from .text_to_speech_tool import TextToSpeechTool
+from .join_files_tool import JoinFilesTool
 
 from app.common import get_logger, Utils, MessageQueue
 logger = get_logger()
@@ -46,22 +47,37 @@ class ToolRegistry:
         ("calculate", "run_code", "bash", "share_file"),    # share_file in bash's round: it runs after the calls that make the files
         ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember"),
         "text_to_speech",   # after write_file and bash: it speaks the files they wrote
+        "join_files",       # after text_to_speech: it joins the audio files it made
     ]
 
     TOOL_RANK = {name: rank for rank, entry in enumerate(TOOL_ORDER) for name in ((entry,) if isinstance(entry, str) else entry)}
     PROMPT_TOOLS = ["remember", "search_memory", "take_photo", "find_tools"]   # find_tools shares search_memory's round, no extra setup call
-    FIX_TOOLS = ["run_code", "bash", "share_file", "write_file"]     # offered again in a worker's fix rounds (ToolExecutionTask), in this order
     RUN_TOOLS = ("run_code", "bash")    # a worker's mandatory one with no call is a problem for its fix rounds (not_called)
     PRIORITY_TOOLS = ("task", "spawn_job")   # highest first: one overrides all other tools and the ones after it here
     WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "poll", "show_map", "task")   # AgentJob.ALLOWED_TOOLS: a task's pass may spawn a job, task and companion passes show polls and maps
     DETACHED_TOOLS = ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember", "text_to_speech")
     REPLY_TOOLS = ("remember", "take_photo")    # a chat reply calls these itself at its end (MetaTask), not the tool setup
+    CHAT_EXCLUDED_TOOLS = ("join_files",)   # only an agent job's workers and task passes use these, a chat turn neither detects nor offers them (MetaTask)
     REPLY_CALL = re.compile(r'(?:^|\n)[ \t]*(?:```(?:json)?\s*)?\{\s*"tool"')   # where the calls at the end of a reply start
     PROJECT_QUESTIONS = [
         "Does the user report a bug in a program, like a crash, an error or wrong behaviour?",
         "Does the user ask for a fix or a change to a program, an app or a game that was made earlier?",
     ]
     PROJECT_TOOLS = ("spawn_job", "bash", "write_file")
+    # how tools are used together (notes), the tools' own texts never name another tool. a note goes into a tool setup
+    # when one of its tools is offered and all of them can be used there (notes)
+    TOOL_NOTES = [
+        (("run_code", "bash"), prompts.TOOL_NOTE_RUN_CODE_BASH),
+        (("run_code", "calculate"), prompts.TOOL_NOTE_RUN_CODE_CALCULATE),
+        (("bash", "write_file"), prompts.TOOL_NOTE_BASH_WRITE_FILE),
+        (("bash", "share_file"), prompts.TOOL_NOTE_BASH_SHARE_FILE),
+        (("run_code", "share_file"), prompts.TOOL_NOTE_RUN_CODE_SHARE_FILE),
+        (("convert", "websearch"), prompts.TOOL_NOTE_CONVERT_WEBSEARCH),
+        (("weather", "websearch"), prompts.TOOL_NOTE_WEATHER_WEBSEARCH),
+        (("spawn_job", "task"), prompts.TOOL_NOTE_SPAWN_JOB_TASK),
+        (("write_file", "text_to_speech"), prompts.TOOL_NOTE_WRITE_FILE_TEXT_TO_SPEECH),
+        (("text_to_speech", "join_files"), prompts.TOOL_NOTE_TEXT_TO_SPEECH_JOIN_FILES),
+    ]
 
     def __init__(self, db, infrastructure, task_queue):
         self.db = db
@@ -92,6 +108,7 @@ class ToolRegistry:
         self._register_tool(FindToolsTool)
         self._register_tool(TaskTool)
         self._register_tool(TextToSpeechTool)
+        self._register_tool(JoinFilesTool)
 
         temp = ", ".join(self._registered)
         logger.debug(f"registered tools: {temp}")
@@ -223,6 +240,11 @@ class ToolRegistry:
 
         return sorted(unique, key=key)
 
+    def fixable(self, tool_names: List[str]) -> List[str]:
+        """the fixable tools (Tool.fixable) of tool_names that can be used now, in TOOL_ORDER: what a worker's fix rounds offer"""
+        tools = self.tools
+        return [name for name in self.ordered_names(tool_names or []) if name in tools and tools[name].fixable]
+
     def ranked_groups(self, tool_names: List[str]) -> List[List[str]]:
         tools = self.tools
         names = [name for name in self.ordered_names(tool_names or []) if name in tools]
@@ -331,9 +353,12 @@ class ToolRegistry:
 
     GROUND_WORD = re.compile(r"[^\W_]{3,}|\d+(?:[.,]\d+)?")    # the words and numbers grounded() compares
 
-    def grounded(self, call: Dict[str, Any], text: str) -> bool:
+    def grounded(self, call: Dict[str, Any], text: str, conversation_id: int) -> bool:
         """whether a call takes at least one of its values from text (the message and the earlier results). a recommended
-        call that shares nothing with it was made up, like the tool's prompt example ("100 USD to EUR" in a fractal task)"""
+        call that shares nothing with it was made up, like the tool's prompt example ("100 USD to EUR" in a fractal task).
+        a call that only looks around in the conversation's work (Tool.looks_around, a bash ls of its workdir) is grounded"""
+        if self._registered.get(call.get("tool"), Tool).looks_around(call, conversation_id):
+            return True
         words = {word.lower() for word in self.GROUND_WORD.findall(text or "")}
         values = [value for key, value in call.items() if key != "tool"]
         # a value written in the message as it is counts too: "ls -la ~" has no word of 3 letters
@@ -361,14 +386,15 @@ class ToolRegistry:
             return {name: {"tool": name, "text": prompts.TOOL_LENGTH_PART.format(name=name)}}
         return None
 
-    def not_called(self, mandatory: List[str], calls: List[Dict[str, Any]]) -> List[str]:
-        """the problems of the mandatory RUN_TOOLS that got no call (a tester that only listed the files)"""
+    def not_called(self, mandatory: List[str], calls: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
+        """the problems (tool name, text) of the mandatory RUN_TOOLS that got no call (a tester that only listed the files)"""
         called = {call.get("tool") for call in calls}
-        return [prompts.TOOL_NOT_CALLED_PART.format(name=name) for name in mandatory if name in self.RUN_TOOLS and name not in called]
+        return [(name, prompts.TOOL_NOT_CALLED_PART.format(name=name)) for name in mandatory if name in self.RUN_TOOLS and name not in called]
 
-    def problems(self, results: Optional[Mapping[str, Any]]) -> List[str]:
-        """what went wrong in {tool name: result} that a fix round could repair (each tool's problems())"""
-        return [problem for name, result in (results or {}).items() if isinstance(result, dict)
+    def problems(self, results: Optional[Mapping[str, Any]]) -> List[Tuple[str, str]]:
+        """what went wrong in {tool name: result} that a fix round could repair, (tool name, text) per problem of each
+        tool's problems(): a problem stays its tool's until that tool runs again"""
+        return [(name, problem) for name, result in (results or {}).items() if isinstance(result, dict)
                 for problem in self._registered.get(name, Tool).problems(result)]
 
     def detachable(self, tool_job: Tool) -> bool:
@@ -432,6 +458,13 @@ class ToolRegistry:
 
         return prompts.TOOLS_MANDATORY_PART.format(tools=tools)
     
+    def notes(self, offered: List[str], excluded: tuple = ()) -> str:
+        """the TOOL_NOTES block for a tool setup that offers offered: the notes of which one tool is offered and all
+        tools can be used (tools) and are not excluded. "" when none fits"""
+        usable = set(self.available(list(self.tools), excluded))
+        lines = [note for names, note in self.TOOL_NOTES if set(names) & set(offered or []) and set(names) <= usable]
+        return prompts.TOOL_NOTES_PART.format(notes="\n".join(f"- {line}" for line in lines)) if lines else ""
+
     def reply_tools_prompt(self) -> str:
         """the REPLY_TOOLS that can be used now for the chat's system prompt, "" when none can"""
         names = self.available(list(self.REPLY_TOOLS))

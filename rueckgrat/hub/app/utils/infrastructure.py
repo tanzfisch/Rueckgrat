@@ -42,6 +42,10 @@ CAPABILITY_REFRESH_SECONDS = 30     # a connected node is asked for its loaded m
 CAPABILITY_TIMEOUT = 5              # seconds for a node's /capabilities
 INTERNET_PROBE_SECONDS = 60
 INTERNET_PROBE_TIMEOUT = 3
+TTS_TIMEOUT = 240                   # seconds for one spoken chunk of a chat (its speech, the app's /tts): the user waits for it
+TTS_BACKGROUND_TIMEOUT = 28800      # seconds for one chunk of a background request (agent job, task or companion pass): it may wait
+                                    # behind the other speakers in the node's queue, bounded by the job (AgentJob DEFAULT_TIME_LIMIT)
+TTS_BUSY_WAIT = 5                   # seconds a background request waits when the node's speech queue is full (503 Retry-After), if it gives none
 INTERNET_PROBE_URLS = ("https://1.1.1.1", "https://www.google.com/generate_204")     # any answer of one of them: online
 
 @dataclass
@@ -353,10 +357,12 @@ class Infrastructure:
 
         return str(filepath)
 
-    def tts(self, text: str, voice: str = "", language: str = "", cache: bool = True) -> Optional[bytes]:
+    def tts(self, text: str, voice: str = "", language: str = "", cache: bool = True, background: bool = False) -> Optional[bytes]:
         """forward a speech request to the tts node, returns wav bytes or None. language "" = the node detects it.
         cache: the wav is cached for an hour, so replaying a recent message does not generate it again. False for speech
-        no one replays (the text_to_speech tool's audio files), it would push the chat's speech out of the cache"""
+        no one replays (the text_to_speech tool's audio files), it would push the chat's speech out of the cache.
+        background: a request no one waits for: the node queues it after the chats' (priority), it may wait up to
+        TTS_BACKGROUND_TIMEOUT and asks again while the node is busy. a chat's gets TTS_TIMEOUT and fails when it is busy"""
         key = (text, voice, language)
         if cache and (wav := self._tts_cache.get(key)) is not None:
             logger.debug("tts: using cached wav")
@@ -370,8 +376,16 @@ class Infrastructure:
         if voice and not self._push_voice(base, voice):
             logger.warning(f"voice {voice} not available on the tts node, using default voice")
         url = f"{base}/tts"
+        payload = {"text": text, "voice": voice, "language": language, "priority": "background" if background else "chat"}
+        deadline = time.monotonic() + (TTS_BACKGROUND_TIMEOUT if background else TTS_TIMEOUT)
         try:
-            response = requests.post(url, json={"text": text, "voice": voice, "language": language}, timeout=240)
+            while True:
+                response = requests.post(url, json=payload, timeout=max(1.0, deadline - time.monotonic()))
+                wait = self._tts_busy(response)
+                if wait is None or not background or time.monotonic() + wait >= deadline:
+                    break
+                logger.debug(f"tts node busy, the background request asks again in {wait}s")
+                time.sleep(wait)
             if response.status_code != 200:
                 logger.error(f"failed tts request: {response.status_code} {response.reason}")
                 return None
@@ -381,6 +395,16 @@ class Infrastructure:
         except Exception as e:
             logger.error(f"failed to get a tts response {repr(e)}")
             return None
+
+    @staticmethod
+    def _tts_busy(response) -> Optional[float]:
+        """the seconds to wait when the tts node answered busy (503 with Retry-After: its speech queue is full), else None"""
+        if response.status_code != 503 or "Retry-After" not in response.headers:
+            return None
+        try:
+            return max(1.0, float(response.headers["Retry-After"]))
+        except ValueError:
+            return float(TTS_BUSY_WAIT)
 
     def stt(self, pcm16: bytes, kind: str, language: str = "") -> Optional[str]:
         """forward 16 kHz mono pcm_s16le audio to the stt node, returns the text or None.

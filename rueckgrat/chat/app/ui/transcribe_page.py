@@ -3,7 +3,7 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.chat_page import WIDE_MIN_WIDTH
+from app.ui.widgets.files_dock import WIDE_MIN_WIDTH
 from app.ui.widgets import Header, LanguagePicker, MessageBox, flag_text
 from app.utils import Hub, Capabilities
 from app.utils.transcript import Transcript, Bookmark, Segment, Item, clock, local_time

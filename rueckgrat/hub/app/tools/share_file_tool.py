@@ -17,12 +17,14 @@ class ShareFileTool(Tool):
     download cards, writes nothing. a path is a file or a folder (all its files, .git, caches and packages left out),
     relative to the conversation's current bash folder or absolute under MOUNT_PATH. without a message (an agent job's
     worker) the files are held in the result's "attachments", the job attaches them to its report (attach_held).
-    offering is shared with WriteFileTool (_offered, attach_held, merge)"""
+    offering is shared with the tools that write a file (WriteFileTool, TextToSpeechTool, JoinFilesTool: _offered, _kept,
+    attach_held, merge), and so is writing it without replacing a file unless the call says overwrite (_write)"""
     description = prompts.SHARE_FILE_DESCRIPTION
     sequential = True           # runs after the round's bash and run_code calls that make the files
     offered_with = ("bash", "run_code")     # no laya question: offered (optional) whenever a tool that makes files is
     # the largest file it attaches. every file of a shared folder is read into memory at once, so not more by default
     max_attach_bytes = MAX_ATTACH_BYTES
+    fixable = True
 
     @classmethod
     def name(cls) -> str:
@@ -34,6 +36,33 @@ class ShareFileTool(Tool):
 
     def volume(self) -> SandboxVolume:
         return SandboxVolume(self.get_user_id(), self.contact_id)
+
+    def _overwrite(self) -> bool:
+        """the call says an existing file at its full path may be replaced (overwrite: true)"""
+        return self.tool_call.get("overwrite") in (True, "true", "True")
+
+    def _check_free(self, stored: str, full: bool) -> None:
+        """ValueError when a full path (full) names something that is there already and the call does not say overwrite.
+        a plain name is kept under its content's hash (SandboxVolume.document_path, tts_path): never another file"""
+        if full and not self._overwrite() and self.volume().has_file(stored):
+            raise ValueError(prompts.FILE_EXISTS_PART.format(path=f"{MOUNT_PATH}/{stored}"))
+
+    def _write(self, stored: str, data: bytes, full: bool) -> None:
+        """writes the file the call made (_check_free first)"""
+        self._check_free(stored, full)
+        self.volume().write_file(stored, data)
+
+    def _kept(self, real: str, stored: str, data: bytes, lead: str) -> Dict[str, Any]:
+        """the result of a file written to stored, its text after lead (what was made): offered like _offered, or when
+        it is larger than max_attach_bytes kept in the files only, the user downloads it in the files browser"""
+        saved = [f"{MOUNT_PATH}/{stored}"]
+        if len(data) > self.max_attach_bytes:
+            return {"tool": self.name(), "saved": saved, "text": f"{lead} " + prompts.FILE_TOO_LARGE_PART.format(
+                path=saved[0], size=f"{len(data) / (1024 * 1024):.0f}", limit=self.max_attach_bytes // (1024 * 1024))}
+        result = self._offered([(real, stored, data)], [])
+        if result.get("file_names"):
+            result.update(text=f"{lead} {self._text(result['file_names'], saved)}".strip(), saved=saved)
+        return result
 
     def execute(self) -> None:
         paths = self.tool_call.get("path")

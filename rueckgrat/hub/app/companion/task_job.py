@@ -12,6 +12,7 @@ logger = get_logger()
 LATE_MINUTES = 5        # a one-off task this late (the hub was down) says so in its message
 BUSY_WAIT_SECONDS = 120     # at most this long its message waits for a reply being made in the conversation
 TITLE_LENGTH = 60           # the title of a conversation a task opens: its text, cut
+TIME_LIMIT = 5400           # seconds for one pass, not an agent job's DEFAULT_TIME_LIMIT: it runs on the scheduler's thread, a long piece of work is a background job (spawn_job)
 
 
 class TaskJob(AgentJob):
@@ -24,7 +25,7 @@ class TaskJob(AgentJob):
     EXCLUDED_TOOLS = ("take_photo",)
 
     def __init__(self, row: dict, db, infrastructure, tool_registry, tz, now: datetime, occurrence: datetime):
-        super().__init__("task", row["note"], infrastructure=infrastructure)
+        super().__init__("task", row["note"], time_limit=TIME_LIMIT, infrastructure=infrastructure)
         self.row = row
         self.user_id = row["user_id"]
         self.db = db

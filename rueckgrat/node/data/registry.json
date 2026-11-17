@@ -957,7 +957,7 @@
     ],
     "llama": {
       "model_file": "IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S-00001-of-00002.gguf",
-      "max_context": 32000,
+      "max_context": 80000,
       "gpu_layers": -1,
       "flash_attn": "on",
       "temp": 0.7,

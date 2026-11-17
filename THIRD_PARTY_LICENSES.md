@@ -41,7 +41,7 @@ Docker image based on `python:3.11-slim`. Files: `requirements.txt`, `requiremen
 | ddgs | ==9.16.0 | MIT | https://github.com/deedy5/ddgs |
 | sqlite-vec | ==0.1.9 | MIT OR Apache-2.0 (dual) | https://github.com/asg017/sqlite-vec |
 | llm-sandbox[docker] | ==0.3.46 | MIT | https://github.com/vndee/llm-sandbox |
-| soundfile (text_to_speech tool: Ogg Opus encoding) | not pinned (latest 0.14.0) | BSD-3-Clause; its wheel bundles libsndfile (LGPL-2.1+) with libogg, libopus, libvorbis, libFLAC (BSD-3-Clause) and libmp3lame, libmpg123 (LGPL-2.1), dynamically loaded | https://github.com/bastibe/python-soundfile |
+| soundfile (text_to_speech tool: Ogg Opus and MP3 encoding) | not pinned (latest 0.14.0) | BSD-3-Clause; its wheel bundles libsndfile (LGPL-2.1+) with libogg, libopus, libvorbis, libFLAC (BSD-3-Clause) and libmp3lame, libmpg123 (LGPL-2.1), dynamically loaded, so AGPL compatible; the MP3 patents have expired (2017) | https://github.com/bastibe/python-soundfile |
 | docker (Docker SDK for Python, comes in through llm-sandbox) | 7.2.0 (latest) | Apache-2.0 | https://github.com/docker/docker-py |
 | playwright | 1.64.1 (installed) | Apache-2.0 | https://github.com/microsoft/playwright-python |
 | certifi (used directly in code, comes in through requests) | 2026.10.23 (installed) | MPL-2.0 | https://github.com/certifi/python-certifi |

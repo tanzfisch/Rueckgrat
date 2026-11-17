@@ -1,8 +1,8 @@
-# Contributing
+# Development
 
 The author develops primarily on a private copy of this repo. Feel free to open tickets here anyway or contact directly via martinloga@protonmail.com
 
-# First steps
+## First steps
 
 1. install once manually and store your setting from `rueckgrat/config/infrastructure.json`.
 2. change code
@@ -14,8 +14,29 @@ The author develops primarily on a private copy of this repo. Feel free to open 
 
 Hint use --in-place option for the installer if you don't want your workspace be then one compiled in to the containers locally
 
+## Communication
 
-# Chat on Android
+Chat talks to the hub over HTTPS and websockets. The hub talks to the nodes over HTTP and websockets on your network. Clients can reach the hub on the LAN through Caddy, or from the internet through an optional Cloudflare tunnel. See [docs/communication.md](docs/communication.md) for the components, ports, authentication and the typical message and audio flows.
+
+## Test Prompts Library
+
+Since it is cumbersome to reinvent prompts for testing all the time. Please find some test prompts here [docs/test_prompts.md](docs/test_prompts.md).
+
+## Local web pages
+
+By default the AI can only open public websites. It cannot open pages in your home network or on the hub machine itself.
+
+If you want the AI to read your own local websites or services, list them in `rueckgrat/.env` on the hub machine and rebuild the hub. Separate entries with commas. You can list a single address, a whole network, or a machine name:
+
+```bash
+HUB_FETCH_ALLOW=192.168.2.0/24,nas.local,127.0.0.1
+```
+
+Write `private` to allow your whole home network. This does not include the hub machine itself (`127.0.0.1`), which you have to list on its own.
+
+You can also set this in the installer config as `"fetch_allow"` in the hub section, so it is kept when you reinstall.
+
+## Chat on Android
 
 Build the APK by hand instead of with the installer
 
@@ -36,14 +57,16 @@ Install on android phone, open the app on the phone and follow its logs
 adb uninstall com.flet.chat && adb install build/apk/*.apk && adb logcat -s flet.python
 ```
 
-# Laya tuning
+## Laya tuning
+
+Add tune data to rueckgrat/hub/laya_tune/dataset.jsonl then run:
 
 ```bash
 cd rueckgrat/hub
 ./laya_tune/tune.sh
 ```
 
-# better logging
+## better logging
 
 Install doozle-agent on remote machines
 
