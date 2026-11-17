@@ -82,6 +82,7 @@ class WhereForm(ft.Column):
     def __init__(self):
         super().__init__(expand=True, spacing=14, scroll=ft.ScrollMode.AUTO)
         timezone = Hub.get_timezone()   # the hub answers its default if none is set, "" if it can't be reached
+        self._timezone_shown = timezone or None     # saved only when the user picks another one: else it follows the device
         self.timezone = ft.Dropdown(
             value=timezone or None,
             options=timezone_options(timezone),
@@ -104,6 +105,11 @@ class WhereForm(ft.Column):
             wizard_row("Time zone", self.timezone),
             wizard_row("Email", self.email_input),
         ]
+
+    def get_changed_timezone(self) -> str | None:
+        """the timezone the user picked, None if they kept the one shown (the device's or their earlier choice)"""
+        value = self.timezone.value or None
+        return value if value != self._timezone_shown else None
 
     def on_email_changed(self, e=None):
         if self.email_input.error:
@@ -164,7 +170,8 @@ class UserProfileWizard(WizardPage):
         if not self.where.validate_email():
             return
         email = (self.where.email_input.value or "").strip()
-        error = Hub.set_timezone(self.where.timezone.value) if self.where.timezone.value else None
+        timezone = self.where.get_changed_timezone()
+        error = Hub.set_timezone(timezone) if timezone else None
         if not error and email:
             error = Hub.set_email(email)
         if error:

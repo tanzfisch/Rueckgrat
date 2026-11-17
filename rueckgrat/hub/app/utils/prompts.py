@@ -10,13 +10,15 @@ placeholders, filled with str.format (literal json braces are doubled). the comp
   IDENTITY_STYLE_PART       style: the contact's clothing style
   INTERACTION_STYLE_PART    tone, engagement, sfw (PERSONA_SFW_PART or PERSONA_UNRESTRICTED_PART), quirks (one "  - " line each)
   OBJECTIVES_PART           primary, secondary (one "  - " line each)
-  LOCAL_TIME_PART           now: "2026-10-28 07:30:00"
+  LOCAL_TIME_PART           now: "Wednesday, 2026-10-28 07:30:00" in the user's timezone
   SITUATION_CONTEXT_PART    location, topic, user_name, user_action, user_head, user_upper_body, user_body, assistant_action,
                             assistant_head, assistant_upper_body, assistant_body, conversation_so_far (CONVERSATION_SO_FAR_PART or "")
   CONVERSATION_SO_FAR_PART  summary: the nightly summary of the conversation
-  TOOL_SETUP_FIRST_PROMPT   history (TOOL_SETUP_HISTORY_PART or ""), prompt (the user's message), tools (the TOOL_SETUP_*
-                            sections of ToolRegistry.get_tools_hydrated)
-  TOOL_SETUP_NEXT_PROMPT    history, prompt, previous_results (one "i. tool -> text" line each), tools
+  NEW_MESSAGE_PART          before (the situation, the last answer's note, this turn's TOOL_RESULTS), message (the user's text)
+  TOOL_SETUP_FIRST_PROMPT   history (TOOL_SETUP_HISTORY_PART or ""), time (TOOL_SETUP_TIME_PART or ""), prompt (the user's
+                            message), tools (the TOOL_SETUP_* sections of ToolRegistry.get_tools_hydrated)
+  TOOL_SETUP_NEXT_PROMPT    history, time, prompt, previous_results (one "i. tool -> text" line each), tools
+  TOOL_SETUP_TIME_PART      timezone: the user's IANA name, now: "Wednesday, 2026-10-28 07:30" in it
   TOOL_SETUP_HISTORY_PART   history: the last messages before the user's message, one "name: content" block each
   GENERIC_IMAGE_PROMPT      prompt: what the image is to show
 """
@@ -72,8 +74,10 @@ OBJECTIVES:
 INSTRUCTIONS_PART = """
 INSTRUCTIONS:
 * When a CONVERSION_RESULT section is provided, use its numbers exactly. If a conversion failed, say so briefly instead of guessing.
-* When a TOOL_RESULT section is provided, use its facts and numbers exactly. If a tool failed, say so briefly instead of guessing.
-* Only say you looked something up or checked a website or source if a WEBSEARCH_RESULT, TOOL_RESULT or CONVERSION_RESULT section is provided. Never invent sources.
+* When a TOOL_RESULTS section is provided, use its facts and numbers exactly. If a tool failed, say so briefly instead of guessing.
+* TOOL_RESULTS belong to the user's new message only. Facts and numbers that tools gave for earlier messages (a forecast, a conversion) are old: don't bring them up again unless the user asks about them.
+* Always reply to the user's new message, never answer an earlier message again.
+* Only say you looked something up or checked a website or source if a WEBSEARCH_RESULT, TOOL_RESULTS or CONVERSION_RESULT section is provided. Never invent sources.
 * If you don't recognise a book, person or event, say you haven't heard of it. Don't invent plots, quotes or facts.
 * Only refer to past shared events that appear in the conversation, the context or your memories. If the user mentions one you have no record of, say you don't remember it.
 """
@@ -93,6 +97,13 @@ You: {assistant_action}, {assistant_head}, {assistant_upper_body}, {assistant_bo
 
 CONVERSATION_SO_FAR_PART = "Conversation so far: {summary}"
 
+# the user's new message in the reply prompt (ChatTask): before is the situation, what the last answer showed and this
+# turn's TOOL_RESULTS, message the user's text. earlier turns' tool results are not in the prompt, only the replies made of them
+NEW_MESSAGE_PART = """{before}
+
+THE USER'S NEW MESSAGE (reply to this, the TOOL_RESULTS above are for it, the rest is from before it):
+{message}"""
+
 # ---------------------------------------------------------------- the tool setup run (ToolPromptCompiler): which tools to call for a message
 
 TOOL_SETUP_MANDATORY_PART = "MANDATORY TOOLS\n"
@@ -103,7 +114,7 @@ TOOL_SETUP_OPTIONAL_PART = "OPTIONAL TOOLS\n"
 
 TOOL_SETUP_FIRST_PROMPT = """
 This is a tool setup run. Apply given tools based on the original prompt.
-{history}
+{history}{time}
 ORIGINAL PROMPT
 {prompt}
 
@@ -116,9 +127,14 @@ THE CONVERSATION BEFORE IT (what goes on, e.g. a quiz or a game: the tools are a
 {history}
 """
 
+TOOL_SETUP_TIME_PART = """
+THE USER'S TIME ZONE
+{timezone}, now {now} there. Dates and times the user means without naming a place are in it.
+"""
+
 TOOL_SETUP_NEXT_PROMPT = """
 This is a tool setup run. Apply given tools based on the original prompt and results from previous tool calls.
-{history}
+{history}{time}
 ORIGINAL PROMPT
 {prompt}
 

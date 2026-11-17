@@ -87,6 +87,9 @@ class WebSocketClientNode(WebSocketClient):
 class Infrastructure:
     callback_handlers: Dict[str, tuple[int, Callable[[str], None]]] = {}
     _tts_cache = TtsCache()  # generated speech, 1 h, max 100 MB
+    # class defaults, so an instance without __init__ (laya_tune: Infrastructure.__new__ and node_by_type for decide) works too
+    internet: Optional[bool] = None     # the last internet probe, None: not probed yet (counts as online)
+    _live = False                       # connected to the nodes' websockets and watching their capabilities
 
     @staticmethod
     def slot_context() -> Optional[int]:
@@ -109,8 +112,6 @@ class Infrastructure:
     def __init__(self):
         self.node_by_type: dict[str, WebSocketClientNode] = {}
         self.nodes: list[WebSocketClientNode] = []
-        self.internet: Optional[bool] = None    # the last internet probe, None: not probed yet (counts as online)
-        self._live = False                      # connected to the nodes' websockets and watching their capabilities
         self._capability_state: dict = {}
         self._watch_stop = threading.Event()
         logger.info(f"llm slot context {self.slot_context() or 'unknown'}, long replies {self.long_reply_tokens()} tokens")

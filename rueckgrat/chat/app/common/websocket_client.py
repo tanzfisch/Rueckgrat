@@ -92,7 +92,7 @@ class WebSocketClient:
                     self.ws = await websockets.connect(self.uri, additional_headers=headers, ping_interval=30, ping_timeout=60)
                 self._running = True
                 self.loop = asyncio.get_running_loop()
-                logger.info(f"succesfully connected to {self.uri}")
+                logger.info(f"successfully connected to {self.uri}")
 
                 if self._receive_task and not self._receive_task.done():
                     self._receive_task.cancel()

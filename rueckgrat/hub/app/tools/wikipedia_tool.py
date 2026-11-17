@@ -55,12 +55,13 @@ def wikipedia_summary(query: str, lang: str = "en") -> Dict[str, str]:
 class WikipediaTool(Tool):
     description = prompts.WIKIPEDIA_DESCRIPTION
     requires = ("internet",)
-    thresholds = (0.5, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.4, 0.5)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask who a famous person from history was?",
         "Does the user ask to have a science theory or natural process explained?",
         "Does the user ask what a science term means, like photosynthesis or a black hole?",
-        "Does the user ask about a famous landmark, monument, country, empire, war, treaty or historic event?",
+        "Does the user ask you to tell them about a famous landmark, monument, war, treaty or historic event?",
+        "Does the user ask about the history of a country, an empire or an era?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

@@ -31,7 +31,7 @@ class ShareFileTool(Tool):
         return False
 
     def volume(self) -> SandboxVolume:
-        return SandboxVolume(self.user_id, self.contact_id)
+        return SandboxVolume(self.get_user_id(), self.contact_id)
 
     def execute(self) -> None:
         paths = self.tool_call.get("path")
@@ -43,7 +43,7 @@ class ShareFileTool(Tool):
         for path in paths:
             before = len(found)
             try:
-                real = volume.resolve(path, self.conversation_id)
+                real = volume.resolve(path, self.get_conversation_id())
                 parent = posixpath.dirname(real)
                 # the name the user sees: below the shared path's folder (a file alone, a folder with its own name)
                 found += [(posixpath.relpath(name, parent) if parent else name, name, data)
@@ -83,7 +83,7 @@ class ShareFileTool(Tool):
                 file_names.append(name)
             else:
                 try:
-                    file_names.append(self._attach(self.db, self.user_id, self.conversation_id, self.message_id,
+                    file_names.append(self._attach(self.db, self.get_user_id(), self.get_conversation_id(), self.message_id,
                                                    name, data, True)["file_name"])
                 except ValueError as e:
                     problems.append(str(e))

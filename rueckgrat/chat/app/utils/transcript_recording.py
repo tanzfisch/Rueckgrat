@@ -26,9 +26,11 @@ class TranscriptRecording:
     """
     current: Optional["TranscriptRecording"] = None
 
-    def __init__(self, page: ft.Page, transcript: Transcript):
+    def __init__(self, page: ft.Page, transcript: Transcript, created: bool = False):
         self.page = page
         self.transcript = transcript
+        self.created = created      # the transcript was made for this recording (not continued): it goes again if it gets no text
+        self.discarded = False      # it got no text and was deleted on the hub (stop)
         self.partial = ""           # the words of the utterance still going on, replaced by its final text
         self.stopping = False
         self.error = ""             # why the hub could not transcribe (speech recognition down), the recording stopped
@@ -40,14 +42,15 @@ class TranscriptRecording:
         """the mic on, into transcript (continued, it keeps its language) or a new one on the hub. raises if it failed"""
         if cls.current:
             raise RuntimeError("a recording is running already")
-        if transcript is None:
+        created = transcript is None
+        if created:
             transcript_id = await asyncio.to_thread(Hub.create_transcript, language)
             if not transcript_id:
                 raise RuntimeError("the hub could not create a transcript")
             created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             transcript = Transcript(id=transcript_id, language=language, created_at=created_at)
         language = transcript.language
-        recording = cls(page, transcript)
+        recording = cls(page, transcript, created=created)
         recording.streamer = AudioStreamer(
             uri=Hub.uri.replace("/ws", "/ws/audio"),
             token=Hub.access_token,
@@ -62,6 +65,8 @@ class TranscriptRecording:
             await recording.streamer.start()
         except Exception:
             await recording.streamer.stop()
+            if created:     # no recording, no transcript
+                await asyncio.to_thread(Hub.delete_transcript, transcript.id)
             raise
         cls.current = recording
         return recording
@@ -117,6 +122,7 @@ class TranscriptRecording:
             data = await asyncio.to_thread(Hub.get_transcript, self.transcript.id)
             if data:
                 self.transcript.settle(data)
+                await self._discard_empty(data)
         finally:
             self.streamer = None
             self.stopping = False
@@ -124,6 +130,13 @@ class TranscriptRecording:
             if TranscriptRecording.current is self:
                 TranscriptRecording.current = None
             self._changed()
+
+    async def _discard_empty(self, data: dict):
+        """a transcript made for this recording that got no text (and no bookmark, no title) is deleted on the hub,
+        a continued one never. data: the hub's copy"""
+        if self.created and not data.get("segments") and not data.get("bookmarks") and not data.get("title"):
+            self.discarded = await asyncio.to_thread(Hub.delete_transcript, self.transcript.id)
+            logger.info(f"empty transcript {self.transcript.id} {'deleted' if self.discarded else 'could not be deleted'}")
 
     async def _on_audio(self, payload: dict):
         kind = payload.get("type")

@@ -237,13 +237,17 @@ CURRENT_TIME_DESCRIPTION = "current date, time and weekday in a city or time zon
 
 CURRENT_TIME_PROMPT = """
 CURRENT TIME:
-Use when you need the current date, time, or weekday in a location.
+Use when you need the current date, time, or weekday, the user's own or in a location.
 
 Parameters:
-- timezone (string, required): IANA name ("Pacific/Auckland") or city ("Auckland", "Munich")
+- timezone (string, optional): IANA name ("America/New_York") or city ("Tokyo", "Munich") of the place asked about.
+  Leave it out for the user's own time, never put a person's name in it.
 
-Example:
-{"tool": "current_time", "timezone": "Pacific/Auckland"}
+Example (the user's own time):
+{"tool": "current_time"}
+
+Example (a place):
+{"tool": "current_time", "timezone": "Tokyo"}
 """
 
 # ---------------------------------------------------------------- date_calc
@@ -258,13 +262,13 @@ Parameters:
 - start (string, required): start date
 - end (string, optional): end date (for difference)
 - days (number, optional): number of days to add/subtract
-- timezone (string, required): IANA name or city
+- timezone (string, optional): IANA name or city whose "today" counts. Leave it out for the user's own today.
 
 Example (difference):
-{"tool": "date_calc", "start": "today", "end": "2026-12-25", "timezone": "Pacific/Auckland"}
+{"tool": "date_calc", "start": "today", "end": "2026-12-25"}
 
 Example (offset):
-{"tool": "date_calc", "start": "today", "days": 90, "timezone": "Pacific/Auckland"}
+{"tool": "date_calc", "start": "today", "days": 90}
 """
 
 # ---------------------------------------------------------------- fetch_url

@@ -23,10 +23,11 @@ class SpawnAgentJobTool(Tool):
     thresholds = (0.7, 0.75)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Is the user asking you to build a complete multi-file software project?",
-        "Does the user tell you to work on it in the background?",
+        "Does the user ask you to program a whole game or app?",
+        "Does the user ask you to do a long task in the background while they wait?",
         "Is the user telling you to monitor something and alert them when it changes?",
         "Is the user asking you to check something regularly or watch for a change?",
-        "Is the user asking you to compare several products using reviews?"
+        "Does the user ask you to research and compare several products using reviews from the web?",
     ]
 
     # set at hub start (main.py). the report waits while a reply is being made (AgentJob.get_turns())
@@ -46,23 +47,23 @@ class SpawnAgentJobTool(Tool):
         prompt = str(self.tool_call.get("prompt") or "").strip()
         job_id = uuid4().hex     # the one id of this job: jobs.id, the tool result and the logs use this same value
         with self.running_lock:     # one job per conversation: the check and the start in one go
-            current = self._running_in(self.user_id, self.conversation_id)
+            current = self._running_in(self.get_user_id(), self.get_conversation_id())
             if current is None:
                 try:
-                    saved = self.db.add_job(job_id, prompt, self.conversation_id)
+                    saved = self.db.add_job(job_id, prompt, self.get_conversation_id())
                 except Exception as e:
                     saved = False
                     logger.error(f"spawn_job: job {job_id} not saved {repr(e)}")
                 if saved:
                     self.job_id, self.cancelled = job_id, False
                     self.message_id = self._message_id()    # #174 the protocol's key: the user message that started the job
-                    tool_context = {"tool_registry": self.tool_registry, "db": self.db, "user_id": self.user_id, "contact_id": self.contact_id,
-                                    "conversation_id": self.conversation_id, "user_name": AgentJob.user_name(self.db, self.user_id)} if self.tool_registry else None
+                    tool_context = {"tool_registry": self.tool_registry, "db": self.db, "user_id": self.get_user_id(), "contact_id": self.contact_id,
+                                    "conversation_id": self.get_conversation_id(), "user_name": AgentJob.user_name(self.db, self.get_user_id())} if self.tool_registry else None
                     self.controller = Controller(prompt, job_id, infrastructure=self.infrastructure, progress=self._progress, tool_context=tool_context)
                     self.running[job_id] = self
         if current is not None:
             # the user's message is in its inbox already (main.py, add_message), the job's next review reads it
-            logger.info(f"spawn_job: job {current.job_id} runs in conversation {self.conversation_id}, no second job")
+            logger.info(f"spawn_job: job {current.job_id} runs in conversation {self.get_conversation_id()}, no second job")
             self.add_result({"tool": self.name(), "job_id": current.job_id,
                 "text": prompts.SPAWN_JOB_RUNNING_PART})
             return
@@ -124,7 +125,7 @@ class SpawnAgentJobTool(Tool):
     def _message_id(self):
         """the conversation's last user message when the job starts (it is stored before the tools run), None if not found"""
         try:
-            return self.db.last_user_message_id(self.conversation_id)
+            return self.db.last_user_message_id(self.get_conversation_id())
         except Exception as e:
             logger.error(f"spawn_job: no user message for the protocol {repr(e)}")
             return None
@@ -132,7 +133,7 @@ class SpawnAgentJobTool(Tool):
     def _save_protocol(self, status: str, error: str = None):
         """#174 the job's decision trace into the db (job_protocols), keyed by the conversation and the user message that
         started the job. it never fails the job"""
-        Trace.write(self.conversation_id, f"job {self.job_id} {status}", error=error, result=getattr(self.controller, "result", None))
+        Trace.write(self.get_conversation_id(), f"job {self.job_id} {status}", error=error, result=getattr(self.controller, "result", None))
         try:
             controller = self.controller
             controller.trace("job_finished", ok=status == "done", status=status, name=controller.name,
@@ -142,14 +143,14 @@ class SpawnAgentJobTool(Tool):
             if self.message_id is None:
                 logger.warning(f"job {self.job_id}: protocol not saved, no user message")
                 return
-            self.db.save_protocol(self.conversation_id, self.message_id, self.job_id, controller.protocol.export())
+            self.db.save_protocol(self.get_conversation_id(), self.message_id, self.job_id, controller.protocol.export())
         except Exception as e:
             logger.error(f"job {self.job_id}: protocol not saved {repr(e)}")
 
     @classmethod
     def _running_in(cls, user_id: int, conversation_id: int):
         """the running job of the conversation or None. with running_lock held"""
-        return next((tool for tool in cls.running.values() if tool.user_id == user_id and tool.conversation_id == conversation_id), None)
+        return next((tool for tool in cls.running.values() if tool.get_user_id() == user_id and tool.get_conversation_id() == conversation_id), None)
 
     @classmethod
     def add_message(cls, user_id: int, conversation_id: int, text: str) -> bool:
@@ -167,7 +168,7 @@ class SpawnAgentJobTool(Tool):
         row and the contact reacts to it. an unknown, finished or foreign job: nothing"""
         with cls.running_lock:
             tool = cls.running.get(job_id)
-            if tool is None or tool.user_id != user_id:
+            if tool is None or tool.get_user_id() != user_id:
                 (logger.warning if tool else logger.debug)(f"user {user_id}: no cancel of {'foreign' if tool else 'unknown or finished'} job {job_id}")
                 return False
             tool.cancelled = True
@@ -186,13 +187,13 @@ class SpawnAgentJobTool(Tool):
         a reply is being made. only to a user with an open /ws, a closed one would pile up in its queue. at the end also
         the "done" status, but not while a reply is being made (it would end the reply's status)"""
         self._job.update(changes)
-        if not AgentJob.user_connected(self.user_id):
+        if not AgentJob.user_connected(self.get_user_id()):
             return
         MessageQueue().send_job_progress(self._job["job_id"], self._job["name"], self._job["percent"], state,
-                                         self._job["step"], self._job["total"], user_id=self.user_id)
+                                         self._job["step"], self._job["total"], user_id=self.get_user_id())
         turns = AgentJob.get_turns()
-        if state != "running" and not (turns and turns.busy(self.conversation_id)):
-            MessageQueue().set_status("done", user_id=self.user_id)    # stops the spinner of the workers' tool status messages
+        if state != "running" and not (turns and turns.busy(self.get_conversation_id())):
+            MessageQueue().set_status("done", user_id=self.get_user_id())    # stops the spinner of the workers' tool status messages
 
     def _report(self, task: str, fallback: str, attachments=None):
         """the contact tells the user what the job found, that it failed or was cancelled (task: prompts.SPAWN_JOB_REPORT_PROMPT / SPAWN_JOB_FAILED_PROMPT / SPAWN_JOB_CANCELLED_PROMPT):
@@ -200,16 +201,16 @@ class SpawnAgentJobTool(Tool):
         the workers' tools held (write_file, generate_image), attached to that message"""
         contact = self.db.get_contact_by_id(self.contact_id)
         name = Utils.get_nested_value(contact, ["identity", "name"], "")
-        messages = AgentJob.persona_messages(contact, self.db.get_conversation(self.conversation_id), AgentJob.user_name(self.db, self.user_id), task)
+        messages = AgentJob.persona_messages(contact, self.db.get_conversation(self.get_conversation_id()), AgentJob.user_name(self.db, self.get_user_id()), task)
         text = self.controller.chat(messages, 0.7).strip() or fallback
 
         turns = AgentJob.get_turns()
-        while turns and turns.busy(self.conversation_id):
+        while turns and turns.busy(self.get_conversation_id()):
             time.sleep(1)   # a reply is being made, the report comes after it
-        message_id, pushed = AgentJob.post_message(self.db, self.user_id, self.conversation_id, text, name)
-        logger.info(f"job report sent as message {message_id}, conversation {self.conversation_id}")
+        message_id, pushed = AgentJob.post_message(self.db, self.get_user_id(), self.get_conversation_id(), text, name)
+        logger.info(f"job report sent as message {message_id}, conversation {self.get_conversation_id()}")
         if attachments:
-            self.tool_registry.attach_held(self.db, self.user_id, self.conversation_id, message_id, attachments, push=pushed)
+            self.tool_registry.attach_held(self.db, self.get_user_id(), self.get_conversation_id(), message_id, attachments, push=pushed)
 
     @classmethod
     def prompt(cls) -> str:

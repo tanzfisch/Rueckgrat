@@ -229,6 +229,8 @@ class TranscribePage(BasePage):
             self.recording.error = ""
         if self.recording and not self.recording.streamer and not self.recording.stopping:
             self.recording.listen(None)     # stopped: the transcript stays on the page
+            if self.recording.discarded:    # it got no text and is gone: an empty new one again
+                self.transcript = None
             self.recording = None
         self._render()
 

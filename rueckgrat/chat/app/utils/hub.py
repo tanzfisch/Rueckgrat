@@ -4,11 +4,30 @@ import requests
 import certifi
 import asyncio
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
 from app.common import get_logger, DownloadQueue, ChatRequest, GetMessagesRequest, WebSocketClient
 logger = get_logger()
+
+def device_timezone() -> str:
+    """this device's IANA timezone, e.g. Pacific/Auckland: TZ, /etc/timezone or the /etc/localtime link (linux, macos),
+    else the current utc offset as Etc/GMT-13 (windows, android). the hub uses it while the user has not chosen one"""
+    name = os.environ.get("TZ", "").lstrip(":")
+    if not name:
+        try:
+            name = Path("/etc/timezone").read_text().strip()
+        except OSError:
+            pass
+    if not name and os.path.islink("/etc/localtime"):
+        name = os.path.realpath("/etc/localtime").partition("zoneinfo/")[2]
+    if not name:
+        offset = datetime.now().astimezone().utcoffset()
+        hours, rest = divmod(int(offset.total_seconds()) if offset else 0, 3600)
+        if not rest:
+            name = f"Etc/GMT{-hours:+d}" if hours else "UTC"     # Etc/GMT-13 is UTC+13
+    return name
 
 class Hub:
     user_id = -1
@@ -153,7 +172,8 @@ class Hub:
     @classmethod
     async def _refresh_session(cls) -> bool | None:
         try:
-            response = await asyncio.to_thread(requests.post, f"{cls.url}/refresh", json={"refresh_token": cls.refresh_token},
+            response = await asyncio.to_thread(requests.post, f"{cls.url}/refresh",
+                                               json={"refresh_token": cls.refresh_token, "timezone": device_timezone()},
                                                timeout=10, verify=cls.server_cert)
         except Exception as e:
             logger.error(f"failed to refresh the session {repr(e)}")
@@ -1107,10 +1127,20 @@ class Hub:
     @classmethod
     def set_timezone(cls, timezone: str) -> str | None:
         """IANA name, e.g. Pacific/Auckland. returns None on success, else an error message for the user"""
+        return cls._change_timezone(requests.put, {"timezone": timezone})
+
+    @classmethod
+    def clear_timezone(cls) -> str | None:
+        """drops the chosen timezone, the hub uses this device's again. returns None on success, else an error message"""
+        return cls._change_timezone(requests.delete, None)
+
+    @classmethod
+    def _change_timezone(cls, send, body: dict | None) -> str | None:
+        """PUT (set_timezone) or DELETE (clear_timezone) of /users/me/timezone. None on success, else an error message"""
         try:
-            response = requests.put(
+            response = send(
                 f"{cls.url}/users/me/timezone",
-                json={"timezone": timezone},
+                json=body,
                 headers={"Authorization": f"Bearer {cls.access_token}"},
                 timeout=10,
                 verify=cls.server_cert,
@@ -1124,7 +1154,7 @@ class Hub:
                 detail = None
             return detail if isinstance(detail, str) else f"saving the timezone failed ({response.status_code})"
         except Exception as e:
-            logger.error(f"failed to set_timezone {repr(e)}")
+            logger.error(f"failed to change the timezone {repr(e)}")
             return "could not reach the hub"
 
     @classmethod
@@ -1169,8 +1199,9 @@ class Hub:
                 url,
                 json={
                     "user_name": user_name,
-                    "user_passwd": user_passwd
-                },                
+                    "user_passwd": user_passwd,
+                    "timezone": device_timezone()   # the user's time while they have not chosen a timezone
+                },
                 timeout=10,
                 verify=cls.server_cert,
             )

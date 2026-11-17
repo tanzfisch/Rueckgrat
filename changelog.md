@@ -1,6 +1,27 @@
 Changelog
 =========
 
+0.28.1
+------
+
+- #208 fixing round
+-     replies go to the chat session that asked for them, status messages only show in their conversation
+-     fixed laya tune.sh
+-     fixed old tool results leaking into later replies: a new seed per reply
+-     device timezone is the default when the user has none set
+-     downloads and tts voices are limited to their owner
+-     empty transcripts are removed
+-     fixed typos
+-     tasks expose their route through getters only
+-     removed db compatibility code for old versions
+-     new users land on the profile wizard again after their first login
+-     a failed tool call no longer stops the following tool rounds
+-     current_time and date_calc use the user's time zone when none or "local" is given
+-     the profile wizard only saves a time zone the user changed, settings can switch back to the device time zone
+-     contact conversations of other users return 404
+-     generated images are stored with their real file size
+-     improved laya tool questions and thresholds, more laya training data
+
 0.28.0
 ------
 

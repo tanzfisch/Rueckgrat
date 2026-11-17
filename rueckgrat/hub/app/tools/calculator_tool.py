@@ -80,7 +80,8 @@ class CalculatorTool(Tool):
     question = [
         "Does the message contain a math problem with numbers to solve?",
         "Does the user ask what a percentage, a tip or a share of an amount is?",
-        "Does the user ask how to split a bill or how much they save over time?",
+        "Does the user ask you to calculate an amount, like savings, a loan payment or a split bill?",
+        "Does the user ask you to split a bill or an amount between people?",
         "Does the user ask what sin, cos or tan of some degrees is?",
     ]
 

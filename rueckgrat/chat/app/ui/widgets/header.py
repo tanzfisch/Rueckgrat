@@ -5,7 +5,7 @@ from app.utils import Contact, Hub, Paths, Capabilities
 # the app level views, in the order of the tools grid: (route, icon, label, the capabilities it needs to be offered)
 TOOLS = [
     ("translate", ft.Icons.TRANSLATE, "translate", ()),     # typing works with the llm alone, its mic and speech hide on their own
-    ("contacts", ft.Icons.CHAT, "charaters", ()),
+    ("contacts", ft.Icons.CHAT, "characters", ()),
     ("image", ft.Icons.IMAGE, "image generation", ("image",)),
     ("gallery", ft.Icons.PHOTO_LIBRARY, "gallery", ()),
     ("transcribe", ft.Icons.TRANSCRIBE, "transcribe", ()),   # the saved transcripts work without stt, its record button shows it

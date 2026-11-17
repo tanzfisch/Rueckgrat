@@ -202,6 +202,7 @@ class PreferencesSettingsPage(ft.Column):
                 "Timezone",
                 self.timezone_edit,
                 ft.Button("save timezone", on_click=self.on_click_save_timezone, style=theme.STYLES["button"]["style"]),
+                ft.Button("use device timezone", on_click=self.on_click_device_timezone, style=theme.STYLES["button"]["style"]),
             ),
             _section(
                 "Chat",
@@ -220,6 +221,18 @@ class PreferencesSettingsPage(ft.Column):
             MessageBox.error(self.page, error, title="Timezone not saved")
             return
         MessageBox.show(self.page, "your timezone has been saved", title="Timezone saved")
+
+    def on_click_device_timezone(self, e=None):
+        """drops the saved timezone, the hub follows this device's again (it gets it at each login)"""
+        error = Hub.clear_timezone()
+        if error:
+            MessageBox.error(self.page, error, title="Timezone not changed")
+            return
+        timezone = Hub.get_timezone()
+        self.timezone_edit.options = timezone_options(timezone)
+        self.timezone_edit.value = timezone or None
+        self.timezone_edit.update()
+        MessageBox.show(self.page, "your timezone follows this device again", title="Timezone changed")
 
     def on_enter_sends_changed(self, e=None):
         RueckgratConfig().enter_sends = self.enter_sends_switch.value
