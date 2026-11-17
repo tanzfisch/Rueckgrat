@@ -651,7 +651,7 @@ class ChatPage(BasePage):
             logger.debug(f"incomming message:\n{Utils.pretty_print(message)}")
 
         try:
-            if "status" in message:
+            if "status" in message and message["status"].get("conversation_id", self.conversation_id) == self.conversation_id:
                 self.status_widget.on_status_message(message["status"])
 
             if "job_progress" in message:     # #152 background jobs, shown whatever conversation is open

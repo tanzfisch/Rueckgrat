@@ -210,13 +210,13 @@ class ToolRegistry:
         started = time.monotonic()
         if not self.task_queue.run(tool_job):
             logger.error(f"tool failed: {tool_job.name()}")
-            Trace.write(tool_job.conversation_id, f"tool {tool_job.name()} failed", call=tool_job.tool_call)
+            Trace.write(tool_job.get_conversation_id(), f"tool {tool_job.name()} failed", call=tool_job.tool_call)
             return None
         result = tool_job.get_result()
         if Trace.enabled():     # the call as the llm wrote it and the whole result text the next steps get
             own = (result or {}).get(tool_job.name()) or {}
             others = {k: v for k, v in own.items() if k not in ("tool", "text")} if isinstance(own, dict) else {}
-            Trace.write(tool_job.conversation_id, f"tool {tool_job.name()}",
+            Trace.write(tool_job.get_conversation_id(), f"tool {tool_job.name()}",
                         f"CALL:\n{json.dumps(tool_job.tool_call, ensure_ascii=False, indent=1, default=str)}\nRESULT:\n"
                         f"{own.get('text', '') if isinstance(own, dict) else own}",
                         seconds=f"{time.monotonic() - started:.2f}", message_id=tool_job.message_id, result=others or None)

@@ -147,7 +147,7 @@ class RunCodeTool(Tool):
 
     def conversation(self) -> str:
         """the latest messages the code writer sees (pasted code stays in them, not in json)"""
-        messages = self.db.get_messages_by_conversation(self.conversation_id, CONTEXT_MESSAGES) or []
+        messages = self.db.get_messages_by_conversation(self.get_conversation_id(), CONTEXT_MESSAGES) or []
         return "\n\n".join(f"{m['role']}: {(m['content'] or '')[:MAX_MESSAGE_CHARS]}"
                            for m in messages if m["role"] in ("user", "assistant") and m["content"])
 
@@ -163,7 +163,7 @@ class RunCodeTool(Tool):
         if language:
             query += f"\n\nLANGUAGE: {language}"
         return self.infrastructure.chat(
-            messages=[{"role": "system", "content": prompts.RUN_CODE_WRITER_PROMPT.format(run_timeout=RUN_TIMEOUT, files=MOUNT_PATH, projects=f"{MOUNT_PATH}/{PROJECTS}", workdir=SandboxVolume.workdir(self.conversation_id))}, {"role": "user", "content": query}],
+            messages=[{"role": "system", "content": prompts.RUN_CODE_WRITER_PROMPT.format(run_timeout=RUN_TIMEOUT, files=MOUNT_PATH, projects=f"{MOUNT_PATH}/{PROJECTS}", workdir=SandboxVolume.workdir(self.get_conversation_id()))}, {"role": "user", "content": query}],
             temperature=0.2,
             seed=random.randint(0, 100000),
             max_new_tokens=self.infrastructure.long_reply_tokens(),
@@ -185,7 +185,7 @@ class RunCodeTool(Tool):
             logger.debug(f"run_code call: {call}")
             logger.debug(f"code:\n{reply}")
             MessageQueue().send_status_message("running code")
-            result = run_call(json.loads(call), SandboxVolume(self.user_id, self.contact_id))
+            result = run_call(json.loads(call), SandboxVolume(self.get_user_id(), self.contact_id))
         self.add_result(result)
 
     @classmethod

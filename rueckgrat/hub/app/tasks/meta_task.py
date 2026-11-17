@@ -15,8 +15,7 @@ logger = get_logger()
 
 class MetaTask(Task):
     def __init__(self, user_id: int, request: ChatRequest, db, infrastructure, tool_registry, turns):
-        super().__init__()
-        self.user_id = user_id
+        super().__init__(user_id=user_id)
         self.request = request
         self.db = db
         self.infrastructure = infrastructure     
@@ -31,6 +30,10 @@ class MetaTask(Task):
         self.streamed = ""  # the part of it sent to the user, without the tool calls
         self.reply_calls = []   # the REPLY_TOOLS calls the reply wrote
         self.done = False
+
+    def get_conversation_id(self) -> int:
+        """its status messages carry the conversation of its request"""
+        return self.request.conversation_id
 
     def _on_incomming_message(self, message: str):
         if self.cancelled.is_set():
@@ -70,13 +73,13 @@ class MetaTask(Task):
             "delta": delta,
             "conversation_id": self.request.conversation_id,
             "message_id": self.message_id
-        }, user_id=self.user_id)   # called on the node's websocket thread, no task context there
+        }, user_id=self.get_user_id(), session=self.get_session())   # called on the node's websocket thread, no task context there
 
     def _run_reply_tools(self):
         """runs the REPLY_TOOLS calls the reply wrote, they are detached and write to the reply's message"""
         logger.debug(f"reply tool calls: {self.reply_calls}")
         task = ToolExecutionTask(
-            user_id = self.user_id,
+            user_id = self.get_user_id(),
             request = self.request,
             context = None,
             db = self.db,
@@ -98,11 +101,11 @@ class MetaTask(Task):
             self.db.delete_message(self.message_id)
             TtsStreams.drop_message(self.message_id)
             from app.utils.text_files import remove_message_files
-            remove_message_files(self.user_id, self.request.conversation_id, self.message_id)
+            remove_message_files(self.get_user_id(), self.request.conversation_id, self.message_id)
         MessageQueue().send_data({"cancelled": {
             "conversation_id": self.request.conversation_id,
             "message_id": self.message_id if self.message_id != -1 else None
-        }}, user_id=self.user_id)
+        }}, user_id=self.get_user_id())
         logger.info(f"reply interrupted by a follow-up, conversation {self.request.conversation_id}")
         return True
 
@@ -111,7 +114,7 @@ class MetaTask(Task):
 
         MessageQueue().send_status_message("thinking")
         tool_detection_task = ToolDetectionTask(self.request.content, self.tool_registry, self.infrastructure,
-                                                volume=SandboxVolume(self.user_id, self.request.contact_id))
+                                                volume=SandboxVolume(self.get_user_id(), self.request.contact_id))
         self.add_sub_task(tool_detection_task)        
 
         if self._interrupted():
@@ -128,7 +131,7 @@ class MetaTask(Task):
             self.message_id = self.db.add_message(self.request.conversation_id, "assistant", "", contact_name)
 
             tool_execution_task = ToolExecutionTask(
-                user_id = self.user_id, 
+                user_id = self.get_user_id(), 
                 request = self.request, 
                 context = Utils.get_nested_value(self.db.get_conversation(self.request.conversation_id), ["context"], ""),
                 db = self.db, 
@@ -170,7 +173,8 @@ class MetaTask(Task):
                 infrastructure=self.infrastructure, 
                 callback=self._on_incomming_message,
                 tool_execution_results=tool_execution_results,
-                tool_registry=self.tool_registry
+                tool_registry=self.tool_registry,
+                seed=self.message_id    # one per turn, see ChatTask
             )
 
             self.add_sub_task(chat_task)

@@ -41,9 +41,9 @@ class TakePhotoTool(ImageTool):
             height = temp
 
         assistant_image_task = AssistantImageTask(
-            user_id = self.user_id,
+            user_id = self.get_user_id(),
             contact_id = self.contact_id,
-            conversation_id = self.conversation_id, 
+            conversation_id = self.get_conversation_id(), 
             db = self.db, 
             infrastructure = self.infrastructure,
             show_assistant = img_ai,

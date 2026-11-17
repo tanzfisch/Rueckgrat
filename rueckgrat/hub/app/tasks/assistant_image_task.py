@@ -9,10 +9,8 @@ logger = get_logger()
 
 class AssistantImageTask(Task):
     def __init__(self, user_id: int, contact_id: int, db, infrastructure, width: int = 720, height: int = 1280, conversation_id: int = None, show_assistant: bool = True, show_user: bool = False, image_type: ImageType = ImageType.FullBody, store_image_as: str = "conversation_images"):
-        super().__init__()
-        self.user_id = user_id
+        super().__init__(user_id=user_id, conversation_id=conversation_id)
         self.contact_id = contact_id
-        self.conversation_id = conversation_id
         self.db = db
         self.infrastructure = infrastructure
         self.response = {}
@@ -28,18 +26,18 @@ class AssistantImageTask(Task):
         """builds the image request from the db (contact, user, conversation context), output stays "".
         no side effects, so MetaTask can call it too and gets the same request and hash as execute()"""
         contact_data = self.db.get_contact_by_id(self.contact_id)
-        user_data = self.db.get_user_data(self.user_id)
+        user_data = self.db.get_user_data(self.get_user_id())
         image_parameters = contact_data["profile"]["image_parameters"]
 
-        if self.conversation_id:
-            conversation = self.db.get_conversation(self.conversation_id)
+        if self.get_conversation_id():
+            conversation = self.db.get_conversation(self.get_conversation_id())
             context = conversation["context"]        
         else:
             context = None
 
         # server side NSFW check: users without NSFW access always get the SFW image model,
         # whatever the contact's profile says (the client can edit that)
-        nsfw_allowed = self.db.user_nsfw_allowed(self.user_id)
+        nsfw_allowed = self.db.user_nsfw_allowed(self.get_user_id())
 
         reference = self.profile_image_reference()
         compiler = ContactImagePromptCompiler(contact_data, user_data, context, self.image_type, self.show_assistant, self.show_user, not reference)
@@ -84,7 +82,7 @@ class AssistantImageTask(Task):
         if self.show_assistant:
             return self.db.get_current_profile_image_key(self.contact_id)
         if self.show_user:
-            return self.db.get_current_user_profile_image_key(self.user_id)
+            return self.db.get_current_user_profile_image_key(self.get_user_id())
         return ""
 
     def execute(self) -> None:

@@ -17,8 +17,7 @@ class GenerateImageTask(Task):
     created (the hub got the request, even if it waits in the queue), done + file name or failed when it ends, also when the
     client is gone by then. result() goes to the client as {"generated_image": {request_id, prompt, filename, image_path or error}}"""
     def __init__(self, user_id: int, prompt: str, db, infrastructure, request_id: str = ""):
-        super().__init__()
-        self.user_id = user_id
+        super().__init__(user_id=user_id)
         self.db = db
         self.infrastructure = infrastructure
         self.prompt = prompt

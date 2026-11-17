@@ -11,9 +11,8 @@ logger = get_logger()
 
 class ContactGeneratorTask(Task):
     def __init__(self, user_input: Dict[str, Any], user_id: int, db, infrastructure):
-        super().__init__()
+        super().__init__(user_id=user_id)
         self.user_input = user_input
-        self.user_id = user_id
         self.db = db
         self.infrastructure = infrastructure
 
@@ -25,15 +24,15 @@ class ContactGeneratorTask(Task):
 
             new_contact = self._generate_contact(self.user_input)
 
-            contact_id = self.db.create_contact(self.user_id, name)
-            self.db.update_contact(self.user_id, contact_id, new_contact)
+            contact_id = self.db.create_contact(self.get_user_id(), name)
+            self.db.update_contact(self.get_user_id(), contact_id, new_contact)
 
             profile = new_contact["profile"]
             persistent = profile["persistent"]
-            self.db.set_contact_companion(self.user_id, contact_id, persistent)
+            self.db.set_contact_companion(self.get_user_id(), contact_id, persistent)
 
             assistant_image_task = AssistantImageTask(
-                user_id = self.user_id,
+                user_id = self.get_user_id(),
                 contact_id = contact_id,
                 db = self.db, 
                 infrastructure = self.infrastructure, 

@@ -39,12 +39,12 @@ class SearchMemoryTool(Tool):
         MessageQueue().send_status_message("searching memories")
 
         # two separate indexes, one vector: the contact's memories and the summaries of its other conversations
-        memories = self.db.nearest_contact_memories(self.user_id, self.contact_id, vector, k=MAX_RESULTS)
-        conversations = self.db.nearest_conversations(self.user_id, vector, k=MAX_CONVERSATIONS, contact_id=self.contact_id,
-                                                      exclude_id=self.conversation_id)
+        memories = self.db.nearest_contact_memories(self.get_user_id(), self.contact_id, vector, k=MAX_RESULTS)
+        conversations = self.db.nearest_conversations(self.get_user_id(), vector, k=MAX_CONVERSATIONS, contact_id=self.contact_id,
+                                                      exclude_id=self.get_conversation_id())
         
         conversations = self._relevant(query, conversations)
-        logger.debug(f"search_memory: user {self.user_id} contact {self.contact_id}, {len(memories)} memories {[m['id'] for m in memories]}, "
+        logger.debug(f"search_memory: user {self.get_user_id()} contact {self.contact_id}, {len(memories)} memories {[m['id'] for m in memories]}, "
                      f"conversations {[c['id'] for c in conversations]}")
         conversation_results = [
             {"conversation_id": c["id"], "contact": c["contact"], "date": str(c["created_at"])[:10], "snippet": c["summary"][:SNIPPET_CHARS]}

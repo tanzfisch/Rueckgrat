@@ -28,7 +28,7 @@ class Turns:
                     "conversation_id": request.conversation_id,
                     "user_message_id": task.user_message_id,
                     "content": request.content
-                }}, user_id=task.user_id)   # runs on the websocket loop, not in a task
+                }}, user_id=task.get_user_id())   # runs on the websocket loop, not in a task
                 logger.info(f"follow-up merged into message {task.user_message_id}, conversation {request.conversation_id}")
             else:
                 task.user_message_id = self.db.add_message(request.conversation_id, request.role, request.content, request.name)

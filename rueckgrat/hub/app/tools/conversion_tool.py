@@ -367,13 +367,12 @@ class ConversionTool(Tool):
     description = prompts.CONVERSION_DESCRIPTION
     thresholds = (0.6, 0.65)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
-        "Does the user want an amount in another unit or currency, like ml to cups, kg to pounds or euros to dollars?",
+        "Does the user ask to convert a temperature, a length, a weight or money into another unit or currency?",
         "Does the user give a height, length or weight and want it in other units?",
-        "Does the user ask the money value of an amount of gold, silver, bitcoin or dollars?",
         "Does the user ask how many centimeters, inches, grams or ounces are in an amount?",
-        "Does the message have money in two different currencies, not just one currency?",
         "Is one amount given in a metric unit and another in an imperial unit?",
-        "Does the message give speeds or temperatures in different units, like km/h and mph or Celsius and Fahrenheit?"
+        "Does the user ask to convert Fahrenheit to Celsius or Celsius to Fahrenheit?",
+        "Does the user ask how much an amount is in another currency?",
     ]
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):

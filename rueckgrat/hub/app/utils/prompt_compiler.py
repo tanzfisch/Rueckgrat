@@ -1,6 +1,6 @@
 import re
-from typing import Dict, Any, List
-from datetime import datetime
+from typing import Dict, Any, List, Optional
+from datetime import datetime, tzinfo
 
 from . import prompts
 
@@ -32,7 +32,10 @@ def build_context(user_name, context, summary: str = "") -> str:
         conversation_so_far=prompts.CONVERSATION_SO_FAR_PART.format(summary=summary) if summary else "").strip()
 
 class PromptCompiler:
-    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_role_name: str = None):
+    def __init__(self, contact: Dict[str, Any], conversation: Dict[str, Any] = None, user_role_name: str = None,
+                 timezone: Optional[tzinfo] = None):
+        """timezone: the user's (clock.user_timezone), the local time of the situation is in it. None: the hub's"""
+        self.timezone = timezone
         self.contact = contact
         self.conversation = conversation
         self.user_role_name = user_role_name
@@ -95,8 +98,8 @@ class PromptCompiler:
         return prompts.INSTRUCTIONS_PART
 
     @staticmethod
-    def date_time() -> str:
-        return prompts.LOCAL_TIME_PART.format(now=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    def date_time(timezone: Optional[tzinfo] = None) -> str:
+        return prompts.LOCAL_TIME_PART.format(now=datetime.now(timezone).strftime('%A, %Y-%m-%d %H:%M:%S'))
 
     def build_prompt(self) -> tuple[str, str]:
         sections = []
@@ -106,7 +109,7 @@ class PromptCompiler:
         sections.append(self._build_style())
         sections.append(self._build_objectives())
         sections.append(self._build_instructions())
-        situation = [self.date_time(), build_context(self.user_role_name, self.context, self.summary)]
+        situation = [self.date_time(self.timezone), build_context(self.user_role_name, self.context, self.summary)]
 
         system_prompt = "\n\n".join(sections)
 
