@@ -27,6 +27,11 @@ templates, filled with str.format (literal braces doubled):
   WRITE_FILE_SAVED_PART                       paths: where write_file kept its files, comma separated
   WRITE_FILE_PROMPT                           documents: the folder write_file writes into
   SHARE_FILE_PROMPT                           files: the sandbox files folder
+  TEXT_TO_SPEECH_PROMPT                       files: the sandbox files folder, tts: the folder the audio files are kept in
+  TEXT_TO_SPEECH_MADE_PART                    name: the audio file, minutes: its length
+  TEXT_TO_SPEECH_TOO_LARGE_PART               path: where it is kept, size, limit: MB
+  TEXT_TO_SPEECH_FAILED_PART                  name: the call's name, reason: what went wrong
+  TEXT_TO_SPEECH_PLANNED_PART                 name: the call's name
   BASH_PROMPT                                 files: the sandbox files folder, timeout: seconds per command, workdir: the
                                               conversation's own folder, project_dir, documents, images: the folders of
                                               the layout, projects: BASH_PROJECT_LINE lines, BASH_NO_PROJECTS_PART or
@@ -661,6 +666,38 @@ Parameters:
 
 Example:
 {{"tool": "write_file", "path": "shopping.txt", "content": "milk\\neggs\\n"}}
+"""
+
+TEXT_TO_SPEECH_DESCRIPTION = ("speaks a short text or text files of your sandbox files with your voice into one audio file "
+                              "(an audiobook, a story, a voice memo) and attaches it to your answer for the user to download")
+
+TEXT_TO_SPEECH_MADE_PART = "{name} was spoken ({minutes} minutes)."
+
+TEXT_TO_SPEECH_TOO_LARGE_PART = ("It is {size} MB, too large to attach (more than {limit} MB): it is kept in your files as {path}, "
+                                 "tell the user to download it from the conversation's files.")
+
+TEXT_TO_SPEECH_FAILED_PART = ("The audio {name} was not made: {reason}. Tell the user, do not claim an audio file was made or attached.")
+
+TEXT_TO_SPEECH_PLANNED_PART = ("The audio {name} is being spoken now, it takes a while and is attached to your answer as a download "
+                               "button when it is ready. Say so in one sentence, do not write the text again.")
+
+TEXT_TO_SPEECH_PROMPT = """
+TEXT_TO_SPEECH:
+Speaks text with your voice into one audio file and puts it under your answer as a download button, the user saves it from there. For an audio file the user wants to keep: an audiobook, a story, a poem, a voice memo. Not for reading your answer out loud, the chat does that itself.
+- text: a short text, up to a few paragraphs, written into the call.
+- files: for anything longer, like the chapters of an audiobook: write the text into files first (bash or write_file), then give their paths here, they are spoken one after another in the given order, with a short pause between them. A folder speaks all its files in name order. Relative to the folder your last bash command ended in, or absolute under {files}. Every word is spoken, also (asides), only code, links and markdown markers are left out. A heading is spoken as a sentence of its own.
+- name: the audio file's name without extension. It becomes .wav, or .ogg (Ogg Opus) when it is long, and is kept in {tts}/<hash>/.
+- language: optional, the two letter code of the text's language (en, de, ...), else it is detected.
+
+Parameters:
+- text (string): the text to speak, or
+- files (string or list of strings): the text files to speak, in order
+- name (string, required): the audio file's name
+- language (string, optional): the language code
+
+Examples:
+{{"tool": "text_to_speech", "text": "Once upon a time there was a little fox.", "name": "fox_story"}}
+{{"tool": "text_to_speech", "files": ["{files}/projects/sea_book/chapter_01.md", "{files}/projects/sea_book/chapter_02.md"], "name": "sea_book", "language": "en"}}
 """
 
 SHARE_FILE_PROMPT = """

@@ -8,6 +8,18 @@ from app.utils.url_check import check_url, FetchBlocked
 from app.common import get_logger, MessageQueue
 logger = get_logger()
 
+# a link in the message selects fetch_url (FetchUrlTool.text_score), no laya question
+TLDS = r"com|org|net|edu|gov|mil|int|info|biz|io|ai|app|dev|xyz|online|site|tech|blog|news|shop|store|cloud|page|link|live|media|tv"
+NOT_TLDS = r"py|md|sh|rs|pl|cc|cs|so|ps|hs|ml|mk|tf|pm|gz|js|ts|rb|kt|go|db"
+URL_PATTERN = re.compile(rf"""
+    [a-z][a-z0-9+.-]*://\S+                                   # any scheme, also glued to a word: protestshttps://...
+  | \bwww\.[\w-]+\.\S+                                       # www.example.org
+  | \blocalhost(?::\d+|/)\S*                                 # localhost:8080, localhost/x
+  | (?<![\w.])(?:\d{{1,3}}\.){{3}}\d{{1,3}}(?!\.?\d)(?::\d+)?(?:/\S*)?   # 192.168.2.39:7346/x
+  | (?<![\w@.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+       # bare host: reddit.com, nzherald.co.nz, bit.ly/x
+      (?:{TLDS}|(?!(?:{NOT_TLDS})(?![\w-]))[a-z]{{2}})(?![\w-])
+""", re.IGNORECASE | re.VERBOSE)
+
 
 def normalize_url(url: str) -> str:
     """feed:// and rss:// links are plain https feeds. without a scheme: http:// for localhost and IPs, https:// else"""
@@ -21,7 +33,7 @@ def normalize_url(url: str) -> str:
 class FetchUrlTool(WebsearchTool):
     """subclass of WebsearchTool only to reuse _extract_page and _get_org_name, everything else is its own"""
     description = prompts.FETCH_URL_DESCRIPTION
-    question = []    # not a laya question: ToolDetectionTask selects it from URL_PATTERN in the message
+    text_only = True    # no laya question: a link in the message selects it (text_score)
     PAGE_TIMEOUT = 20           # one page the user is waiting for, not a batch
     BROWSER_FALLBACK = True     # the user asked for this page, worth a headless browser if plain http comes back thin
 
@@ -31,6 +43,11 @@ class FetchUrlTool(WebsearchTool):
     @classmethod
     def name(cls) -> str:
         return "fetch_url"
+
+    @classmethod
+    def text_score(cls, prompt: str) -> float:
+        """1.0: the message holds a link (URL_PATTERN), fetch_url is mandatory"""
+        return 1.0 if URL_PATTERN.search(prompt or "") else 0.0
 
     def execute(self) -> None:
         if not "url" in self.tool_call:

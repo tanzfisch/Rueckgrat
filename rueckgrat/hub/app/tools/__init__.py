@@ -21,6 +21,7 @@ from .bash_tool import BashTool
 from .write_file_tool import WriteFileTool
 from .share_file_tool import ShareFileTool
 from .task_tool import TaskTool
+from .text_to_speech_tool import TextToSpeechTool
 
 __all__ = [
     "ToolRegistry",
@@ -46,4 +47,5 @@ __all__ = [
     "WriteFileTool",
     "ShareFileTool",
     "TaskTool",
+    "TextToSpeechTool",
 ]

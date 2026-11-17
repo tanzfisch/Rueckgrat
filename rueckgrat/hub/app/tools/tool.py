@@ -10,6 +10,8 @@ class Tool(Task):
     description = ""    # one line for the tool index, every tool sets its own
     question = []       # yes/no decision questions: does the request involve this tool's purpose. the tool counts with its most likely question
     thresholds = None   # (recommended, mandatory) for the question scores, None: ToolDetectionTask's RECOMMENDED_THRESHOLD and MANDATORY_THRESHOLD
+    whole_message = False   # its questions are also judged on the whole message, not only part by part (a plan of several steps)
+    text_only = False   # no laya questions: text_score alone detects it (fetch_url: a link in the message)
     sequential = False  # the calls of sequential tools in one round run one after another in their order (they share the sandbox files)
     offered_with = ()   # names of tools this one is offered with as an optional tool (ToolRegistry.companions), no laya question of its own
     requires = ()       # the capabilities it needs (Infrastructure.available: "image", "embedding", "internet" ...), without one it is not offered
@@ -24,6 +26,12 @@ class Tool(Task):
         self.tool_call=tool_call
         self._response: Dict[str, Any] = {}
         self.message_id: Optional[int] = None
+
+    @classmethod
+    def text_score(cls, prompt: str) -> float:
+        """a score of the message from code (a pattern, its shape), on the scale of the laya scores: ToolDetectionTask takes
+        the higher one. 0.0: none"""
+        return 0.0
 
     def get_result(self) -> Dict[str, Any]:
         return dict(self._response)

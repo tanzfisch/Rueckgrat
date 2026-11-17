@@ -1,7 +1,7 @@
 import os
 from threading import Lock
 
-from app.common import get_logger, Utils
+from app.common import get_logger
 from app.common.text_chunks import split_into_chunks
 logger = get_logger()
 
@@ -47,25 +47,28 @@ class DecisionModel:
         """optional warm up, errors go to the caller and the first request tries again"""
         self._load(source="preload")
 
-    def decide(self, state: str, questions: dict) -> dict:
+    def decide(self, state: str, questions: dict, whole: tuple = ()) -> tuple[dict, dict]:
         """questions: {id: {"type": "choice"|"score"|"noul", "instructions": ..., "criteria": ...}}
-        returns laya's answers by id, e.g. {"id": {"type": "noul", "noul": P(true), ...}}"""
-
-        agent = self._load()
+        returns (answers, whole_answers) by id, e.g. {"id": {"type": "noul", "noul": P(true), ...}}. answers: each question's
+        best over the state's chunks. whole_answers: the questions of the ids in whole judged on the whole state in one pass
+        (a request that only shows as a whole, like a plan of several steps), {} when the state is a single chunk anyway"""
         best = {}
-
-        #logger.debug(f"all answers:\n{Utils.pretty_print(questions)}")
-
         chunks = split_into_chunks(state, MIN_CHUNK_WORDS, MAX_CHUNK_WORDS)
         for chunk in chunks:
-            with self.predict_lock:
-                partial = agent.predict(chunk, questions)
-            if partial.get("usage", {}).get("truncated"):
-                logger.warning("decision state was truncated to the model context")
+            for key, info in self._predict(chunk, questions).items():
+                if key not in best or info.get("noul", 0) > best[key].get("noul", 0):
+                    best[key] = info
 
-            for tool, info in partial.get("answers", {}).items():
-                if tool not in best or info.get("noul", 0) > best[tool].get("noul", 0):
-                    best[tool] = info
+        whole_questions = {key: question for key, question in questions.items() if key in whole}
+        if len(chunks) < 2 or not whole_questions:
+            return best, {}
+        return best, self._predict(state, whole_questions)
 
-        #logger.debug(f"all answers:\n{Utils.pretty_print(best)}")
-        return best
+    def _predict(self, text: str, questions: dict) -> dict:
+        """laya's answers by id for one text, one forward pass"""
+        agent = self._load()
+        with self.predict_lock:
+            partial = agent.predict(text, questions)
+        if partial.get("usage", {}).get("truncated"):
+            logger.warning("decision state was truncated to the model context")
+        return partial.get("answers", {})

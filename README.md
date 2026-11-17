@@ -29,6 +29,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **search_memory** — find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub)
     - **spawn_job** — hand a bigger task to a background agent job that reports back when it is done
     - **take_photo** — generate a photo of self, user, or both from current context
+    - **text_to_speech** — speak a short text or text files (e.g. the chapters of an audiobook) with the contact's voice into one audio file, downloadable by the user in chat (long ones as Ogg Opus)
     - **weather** — weather forcast for given location
     - **websearch** — search the web when requested or needed
     - **wikipedia** — search wikipedia when requested or needed

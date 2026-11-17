@@ -28,7 +28,7 @@ class AgentJob:
     ALLOWED_TOOLS = ()
     # a worker whose detection found one of these builds or tests something from its task: WORKER_TOOLS' websearch is not
     # forced on it (it searched for nothing useful, about a minute each), it still searches when its detection picks websearch
-    BUILD_TOOLS = ("bash", "run_code", "write_file")
+    BUILD_TOOLS = ("bash", "run_code", "write_file", "text_to_speech")
     _turns = None           # the hub's Turns, see set_turns
     connections = None      # user_id -> open /ws connections
 

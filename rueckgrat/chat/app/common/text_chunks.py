@@ -45,10 +45,35 @@ def without_code(text: str, complete: bool = True) -> str:
     return text
 
 
+LINK = re.compile(r"https?://\S+|www\.\S+")
+BLOCK_MARKER = re.compile(r"^\s*(?:#{1,6}|[-*+>]|\d+[.)])\s+")    # a markdown heading, list item or quote
+SENTENCE_END = (".", "!", "?", "…", ":", ";")
+
+
 def speech_text(text: str) -> str:
-    """what of a text is spoken: no code, *actions*, (asides), [tags], links or markdown stars"""
+    """what of a chat reply is spoken: no code, *actions*, (asides), [tags], links or markdown stars"""
     text = without_code(text)
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)   # **bold** is spoken, a single *action* is not
     text = re.sub(r"\*[^*]+\*|\([^)]*\)|\[[^\]]+\]", "", text)
-    text = re.sub(r"https?://\S+|www\.\S+", "", text)
+    text = LINK.sub("", text)
     return " ".join(text.replace("*", "").split())
+
+
+def written_speech_text(text: str) -> str:
+    """what of a written text (a book, a story: the text_to_speech tool) is spoken: every word, without code, links and
+    markdown markers. (asides) stay as they are, *emphasis* and [tags] keep their words, [text](link) its text. a heading,
+    a list item or the last line before a blank line gets a period when it has no sentence end, so it is a sentence of
+    its own and not run into the next one"""
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", without_code(text))
+    lines = text.splitlines()
+    spoken = []
+    for i, line in enumerate(lines):
+        block = bool(BLOCK_MARKER.match(line))
+        line = LINK.sub("", BLOCK_MARKER.sub("", line))
+        line = re.sub(r"(?<!\w)_+|_+(?!\w)", "", re.sub(r"[*`\[\]]", "", line))   # _emphasis_ markers, not snake_case
+        line = " ".join(line.split())
+        if line and (block or i + 1 == len(lines) or not lines[i + 1].strip()) and not line.rstrip("\"')»“”’").endswith(SENTENCE_END):
+            line += "."
+        if line:
+            spoken.append(line)
+    return " ".join(spoken)

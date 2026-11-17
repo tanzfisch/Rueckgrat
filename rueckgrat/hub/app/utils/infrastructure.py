@@ -11,7 +11,7 @@ from tqdm import tqdm
 from urllib.parse import urlparse
 from requests.models import Response
 from pathlib import Path
-from typing import Optional, Dict, Callable
+from typing import Optional, Dict, Callable, Tuple
 from dataclasses import dataclass
 from ..tasks.image_task import ImageRequest
 from .tts_cache import TtsCache
@@ -23,6 +23,8 @@ INFRASTRUCTURE_CONFIG_PATH = Path("/hub/config/infrastructure.json")
 LONG_REPLY_SHARE = 0.5          # of a llama slot's context for a long reply (tool setup, code, job), the rest is the prompt
 MIN_LONG_REPLY_TOKENS = 4096    # also when the context is unknown
 DECIDE_BATCH = 64               # questions per /decide request, the node's MAX_DECIDE_QUESTIONS
+DECIDE_MAX_CHARS = 4000         # the state of a /decide request, the node's MAX_DECIDE_CHARS
+DECIDE_GAP = "\n…\n"            # stands for the middle of a longer state, which is left out
 HUB_IMAGE_DIR = Path("/hub/images")
 
 # capabilities: what the system can do right now, by the names the hub and the app use -> the node service type of each
@@ -351,11 +353,12 @@ class Infrastructure:
 
         return str(filepath)
 
-    def tts(self, text: str, voice: str = "", language: str = "") -> Optional[bytes]:
+    def tts(self, text: str, voice: str = "", language: str = "", cache: bool = True) -> Optional[bytes]:
         """forward a speech request to the tts node, returns wav bytes or None. language "" = the node detects it.
-        the wav is cached for an hour, so replaying a recent message does not generate it again"""
+        cache: the wav is cached for an hour, so replaying a recent message does not generate it again. False for speech
+        no one replays (the text_to_speech tool's audio files), it would push the chat's speech out of the cache"""
         key = (text, voice, language)
-        if (wav := self._tts_cache.get(key)) is not None:
+        if cache and (wav := self._tts_cache.get(key)) is not None:
             logger.debug("tts: using cached wav")
             return wav
         if not self.available("tts"):
@@ -372,7 +375,8 @@ class Infrastructure:
             if response.status_code != 200:
                 logger.error(f"failed tts request: {response.status_code} {response.reason}")
                 return None
-            self._tts_cache.put(key, response.content)
+            if cache:
+                self._tts_cache.put(key, response.content)
             return response.content
         except Exception as e:
             logger.error(f"failed to get a tts response {repr(e)}")
@@ -425,28 +429,52 @@ class Infrastructure:
         """laya typed decisions about state from the decision node, one forward pass per DECIDE_BATCH questions.
         questions: {id: {"type": "choice"|"score"|"noul", "instructions": ..., "criteria": ...}}
         returns the answers by id (noul: {"noul": P(true), ...}, choice: {"choice": label, ...}) or None when any batch failed"""
+        decided = self.decide_whole(state, questions, ())
+        return decided[0] if decided else None
+
+    def decide_whole(self, state: str, questions: dict, whole: tuple) -> Optional[Tuple[dict, dict]]:
+        """decide, and the questions of the ids in whole also judged on the whole state (the node judges a longer state
+        chunk by chunk). returns (answers, whole_answers), whole_answers {} for a state of a single chunk, or None when any
+        batch failed. a state longer than DECIDE_MAX_CHARS is judged by its start and end (decide_state)"""
         if not self.available("decision"):
             return None     # the callers go on without laya (tool detection: the regex and prompt tools, memory: all candidates)
 
+        state = self.decide_state(state)
         items = list(questions.items())
-        answers = {}
+        answers, whole_answers = {}, {}
         for start in range(0, len(items), DECIDE_BATCH):
-            batch = self._decide_batch(state, dict(items[start:start + DECIDE_BATCH]))
-            if batch is None:
+            batch = dict(items[start:start + DECIDE_BATCH])
+            decided = self._decide_batch(state, batch, [key for key in batch if key in whole])
+            if decided is None:
                 return None
-            answers.update(batch)
-        return answers
+            answers.update(decided[0])
+            whole_answers.update(decided[1])
+        return answers, whole_answers
 
-    def _decide_batch(self, state: str, questions: dict) -> Optional[dict]:
-        """one /decide request, at most DECIDE_BATCH questions (the node's limit)"""
+    @staticmethod
+    def decide_state(state: str) -> str:
+        """the state as the node takes it: at most DECIDE_MAX_CHARS. a longer one keeps its start and its end, cut at words,
+        and leaves out the middle, where a pasted text usually is: the request is mostly before or after it"""
+        if len(state) <= DECIDE_MAX_CHARS:
+            return state
+        half = (DECIDE_MAX_CHARS - len(DECIDE_GAP)) // 2
+        head, tail = state[:half], state[-half:]
+        head = head[:head.rfind(" ")] if " " in head else head
+        tail = tail[tail.find(" ") + 1:] if " " in tail else tail
+        logger.debug(f"decide: a state of {len(state)} characters, judged by its first {len(head)} and last {len(tail)}")
+        return f"{head.rstrip()}{DECIDE_GAP}{tail.lstrip()}"
+
+    def _decide_batch(self, state: str, questions: dict, whole: list) -> Optional[Tuple[dict, dict]]:
+        """one /decide request, at most DECIDE_BATCH questions (the node's limit): (answers, whole_answers)"""
         node = self.node_by_type["text_to_decision"]
         url = f"http://{node.addr}:{node.port}/decide"
         try:
-            response = requests.post(url, json={"state": state, "questions": questions}, timeout=30)
+            response = requests.post(url, json={"state": state, "questions": questions, "whole": whole}, timeout=30)
             if response.status_code != 200:
                 logger.error(f"failed decide request: {response.status_code} {response.reason}")
                 return None
-            return response.json().get("answers")
+            body = response.json()
+            return body.get("answers") or {}, body.get("whole_answers") or {}
         except Exception as e:
             logger.error(f"failed to get a decide response {repr(e)}")
             return None

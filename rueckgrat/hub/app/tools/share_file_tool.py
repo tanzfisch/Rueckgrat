@@ -21,6 +21,8 @@ class ShareFileTool(Tool):
     description = prompts.SHARE_FILE_DESCRIPTION
     sequential = True           # runs after the round's bash and run_code calls that make the files
     offered_with = ("bash", "run_code")     # no laya question: offered (optional) whenever a tool that makes files is
+    # the largest file it attaches. every file of a shared folder is read into memory at once, so not more by default
+    max_attach_bytes = MAX_ATTACH_BYTES
 
     @classmethod
     def name(cls) -> str:
@@ -47,7 +49,7 @@ class ShareFileTool(Tool):
                 parent = posixpath.dirname(real)
                 # the name the user sees: below the shared path's folder (a file alone, a folder with its own name)
                 found += [(posixpath.relpath(name, parent) if parent else name, name, data)
-                          for name, _, data in volume.files(real, max_bytes=MAX_ATTACH_BYTES)]
+                          for name, _, data in volume.files(real, max_bytes=self.max_attach_bytes)]
             except ValueError:
                 problems.append(f"{path} is not a path in your files")
             except FileNotFoundError:
@@ -64,7 +66,7 @@ class ShareFileTool(Tool):
 
     def _offered(self, files: List[Tuple[str, str, bytes | None]], problems: List[str]) -> Dict[str, Any]:
         """the result of offering files [(the name the user sees, its path in the sandbox files, its bytes, None when
-        larger than MAX_ATTACH_BYTES)]: attached to the message, or held without one. problems: what could not be
+        larger than max_attach_bytes)]: attached to the message, or held without one. problems: what could not be
         offered before, named in the text with what fails here"""
         file_names: List[str] = []
         held: List[Dict[str, Any]] = []
@@ -74,7 +76,7 @@ class ShareFileTool(Tool):
                 problems.append(f"only the first {MAX_ATTACH_FILES} files were attached")
                 break
             if data is None:
-                problems.append(f"{name} is larger than {MAX_ATTACH_BYTES // (1024 * 1024)} MB")
+                problems.append(f"{name} is larger than {self.max_attach_bytes // (1024 * 1024)} MB")
             elif not sanitize_relative_path(name):
                 problems.append(f"{name} can't be attached (hidden file or folder)")
             elif self.message_id is None:
@@ -112,16 +114,16 @@ class ShareFileTool(Tool):
         "sandbox": True}, the file read now (as it is when the report is made). ValueError when it is gone or too large"""
         path = held.get("path") or held["name"]
         content = next((data for name, _, data in SandboxVolume.of_conversation(db, user_id, conversation_id).files(
-            path, max_bytes=MAX_ATTACH_BYTES) if name == path), None)
+            path, max_bytes=cls.max_attach_bytes) if name == path), None)
         if content is None:
-            raise ValueError(f"{path} is not a file or larger than {MAX_ATTACH_BYTES // (1024 * 1024)} MB")
+            raise ValueError(f"{path} is not a file or larger than {cls.max_attach_bytes // (1024 * 1024)} MB")
         cls._attach(db, user_id, conversation_id, message_id, held["name"], content, push)
 
-    @staticmethod
-    def _attach(db, user_id: int, conversation_id: int, message_id: int, name: str, content: str | bytes, push: bool) -> Dict[str, Any]:
+    @classmethod
+    def _attach(cls, db, user_id: int, conversation_id: int, message_id: int, name: str, content: str | bytes, push: bool) -> Dict[str, Any]:
         """writes the file for the message and pushes it to the chat (push: the user has an open /ws). returns the payload,
         ValueError for an invalid file"""
-        payload = attach_message_file(db, user_id, conversation_id, message_id, name, content)
+        payload = attach_message_file(db, user_id, conversation_id, message_id, name, content, max_bytes=cls.max_attach_bytes)
         if push:
             MessageQueue().send_data({"text_files": {
                 "conversation_id": conversation_id,

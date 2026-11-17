@@ -2,7 +2,19 @@
 
 Used during development or for demo purposes.
 
-## code prompts
+## large prompts
+
+```
+Create an audiobook for me about the Younger Dryas impact hypothesis, in four chapters:
+
+1. **The Younger Dryas:** what it was, when it happened (about 12,900 to 11,700 years ago), and why it was such a fascinating period of sudden climate change and upheaval.
+2. **The impact hypothesis:** what the theory claims, the evidence its supporters point to, and the main criticisms from other scientists.
+3. **Graham Hancock:** his ideas about an advanced ancient civilisation that was wiped out during the Younger Dryas, and how mainstream archaeology responds to them.
+4. **Could it happen again?** Some speculation if a similar catastrophe could strike today and how our current civilisation would cope.
+
+Research each topic first, write each chapter to its own file, then turn all four into a single audio file in your voice and give me the download link.
+```
+
 
 ```
 Create a small Python project: an interactive Mandelbrot and Julia set explorer using pygame and numpy.
@@ -29,8 +41,13 @@ Show the current zoom, center and iterations in the window title.
 After writing the files, build the project with cmake to check that it compiles and fix any errors.
 ```
 
-
 ## prompts to trigger specific tools and tool combinations
+
+### task
+
+```
+create a task that runs every day "find me the best price for Kenwood Chef KVC3100"
+```
 
 ### write_file
 
