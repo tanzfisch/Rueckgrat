@@ -20,6 +20,7 @@ from .code_tool import RunCodeTool
 from .bash_tool import BashTool
 from .write_file_tool import WriteFileTool
 from .share_file_tool import ShareFileTool
+from .task_tool import TaskTool
 
 __all__ = [
     "ToolRegistry",
@@ -44,4 +45,5 @@ __all__ = [
     "BashTool",
     "WriteFileTool",
     "ShareFileTool",
+    "TaskTool",
 ]

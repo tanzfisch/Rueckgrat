@@ -14,7 +14,7 @@ logger = get_logger()
 # a different model with another size needs this changed and SCHEMA_VERSION bumped
 MEMORY_EMBEDDING_DIM = 384
 # PRAGMA user_version of a db made by this hub. bump it on every schema change: until 1.0 an older db is wiped, never migrated
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 # #174 job protocols older than this are deleted (save_protocol and hub start), they are for looking into recent jobs
 PROTOCOL_RETENTION_HOURS = 24
 
@@ -261,8 +261,10 @@ class ChatDB:
         )""")
 
         # the private calendar of a companion contact (profile "companion": true), see app/companion.
-        # due_at / fired_at are UTC "YYYY-MM-DD HH:MM:SS" like CURRENT_TIMESTAMP. recurrence '' (once) or 'daily'.
-        # a daily row stays pending and moves on after firing, result and message_id are of its last firing
+        # due_at / fired_at are UTC "YYYY-MM-DD HH:MM:SS" like CURRENT_TIMESTAMP. recurrence: see clock.RECURRENCES ('' once).
+        # a recurring row stays pending and moves on after firing, result and message_id are of its last firing.
+        # kind 'task' (#170) is a task of the user (task tool, /tasks), note its text: alarm rings the app, conversation_id is
+        # where it was asked for (NULL: the contact's latest conversation)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS companion_calendar (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -275,8 +277,11 @@ class ChatDB:
             result TEXT NOT NULL DEFAULT '',
             message_id INTEGER DEFAULT NULL,
             fired_at TEXT DEFAULT NULL,
+            alarm INTEGER NOT NULL DEFAULT 0,
+            conversation_id INTEGER DEFAULT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+            FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
         )""")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_companion_due ON companion_calendar(status, due_at)")
 
@@ -2419,6 +2424,7 @@ class ChatDB:
 
     # only rows of contacts that are still companions fire
     _COMPANION = "json_extract(c.profile, '$.companion') = 1"
+    TASK_KIND = "task"     # #170 the rows of the user's tasks, the others are the companion's own life
 
     def set_contact_companion(self, user_id: int, contact_id: int, enabled: bool) -> bool:
         """the companion flag lives in the profile. switching it off drops the calendar, on again seeds a new one"""
@@ -2449,18 +2455,20 @@ class ChatDB:
             return conn.execute("SELECT MAX(fired_at) FROM companion_calendar WHERE contact_id = ?", (contact_id,)).fetchone()[0]
 
     def unseeded_companions(self) -> list[dict]:
-        """companions without a calendar yet: id, user_id"""
+        """companions without a calendar yet (the user's tasks don't count): id, user_id"""
         with self.get_connection() as conn:
             rows = conn.execute(f"""
                 SELECT c.id, c.user_id FROM contacts c
-                WHERE {self._COMPANION} AND NOT EXISTS (SELECT 1 FROM companion_calendar r WHERE r.contact_id = c.id)
-            """).fetchall()
+                WHERE {self._COMPANION} AND NOT EXISTS (SELECT 1 FROM companion_calendar r WHERE r.contact_id = c.id AND r.kind != ?)
+            """, (self.TASK_KIND,)).fetchall()
             return [dict(row) for row in rows]
 
-    def add_companion_row(self, contact_id: int, due_at: str, kind: str, note: str = "", recurrence: str = "") -> int:
+    def add_companion_row(self, contact_id: int, due_at: str, kind: str, note: str = "", recurrence: str = "",
+                          alarm: bool = False, conversation_id: int | None = None) -> int:
         with self.get_connection() as conn:
-            cursor = conn.execute("INSERT INTO companion_calendar (contact_id, due_at, kind, note, recurrence) VALUES (?, ?, ?, ?, ?)",
-                                  (contact_id, due_at, kind, note, recurrence))
+            cursor = conn.execute("""
+                INSERT INTO companion_calendar (contact_id, due_at, kind, note, recurrence, alarm, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (contact_id, due_at, kind, note, recurrence, int(bool(alarm)), conversation_id))
             conn.commit()
             return cursor.lastrowid
 
@@ -2499,13 +2507,13 @@ class ChatDB:
             return cursor.rowcount == 1
 
     def get_companion_day(self, contact_id: int, start: str, end: str) -> list[dict]:
-        """the rows due or fired in [start, end), in time order"""
+        """the companion's own rows due or fired in [start, end), in time order (not the user's tasks)"""
         with self.get_connection() as conn:
             rows = conn.execute("""
-                SELECT * FROM companion_calendar WHERE contact_id = ?
+                SELECT * FROM companion_calendar WHERE contact_id = ? AND kind != ?
                 AND ((due_at >= ? AND due_at < ?) OR (fired_at >= ? AND fired_at < ?))
                 ORDER BY COALESCE(fired_at, due_at), id
-            """, (contact_id, start, end, start, end)).fetchall()
+            """, (contact_id, self.TASK_KIND, start, end, start, end)).fetchall()
             return [dict(row) for row in rows]
 
     def last_companion_result(self, contact_id: int, kind: str) -> str:
@@ -2517,16 +2525,17 @@ class ChatDB:
             return row["result"] if row else ""
 
     def count_companion_messages(self, contact_id: int, since: str) -> int:
-        """proactive messages sent since"""
+        """proactive messages sent since (the user's tasks are no proactive messages)"""
         with self.get_connection() as conn:
-            row = conn.execute("SELECT COUNT(*) FROM companion_calendar WHERE contact_id = ? AND message_id IS NOT NULL AND fired_at >= ?",
-                               (contact_id, since)).fetchone()
+            row = conn.execute("""
+                SELECT COUNT(*) FROM companion_calendar WHERE contact_id = ? AND message_id IS NOT NULL AND fired_at >= ? AND kind != ?
+            """, (contact_id, since, self.TASK_KIND)).fetchone()
             return row[0]
 
     def count_pending_companion_rows(self, contact_id: int) -> int:
         with self.get_connection() as conn:
-            row = conn.execute("SELECT COUNT(*) FROM companion_calendar WHERE contact_id = ? AND status = 'pending' AND recurrence = ''",
-                               (contact_id,)).fetchone()
+            row = conn.execute("SELECT COUNT(*) FROM companion_calendar WHERE contact_id = ? AND status = 'pending' AND recurrence = '' AND kind != ?",
+                               (contact_id, self.TASK_KIND)).fetchone()
             return row[0]
 
     def has_companion_row(self, contact_id: int, due_at: str, kind: str, note: str) -> bool:
@@ -2577,6 +2586,56 @@ class ChatDB:
             rows = conn.execute("SELECT * FROM companion_calendar WHERE contact_id = ? AND status = 'pending' ORDER BY due_at, id",
                                 (contact_id,)).fetchall()
             return [dict(row) for row in rows]
+
+    ########### #170 the user's tasks: rows of kind TASK_KIND in the companion calendar, see app.companion.user_tasks
+
+    def get_tasks(self, user_id: int, contact_id: int | None = None, task_id: int | None = None) -> list[dict]:
+        """the user's open (pending) tasks, all, of one contact or one, next first, with contact_name"""
+        with self.get_connection() as conn:
+            rows = conn.execute("""
+                SELECT r.*, c.name AS contact_name FROM companion_calendar r JOIN contacts c ON c.id = r.contact_id
+                WHERE c.user_id = ? AND r.kind = ? AND r.status = 'pending' AND (? IS NULL OR r.contact_id = ?) AND (? IS NULL OR r.id = ?)
+                ORDER BY r.due_at, r.id
+            """, (user_id, self.TASK_KIND, contact_id, contact_id, task_id, task_id)).fetchall()
+            return [dict(row) for row in rows]
+
+    def count_tasks(self, user_id: int) -> int:
+        """the user's open tasks over all contacts"""
+        with self.get_connection() as conn:
+            return conn.execute("""
+                SELECT COUNT(*) FROM companion_calendar r JOIN contacts c ON c.id = r.contact_id
+                WHERE c.user_id = ? AND r.kind = ? AND r.status = 'pending'
+            """, (user_id, self.TASK_KIND)).fetchone()[0]
+
+    def update_task(self, user_id: int, task_id: int, due_at: str, recurrence: str, note: str, alarm: bool) -> bool:
+        """changes an open task of the user, False if there is none with that id"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                UPDATE companion_calendar SET due_at = ?, recurrence = ?, note = ?, alarm = ?
+                WHERE id = ? AND kind = ? AND status = 'pending' AND contact_id IN (SELECT id FROM contacts WHERE user_id = ?)
+            """, (due_at, recurrence, note, int(bool(alarm)), task_id, self.TASK_KIND, user_id))
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def adopt_tasks(self, contact_id: int, conversation_id: int) -> int:
+        """the contact's open tasks without a conversation (it was deleted, or there was none) post into conversation_id"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                UPDATE companion_calendar SET conversation_id = ?
+                WHERE contact_id = ? AND kind = ? AND status = 'pending' AND conversation_id IS NULL
+            """, (conversation_id, contact_id, self.TASK_KIND))
+            conn.commit()
+            return cursor.rowcount
+
+    def delete_task(self, user_id: int, task_id: int) -> bool:
+        """cancels an open task of the user, False if there is none with that id"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                DELETE FROM companion_calendar
+                WHERE id = ? AND kind = ? AND status = 'pending' AND contact_id IN (SELECT id FROM contacts WHERE user_id = ?)
+            """, (task_id, self.TASK_KIND, user_id))
+            conn.commit()
+            return cursor.rowcount == 1
 
     def last_user_message_time(self, contact_id: int) -> str | None:
         """UTC timestamp of the user's last message to this contact, any conversation"""

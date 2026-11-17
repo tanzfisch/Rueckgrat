@@ -13,6 +13,7 @@ class ConversationsPage(BasePage):
     def __init__(self, navigator):
         super().__init__(navigator)
         self.contact_id = None
+        self._conversation_ids = set()     # the listed ones: a message in another one (a task's new conversation) reloads the list
         self.header = Header(navigator)
         self.header.on_go_back = self.on_go_back
         self.list_view = ft.ListView(expand=True, spacing=8, padding=8)
@@ -37,9 +38,20 @@ class ConversationsPage(BasePage):
         contact = Contact(Hub.get_contact(self.contact_id))
         self.header.set_contact(contact)
         self.load_conversations()
+        Hub.register_incomming_message(self.on_incomming_message)
 
     def on_leave(self):
-        pass
+        Hub.unregister_incomming_message(self.on_incomming_message)
+
+    def on_incomming_message(self, msg: dict):
+        """a message in a conversation that is not listed: the hub made it (a task or the companion wrote while the
+        contact had no conversation), the list is loaded again. one of another contact's only costs a reload"""
+        try:
+            chat = msg.get("chat")
+            if chat and chat.get("conversation_id") not in self._conversation_ids:
+                self.load_conversations()
+        except Exception as e:
+            logger.error(f"failed to handle incomming message: {e}")
 
     def conversation_chosen(self, title: str, conversation_id: int):
         self.navigator("chat", contact_id=self.contact_id, conversation_id=conversation_id)
@@ -68,6 +80,7 @@ class ConversationsPage(BasePage):
 
     def load_conversations(self):
         conversations = Hub.get_conversations(self.contact_id)
+        self._conversation_ids = {conversation["id"] for conversation in conversations}
         start_bubble = OneLineBubble("+")
         start_bubble.height = 40
         start_bubble.on_click = self.create_conversation

@@ -44,9 +44,14 @@ class WebsearchTool(Tool):
         # sentences, headlines and live blog posts have 4+ words, times, scores and prices have digits. menu items have neither
         return '\n'.join(line for line in text.splitlines() if len(line.split()) >= 4 or re.search(r'\d', line))
 
-    def _get_org_name(self, url: str) -> str:
+    @staticmethod
+    def _site(url: str) -> str:
+        """the registered domain of url: https://www.priceme.co.nz/... is priceme.co.nz"""
         ext = tldextract.extract(url)
-        domain = f"{ext.domain}.{ext.suffix}"
+        return f"{ext.domain}.{ext.suffix}"
+
+    def _get_org_name(self, url: str) -> str:
+        domain = self._site(url)
         org_map = {
             "google.com": "Google",
             "microsoft.com": "Microsoft",

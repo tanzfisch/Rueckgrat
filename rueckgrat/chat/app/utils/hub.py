@@ -623,6 +623,61 @@ class Hub:
         return cls._transcripts(requests.delete, f"/{transcript_id}/bookmarks/{bookmark_id}") is not None
 
     @classmethod
+    def _tasks(cls, send, route: str = "", **kwargs) -> tuple[dict | None, str | None]:
+        """#170 (the hub's json answer of /tasks{route}, None) or (None, why not: the hub's reason or that it failed)"""
+        try:
+            response = send(
+                f"{cls.url}/tasks{route}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+                **kwargs,
+            )
+            if response.status_code == 200:
+                return response.json(), None
+            logger.error(f"tasks{route} - {response.status_code} {response.reason}")
+            try:
+                body = response.json()
+            except ValueError:
+                body = None
+            detail = body.get("detail") if isinstance(body, dict) else None
+            return None, detail if isinstance(detail, str) else f"the hub answered {response.status_code}"
+        except Exception as e:
+            logger.error(f"failed to reach tasks{route} {repr(e)}")
+            return None, "could not reach the hub"
+
+    @classmethod
+    def get_tasks(cls) -> tuple[list | None, dict]:
+        """the user's open tasks over all contacts, next first: [{id, contact_id, contact_name, task, repeat, repeat_text,
+        alarm, next_run, next_run_local, when}] (None on an error) and the limits {max_tasks, min_interval_minutes}"""
+        data, _ = cls._tasks(requests.get)
+        return (data.get("tasks", []), data.get("limits", {})) if data else (None, {})
+
+    @classmethod
+    def get_contact_tasks(cls, contact_id: int) -> list | None:
+        """the open tasks of one contact, None on an error"""
+        tasks, _ = cls.get_tasks()
+        return None if tasks is None else [task for task in tasks if task["contact_id"] == contact_id]
+
+    @classmethod
+    def create_task(cls, contact_id: int, task: str, when: str, repeat: str, alarm: bool) -> tuple[dict | None, str | None]:
+        """(the new task, None) or (None, why not). the task has companion_switched_on when its contact became a companion"""
+        data, error = cls._tasks(requests.post, json={"contact_id": contact_id, "task": task, "when": when, "repeat": repeat, "alarm": alarm})
+        return (data.get("task"), None) if data else (None, error)
+
+    @classmethod
+    def edit_task(cls, task_id: int, **changes) -> tuple[dict | None, str | None]:
+        """changes: task, when, repeat, alarm. (the task, None) or (None, why not)"""
+        data, error = cls._tasks(requests.patch, f"/{task_id}", json=changes)
+        return (data.get("task"), None) if data else (None, error)
+
+    @classmethod
+    def delete_task(cls, task_id: int) -> str | None:
+        """cancels a task: None, else why not"""
+        _, error = cls._tasks(requests.delete, f"/{task_id}")
+        return error
+
+    @classmethod
     def upload_contact_image(cls, contact_id: int, data: bytes) -> Optional[str]:
         """png, jpeg or webp bytes become the contact's profile image, returns its file key or None"""
         return cls._set_contact_image(requests.post, f"contacts/{contact_id}/image", data)

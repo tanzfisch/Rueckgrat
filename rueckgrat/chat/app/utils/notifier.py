@@ -61,9 +61,9 @@ class Notifier:
             logger.warning("notification permission request failed: %r", e)
 
     @classmethod
-    def notify(cls, title: str, body: str):
-        """ thread safe, never raises. does nothing while the user looks at the app """
-        if cls._active or cls._page is None:
+    def notify(cls, title: str, body: str, always: bool = False):
+        """ thread safe, never raises. does nothing while the user looks at the app, unless always (an alarm) """
+        if (cls._active and not always) or cls._page is None:
             return
         body = " ".join(body.split())
         if len(body) > BODY_LENGTH:

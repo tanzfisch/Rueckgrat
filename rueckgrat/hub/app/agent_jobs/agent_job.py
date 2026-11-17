@@ -24,6 +24,8 @@ class AgentJob:
     # never offered besides the registry's WORKER_EXCLUDED_TOOLS. a worker takes no photos: take_photo is an optional
     # tool in every tool prompt, a job would take them for nothing
     EXCLUDED_TOOLS = ("take_photo",)
+    # the registry's WORKER_EXCLUDED_TOOLS this kind of agent may use anyway, e.g. a user's task may start a job (TaskJob)
+    ALLOWED_TOOLS = ()
     # a worker whose detection found one of these builds or tests something from its task: WORKER_TOOLS' websearch is not
     # forced on it (it searched for nothing useful, about a minute each), it still searches when its detection picks websearch
     BUILD_TOOLS = ("bash", "run_code", "write_file")
@@ -57,6 +59,7 @@ class AgentJob:
         self.plan_step, self.plan_task = None, None   # a worker's step and task id in the plan, set by Controller.spawn
         self.attempt = 1        # a retried task's worker: 2, ... (Controller._retry)
         self.attachments = []   # a worker's files its tools held (write_file, share_file, generate_image), they go into its result
+        self.held_data = {}     # {kind: value} a task's or companion pass's tools held for its message (ToolRegistry.show_held)
         self.excluded_tools = ()    # a retried task's worker: the tools that failed the attempts before (Controller._retry)
         self.failed_tools = []      # the tools that failed or found nothing in this worker's run, a failed result names them
 
@@ -131,7 +134,7 @@ class AgentJob:
         from app.tasks import ToolDetectionTask, ToolExecutionTask
         context = self.tool_context
         registry = context["tool_registry"]
-        excluded = registry.WORKER_EXCLUDED_TOOLS + self.EXCLUDED_TOOLS + tuple(self.excluded_tools)
+        excluded = tuple(name for name in registry.WORKER_EXCLUDED_TOOLS if name not in self.ALLOWED_TOOLS) + self.EXCLUDED_TOOLS + tuple(self.excluded_tools)
         detection = ToolDetectionTask(detect, registry, self.infrastructure, excluded_tools=excluded)
         registry.task_queue.run(detection)
         detection.trace(context["conversation_id"], f"{self.role} {self.job_id}")
@@ -225,19 +228,22 @@ class AgentJob:
         return cls.connections is not None and cls.connections[user_id] > 0
 
     @classmethod
-    def post_message(cls, db, user_id: int, conversation_id: int, text: str, name: str) -> tuple[int, bool]:
+    def post_message(cls, db, user_id: int, conversation_id: int, text: str, name: str, alarm: bool = False) -> tuple[int, bool]:
         """stores text as the contact's message like a normal reply, so later replies see it in the history, and pushes
-        it when the user is connected. returns (message_id, pushed)"""
+        it when the user is connected. alarm: the app rings (a user's task with its alarm on). returns (message_id, pushed)"""
         message_id = db.add_message(conversation_id, "assistant", text, name)
         pushed = cls.user_connected(user_id)
         if pushed:
-            MessageQueue().send_data({"chat": {
+            chat = {
                 "conversation_id": conversation_id,
                 "role": "assistant",
                 "content": text,
                 "tool_calls": [],
                 "message_id": message_id
-            }}, user_id=user_id)   # only the conversation's owner
+            }
+            if alarm:
+                chat["alarm"] = True
+            MessageQueue().send_data({"chat": chat}, user_id=user_id)   # only the conversation's owner
         return message_id, pushed
 
     def stop(self):

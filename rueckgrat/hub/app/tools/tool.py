@@ -13,6 +13,8 @@ class Tool(Task):
     sequential = False  # the calls of sequential tools in one round run one after another in their order (they share the sandbox files)
     offered_with = ()   # names of tools this one is offered with as an optional tool (ToolRegistry.companions), no laya question of its own
     requires = ()       # the capabilities it needs (Infrastructure.available: "image", "embedding", "internet" ...), without one it is not offered
+    overrides = ()      # names of tools this one makes needless when both are detected (ToolRegistry.overridden), e.g. price_finder: websearch
+    HELD_DATA = "held_data"     # result key: {kind: value} show_data held without a stored message (ToolRegistry.show_held)
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
         super().__init__(user_id=user_id, conversation_id=conversation_id)
@@ -41,12 +43,20 @@ class Tool(Task):
 
     def show_data(self, kind: str, value) -> None:
         """stores value as the data of kind of this call's message and sends it to the chat, e.g. show_data("poll", {...}).
-        the client shows it under the bubble by its kind. nothing without a stored message (a worker's or companion's call)"""
+        the client shows it under the bubble by its kind. without a stored message (a task's, companion's or worker's call)
+        the result holds it (HELD_DATA): whoever posts a message with the result shows it there (ToolRegistry.show_held)"""
         if not self.has_message():
+            self._response.setdefault(self.name(), {}).setdefault(self.HELD_DATA, {})[kind] = value
             return
-        self.db.set_message_data(self.message_id, kind, value)
-        MessageQueue().send_data({"data": {"conversation_id": self.get_conversation_id(), "message_id": self.message_id, "kind": kind, "value": value}},
-                                 user_id=self.get_user_id())
+        self.send_data(self.db, self.get_user_id(), self.get_conversation_id(), self.message_id, kind, value)
+
+    @staticmethod
+    def send_data(db, user_id: int, conversation_id: int, message_id: int, kind: str, value, push: bool = True) -> None:
+        """stores value as the data of kind of message_id (a reload shows it) and, push: sends it to the user's chat"""
+        db.set_message_data(message_id, kind, value)
+        if push:
+            MessageQueue().send_data({"data": {"conversation_id": conversation_id, "message_id": message_id, "kind": kind, "value": value}},
+                                     user_id=user_id)
 
     @classmethod
     def sharing(cls):

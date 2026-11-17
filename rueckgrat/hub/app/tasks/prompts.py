@@ -126,7 +126,7 @@ THE USER IS LOOKING FOR:
 Respond with a json structure like this:
 {{
     "offers": [
-        {{"title": "the product's name as the page gives it", "price": 1299.00, "currency": "NZD", "shop": "the shop that sells it", "match": 1-10, "note": "what matters to the user, at most 12 words"}}
+        {{"title": "the product's name as the page gives it", "price": 1299.00, "currency": "NZD", "match": 1-10, "note": "what matters to the user, at most 12 words"}}
     ]
 }}
 

@@ -40,11 +40,13 @@ def amounts(text: str) -> List[float]:
 
 class PriceFinderTool(WebsearchTool):
     """searches the web for a product (WebsearchTool's search and page reading), one llm call per page reads its offers
-    (FindOfferTask), only offers whose price is on the page are kept. the ranking (the cheapest, or the best match first)
+    (FindOfferTask), only offers whose price is on the page are kept. a find's shop is its page's site (priceme.co.nz),
+    so the label always matches the link, also for a price comparison page. the ranking (the cheapest, or the best match first)
     is shown under the answer: a podium of the best three and a list of more finds (the message's "prices" data, the client's
     PriceView), the reply gets the finds as text"""
     description = prompts.PRICE_FINDER_DESCRIPTION
     thresholds = (0.55, 0.6)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    overrides = ("websearch",)  # it searches the web itself, a websearch next to it only finds the same shops again
     question = [
         "Does the user ask for the best price or the cheapest offer for a product?",
         "Does the user ask you to search the shops for a product?",
@@ -158,24 +160,27 @@ class PriceFinderTool(WebsearchTool):
                 if not self._grounded(offer["price"], information):
                     logger.debug(f"price finder dropped {offer['title']} at {offer['price']}, the price is not on {url}")
                     continue
-                findings.append({**offer, "shop": offer["shop"] or self._get_org_name(url), "url": url, "image": image})
+                findings.append({**offer, "shop": self._site(url), "url": url, "image": image})
         return findings
 
     @staticmethod
     def _ranked(findings: List[Dict[str, Any]], rank: str) -> List[Dict[str, Any]]:
-        """the finds that fit (MIN_MATCH), each once, best first: "price" the cheapest, "match" the best fitting (cheaper
-        on a tie). prices in other currencies than the most found one are not compared with it, they come after"""
-        unique, seen = [], set()
-        for finding in findings:
-            keys = {(finding["url"], finding["price"]), (finding["title"].lower(), finding["price"], finding["shop"].lower())}
-            if finding["match"] >= MIN_MATCH and not keys & seen:
-                seen |= keys
-                unique.append(finding)
-        if not unique:
+        """the finds that fit (MIN_MATCH), best first: "price" the cheapest, "match" the best fitting (cheaper on a tie).
+        prices in other currencies than the most found one are not compared with it, they come after. one find per page:
+        a comparison page's offers would be rows with the same shop and link, its best one stays"""
+        fitting = [finding for finding in findings if finding["match"] >= MIN_MATCH]
+        if not fitting:
             return []
-        main = Counter(finding["currency"] for finding in unique).most_common(1)[0][0]
+        main = Counter(finding["currency"] for finding in fitting).most_common(1)[0][0]
         key = (lambda f: (-f["match"], f["price"])) if rank == "match" else (lambda f: (f["price"], -f["match"]))
-        return sorted((f for f in unique if f["currency"] == main), key=key) + sorted((f for f in unique if f["currency"] != main), key=key)
+        ordered = sorted((f for f in fitting if f["currency"] == main), key=key) + sorted((f for f in fitting if f["currency"] != main), key=key)
+        ranked, seen = [], set()
+        for finding in ordered:
+            keys = {finding["url"], (finding["title"].lower(), finding["price"], finding["shop"])}
+            if not keys & seen:
+                seen |= keys
+                ranked.append(finding)
+        return ranked
 
     def execute(self) -> None:
         try:

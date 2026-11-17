@@ -14,8 +14,8 @@ CURRENCY = re.compile(r"[A-Z]{3}")
 
 class FindOfferTask(FindAnswerTask):
     """the price finder's offers on one page: one llm call reads the page's product data and text (FindAnswerTask with
-    FIND_OFFER_PROMPT), the result is {"offers": [{"title", "price", "currency", "shop", "match", "note"}]}.
-    the prices are what the llm read, PriceFinderTool keeps only those it finds in the page"""
+    FIND_OFFER_PROMPT), the result is {"offers": [{"title", "price", "currency", "match", "note"}]}.
+    the prices are what the llm read, PriceFinderTool keeps only those it finds in the page, the page's site is the shop"""
     PROMPT = prompts.FIND_OFFER_PROMPT
 
     def _answer(self, reply) -> Dict[str, Any]:
@@ -40,7 +40,6 @@ class FindOfferTask(FindAnswerTask):
             "title": title,
             "price": price,
             "currency": currency if CURRENCY.fullmatch(currency) else "",
-            "shop": " ".join(str(raw.get("shop") or "").split())[:MAX_TITLE],
             "match": max(1, min(10, match)),
             "note": " ".join(str(raw.get("note") or "").split())[:MAX_NOTE],
         }

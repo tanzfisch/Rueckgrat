@@ -2,8 +2,9 @@ import threading
 from datetime import datetime, time, timedelta
 
 from .companion_job import CompanionJob, short
+from .task_job import TaskJob
 from app.utils import clock
-from app.utils.clock import to_db, from_db, user_timezone, next_daily, last_occurrence, at_local
+from app.utils.clock import to_db, from_db, user_timezone, next_occurrence, last_occurrence, at_local
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -11,6 +12,7 @@ logger = get_logger()
 MAX_SLEEP = 60                  # wall clock seconds, also picks up new companions and rows added by other paths
 MIN_SLEEP = 1
 PLANNING_TIME = time(0, 5)      # the only always-on row: the night planning, local time. it schedules everything else
+RESTART_GRACE = timedelta(minutes=5)    # a repeating user's task due this shortly before the hub started still fires
 
 class CompanionScheduler:
     """one thread sleeping until the next due row of the companion calendars, then running the passes (CompanionJob,
@@ -18,12 +20,18 @@ class CompanionScheduler:
 
     catch-up after downtime: a due row fires once if its (latest) occurrence is at or after the cutoff
     max(the last local midnight, the companion's last run), older ones are marked missed without a pass.
-    a daily row always re-arms to its next future occurrence, missed days are never replayed"""
+    a daily row always re-arms to its next future occurrence, missed days are never replayed.
 
-    def __init__(self, db, infrastructure, tool_registry):
+    #170 the user's tasks (rows of kind db.TASK_KIND, app.companion.user_tasks) are no part of the companion's day: they
+    fire as a TaskJob, whatever the chattiness or quiet hours. a one-off task that was due while the hub was down runs late
+    (its message says so), a repeating one skips the runs it missed then (due before started - RESTART_GRACE) and re-arms"""
+
+    def __init__(self, db, infrastructure, tool_registry, started: datetime | None = None):
+        """started: when the hub started (now), what a repeating task's run is missed before"""
         self.db = db
         self.infrastructure = infrastructure
         self.tool_registry = tool_registry
+        self._started = started or clock.now()
         self._stop = threading.Event()
         self._wake = threading.Event()
 
@@ -55,6 +63,15 @@ class CompanionScheduler:
         now = now or clock.now()
         return min(MAX_SLEEP, max(MIN_SLEEP, (from_db(due) - now).total_seconds()))
 
+    def missed(self, row: dict, occurrence: datetime, cutoff: datetime) -> str | None:
+        """why a due row gets no pass, None: it fires. the companion's rows before the cutoff; a user's task only when it
+        repeats and its run was due while the hub was down"""
+        if row["kind"] != self.db.TASK_KIND:
+            return f"before the cutoff {to_db(cutoff)}" if occurrence < cutoff else None
+        if row["recurrence"] and occurrence < self._started - RESTART_GRACE:
+            return f"the hub was down, started {to_db(self._started)}"
+        return None
+
     def cutoff(self, contact_id: int, tz, now: datetime) -> datetime:
         midnight = at_local(now.astimezone(tz).date(), time(0), tz)
         last_run = self.db.last_companion_run(contact_id)
@@ -83,8 +100,8 @@ class CompanionScheduler:
         for row in self.db.due_companion_rows(to_db(now)):
             tz = user_timezone(self.db, row["user_id"])
             occurrence = from_db(row["due_at"])
-            if row["recurrence"] == "daily":
-                occurrence = last_occurrence(occurrence, tz, now)
+            if row["recurrence"]:
+                occurrence = last_occurrence(occurrence, tz, now, row["recurrence"])
             if row["contact_id"] not in cutoffs:   # before any pass of this tick, they would move the last run
                 cutoffs[row["contact_id"]] = self.cutoff(row["contact_id"], tz, now)
             due.append((occurrence, row["id"], row, tz))
@@ -94,16 +111,20 @@ class CompanionScheduler:
     def _fire(self, row: dict, tz, occurrence: datetime, cutoff: datetime, now: datetime) -> dict:
         if not self.db.is_companion(row["contact_id"]):
             return {"row": row["id"], "skipped": "no companion"}   # switched off during this tick, the next drops the row
-        next_due = to_db(next_daily(from_db(row["due_at"]), tz, now)) if row["recurrence"] == "daily" else None
+        next_due = to_db(next_occurrence(from_db(row["due_at"]), row["recurrence"], tz, now)) if row["recurrence"] else None
 
         record = {"row": row["id"], "kind": row["kind"], "note": short(row["note"]), "occurrence": to_db(occurrence)}
-        if occurrence < cutoff:
-            logger.info(f"companion row {row['id']} {row['kind']} missed (before {to_db(cutoff)}), no pass")
+        missed = self.missed(row, occurrence, cutoff)
+        if missed:
+            logger.info(f"companion row {row['id']} {row['kind']} missed ({missed}), no pass")
             self.db.finish_companion_row(row["id"], "missed", None, next_due=next_due)
-            self.db.add_companion_log(row["contact_id"], to_db(now), {**record, "missed": f"before the cutoff {to_db(cutoff)}"})
+            self.db.add_companion_log(row["contact_id"], to_db(now), {**record, "missed": missed})
             return {"row": row["id"], "skipped": "missed"}
 
-        job = CompanionJob(row, self.db, self.infrastructure, self.tool_registry, tz, now)
+        if row["kind"] == self.db.TASK_KIND:
+            job = TaskJob(row, self.db, self.infrastructure, self.tool_registry, tz, now, occurrence)
+        else:
+            job = CompanionJob(row, self.db, self.infrastructure, self.tool_registry, tz, now)
         try:
             with MessageQueue.user_scope(row["user_id"]):    # status messages of its tool lookups go to the contact's owner only
                 job.run()

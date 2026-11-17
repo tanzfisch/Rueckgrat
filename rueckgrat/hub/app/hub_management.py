@@ -102,6 +102,7 @@ def companion_status(db, contact, log_entries):
     from app.utils import clock
     from app.companion.settings import CompanionSettings
     from app.companion.scheduler import CompanionScheduler
+    from app.companion.user_tasks import UserTasks
     contact_id = contact["id"]
     tz = clock.user_timezone(db, contact["user_id"])
     def local(text):
@@ -116,7 +117,8 @@ def companion_status(db, contact, log_entries):
         "cutoff": CompanionScheduler(db, None, None).cutoff(contact_id, tz, now).astimezone(tz).strftime("%a %d %H:%M") if now else None,
         "messages_today": db.count_companion_messages(contact_id, clock.local_day(now.astimezone(tz))[0]) if now else None,
         "limits": CompanionSettings(db.get_contact_by_id(contact_id)).limits_text(),
-        "calendar": [{"row": r["id"], "due": local(r["due_at"]), "kind": r["kind"], "note": r["note"], "daily": r["recurrence"] == "daily"}
+        "calendar": [{"row": r["id"], "due": local(r["due_at"]), "kind": r["kind"], "note": r["note"],
+                      "repeat": UserTasks.repeat_text(r["recurrence"]) if r["recurrence"] else "", "alarm": bool(r["alarm"])}
                      for r in db.pending_companion_rows(contact_id)],
         "hub_next_wake": local(db.next_companion_due()),
         "log": [{"at": local(e["at"]), **e["record"], "occurrence": local(e["record"].get("occurrence"))} for e in log_entries],
@@ -132,8 +134,8 @@ def print_companion_status(s):
     print(f"  messages   {s['messages_today'] if s['messages_today'] is not None else '?'} today, limits {s['limits']}")
     print(f"  next wake  {s['calendar'][0]['due'] if s['calendar'] else '-'} (hub: {s['hub_next_wake'] or '-'})")
     print("  calendar")
-    print_table(None, [f"    {r['due']:<12} {r['kind']:<10} {'daily' if r['daily'] else '':<6}{r['note']}"
-                       for r in s["calendar"] or [{"due": "", "kind": "nothing pending", "note": "", "daily": False}]])
+    print_table(None, [f"    {r['due']:<12} {r['kind']:<10} {r['repeat']:<15}{'alarm ' if r['alarm'] else ''}{r['note']}"
+                       for r in s["calendar"] or [{"due": "", "kind": "nothing pending", "note": "", "repeat": "", "alarm": False}]])
     print(f"  last {len(s['log'])} pass{'' if len(s['log']) == 1 else 'es'}")
     passes = []     # one colour per pass, with its detail lines
     for e in s["log"]:

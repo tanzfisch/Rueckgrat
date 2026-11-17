@@ -205,6 +205,8 @@
 {"lang": "en", "text": "Make a poster for the school fundraiser.", "labels": {"spawn_job": "r", "generate_image": "r"}}
 {"lang": "en", "text": "Create a React todo app with a Node backend and Postgres.", "labels": {"spawn_job": "M"}}
 {"lang": "en", "text": "Watch Bitcoin price hourly and alert if it falls under 60k.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Hey, find me the lyrics too. \"Trink, trink, Brüderlein, trink. Lass doch die Sorgen zu Haus.\"", "labels": {"websearch": "M"}}
+{"lang": "en", "text": "create a task that runs every 15min \"find me the best price for Kenwood Chef KVC3100\"", "labels": {"task": "M"}}
 
 {"comment": "checked by human until here", "lang": "en", "text": "Build a band website with gallery, tour dates and contact form.", "labels": {"spawn_job": "M"}}
 {"lang": "en", "text": "Code a Tetris clone in JavaScript.", "labels": {"spawn_job": "M"}}
@@ -391,6 +393,19 @@
 {"lang": "en", "text": "Just planted some tomatoes in the garden.", "labels": {}}
 {"lang": "en", "text": "The new keyboard is much better.", "labels": {}}
 {"lang": "en", "text": "Power went out for ten minutes last night.", "labels": {}}
+{"lang": "en", "text": "Remind me in 20 minutes to take the pizza out of the oven.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Wake me up at 6:30 tomorrow with an alarm.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Set an alarm for 7am every weekday.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Every morning at 8, tell me the weather in Berlin.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Remind me every Friday at 5pm to submit my timesheet.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Ping me every 2 hours to drink some water.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Remind me tonight at 9 to call mum.", "labels": {"task": "M"}}
+{"lang": "en", "text": "What reminders do I have?", "labels": {"task": "M"}}
+{"lang": "en", "text": "Cancel my wake-up alarm.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Move my timesheet reminder to Thursday.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Do you remember what we talked about yesterday?", "labels": {}}
+{"lang": "en", "text": "What time is it in Tokyo right now?", "labels": {"current_time": "M"}}
+{"lang": "en", "text": "My alarm clock broke this morning, so I was late for work.", "labels": {}}
 
 {"comment": "below this typos on purpose", "lang": "en", "text": "Quiz me on the captiols of Europe, one question at a time.", "labels": {"poll": "M"}}
 {"lang": "en", "text": "Help me decide wich laptop to buy by asking me a few questions.", "labels": {"poll": "M"}}
@@ -422,3 +437,22 @@
 {"lang": "en", "text": "Please rember that my sister's name is Anna.", "labels": {}}
 {"lang": "en", "text": "What's the weater like in Wellington today?", "labels": {"weather": "M"}}
 {"lang": "en", "text": "Who wrote Pride and Prejudic?", "labels": {"wikipedia": "M", "websearch": "r"}}
+{"lang": "en", "text": "Every 15 minutes, find me the cheapest price for a Sony WH-1000XM5.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Create a task: check the weather in Wellington every morning at 7.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Run a web search for news about the Rueckgrat project every day at noon.", "labels": {"task": "M"}}
+{"lang": "en", "text": "In 2 hours check the price of the Kenwood Chef again.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Each morning look up the exchange rate from NZD to EUR and tell me.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Schedule a daily job that searches the shops for a cheap air fryer.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Every hour search the web for new articles about the All Blacks.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Set up a task that runs every 30 minutes and checks if Tesla stock is below 200.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Tomorrow at 9am, tell me the weather in Christchurch.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Make a recurring task: every Monday give me an interesting Wikipedia article.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Run this every 6 hours: find me the best deal on an iPhone 16.", "labels": {"task": "M"}}
+{"lang": "en", "text": "create a task that runs every 20 min: what time is it in Tokyo", "labels": {"task": "M"}}
+{"lang": "en", "text": "Every weekday at 8:30 send me the top headlines from the web.", "labels": {"task": "M"}}
+{"lang": "en", "text": "In 45 minutes look up the opening hours of Te Papa for me.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Every evening at 6 convert 100 NZD to USD and tell me the rate.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Find me the best price for a Kenwood Chef KVC3100.", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "The bus here comes every 15 minutes, it's great.", "labels": {}}
+{"lang": "en", "text": "I go running every morning at 6 before work.", "labels": {}}
+{"lang": "en", "text": "How often should I water my tomatoes, every day or every two days?", "labels": {"websearch": "r"}}

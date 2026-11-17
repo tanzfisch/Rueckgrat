@@ -20,6 +20,7 @@ from .price_view import PriceView
 from .text_preview import TextPreview
 from .file_card import FileCard, FileCards
 from .files_panel import FilesPanel
+from .alarm_box import AlarmBox
 
 __all__ = [
     "MessageBox", 
@@ -48,4 +49,5 @@ __all__ = [
     "FileCard",
     "FileCards",
     "FilesPanel",
+    "AlarmBox",
 ]
