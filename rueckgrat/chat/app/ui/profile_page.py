@@ -364,12 +364,7 @@ class ProfilePage(BasePage):
         voice = self.voice_selector.get_voice()
         if voice is None:
             return ""
-        if "voice_id" in voice:
-            voice_id = voice["voice_id"]
-        elif "predefined_id" in voice:
-            voice_id = Hub.use_predefined_voice(voice["predefined_id"])
-        else:
-            voice_id = Hub.upload_voice(voice["bytes"], self.gender_group.value or "")
+        voice_id = Hub.voice_of(voice, self.gender_group.value or "")
         if not voice_id:
             logger.error("storing the voice failed, keeping the current voice")
             return self.voice_selector.current_voice_id

@@ -421,6 +421,25 @@ def clear_timezone(username: str = Depends(get_current_user)):
     app.state.db.set_user_timezone(app.state.db.get_user_id(username), None)
     return {"status": "ok"}
 
+class TtsVoiceRequest(BaseModel):
+    voice_id: str
+
+@app.get("/users/me/tts_voice")
+def get_tts_voice(username: str = Depends(get_current_user)):
+    """the voice the text_to_speech tool speaks with: one of the user's voice uuids, "" the contact's voice"""
+    return {"voice_id": app.state.db.get_user_tts_voice(app.state.db.get_user_id(username)) or ""}
+
+@app.put("/users/me/tts_voice")
+def set_tts_voice(request: TtsVoiceRequest, username: str = Depends(get_current_user)):
+    """one of the user's voice uuids (POST /voices, POST /voices/predefined/<id>), "" the contact's voice again"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        voice = own_voice(user_id, request.voice_id.strip())
+        if request.voice_id.strip() and not voice:
+            raise HTTPException(status_code=400, detail="unknown voice")
+        app.state.db.set_user_tts_voice(user_id, voice or None)
+        return {"status": "ok", "voice_id": voice}
+
 class EmailRequest(BaseModel):
     email: str
 

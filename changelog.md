@@ -28,6 +28,7 @@ Changelog
 - #211 explorer button in conversations list
 - #213 copy path button on files in file explorer
 - #210 play button for audio files in contact fs
+- #218 added option to override voice for ai tools
 
 0.28.1
 ------

@@ -249,7 +249,8 @@ class ChatDB:
 
         # per user settings. profile: the user's profile json (get_user_data). timezone: IANA name the user chose, the companion
         # plans in it (timestamps stay UTC). device_timezone: the one the app sent at login, used while timezone is NULL.
-        # profile_image_key: current user avatar in /hub/images, NULL if none
+        # profile_image_key: current user avatar in /hub/images, NULL if none. tts_voice: the voice uuid (voices) the
+        # text_to_speech tool speaks with, NULL: the contact's voice
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
             user_id INTEGER PRIMARY KEY,
@@ -257,6 +258,7 @@ class ChatDB:
             timezone TEXT,
             profile_image_key TEXT,
             device_timezone TEXT DEFAULT NULL,
+            tts_voice TEXT DEFAULT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
 
@@ -2390,6 +2392,22 @@ class ChatDB:
                 INSERT INTO user_settings (user_id, timezone) VALUES (?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET timezone = excluded.timezone
             """, (user_id, timezone))
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def get_user_tts_voice(self, user_id: int) -> str | None:
+        """the voice uuid the user chose for the text_to_speech tool, None: the contact's voice"""
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT tts_voice FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
+            return row["tts_voice"] if row and row["tts_voice"] else None
+
+    def set_user_tts_voice(self, user_id: int, voice: str | None) -> bool:
+        """voice: one of the user's voice uuids (the caller checks), None: back to the contact's voice"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                INSERT INTO user_settings (user_id, tts_voice) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET tts_voice = excluded.tts_voice
+            """, (user_id, voice or None))
             conn.commit()
             return cursor.rowcount == 1
 

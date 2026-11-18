@@ -14,8 +14,8 @@ MAX_TEXT_BYTES = 10 * 1024 * 1024   # of one text file read, about 15 hours of s
 
 
 class TextToSpeechTool(ShareFileTool):
-    """speaks a short text of the call, or text files of the contact's sandbox files in their order, with the contact's
-    voice into one audio file (SpeechFile: chunk by chunk, so a long text never passes through the llm), kept as
+    """speaks a short text of the call, or text files of the contact's sandbox files in their order, with the user's
+    chosen voice or else the contact's (_voice) into one audio file (SpeechFile: chunk by chunk, so a long text never passes through the llm), kept as
     TTS/<hash>/<name>.wav, or .ogg when large, or in the format the name's extension asks for (.wav, .ogg, .mp3:
     AudioFile.finish) (SandboxVolume.tts_path), or at the full path the name gives (~/projects/x/book:
     SandboxVolume.file_path, a file there replaced only with overwrite: ShareFileTool._write), and offers it to the user
@@ -72,7 +72,12 @@ class TextToSpeechTool(ShareFileTool):
             yield name, data.decode("utf-8")
 
     def _voice(self) -> str:
-        """the contact's voice (the user's voice uuid), "" the tts node's default"""
+        """the voice the user chose for this tool (user settings, while it is still one of their voices), else the
+        contact's voice (the user's voice uuid), "" the tts node's default"""
+        user_id = self.get_user_id()
+        chosen = self.db.get_user_tts_voice(user_id) if user_id is not None else None
+        if chosen and self.db.find_user_voice(user_id, chosen):
+            return chosen
         contact = self.db.get_contact_by_id(self.contact_id) or {}
         return Utils.get_nested_value(contact, ["profile", "tts_parameters", "voice_id"], "") or ""
 
