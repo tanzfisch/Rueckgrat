@@ -2,6 +2,7 @@ import json
 import re
 import os
 import asyncio
+import concurrent.futures
 
 from tqdm import tqdm
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -137,19 +138,31 @@ def image(request: ImageRequest):
         logger.error("failed to generate image with comfyui")
     return response
 
+TTS_BUSY_RETRY_AFTER = 5    # seconds, the Retry-After of a busy answer (the speech queue is full)
+
 @app.post("/tts")
-def tts(request: NodeTTSRequest):
+async def tts(body: NodeTTSRequest, request: Request):
+    """queued (SpeechQueue): a chat's request (priority "chat") before the background ones, one generation at a time.
+    503 with Retry-After when the queue is full: busy, ask again. a request whose client is gone is skipped"""
     if not app.state.tts:
         raise HTTPException(status_code=503, detail="Node has no tts module loaded")
     from app.utils.tts import TTS_MODEL
+    from app.utils.speech_queue import QueueBusy
     try:
-        # the tts class installs its own model through the registry if it is missing
-        app.state.tts.install()
+        # the tts class installs its own model through the registry if it is missing (blocking: not on the event loop)
+        await asyncio.to_thread(app.state.tts.install)
     except Exception as e:
         logger.error(f"Model installation failed for {TTS_MODEL}: {e}")
         raise HTTPException(status_code=503, detail=f"tts model {TTS_MODEL} not installed")
     try:
-        wav = app.state.tts.speak(request.text, request.voice, request.exaggeration, request.cfg_weight, request.language)
+        future = app.state.tts.submit(body.priority, body.text, body.voice, body.exaggeration, body.cfg_weight, body.language)
+    except QueueBusy as e:
+        logger.warning(f"tts busy: {e}")
+        raise HTTPException(status_code=503, detail="tts busy", headers={"Retry-After": str(TTS_BUSY_RETRY_AFTER)})
+    try:
+        wav = await app.state.tts.wait(future, request.is_disconnected)
+    except concurrent.futures.CancelledError:
+        return Response(status_code=499)     # the client is gone, no one reads it
     except Exception as e:
         logger.error(f"tts failed: {e!r}")
         raise HTTPException(status_code=500, detail="tts failed")
@@ -209,16 +222,19 @@ MAX_DECIDE_CHARS = 4000
 class DecideRequest(BaseModel):
     state: str                              # the text the questions are about
     questions: Dict[str, Dict[str, Any]]    # laya questions by id: {"type": "choice"|"score"|"noul", "instructions": ..., "criteria": ...}
+    whole: List[str] = []                   # ids of questions also judged on the whole state, not only chunk by chunk
 
 @app.post("/decide")
 async def decide(request: DecideRequest):
-    """laya typed decisions, all questions in one forward pass: {"answers": {id: {"type": "noul", "noul": P(true), ...}}}"""
+    """laya typed decisions, all questions in one forward pass per chunk of the state: {"answers": {id: {"type": "noul",
+    "noul": P(true), ...}}, "whole_answers": {id: ...}}. whole_answers: the whole ids judged on the whole state, {} for a
+    state of a single chunk"""
     if not app.state.decision:
         raise HTTPException(status_code=503, detail="Node has no decision module loaded")
     if not request.state or len(request.state) > MAX_DECIDE_CHARS or not request.questions or len(request.questions) > MAX_DECIDE_QUESTIONS:
         raise HTTPException(status_code=400, detail=f"a state of max {MAX_DECIDE_CHARS} characters and 1 to {MAX_DECIDE_QUESTIONS} questions")
     try:
-        answers = await asyncio.to_thread(app.state.decision.decide, request.state, request.questions)
+        answers, whole_answers = await asyncio.to_thread(app.state.decision.decide, request.state, request.questions, tuple(request.whole))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
@@ -226,7 +242,7 @@ async def decide(request: DecideRequest):
     except Exception as e:
         logger.error(f"decision failed: {e!r}")
         raise HTTPException(status_code=500, detail="decision failed")
-    return {"answers": answers}
+    return {"answers": answers, "whole_answers": whole_answers}
 
 VOICE_ID_PATTERN = r"[\w.-]+"
 MAX_VOICE_BYTES = 20 * 1024 * 1024

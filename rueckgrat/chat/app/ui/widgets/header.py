@@ -9,6 +9,7 @@ TOOLS = [
     ("image", ft.Icons.IMAGE, "image generation", ("image",)),
     ("gallery", ft.Icons.PHOTO_LIBRARY, "gallery", ()),
     ("transcribe", ft.Icons.TRANSCRIBE, "transcribe", ()),   # the saved transcripts work without stt, its record button shows it
+    ("tasks", ft.Icons.ALARM, "tasks", ()),     # #170 the user's tasks with all contacts
 ]
 
 
@@ -80,7 +81,7 @@ class Header(ft.Row):
             )
         controls.append(ft.Container(expand=True))
         controls.extend(actions or [])
-        # app level tools, only with a logged in session (not on the login page)
+
         if Hub.access_token:
             controls.append(self._tools_menu())
         controls.append(self.menu_btn)

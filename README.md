@@ -22,17 +22,23 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **fetch_url** — fetch content for given URL
     - **find_tools** — helps the AI to find tools it needs
     - **generate_image** — generate an image on request or on its own
+    - **join_files** — join audio or text files from the sandbox into one file in the given order (e.g. audiobook chapters), used by agent jobs and tasks
     - **show_map** — show a place on an OpenStreetMap map in the chat, tapping it opens the maps app
     - **poll** — ask the user a question with options to pick from in the chat
     - **price_finder** — looks for the best price of something and then shows you a ranked result in the chat
     - **remember** — keep a short fact about the user, per contact
     - **search_memory** — find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub)
     - **spawn_job** — hand a bigger task to a background agent job that reports back when it is done
+    - **task** — do something at a set time, once or repeating (reminders, alarms, wake-up calls, daily news or a price check); also list, change and cancel these tasks
     - **take_photo** — generate a photo of self, user, or both from current context
+    - **text_to_speech** — speak a short text or text files (e.g. the chapters of an audiobook) with the contact's voice, or the voice chosen in the preferences, into one audio file (WAV, MP3 or Ogg), downloadable by the user in chat
     - **weather** — weather forcast for given location
     - **websearch** — search the web when requested or needed
     - **wikipedia** — search wikipedia when requested or needed
     - **write_file** — write text or code files, downloadable by the user in chat
+    - **share_file** — attach files or folders already in the sandbox to the answer, downloadable by the user in chat
+
+    Some tools are only offered while the matching service is available: **generate_image** and **take_photo** need an image node, **text_to_speech** a TTS node, **remember** and **search_memory** a text-embeddings node, and **websearch**, **fetch_url**, **wikipedia**, **weather**, **price_finder** and **show_map** need internet.
 
 - agent jobs running in the background
     - a controller plans the job in steps and delegates each step to up multiple sub agents working in parallel, each with its own role (e.g. researcher, analyst, writer)
@@ -71,15 +77,30 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
 ### Chat
 - running on Linux and Android
 - chat with a locally installed LLM
+- several conversations per contact
 - in-chat image generation based on use prompt
 - self image generation. Like taking a picture of self based on current context.
-- code highlighting, copy button on code blocks
+- maps, polls and price rankings shown in the chat
+- source links under answers that used the web
+- code highlighting, copy button on code blocks and blockquotes
 - files from the AI: one file as itself, several files of one answer as a single zip
 - preview text files in the chat with syntax highlighting, without downloading them
 - file browser for the files of a conversation
+- speak into the chat with the mic (needs an STT node)
 - spoken answers start playing while the text is still streaming
+- progress of background agent jobs in the chat, with a cancel button
 - contacts, character templates, character-creation wizard, settings
+- choose a voice for a contact (predefined or your own recording, needs a TTS node)
+- view and delete a contact's memories
+- opt-in companion per contact, from the contact profile
 - assiting a conversation with someone in an other language (using your own llm for translation)
+- transcribe: record a transcript, bookmark moments, edit the text, export as markdown, get a summary or a cleaned-up copy (recording needs an STT node)
+- image generation tool and a gallery of your images (needs an image node)
+- tasks and alarms (list, change or cancel them); alarms can ring in the app
+- notifications when a reply or image is ready
+- dark or light theme and text size
+- Enter sends a message (or Ctrl+Enter when that is off)
+- a banner when the hub is unreachable or a configured service is down
 
 Some screenhots of the app ...
 
@@ -168,10 +189,6 @@ cd Rueckgrat\rueckgrat\chat
 .\run.ps1
 ```
 
-# Development
-
-If you like to contribute please check out [CONTRIBUTING.md](CONTRIBUTING.md) on how to contribute.
-
 # Models
 
 Edit `rueckgrat/node/data/registry.json` to add models to the registry
@@ -207,19 +224,7 @@ docker exec -it rueckgrat_hub python -m app.hub_management stats
 
 **Note: The invite token is printed only once, copy it immediately.**
 
-## Local web pages
-
-By default the AI can only open public websites. It cannot open pages in your home network or on the hub machine itself.
-
-If you want the AI to read your own local websites or services, list them in `rueckgrat/.env` on the hub machine and rebuild the hub. Separate entries with commas. You can list a single address, a whole network, or a machine name:
-
-```bash
-HUB_FETCH_ALLOW=192.168.2.0/24,nas.local,127.0.0.1
-```
-
-Write `private` to allow your whole home network. This does not include the hub machine itself (`127.0.0.1`), which you have to list on its own.
-
-You can also set this in the installer config as `"fetch_allow"` in the hub section, so it is kept when you reinstall.
+To let the AI read websites on your home network or on the hub machine, see [Local web pages](DEVELOPMENT.md#local-web-pages).
 
 # Hardware requirements
 
@@ -236,6 +241,10 @@ Following an example setup that worked fine for the dev
 | Text embeddings (bge-small-en-v1.5) | CPU | 0 GB |
 
 See [config_example.json](rueckgrat/config/config_example.json) for the dev setup.
+
+# Development
+
+If you like to contribute please check out [DEVELOPMENT.md](DEVELOPMENT.md).
 
 # FAQ
 

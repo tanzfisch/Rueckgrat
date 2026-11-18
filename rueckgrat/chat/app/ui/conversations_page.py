@@ -2,8 +2,8 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import OneLineBubble, Header
-from app.utils import Hub, Contact, Paths
+from app.ui.widgets import OneLineBubble, Header, FilesDock
+from app.utils import Hub, Contact, Paths, ContactFiles
 from app.common import get_logger
 
 logger = get_logger()
@@ -13,33 +13,64 @@ class ConversationsPage(BasePage):
     def __init__(self, navigator):
         super().__init__(navigator)
         self.contact_id = None
-        self.header = Header(navigator)
+        self._contact = None
+        self._conversation_ids = set()     # the listed ones: a message in another one (a task's new conversation) reloads the list
+        self._files_conversation_id = None  # one of the listed conversations: the hub serves the contact's files by a conversation
+        self.files_btn = ft.IconButton(
+            icon=ft.Icons.FOLDER_OPEN,
+            tooltip="files",
+            width=40,
+            height=40,
+            style=theme.STYLES["icon_button"]["style"],
+            disabled=True,
+            on_click=lambda e: self.toggle_files(),
+        )
+        self.header = Header(navigator, actions=[self.files_btn])
         self.header.on_go_back = self.on_go_back
         self.list_view = ft.ListView(expand=True, spacing=8, padding=8)
-        self.controls = [self.header, self.list_view]
-
-        self.controls = [
-            ft.Container(
-                margin=20,
+        self.files_dock = FilesDock(ft.Container(
+            margin=20,
+            content=ft.Column(
                 expand=True,
-                content=ft.Column(
-                    expand=True,
-                    controls=[self.header, self.list_view],
-                ),
-            )
-        ]    
+                controls=[self.header, self.list_view],
+            ),
+        ))
+        self.controls = [self.files_dock]
 
     def on_go_back(self, e=None):
         self.navigator.back()
 
     def on_enter(self, **kwargs):
-        self.contact_id = kwargs.get("contact_id")
-        contact = Contact(Hub.get_contact(self.contact_id))
-        self.header.set_contact(contact)
+        contact_id = kwargs.get("contact_id")
+        if contact_id != self.contact_id and self.files_dock.is_open:
+            self.files_dock.close()     # another contact's files are not left open
+        self.contact_id = contact_id
+        self._contact = Contact(Hub.get_contact(self.contact_id))
+        self.header.set_contact(self._contact)
         self.load_conversations()
+        self.files_dock.attach()
+        Hub.register_incomming_message(self.on_incomming_message)
 
     def on_leave(self):
-        pass
+        self.files_dock.detach()
+        Hub.unregister_incomming_message(self.on_incomming_message)
+
+    def toggle_files(self):
+        """the contact's files: the same for all its conversations, reached through one of them"""
+        if self._files_conversation_id is not None:
+            self.files_dock.toggle(ContactFiles(self.contact_id, self._files_conversation_id, self._contact.get_name()))
+
+    def on_incomming_message(self, msg: dict):
+        """a message in a conversation that is not listed: the hub made it (a task or the companion wrote while the
+        contact had no conversation), the list is loaded again. one of another contact's only costs a reload"""
+        try:
+            chat = msg.get("chat")
+            if chat and chat.get("conversation_id") not in self._conversation_ids:
+                self.load_conversations()
+            elif chat:
+                self.files_dock.refresh()   # a reply may have written files, only when the panel is open
+        except Exception as e:
+            logger.error(f"failed to handle incomming message: {e}")
 
     def conversation_chosen(self, title: str, conversation_id: int):
         self.navigator("chat", contact_id=self.contact_id, conversation_id=conversation_id)
@@ -68,6 +99,13 @@ class ConversationsPage(BasePage):
 
     def load_conversations(self):
         conversations = Hub.get_conversations(self.contact_id)
+        self._conversation_ids = {conversation["id"] for conversation in conversations}
+        # the files need a conversation of the contact to be reached: no conversation, no files button
+        self._files_conversation_id = conversations[0]["id"] if conversations else None
+        self.files_btn.disabled = self._files_conversation_id is None
+        self.files_btn.tooltip = "files" if conversations else "files (start a conversation first)"
+        if self._files_conversation_id is None and self.files_dock.is_open:
+            self.files_dock.close()
         start_bubble = OneLineBubble("+")
         start_bubble.height = 40
         start_bubble.on_click = self.create_conversation
@@ -95,3 +133,7 @@ class ConversationsPage(BasePage):
 
         self.list_view.controls = items
         self.list_view.update()
+        try:
+            self.files_btn.update()
+        except RuntimeError:
+            pass    # not on the page yet: drawn with it

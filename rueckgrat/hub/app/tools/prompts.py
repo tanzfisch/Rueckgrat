@@ -22,11 +22,26 @@ templates, filled with str.format (literal braces doubled):
   PRICE_FOUND_PART                            query, findings: one PRICE_FINDING_LINE per find, best first
   PRICE_FINDING_LINE                          place, title, price, currency, shop, note: " (the note)" or ""
   PRICE_NONE_PART                             query: the product searched for
+  WEBSEARCH_FOUND_PART                        query: the search, answers: one WEBSEARCH_ANSWER_LINE per answer, most accurate first
+  WEBSEARCH_ANSWER_LINE                       source: the site's name, answer: what the page says, url: the page
   WRITE_FILE_ATTACHED_PART                    file_names: the files, comma separated
   WRITE_FILE_NOT_ATTACHED_PART                problems: what could not be attached, "; " separated
   WRITE_FILE_SAVED_PART                       paths: where write_file kept its files, comma separated
-  WRITE_FILE_PROMPT                           documents: the folder write_file writes into
+  WRITE_FILE_PROMPT                           documents: the folder write_file keeps a plain name in, files: the sandbox files folder
+  WRITE_FILE_REFUSED_PART                     name: the file write_file does not write (audio, image, archive)
+  FILE_EXISTS_PART                            path: the full path that is taken
+  FILE_TOO_LARGE_PART                         path: where it is kept, size, limit: MB
   SHARE_FILE_PROMPT                           files: the sandbox files folder
+  TEXT_TO_SPEECH_PROMPT                       files: the sandbox files folder, tts: the folder the audio files are kept in
+  TEXT_TO_SPEECH_MADE_PART                    name: the audio file, minutes: its length
+  TEXT_TO_SPEECH_NOT_TEXT_PART                name: the file that is not text
+  TEXT_TO_SPEECH_FAILED_PART                  name: the call's name, reason: what went wrong
+  TEXT_TO_SPEECH_PLANNED_PART                 name: the call's name
+  JOIN_FILES_PROMPT                           files: the sandbox files folder, tts: the folder audio is kept in,
+                                              documents: the folder text is kept in
+  JOIN_FILES_MADE_PART                        name: the joined file, count: how many files, length: JOIN_FILES_AUDIO_PART or ""
+  JOIN_FILES_AUDIO_PART                       minutes: the audio's length
+  JOIN_FILES_FAILED_PART                      name: the call's name, reason: what went wrong
   BASH_PROMPT                                 files: the sandbox files folder, timeout: seconds per command, workdir: the
                                               conversation's own folder, project_dir, documents, images: the folders of
                                               the layout, projects: BASH_PROJECT_LINE lines, BASH_NO_PROJECTS_PART or
@@ -41,9 +56,34 @@ templates, filled with str.format (literal braces doubled):
   FIND_TOOLS_FOUND_PART, FIND_TOOLS_NONE_PART,
   FIND_TOOLS_OFFERED_PART                     task, tools (not for none): the tools found, comma separated
   FIND_TOOLS_ROUND_PART                       task: added to the original prompt of the rounds of the found tools
+  TOOL_NOTES_PART                             notes: the TOOL_NOTE_* lines of the offered tools, one "- " line each
+A tool's own texts never name another tool: how tools are used together is in the TOOL_NOTE_* texts (ToolRegistry.TOOL_NOTES).
 """
 
 # ---------------------------------------------------------------- tool index, how the tools are offered (ToolRegistry, Tool)
+
+# how tools are used together, the tools themselves know nothing of each other. ToolRegistry.TOOL_NOTES: a note goes into a
+# tool setup when one of its tools is offered there and all of them can be used in it
+TOOL_NOTES_PART = """
+HOW THE TOOLS WORK TOGETHER
+{notes}
+"""
+TOOL_NOTE_RUN_CODE_BASH = "run_code runs one program once. To create a project or files to keep, use bash: it works in the same files."
+TOOL_NOTE_RUN_CODE_CALCULATE = "Simple arithmetic goes to calculate, not to run_code."
+TOOL_NOTE_BASH_WRITE_FILE = ("A software project or several files at once are made with bash in your sandbox files, not with write_file: "
+                             "write_file writes one text file.")
+TOOL_NOTE_BASH_SHARE_FILE = ("The user does not see the files bash makes: give them files or a project folder with share_file afterwards. "
+                             "share_file calls in the same answer as the bash calls that make the files run after them.")
+TOOL_NOTE_RUN_CODE_SHARE_FILE = "The user does not see the files run_code makes in your files: give them with share_file afterwards."
+TOOL_NOTE_CONVERT_WEBSEARCH = "Prefer convert over websearch for exchange rates and metal prices."
+TOOL_NOTE_WEATHER_WEBSEARCH = "Prefer weather over websearch for the weather."
+TOOL_NOTE_SPAWN_JOB_TASK = ("spawn_job is for work now, not for anything at a later time or repeating (reminders, alarms, every day, "
+                            "every hour, watching a price): that is task.")
+TOOL_NOTE_WRITE_FILE_TEXT_TO_SPEECH = ("write_file writes text only, never audio. An audio file comes from text_to_speech: write a "
+                                       "long text into files first, then text_to_speech speaks the files.")
+TOOL_NOTE_TEXT_TO_SPEECH_JOIN_FILES = ("Audio made of several parts (chapters, episodes, scenes) is one text_to_speech call over all its "
+                                       "text files in order, or one text_to_speech call per part followed by join_files, which joins the "
+                                       "audio files in order.")
 
 TOOL_PLANNED_PART = "{name} runs in the background, its result is shown to the user under your answer when it is done"
 
@@ -59,7 +99,8 @@ FIX ROUND {fix} OF {total}: these calls of the earlier rounds did not work:
 {problems}
 The earlier results show what happened (the commands, exit codes and errors). Fix only what failed, in order: repair the
 code or write the missing files, then run the failed command again (e.g. the build or the test), so its result shows
-whether it works now. Do not redo what already worked. Attach a file again only when it is new or changed."""
+whether it works now. Do not redo what already worked. Attach a file again only when it is new or changed. A file of
+this task that is there already (made by an earlier call) is replaced with "overwrite": true."""
 TOOL_NOT_CALLED_PART = ("{name}: the task needs it, but it was not called. Call it now for what the task asks "
                         "(build, install, run, test), all calls at once")
 CHECKS_FIXED_PART = "the calls that did not work were fixed in {rounds} fix round(s), the last calls all worked."
@@ -146,7 +187,7 @@ Rules:
 - "language" when it is not python. "requires" lists packages to install first: pip for python, npm for javascript, apt for cpp, go modules for go. java can't install packages, use only its standard library.
 - When the user gave code to run, reply with that code unchanged (add header lines if it needs packages).
 - It must finish within {run_timeout} seconds. Keep the output short.
-- The folder {files} holds the user's files, they stay between runs and the bash tool sees them too: the projects in {projects}/<project-name>/, this conversation's own folder {workdir}, the files written for the user in {files}/data/documents/. Read and write there when the task is about these files. Files to keep go into the project's own folder, scratch files into {workdir}.
+- The folder {files} holds the user's files, they stay between runs: the projects in {projects}/<project-name>/, this conversation's own folder {workdir}, the files written for the user in {files}/data/documents/. Read and write there when the task is about these files. Files to keep go into the project's own folder, scratch files into {workdir}.
 - A task about a project: the program first changes into the project's folder {projects}/<project-name> (python: os.chdir to it and sys.path.insert(0, it)), then imports or runs the project's code from there, so its own imports and relative paths work."""
 
 RUN_CODE_NO_CODE_PART = ("the task was to run the code from the user's message, but the conversation has no code. Nothing ran. "
@@ -162,8 +203,8 @@ You may also use it on your own when an exact check is better than guessing:
 - explore an unfamiliar function or library by trying it
 - validate math or logic before you rely on it in a longer plan
 - prototype a small piece to see if an approach works before using it
-Do not use it when the user only wants to see or discuss code, or for simple arithmetic (calculator).
-It runs one program once. To create a project or files to keep, use bash: it works in the same files.
+Do not use it when the user only wants to see or discuss code, or for simple arithmetic.
+It runs one program once, the files it writes in your files stay.
 
 Parameters:
 - task (string, required): what the program must do and print, with all the values it needs. Only when the user's message has code to run, write "run the code from the user's message", do not copy the code here.
@@ -186,18 +227,18 @@ Use to work with your files, shared by all your conversations with the user: cre
 - The folders, each for one purpose:
   - {project_dir}/<project-name>/: one folder per project (short, lowercase, e.g. fractal_explorer), all its files and subfolders inside. Each has a PROJECT.md: its first line says in one sentence what the project is, then its status and how to run it. Write it when you create the project, update it when the project changes.
   - {workdir}: this conversation's own folder: scratch work, quick scripts and downloads that belong to no project.
-  - {documents}/: the files write_file made for the user, each in its own folder (<hash>/<name>). Read or copy them, do not change them.
+  - {documents}/: the files written for the user, each in its own folder (<hash>/<name>). Read or copy them, do not change them.
   - {images}/: generated images.
 - The projects so far (folder: first line of its PROJECT.md):
 {projects}
 - Available: bash, coreutils, git, python3 with pip and venv, curl, wget, unzip. git commit works, an author is set. There is no display: GUI programs run without a window.
 - Python packages go in a venv in the project folder: python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
 - The command must finish within {timeout} seconds. A program that keeps running (a game, a GUI, a server) runs with a time limit: timeout 10 python3 main.py, exit code 124 then means it ran 10 seconds without crashing. Keep the output short: use head, tail, grep or wc instead of printing big files whole.
-- {files} is your own filesystem: create every project and its files with bash, not with write_file. Nothing loose at the top of {files}.
+- {files} is your own filesystem: create every project and its files here. Nothing loose at the top of {files}.
 - Continue earlier work: an existing project is changed in its folder (cd into it first), not started again.
 - You write all calls of this step at once and get no second turn: write every command the task needs now, in order, nothing left for later. They run one after another, a later call sees what an earlier one made.
 - To create or change a project: one call per file with its whole content in a heredoc (mkdir -p in the first call). Every file the task asks for gets its call.
-- The user does not see these files. To give them files or a project folder, share them afterwards with share_file.
+- The user does not see these files.
 
 Parameters:
 - command (string, required): the bash command, newlines written as \\n
@@ -220,7 +261,7 @@ CONVERSION_DESCRIPTION = "converts amounts between currencies, crypto and physic
 
 CONVERSION_PROMPT = """
 CONVERT:
-Use for converting an amount between units: currencies and crypto (live rates), precious metals (gold, silver, platinum, palladium) in any currency, and physical units (length, mass, volume, area, temperature, speed, time, data, energy, power, pressure). Prefer this over websearch for exchange rates and metal prices. One call per conversion.
+Use for converting an amount between units: currencies and crypto (live rates), precious metals (gold, silver, platinum, palladium) in any currency, and physical units (length, mass, volume, area, temperature, speed, time, data, energy, power, pressure). One call per conversion.
 
 Parameters:
 - amount (number, required): the value to convert
@@ -465,7 +506,7 @@ Example:
 
 # ---------------------------------------------------------------- spawn_job
 
-SPAWN_JOB_DESCRIPTION = "hands a task to a background job: long or multi-step work, research with its own analysis, watching something, or repeating on a schedule and reporting back later"
+SPAWN_JOB_DESCRIPTION = "hands a task to a background job now: long or multi-step work, building a program, research with its own analysis, reporting back when it is done"
 
 SPAWN_JOB_REPORT_PROMPT = """A background job you started for the user has finished.
 
@@ -515,17 +556,59 @@ SPAWN_JOB_STARTED_PART = "a background job was started and is doing the task now
 SPAWN_JOB_PROMPT = """
 SPAWN_JOB:
 Use to hand a task to a background job, so the conversation can go on meanwhile.
-Use it for tasks that take long, have several steps, keep watching something, or repeat on a schedule and report back later.
+Use it for tasks that take long or have several steps, it starts right away and reports back when it is done.
+Not for anything at a later time or repeating (reminders, alarms, every day, every hour, watching a price).
 A conversation has one job at a time: while it runs, the user's messages go to it and it adjusts its plan.
 
 Parameters:
-- prompt (string, required): the full instructions for the job, in the user's own words. Keep every detail the user gave: what to do, when or how often, and when to report back. Never add names, numbers, tickers or places the user did not say. If the user says "these" or "my" without naming them, keep it like that and add: ask the user which ones.
+- prompt (string, required): the full instructions for the job, in the user's own words. Keep every detail the user gave: what to do and what to report back. Never add names, numbers, tickers or places the user did not say. If the user says "these" or "my" without naming them, keep it like that and add: ask the user which ones.
 To fix or change a program or project made earlier, say that it is in your files already and is changed there, not made again, name it if you know it, and keep what the user says is wrong or wants changed.
 
 Examples:
 {"tool": "spawn_job", "prompt": "find three reviews of the new Pixel phone and summarize them"}
 {"tool": "spawn_job", "prompt": "the snake game in your files crashes when space is pressed: fix it there, not made again, and test it"}
-{"tool": "spawn_job", "prompt": "every Friday check the prices of my two favourite games and message me if one is on sale (ask the user which games)"}
+{"tool": "spawn_job", "prompt": "compare the prices of my two favourite games in three shops and tell me where they are cheapest (ask the user which games)"}
+"""
+
+# ---------------------------------------------------------------- task (#170)
+
+TASK_DESCRIPTION = ("does something for the user at a set time, once or repeating: reminders, alarms, wake up calls, daily news "
+                    "or weather, checking a price every hour. also lists, changes and cancels these tasks")
+
+TASK_CREATED_PART = "task #{id} is set: {task}. Tell the user in a few words when it runs."
+TASK_COMPANION_PART = " Companion mode was switched on for this contact, tasks only run in companion mode: tell the user that too."
+TASK_CHANGED_PART = "task #{id} is changed: {task}"
+TASK_CANCELLED_PART = "task #{id} is cancelled: {task}"
+TASK_LIST_PART = "the user's open tasks with you:\n{tasks}"
+TASK_NONE_PART = "the user has no open tasks with you"
+TASK_OTHERS_PART = "\n{count} more with other contacts, they are on the tasks page of the app"
+TASK_LINE = "- {task}"
+TASK_UNKNOWN_ACTION_PART = "unknown action {action!r}: create, list, edit or cancel"
+TASK_NO_ID_PART = "the task's id is missing, it is the number in YOUR OPEN TASKS"
+
+TASK_OPEN_PART = """
+YOUR OPEN TASKS for the user (max {max_tasks} over all contacts, repeating at most every {min_interval} minutes):
+{tasks}
+"""
+
+TASK_PROMPT = """
+TASK:
+Use when the user wants something done at a later time or again and again: a reminder, an alarm or wake up call, a daily summary, checking something every hour. Also to list, change or cancel their tasks.
+At its time you do the task yourself: you look things up and write the user the result in this conversation.
+
+Parameters:
+- action (string, required): "create", "list", "edit" or "cancel"
+- task (string, create, edit): what to do then, in the user's own words with every detail ("remind me to call mum", "check the bitcoin price and tell me only if it is below 50k")
+- when (string, create, edit): the user's local time "07:30", "tomorrow 07:30", "friday 18:00", "2026-11-18 07:30" or a delay "in 20 minutes". Leave it out for "every N minutes or hours" from now on
+- repeat (string, optional): "once" (default), "hourly", "daily", "weekdays", "weekly", "every 30 minutes", "every 2 hours"
+- alarm (boolean, optional): true rings the user's app: alarms, wake up calls, "ring me", "wake me"
+- id (number, edit, cancel): the task's number
+{open_tasks}
+Examples:
+{{"tool": "task", "action": "create", "when": "in 20 minutes", "task": "remind me to take the pizza out of the oven", "alarm": true}}
+{{"tool": "task", "action": "create", "when": "07:00", "repeat": "weekdays", "task": "wake me up and tell me the weather in Berlin", "alarm": true}}
+{{"tool": "task", "action": "create", "repeat": "hourly", "task": "check the bitcoin price and tell me only if it is below 50k"}}
+{{"tool": "task", "action": "cancel", "id": 3}}
 """
 
 # ---------------------------------------------------------------- take_photo
@@ -551,7 +634,7 @@ WEATHER_DESCRIPTION = "current weather and 3 day forecast for a place"
 
 WEATHER_PROMPT = """
 WEATHER:
-Use for current weather and 3-day forecast. Prefer this over websearch for weather.
+Use for current weather and 3-day forecast.
 
 Parameters:
 - location (string, required): city or place name
@@ -575,6 +658,11 @@ Example:
 {"tool": "websearch", "query": "current NZD to USD exchange rate"}
 """
 
+WEBSEARCH_FOUND_PART = ("web search for {query}, the answers the pages give, the most accurate first:\n{answers}\n"
+                        "Base what you say about it on these answers, do not add facts they do not give.")
+
+WEBSEARCH_ANSWER_LINE = "{source}: {answer} ({url})"
+
 # ---------------------------------------------------------------- wikipedia
 
 WIKIPEDIA_DESCRIPTION = "encyclopedic summary of a well known person, place, thing, concept or historic event"
@@ -593,7 +681,8 @@ Example:
 
 # ---------------------------------------------------------------- write_file
 
-WRITE_FILE_DESCRIPTION = ("writes one tiny text file into your documents and attaches it to your answer for the user to download")
+WRITE_FILE_DESCRIPTION = ("writes one tiny text file (text only, no audio, images or archives) into your documents and attaches "
+                          "it to your answer for the user to download")
 
 SHARE_FILE_DESCRIPTION = ("attaches files or folders that are in your sandbox files already to your answer for the user to download")
 
@@ -606,26 +695,98 @@ WRITE_FILE_NOT_ATTACHED_PART = ("Not attached: {problems}. Tell the user, do not
 
 WRITE_FILE_SAVED_PART = "Kept in your files as {paths}."
 
+WRITE_FILE_REFUSED_PART = "{name}: write_file writes text files only, it can not write audio, images or archives"
+
+FILE_EXISTS_PART = "{path}: the file exists, pass \"overwrite\": true to replace it"
+
+FILE_TOO_LARGE_PART = ("It is {size} MB, too large to attach (more than {limit} MB): it is kept in your files as {path}, "
+                       "tell the user to download it from the conversation's files.")
+
 WRITE_FILE_PROMPT = """
 WRITE_FILE:
-Writes one tiny text file and puts it under your answer as a download button, the user saves it from there. Only for a file that belongs to no project, like a short note, a small list or a small single script. It is kept in {documents}/<hash>/<path>, a new folder for every content, so it never overwrites another file.
-A project or several files are made with bash in your sandbox files, then given to the user with share_file, not with write_file.
-The path is relative (shopping.txt, notes/todo.md). No .. and no absolute path.
+Writes one text file and puts it under your answer as a download button, the user saves it from there. For a short note, a small list, a small single script, or one text of a bigger job, like a chapter.
+Text only: it can not write audio (.mp3, .wav, .ogg ...), images or archives, such a name is refused. One file per call, not a software project.
+- path: a plain file name (shopping.txt, notes/todo.md) is kept in {documents}/<hash>/<path>, a new folder for every content, so it never overwrites another file.
+  When the task names where the file goes, or later steps read it from a known place, give the full path in your files instead (~/projects/sea_book/chapter_01.md or {files}/projects/sea_book/chapter_01.md): the file is written exactly there. The tool result tells where the file was kept.
+- overwrite: a file that is at the full path already is an error, unless "overwrite": true replaces it. Only for a file the task itself made or is told to replace.
 Escape quotes and newlines inside content so the line stays valid JSON.
 
 Parameters:
-- path (string, required): relative file name, the name the user sees
+- path (string, required): a file name, or the full path under ~/ ({files}/), no ..
 - content (string, required): the whole file
+- overwrite (boolean, optional): replace a file at the full path, default false
 
-Example:
+Examples:
 {{"tool": "write_file", "path": "shopping.txt", "content": "milk\\neggs\\n"}}
+{{"tool": "write_file", "path": "~/projects/sea_book/chapter_01.md", "content": "# Chapter 1\\n..."}}
+"""
+
+TEXT_TO_SPEECH_DESCRIPTION = ("speaks a short text or text files of your sandbox files with your voice into one audio file "
+                              "(a story, an audiobook, a podcast, a voice-over, a voice memo) and attaches it to your answer for the user to download")
+
+TEXT_TO_SPEECH_MADE_PART = "{name} was spoken ({minutes} minutes)."
+
+TEXT_TO_SPEECH_NOT_TEXT_PART = "{name} is not a text file, only text can be spoken"
+
+TEXT_TO_SPEECH_FAILED_PART = ("The audio {name} was not made: {reason}. Tell the user, do not claim an audio file was made or attached.")
+
+TEXT_TO_SPEECH_PLANNED_PART = ("The audio {name} is being spoken now, it takes a while and is attached to your answer as a download "
+                               "button when it is ready. Say so in one sentence, do not write the text again.")
+
+TEXT_TO_SPEECH_PROMPT = """
+TEXT_TO_SPEECH:
+Speaks text with your voice into one audio file and puts it under your answer as a download button, the user saves it from there. For an audio file the user wants to keep: a story, a poem, an audiobook, a podcast, a voice-over, a voice memo. Not for reading your answer out loud, the chat does that itself.
+It speaks text only: the files have to be text files, not audio.
+- text: a short text, up to a few paragraphs, written into the call.
+- files: for anything longer, like the chapters or parts of a longer work: write the text into files first, then give their paths here, they are spoken one after another in the given order, with a short pause between them. A folder speaks all its files in name order. Relative to your current folder (where your last command ended), or absolute under {files}. Every word is spoken, also (asides), only code, links and markdown markers are left out. A heading is spoken as a sentence of its own.
+- name: the audio file's name. Without an extension it becomes .wav, or .ogg (Ogg Opus) when it is long. End it with .mp3, .ogg or .wav when the task asks for that format (e.g. "an mp3": story.mp3), other formats can not be made. It is kept in {tts}/<hash>/. When the task names where the audio goes, give its full path instead (~/projects/sea_book/sea_book or {files}/projects/sea_book/sea_book): it is written there with its extension.
+- overwrite: an audio file that is at the full path already is an error, unless "overwrite": true replaces it. Only for a file the task itself made or is told to replace.
+- language: optional, the two letter code of the text's language (en, de, ...), else it is detected.
+
+Parameters:
+- text (string): the text to speak, or
+- files (string or list of strings): the text files to speak, in order
+- name (string, required): the audio file's name, or its full path under ~/ ({files}/)
+- overwrite (boolean, optional): replace a file at the full path, default false
+- language (string, optional): the language code
+
+Examples:
+{{"tool": "text_to_speech", "text": "Once upon a time there was a little fox.", "name": "fox_story"}}
+{{"tool": "text_to_speech", "files": ["{files}/projects/sea_book/chapter_01.md", "{files}/projects/sea_book/chapter_02.md"], "name": "~/projects/sea_book/sea_book", "language": "en"}}
+"""
+
+JOIN_FILES_DESCRIPTION = ("joins several files of your sandbox files in their order into one file: audio files (.wav, .ogg, "
+                          ".mp3) into one audio file, or text files into one text file, and attaches it to your answer")
+
+JOIN_FILES_MADE_PART = "{name} was joined from {count} files{length}."
+
+JOIN_FILES_AUDIO_PART = " ({minutes} minutes)"
+
+JOIN_FILES_FAILED_PART = "The file {name} was not joined: {reason}. Tell the user, do not claim the file was made or attached."
+
+JOIN_FILES_PROMPT = """
+JOIN_FILES:
+Joins files that are in your sandbox files already into one new file, in the given order, and puts it under your answer as a download button. The files stay as they are.
+- files: at least two files, in the order they are joined. A folder joins all its files in name order. Relative to your current folder (where your last command ended), or absolute under {files}.
+  Audio files (.wav, .ogg, .mp3) become one audio file with a short pause between them, they may differ in format and sound. Text files become one text file, a blank line between them. Audio and text can not be mixed.
+- name: the new file's name, its extension says what it becomes: .mp3, .ogg or .wav for audio, any text extension (.txt, .md ...) for text. A plain name is kept in {tts}/<hash>/ (audio) or {documents}/<hash>/ (text). When the task names where the file goes, give its full path instead (~/projects/sea_book/sea_book.mp3 or {files}/projects/sea_book/sea_book.mp3). It can not be one of the joined files.
+- overwrite: a file that is at the full path already is an error, unless "overwrite": true replaces it. Only for a file the task itself made or is told to replace.
+
+Parameters:
+- files (list of strings, required): the files to join, in order
+- name (string, required): the new file's name with its extension, or its full path under ~/ ({files}/)
+- overwrite (boolean, optional): replace a file at the full path, default false
+
+Examples:
+{{"tool": "join_files", "files": ["{files}/projects/sea_book/chapter_01.mp3", "{files}/projects/sea_book/chapter_02.mp3"], "name": "~/projects/sea_book/sea_book.mp3"}}
+{{"tool": "join_files", "files": ["notes/part_1.md", "notes/part_2.md"], "name": "notes.md"}}
 """
 
 SHARE_FILE_PROMPT = """
 SHARE_FILE:
-Puts files that are in your sandbox files already (made with bash or run_code, now or earlier, also in another conversation) under your answer as download buttons, the user saves them from there. It writes nothing. Use it after the work, for the files the user asked for or will want to keep, also when the user asks you to send or give them a file. Do not write their content again.
-- path: a file, or a folder to share all of its files (.git, caches and installed packages are left out). Relative to the folder your last bash command ended in, or absolute under {files} (e.g. {files}/projects/fractal_explorer).
-- Calls in the same answer as the bash calls that make the files run after them.
+Puts files that are in your sandbox files already (made now or earlier, also in another conversation) under your answer as download buttons, the user saves them from there. It writes nothing. Use it after the work, for the files the user asked for or will want to keep, also when the user asks you to send or give them a file. Do not write their content again.
+- path: a file, or a folder to share all of its files (.git, caches and installed packages are left out). Relative to your current folder (where your last command ended), or absolute under {files} (e.g. {files}/projects/fractal_explorer).
+- Calls in the same answer as the calls that make the files run after them.
 
 Parameters:
 - path (string or list of strings, required): the files or folders

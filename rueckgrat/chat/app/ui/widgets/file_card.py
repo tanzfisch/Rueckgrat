@@ -1,4 +1,5 @@
 """one card under an assistant message for a file write_file attached. the name shown is the AI's path"""
+import asyncio
 import io
 import zipfile
 import flet as ft
@@ -55,14 +56,20 @@ class FileCard(ft.Container):
                          padding=ft.Padding(left=10, top=2, right=2, bottom=2))
 
     async def _save(self, save_name: str):
-        data = Hub.get_message_file(self.message_id, self.spec.get("stored_name") or "")
-        if data is None:
-            return
+        """on the desktop the file is streamed into the chosen path (an audio file is up to 100 MB). the web and
+        android need the bytes for the save dialog"""
         if self._file_picker is None:
             self._file_picker = ft.FilePicker()
+        stored_name = self.spec.get("stored_name") or ""
         try:
-            # android needs the bytes, on desktop flet writes them to the chosen path
-            await self._file_picker.save_file(dialog_title="Save file", file_name=save_name, src_bytes=data)
+            if not self.page.web and not self.page.platform.is_mobile():
+                path = await self._file_picker.save_file(dialog_title="Save file", file_name=save_name)
+                if path and not await asyncio.to_thread(Hub.save_message_file, self.message_id, stored_name, path):
+                    logger.error(f"saving {save_name} to {path} failed")
+                return
+            data = await asyncio.to_thread(Hub.get_message_file, self.message_id, stored_name)
+            if data is not None:
+                await self._file_picker.save_file(dialog_title="Save file", file_name=save_name, src_bytes=data)
         except Exception as e:
             logger.error(f"saving {save_name} failed: {e}")
 

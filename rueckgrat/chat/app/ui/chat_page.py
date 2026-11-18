@@ -5,16 +5,12 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, PriceView, FileCards, FilesPanel, MessageBox
+from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, PriceView, FileCards, FilesDock, MessageBox
 from app.audio import Text_To_Speech
-from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig, Capabilities
+from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig, Capabilities, ContactFiles
 from app.common import get_logger, Utils
 
 logger = get_logger()
-
-# from this window width on the files panel docks to the right of the conversation, below it covers the conversation.
-# material's "expanded" window class: room for the panel and a conversation of about 500
-WIDE_MIN_WIDTH = 840
 
 
 class ChatPage(BasePage):
@@ -41,7 +37,6 @@ class ChatPage(BasePage):
         self._pending_data: dict[int, dict] = {}        # message id -> {kind: value} a tool pushed before its bubble (_set_data)
         self.user_role_name = ""   # set from the user's own character profile in on_enter
 
-        self.files_panel = FilesPanel(on_close=self.toggle_files)
         self.files_btn = ft.IconButton(
             icon=ft.Icons.FOLDER_OPEN,
             tooltip="files",
@@ -152,7 +147,6 @@ class ChatPage(BasePage):
         )
 
         self.conversation = ft.Container(
-            left=0, top=0, right=0, bottom=0,   # in the stack: all of it, or all but the docked files panel
             padding=20,
             content=ft.Column(
                 expand=True,
@@ -163,35 +157,16 @@ class ChatPage(BasePage):
                 ],
             ),
         )
-        self.controls = [ft.Stack([self.conversation, self.files_panel], expand=True)]
-        self._prev_resize = None
+        self.files_dock = FilesDock(self.conversation)     # the contact's files, docked right or over the conversation
+        self.controls = [self.files_dock]
 
     def did_mount(self):
         self.page.on_keyboard_event = self._on_keyboard
-        self._prev_resize = self.page.on_resize
-        self.page.on_resize = self._on_resize
-        self._layout()
-
-    def _on_resize(self, e):
-        if self.page:
-            self._layout()
-            self.update()
-        if self._prev_resize:
-            self._prev_resize(e)
-
-    def _layout(self):
-        """the files panel docked right of the conversation on a wide window, over it on a narrow one"""
-        wide = (self.page.width or 0) >= WIDE_MIN_WIDTH
-        self.files_panel.dock(wide)
-        self.conversation.right = FilesPanel.WIDTH if wide and self.files_panel.visible else 0
+        self.files_dock.attach()
 
     def toggle_files(self):
-        if self.files_panel.visible:
-            self.files_panel.visible = False
-        else:
-            self.files_panel.show(self.conversation_id)
-        self._layout()
-        self.update()
+        """the contact's files: the same for all its conversations, reached through this one"""
+        self.files_dock.toggle(ContactFiles(self.contact_id, self.conversation_id, self.contact.get_name() if self.contact else ""))
 
     def _on_keyboard(self, e: ft.KeyboardEvent):
         if e.key == "Enter" and e.ctrl and self._input_focused and not self._enter_sends:   # enter_sends: on_submit sends
@@ -242,6 +217,7 @@ class ChatPage(BasePage):
         self.conversation_id = kwargs.get("conversation_id")
         self.contact = Contact(Hub.get_contact(self.contact_id))
         self.header.set_contact(self.contact)
+        self.files_dock.attach()    # again after a leave (did_mount only comes once)
         user_data = Hub.get_user_data() or {}
         profile = user_data.get("profile") or {}
         self.user_role_name = (profile.get("name") or "").strip() or Hub.user_name
@@ -262,8 +238,7 @@ class ChatPage(BasePage):
     def on_leave(self):
         if self.page:
             self.page.run_task(self._stop_mic)
-            if self.page.on_resize == self._on_resize:
-                self.page.on_resize = self._prev_resize
+            self.files_dock.detach()
         Hub.unregister_incomming_message(self.on_incomming_message)
         Capabilities.unlisten(self._on_capabilities)
 
@@ -700,7 +675,7 @@ class ChatPage(BasePage):
             if "chat" in message:
                 chat = message["chat"]
                 if chat["conversation_id"] == self.conversation_id:
-                    self.files_panel.refresh()     # the reply may have written files (bash, run_code). only when it is open
+                    self.files_dock.refresh()     # the reply may have written files (bash, run_code). only when it is open
                     message_id = chat.get("message_id", self._stream_message_id)   # read before the stream id is reset
                     if self._stream_message_id is not None:
                         self._finished_message_ids.add(self._stream_message_id)

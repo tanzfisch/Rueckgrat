@@ -10,10 +10,11 @@ logger = get_logger()
 class ToolPromptCompiler:
     def __init__(self, prompt: str, previous_results: Dict[str, Any], tool_registry: ToolRegistry = None, tool_names: Optional[List[str]] = None,
                  recommended: Optional[List[str]] = None, history: str = "", scope: Optional[Dict[str, int]] = None,
-                 timezone: Optional[ZoneInfo] = None):
+                 timezone: Optional[ZoneInfo] = None, excluded: tuple = ()):
         """history: the last messages before the prompt (ToolExecutionTask._history), "" for none. scope: {user_id,
         contact_id, conversation_id} of the setup, for the tools' prompt_for (None: their plain prompt). timezone: the
-        user's (clock.user_timezone), the setup knows what "today" and "my time" are. None: not told"""
+        user's (clock.user_timezone), the setup knows what "today" and "my time" are. None: not told. excluded: the
+        tools this setup can't use, no note names them (ToolRegistry.notes)"""
         self.prompt = prompt
         self.history = prompts.TOOL_SETUP_HISTORY_PART.format(history=history) if history else ""
         self.time = prompts.TOOL_SETUP_TIME_PART.format(timezone=timezone.key, now=datetime.now(timezone).strftime("%A, %Y-%m-%d %H:%M")) \
@@ -23,10 +24,12 @@ class ToolPromptCompiler:
         self.recommended = list(recommended or [])
         self.tool_registry = tool_registry
         self.scope = scope
+        self.excluded = tuple(excluded)
 
     def _tools_definition(self) -> str:
         """the surely detected tools must be called, the recommended ones and the optional ones (PROMPT_TOOLS: remember,
-        search_memory, take_photo; companions: share_file) the model decides about"""
+        search_memory, take_photo; companions: share_file) the model decides about. then how they work together with
+        the other tools (ToolRegistry.notes)"""
         mandatory, recommended, optional = self.tool_registry.split_tools(self.tool_names, self.recommended)
         sections = []
         if mandatory:
@@ -35,6 +38,9 @@ class ToolPromptCompiler:
             sections.append(prompts.TOOL_SETUP_RECOMMENDED_PART + self.tool_registry.get_tools_hydrated(recommended, kind="recommended", scope=self.scope))
         if optional:
             sections.append(prompts.TOOL_SETUP_OPTIONAL_PART + self.tool_registry.get_tools_hydrated(optional, kind="optional", scope=self.scope))
+        notes = self.tool_registry.notes(mandatory + recommended + optional, self.excluded)
+        if notes:
+            sections.append(notes)
         return "\n".join(sections)
 
     def _build_first_prompt(self) -> tuple[str, str]:

@@ -44,9 +44,14 @@ class WebsearchTool(Tool):
         # sentences, headlines and live blog posts have 4+ words, times, scores and prices have digits. menu items have neither
         return '\n'.join(line for line in text.splitlines() if len(line.split()) >= 4 or re.search(r'\d', line))
 
-    def _get_org_name(self, url: str) -> str:
+    @staticmethod
+    def _site(url: str) -> str:
+        """the registered domain of url: https://www.priceme.co.nz/... is priceme.co.nz"""
         ext = tldextract.extract(url)
-        domain = f"{ext.domain}.{ext.suffix}"
+        return f"{ext.domain}.{ext.suffix}"
+
+    def _get_org_name(self, url: str) -> str:
+        domain = self._site(url)
         org_map = {
             "google.com": "Google",
             "microsoft.com": "Microsoft",
@@ -473,7 +478,7 @@ class WebsearchTool(Tool):
                 logger.error("invalid websearch")
                 return None
             
-            MessageQueue().send_status_message(f"searching the web")
+            MessageQueue().send_status_message("searching the web")
             
             query = self.tool_call["query"]
             # nothing useful (no hits, or no page answers it): once more with the key words only
@@ -484,15 +489,17 @@ class WebsearchTool(Tool):
                 good_results = self._answers(query, short)
 
             if good_results:
-                result = {
-                    "tool": self.name(), 
-                    "text": f"websearch results",
-                    "websearch_results": sorted(good_results, key=lambda x: x["answer_quality"], reverse=True)
-                }
-                self.add_result(result)
+                self.add_result({"tool": self.name(), "text": self._text(query, good_results)})
 
         except Exception as e:
             logger.error(f"failed to do a websearch {repr(e)}")
+
+    @staticmethod
+    def _text(query: str, answers: list) -> str:
+        """the result text for the reply: the answers to query, the most accurate first, one "source: answer (url)" line each"""
+        lines = [prompts.WEBSEARCH_ANSWER_LINE.format(source=a["source"], answer=a["answer"], url=a["url"])
+                 for a in sorted(answers, key=lambda a: a["answer_quality"], reverse=True)]
+        return prompts.WEBSEARCH_FOUND_PART.format(query=query, answers="\n".join(lines))
 
     @classmethod
     def prompt(cls) -> str:

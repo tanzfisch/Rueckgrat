@@ -4,7 +4,7 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import Header, VoiceSelector, ProfileImageSlot
+from app.ui.widgets import Header, VoiceSelector, ProfileImageSlot, MessageBox
 from app.utils import Contact, Hub, Capabilities
 from app.audio import Text_To_Speech
 from app.common import (get_logger, Utils, IMAGE_STYLE_OPTIONS, IMAGE_STYLE_ICONS, CHATTINESS_OPTIONS, QUIET_HOUR_OPTIONS, PHOTO_OPTIONS,
@@ -334,6 +334,17 @@ class ProfilePage(BasePage):
         self.navigator.back()
 
     def _on_save(self, e=None):
+        """switching the companion off drops its calendar with the user's open tasks (#170): asks first when it has some"""
+        if self.contact_id != -1 and self.companion_loaded and not self.companion_switch.value:
+            tasks = Hub.get_contact_tasks(self.contact_id) or []
+            if tasks:
+                listed = "\n".join(f"- {task['task']}" for task in tasks[:5]) + ("\n- ..." if len(tasks) > 5 else "")
+                MessageBox.confirm(self.page, f"Switching the companion off deletes its {len(tasks)} open task(s):\n{listed}",
+                                   self._save, title="Companion off", ok_text="Switch off")
+                return
+        self._save()
+
+    def _save(self):
         if self.contact_id == -1:
             self.contact_id = Hub.create_contact()
         data = self.get_data()
@@ -353,12 +364,7 @@ class ProfilePage(BasePage):
         voice = self.voice_selector.get_voice()
         if voice is None:
             return ""
-        if "voice_id" in voice:
-            voice_id = voice["voice_id"]
-        elif "predefined_id" in voice:
-            voice_id = Hub.use_predefined_voice(voice["predefined_id"])
-        else:
-            voice_id = Hub.upload_voice(voice["bytes"], self.gender_group.value or "")
+        voice_id = Hub.voice_of(voice, self.gender_group.value or "")
         if not voice_id:
             logger.error("storing the voice failed, keeping the current voice")
             return self.voice_selector.current_voice_id

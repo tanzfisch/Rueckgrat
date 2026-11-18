@@ -9,9 +9,12 @@ from app.agent_jobs.controller import Controller, short_name
 
 from app.common import get_logger, Utils, MessageQueue
 from app.utils.trace import Trace
+from app.utils.message_shape import MessageShape
 logger = get_logger()
 
 FAIL_REASON_CHARS = 300     # the failure as the contact gets it, the full one is in the protocol
+JOB_COMPLEXITY = 0.4        # a message whose shape (MessageShape.complexity) reaches it recommends spawn_job. t463: jobs of
+                            # several steps 0.31-1.0, long but simple messages (a story, an email, a long question) at most 0.31
 
 
 class SpawnAgentJobTool(Tool):
@@ -21,12 +24,11 @@ class SpawnAgentJobTool(Tool):
     # scored on laya (/tmp/probe_spawn.py): jobs 0.44-0.90, chat messages (a how-to with a code block, explain, a follow-up
     # question, poem, weather) at most 0.38. "commanding you to put a task in the background" took a venv how-to for a job (0.66)
     thresholds = (0.7, 0.75)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    whole_message = True    # a job of several steps shows as a whole: part by part the polished audiobook request scored 0.42, whole 0.98
     question = [
         "Is the user asking you to build a complete multi-file software project?",
         "Does the user ask you to program a whole game or app?",
         "Does the user ask you to do a long task in the background while they wait?",
-        "Is the user telling you to monitor something and alert them when it changes?",
-        "Is the user asking you to check something regularly or watch for a change?",
         "Does the user ask you to research and compare several products using reviews from the web?",
     ]
 
@@ -42,6 +44,12 @@ class SpawnAgentJobTool(Tool):
     @classmethod
     def name(cls) -> str:
         return "spawn_job"
+
+    @classmethod
+    def text_score(cls, prompt: str) -> float:
+        """a message of several steps (MessageShape.complexity at least JOB_COMPLEXITY) recommends spawn_job, never more:
+        the model decides"""
+        return cls.thresholds[0] if MessageShape(prompt).complexity() >= JOB_COMPLEXITY else 0.0
 
     def execute(self) -> None:
         prompt = str(self.tool_call.get("prompt") or "").strip()

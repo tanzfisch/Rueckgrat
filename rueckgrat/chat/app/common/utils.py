@@ -74,21 +74,25 @@ class Utils:
         return json.dumps(truncate(data), indent=4).replace('\\n', '\n')
 
     @classmethod
-    def pretty_scores(cls, data: dict[str, float], bar_width: int = 20, thresholds: tuple[float, float] = (0.4, 0.7)) -> str:
+    def pretty_scores(cls, data: dict, bar_width: int = 20) -> str:
+        """data: name -> {"value", "recommended_threshold", "mandatory_threshold"}"""
         if not data:
             return "(empty)"
         max_key = max(len(k) for k in data)
-        low, high = (int(t * bar_width) for t in thresholds)
-        zones = ((0, low, 31), (low, high, 33), (high, bar_width, 32))
         lines = []
         for k, v in data.items():
-            filled = max(0, min(bar_width, int(v * bar_width)))
+            value = v["value"]
+            low = int(v["recommended_threshold"] * bar_width)
+            high = int(v["mandatory_threshold"] * bar_width)
+            zones = ((0, low, 31), (low, high, 33), (high, bar_width, 32))
+
+            filled = max(0, min(bar_width, int(value * bar_width)))
             bar = "█" * filled
             for start, end, colour in zones:
                 unfilled = "░" * max(0, end - max(start, filled))
                 if unfilled:
                     bar += f"\033[{colour}m{unfilled}\033[0m"
-            lines.append(f"{k:<{max_key}}  {v:7.4f}  {bar}")
+            lines.append(f"{k:<{max_key}}  {value:7.4f}  {bar}")
         return "\n".join(lines)
 
     @classmethod

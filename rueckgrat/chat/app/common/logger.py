@@ -66,12 +66,15 @@ class ColorFormatter(logging.Formatter):
         "CRITICAL": MAGENTA
     }
 
+    # the fields the formats use that a filter adds (UserFilter): a record that missed the filter still formats
+    DEFAULTS = {"user_prefix": ""}
+
     def __init__(self, use_colors=True, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.use_colors = use_colors
 
     def format(self, record):
-        record = logging.makeLogRecord(record.__dict__.copy())
+        record = logging.makeLogRecord({**self.DEFAULTS, **record.__dict__})    # a copy, the record itself stays
         msg = record.getMessage()
         
         if self.use_colors:
@@ -123,9 +126,15 @@ class LockedStreamHandler(logging.StreamHandler):
         with self._lock:
             super().emit(record)
 
-class HealthFilter(logging.Filter):
+class QuietPathFilter(logging.Filter):
+    """drops uvicorn's access log lines of the paths polled all the time (QUIET_PATHS, a query string does not count)"""
+    QUIET_PATHS = frozenset(("/health", "/capabilities"))
+
     def filter(self, record: logging.LogRecord) -> bool:
-        return not (record.args and len(record.args) >= 3 and record.args[2] == "/health")
+        # uvicorn.access: args = (client, method, path with query, http version, status)
+        if not (record.args and isinstance(record.args, tuple) and len(record.args) >= 3):
+            return True
+        return str(record.args[2]).split("?", 1)[0] not in self.QUIET_PATHS
 
 class Logger:
     def __init__(self, level=logging.DEBUG):
@@ -166,8 +175,8 @@ class Logger:
             self._logger.addFilter(UserFilter())
 
         access = logging.getLogger("uvicorn.access")
-        if not any(isinstance(f, HealthFilter) for f in access.filters):
-            access.addFilter(HealthFilter())            
+        if not any(isinstance(f, QuietPathFilter) for f in access.filters):
+            access.addFilter(QuietPathFilter())
 
     def get_logger(self):
         return self._logger

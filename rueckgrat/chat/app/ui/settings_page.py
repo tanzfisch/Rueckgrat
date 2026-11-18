@@ -5,8 +5,9 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import RowSelector, Header, MessageBox, ProfileImageView
-from app.utils import RueckgratConfig, Hub
+from app.ui.widgets import RowSelector, Header, MessageBox, ProfileImageView, VoiceSelector
+from app.utils import RueckgratConfig, Hub, Capabilities
+from app.audio import Text_To_Speech
 
 # common IANA zones, east to west. the hub accepts any IANA name, one not listed here is added when it is the stored one
 TIMEZONES = [
@@ -186,7 +187,7 @@ class AccountSettingsPage(ft.Column):
 
 
 class PreferencesSettingsPage(ft.Column):
-    """how the app behaves for the user: timezone (on the hub), chat input (this device)"""
+    """how the app behaves for the user: timezone and the voice of made audio files (on the hub), chat input (this device)"""
     def __init__(self, navigator):
         # scrolls, so small screens can reach every section. STRETCH gives fields and buttons the same width
         super().__init__(expand=True, spacing=28, scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
@@ -197,6 +198,8 @@ class PreferencesSettingsPage(ft.Column):
                                          options=timezone_options(timezone), **theme.STYLES["field"])
         # stored on this device only, saved on change
         self.enter_sends_switch = ft.Switch(value=RueckgratConfig().enter_sends, on_change=self.on_enter_sends_changed)
+        # the voice audio files are made with (text_to_speech on the hub), none: each contact's own. offered like a contact's voice
+        self._tts_voice = TtsVoicePreference()
         self.controls = [
             _section(
                 "Timezone",
@@ -204,6 +207,7 @@ class PreferencesSettingsPage(ft.Column):
                 ft.Button("save timezone", on_click=self.on_click_save_timezone, style=theme.STYLES["button"]["style"]),
                 ft.Button("use device timezone", on_click=self.on_click_device_timezone, style=theme.STYLES["button"]["style"]),
             ),
+            Capabilities.bind(self._tts_voice, "tts"),     # only while the hub can speak
             _section(
                 "Chat",
                 ft.Text("when off, ctrl+enter sends", color=theme.TEXT_DIM, size=12),
@@ -236,6 +240,46 @@ class PreferencesSettingsPage(ft.Column):
 
     def on_enter_sends_changed(self, e=None):
         RueckgratConfig().enter_sends = self.enter_sends_switch.value
+
+
+class TtsVoicePreference(ft.Column):
+    """the user's voice for audio files the AI makes (the hub's text_to_speech), "use contact's voice" by default:
+    a VoiceSelector like the contact profile's, saved on the hub (Hub.set_tts_voice)"""
+    NO_VOICE_TEXT = "use contact's voice"
+
+    def __init__(self):
+        super().__init__(spacing=10, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+        self._selector = VoiceSelector(Hub.get_predefined_voices(), on_play_sample=Text_To_Speech.play_voice_sample,
+                                       no_voice_text=self.NO_VOICE_TEXT)
+        voice = Hub.get_tts_voice()     # None: the hub can't be reached, the select stays at the contact's voice
+        if voice:
+            self._selector.set_current_voice(voice)
+        self.controls = _section(
+            "Audio files",
+            ft.Text("the voice audio files are spoken with when the AI makes them for you", color=theme.TEXT_DIM, size=12),
+            self._selector,
+            ft.Button("save voice", on_click=self.on_click_save, style=theme.STYLES["button"]["style"]),
+        ).controls
+
+    @property
+    def selector(self) -> VoiceSelector:
+        return self._selector
+
+    def on_click_save(self, e=None):
+        selection = self._selector.get_voice()
+        voice_id = Hub.voice_of(selection)
+        if voice_id is None:
+            MessageBox.error(self.page, "the voice could not be stored on the hub", title="Voice not saved")
+            return
+        error = Hub.set_tts_voice(voice_id)
+        if error:
+            MessageBox.error(self.page, error, title="Voice not saved")
+            return
+        # an upload or a predefined voice is stored now: keep its uuid, a fresh list maps it back to its predefined entry
+        self._selector.set_current_voice(voice_id, Hub.get_predefined_voices() if voice_id else None)
+        self._selector.update()
+        text = "audio files are spoken with this voice" if voice_id else "audio files are spoken with the contact's voice"
+        MessageBox.show(self.page, text, title="Voice saved")
 
 
 class AppearanceSettingsPage(ft.Column):

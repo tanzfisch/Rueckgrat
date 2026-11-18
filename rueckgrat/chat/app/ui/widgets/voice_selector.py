@@ -20,8 +20,9 @@ class VoiceSelector(ft.Column):
     # only present when editing a contact that already has a voice, its value is the stored hub uuid
     CURRENT_VOICE_KEY = "__current_voice__"
 
-    def __init__(self, voices: list = None, on_play_sample=None):
+    def __init__(self, voices: list = None, on_play_sample=None, no_voice_text: str = "default voice"):
         super().__init__(spacing=8)
+        self._no_voice_text = no_voice_text     # the entry for no voice of its own, e.g. "use contact's voice"
         self.voice_file_name = None
         self.voice_file_path = None
         self.voice_file_bytes = None
@@ -55,7 +56,7 @@ class VoiceSelector(ft.Column):
         return ", ".join(p for p in parts if p)
 
     def _build_options(self, current_text: str = "") -> list:
-        options = [ft.DropdownOption(key=self.NO_VOICE_KEY, text="default voice")]
+        options = [ft.DropdownOption(key=self.NO_VOICE_KEY, text=self._no_voice_text)]
         if current_text:
             # a contact voice that could not be matched to a predefined one, so there are no details to show
             options.append(ft.DropdownOption(key=self.CURRENT_VOICE_KEY, text=current_text))

@@ -2,6 +2,7 @@ import copy
 import io
 import os
 import re
+import time
 from pathlib import Path
 from threading import Lock
 
@@ -9,6 +10,8 @@ import soundfile as sf
 import torch
 
 from app.common import get_logger
+from app.utils.speech_queue import SpeechQueue, CHAT
+from app.utils.voice_conds import VoiceConds
 logger = get_logger()
 
 VOICES_DIR = Path("/node/voices")
@@ -42,7 +45,8 @@ MIN_LANGUAGE_CONFIDENCE = 0.5  # langid probability 0..1, below this DEFAULT_LAN
 
 
 class TextToSpeech:
-    """Chatterbox TTS. The model loads on the first request, or earlier if preload() is called."""
+    """Chatterbox TTS. The model loads on the first request, or earlier if preload() is called. the requests wait in a
+    SpeechQueue (submit, wait): one generation at a time on the gpu, a chat's first"""
 
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -50,7 +54,9 @@ class TextToSpeech:
         self.model_dir = None  # set by install() from the registry install_path
         self.default_conds = None  # chatterbox built-in voice, saved before any voice overwrites it
         self.language_identifier = None  # langid detector, created on first use, multilingual only
-        self.lock = Lock()
+        self.lock = Lock()     # the model: a preload and the queue's generation never load it twice or use it half loaded
+        self._queue = SpeechQueue(self._generate)
+        self._voices = VoiceConds()     # a voice's prepared conditionals, not made again for every chunk
         logger.info(f"startup tts interface on {self.device}")
 
     def _load(self, source: str = "request"):
@@ -67,6 +73,7 @@ class TextToSpeech:
                 logger.warning(f"tts model {TTS_MODEL} not found in {self.model_dir}, downloading from huggingface")
                 self.model = Chatterbox.from_pretrained(device=self.device)
             self.default_conds = copy.deepcopy(self.model.conds)
+            self._voices.clear()
             logger.debug(f"tts model {TTS_MODEL} loaded by {source}")
         return self.model
 
@@ -123,28 +130,59 @@ class TextToSpeech:
         logger.debug(f"detected language {language} ({confidence:.2f})")
         return language
 
+    def submit(self, priority: str, text: str, voice: str = "", exaggeration: float = 0.5, cfg_weight: float = 0.5,
+               language: str | None = None):
+        """queues a request (SpeechQueue.submit: priority CHAT or BACKGROUND), its future gets the wav file bytes.
+        QueueBusy when the queue is full"""
+        return self._queue.submit(priority, text, voice, exaggeration, cfg_weight, language)
+
+    async def wait(self, future, disconnected) -> bytes:
+        """the wav of a submitted request, skipped when its client is gone (SpeechQueue.wait)"""
+        return await self._queue.wait(future, disconnected)
+
     def speak(self, text: str, voice: str = "", exaggeration: float = 0.5, cfg_weight: float = 0.5,
               language: str | None = None) -> bytes:
-        """returns the speech as wav file bytes. language is only used by the multilingual model,
+        """the speech as wav file bytes, waits for its turn as a chat's request"""
+        return self.submit(CHAT, text, voice, exaggeration, cfg_weight, language).result()
+
+    @property
+    def voices(self) -> VoiceConds:
+        return self._voices
+
+    def _conds(self, model, voice_path: str | None):
+        """the conditionals to speak with: the voice's (cached, VoiceConds) or chatterbox's own voice. a copy each time,
+        generate replaces conds.t3 when the exaggeration differs"""
+        if voice_path is None:
+            return copy.copy(self.default_conds)
+
+        def prepare(path: str):
+            model.prepare_conditionals(path)    # exaggeration 0.5, generate adjusts it per request
+            return model.conds
+        return self._voices.get(voice_path, prepare)
+
+    def _generate(self, text: str, voice: str, exaggeration: float, cfg_weight: float, language: str | None) -> bytes:
+        """one request's speech, on the queue's thread only. language is only used by the multilingual model,
         None or a language it does not support = detect it from the text"""
         if MULTILINGUAL and language not in MULTILINGUAL_LANGUAGES:
             language = self._detect_language(text)
-        with self.lock:  # one generation at a time on the gpu
+        with self.lock:  # the queue's one thread generates, the lock keeps a preload out
             model = self._load()
+            started = time.monotonic()
+            hits = self._voices.hits
             voice_path = self._voice_path(voice)
-            if voice_path is None:
-                # chatterbox keeps the last voice in model.conds, so without this an empty voice would reuse it
-                model.conds = copy.deepcopy(self.default_conds)
+            # set every time: chatterbox keeps the last voice in model.conds, generate gets no audio_prompt_path
+            model.conds = self._conds(model, voice_path)
             logger.info("generate audio")
             # the english model has no language parameter, the multilingual one requires it
             extra = {"language_id": language} if MULTILINGUAL else {}
             wav = model.generate(
                 text,
                 **extra,
-                audio_prompt_path=voice_path,
                 exaggeration=exaggeration,
                 cfg_weight=cfg_weight,
             )
+            logger.info(f"generated {len(text)} chars in {time.monotonic() - started:.2f} s"
+                        f" (voice {'default' if voice_path is None else 'cached' if self._voices.hits > hits else 'prepared'})")
         buffer = io.BytesIO()
         sf.write(buffer, wav.squeeze(0).cpu().numpy(), model.sr, format="WAV")
         return buffer.getvalue()

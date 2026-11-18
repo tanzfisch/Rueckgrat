@@ -4,7 +4,7 @@ import random
 import re
 import threading
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from uuid import uuid4
 
 from . import prompts
@@ -13,20 +13,25 @@ from app.common import get_logger, ChatRequest, MessageQueue
 from app.utils.trace import Trace
 logger = get_logger()
 
-DEFAULT_TIME_LIMIT = 5400     # max time for a job in seconds
-JOB_LLM_TIMEOUT = 900         # seconds per llm call
+DEFAULT_TIME_LIMIT = 28800    # max time for a job in seconds (8 h: the controller, and each worker), speaking a long work takes hours
+JOB_LLM_TIMEOUT = 1800        # seconds per llm call, a setup round writing eight chapters takes over 12 minutes
 MAX_TOOL_CHARS = 12000        
 WORKER_TOOLS = ["websearch"]   # always run for a worker, the controller's task sets its role and scope (not for a building worker, see BUILD_TOOLS)
 FAILED_LINE = re.compile(r"^\W*FAILED:", re.MULTILINE)    # a worker's reply with a line starting FAILED: failed, also mid-reply
-WORKER_FIX_ROUNDS = 3          # a worker's extra passes of bash / run_code / share_file / write_file while their calls fail (ToolExecutionTask._fix)
+WORKER_FIX_ROUNDS = 3          # a worker's extra passes of the fixable tools (Tool.fixable) while their calls fail (ToolExecutionTask._fix)
 
 class AgentJob:
     # never offered besides the registry's WORKER_EXCLUDED_TOOLS. a worker takes no photos: take_photo is an optional
     # tool in every tool prompt, a job would take them for nothing
     EXCLUDED_TOOLS = ("take_photo",)
+    # the registry's WORKER_EXCLUDED_TOOLS this kind of agent may use anyway, e.g. a user's task may start a job (TaskJob)
+    ALLOWED_TOOLS = ()
     # a worker whose detection found one of these builds or tests something from its task: WORKER_TOOLS' websearch is not
     # forced on it (it searched for nothing useful, about a minute each), it still searches when its detection picks websearch
-    BUILD_TOOLS = ("bash", "run_code", "write_file")
+    BUILD_TOOLS = ("bash", "run_code", "write_file", "text_to_speech", "join_files")
+    # a worker whose detection made one of these mandatory has to make its file: when it still fails after the fix rounds
+    # the worker fails in code (step), the llm can't report a file that is not there
+    FILE_TOOLS = ("text_to_speech", "write_file", "run_code", "join_files")
     _turns = None           # the hub's Turns, see set_turns
     connections = None      # user_id -> open /ws connections
 
@@ -57,8 +62,11 @@ class AgentJob:
         self.plan_step, self.plan_task = None, None   # a worker's step and task id in the plan, set by Controller.spawn
         self.attempt = 1        # a retried task's worker: 2, ... (Controller._retry)
         self.attachments = []   # a worker's files its tools held (write_file, share_file, generate_image), they go into its result
+        self._saved: List[str] = []     # the full paths of the files its tools wrote (write_file, text_to_speech), into its result
+        self.held_data = {}     # {kind: value} a task's or companion pass's tools held for its message (ToolRegistry.show_held)
         self.excluded_tools = ()    # a retried task's worker: the tools that failed the attempts before (Controller._retry)
         self.failed_tools = []      # the tools that failed or found nothing in this worker's run, a failed result names them
+        self._stuck: List[str] = []     # the problems of its mandatory FILE_TOOLS left after the fix rounds (_use_tools)
 
     def trace(self, action: str, ok=None, step=None, task=None, **data):
         """#174 one line of this agent in the job's protocol, by default in its own step and task"""
@@ -89,13 +97,33 @@ class AgentJob:
         """one pass of working out the current task. returns True when the agent is done.
         a worker runs the tools its task needs (like MetaTask), then does its task in one llm call with their results"""
         tools = self._use_tools() if self.tool_context else ""
+        if self._stuck:
+            self._fail_stuck()
+            return True
         text = self.chat([{"role": "user", "content": prompts.WORKER_PROMPT.format(role=self.role, prompt=self.prompt, tools=tools)}], 0.3).strip()
         if not text or FAILED_LINE.search(text):
             self.result = {"error": text or "no reply from the llm", **({"failed_tools": self.failed_tools} if self.failed_tools else {})}
         else:
-            self.result = {"summary": text, "details": "", **({"attachments": self.attachments} if self.attachments else {})}
+            self.result = {"summary": text, "details": "", **({"attachments": self.attachments} if self.attachments else {}),
+                           **({"saved": self._saved} if self._saved else {})}
         self.trace("done", ok="error" not in self.result, **({"error": text or "no reply"} if "error" in self.result else {"summary": text}))
         return True
+
+    def _fail_stuck(self) -> None:
+        """the worker's failed result when a mandatory FILE_TOOLS tool still fails after the fix rounds, no llm call.
+        its failed_tools leave the FILE_TOOLS out: the retry needs them to make the file (Controller._retry)"""
+        error = prompts.FILE_TOOLS_STUCK_PART.format(problems="; ".join(dict.fromkeys(self._stuck)))
+        failed = [name for name in self.failed_tools if name not in self.FILE_TOOLS]
+        self.result = {"error": error, **({"failed_tools": failed} if failed else {})}
+        logger.warning(f"agent {self.role} {self.job_id}: {error[:300]}")
+        self.trace("done", ok=False, error=error)
+
+    @staticmethod
+    def result_text(result: Dict[str, Any]) -> str:
+        """a worker's result as text for the steps after it: its summary, details and the files its tools wrote with their
+        full paths, so a later worker uses them instead of making them again"""
+        saved = prompts.SAVED_FILES_PART.format(paths=", ".join(result["saved"])) if result.get("saved") else ""
+        return "\n".join(part for part in (result.get("summary") or "", result.get("details") or "", saved) if part).strip()
 
     def _use_tools(self) -> str:
         """a worker's tools (run_tools) and their results as the TOOL_RESULTS block. a failed tool or a search that found
@@ -106,6 +134,7 @@ class AgentJob:
         execution = self.run_tools(task, self.prompt, WORKER_TOOLS, optional_when=self.BUILD_TOOLS)
         results = execution.get_result()
         self.attachments = [held for result in results.values() if isinstance(result, dict) for held in result.get("attachments") or []]
+        self._saved = list(dict.fromkeys(path for result in results.values() if isinstance(result, dict) for path in result.get("saved") or []))
 
         failed = [f"{name} ({result['error']})" for name, result in results.items() if isinstance(result, dict) and "error" in result]
         self.failed_tools = [name for name, result in results.items() if isinstance(result, dict) and "error" in result]
@@ -116,6 +145,7 @@ class AgentJob:
             logger.info(f"agent {self.role} {self.job_id}: websearch found nothing, the worker goes on without it")
         if failed:
             logger.warning(f"agent {self.role} {self.job_id}: tools failed {'; '.join(failed)}")
+        self._stuck = [text for name, text in execution.failing() if name in self.FILE_TOOLS and name in execution.tool_names]
 
         text = execution.results_prompt(results)
         if empty_search:
@@ -131,7 +161,7 @@ class AgentJob:
         from app.tasks import ToolDetectionTask, ToolExecutionTask
         context = self.tool_context
         registry = context["tool_registry"]
-        excluded = registry.WORKER_EXCLUDED_TOOLS + self.EXCLUDED_TOOLS + tuple(self.excluded_tools)
+        excluded = tuple(name for name in registry.WORKER_EXCLUDED_TOOLS if name not in self.ALLOWED_TOOLS) + self.EXCLUDED_TOOLS + tuple(self.excluded_tools)
         detection = ToolDetectionTask(detect, registry, self.infrastructure, excluded_tools=excluded)
         registry.task_queue.run(detection)
         detection.trace(context["conversation_id"], f"{self.role} {self.job_id}")
@@ -158,7 +188,7 @@ class AgentJob:
             tool_registry=registry, 
             tool_names=detected + list(always),
             excluded_tools=excluded, llm_timeout=JOB_LLM_TIMEOUT, recommended_tools=recommended,
-            fix_rounds=WORKER_FIX_ROUNDS
+            fix_rounds=WORKER_FIX_ROUNDS, background=True
         )
         
         logger.info(f"agent {self.role} {self.job_id}: tools {execution.tool_names}, recommended {execution.recommended}, detected {detected}")
@@ -225,19 +255,22 @@ class AgentJob:
         return cls.connections is not None and cls.connections[user_id] > 0
 
     @classmethod
-    def post_message(cls, db, user_id: int, conversation_id: int, text: str, name: str) -> tuple[int, bool]:
+    def post_message(cls, db, user_id: int, conversation_id: int, text: str, name: str, alarm: bool = False) -> tuple[int, bool]:
         """stores text as the contact's message like a normal reply, so later replies see it in the history, and pushes
-        it when the user is connected. returns (message_id, pushed)"""
+        it when the user is connected. alarm: the app rings (a user's task with its alarm on). returns (message_id, pushed)"""
         message_id = db.add_message(conversation_id, "assistant", text, name)
         pushed = cls.user_connected(user_id)
         if pushed:
-            MessageQueue().send_data({"chat": {
+            chat = {
                 "conversation_id": conversation_id,
                 "role": "assistant",
                 "content": text,
                 "tool_calls": [],
                 "message_id": message_id
-            }}, user_id=user_id)   # only the conversation's owner
+            }
+            if alarm:
+                chat["alarm"] = True
+            MessageQueue().send_data({"chat": chat}, user_id=user_id)   # only the conversation's owner
         return message_id, pushed
 
     def stop(self):

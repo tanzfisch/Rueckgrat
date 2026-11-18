@@ -16,6 +16,7 @@ ALWAYS_TOOLS = {"news": ["websearch"]}
 # the guardrails (message limits, quiet hours, rows per pass) come from the contact's settings: CompanionSettings
 ROW_KINDS = ("event", "check_in", "news", "reflection")   # what a pass may put on the calendar, all one-off
 SILENT_KINDS = ("planning",)
+TIME_LIMIT = 5400   # seconds for one pass, not an agent job's DEFAULT_TIME_LIMIT: it runs on the scheduler's thread
 
 def short(text, n: int = 200) -> str:
     text = " ".join(str(text or "").split())
@@ -34,11 +35,12 @@ class CompanionJob(AgentJob):
     """one pass of a companion as an agent job: a calendar row fired. its one step: the lookups on the workers' tool path
     (run_tools), one decision call with their results, then the answer is applied: calendar rows, maybe a message.
     the scheduler runs it on its own thread (run()) and re-arms or closes the row"""
-    # it may take a photo (sent with its message), not make pictures or files: those are for jobs the user asked for
-    EXCLUDED_TOOLS = ("generate_image", "write_file", "share_file")
+    # it may take a photo (sent with its message), not make pictures, audio or files: those are for jobs the user asked for
+    EXCLUDED_TOOLS = ("generate_image", "write_file", "share_file", "text_to_speech", "join_files")
+    ALLOWED_TOOLS = ("poll", "show_map")     # its message shows the poll or map (ToolRegistry.show_held)
 
     def __init__(self, row: dict, db, infrastructure, tool_registry, tz, now: datetime):
-        super().__init__("companion", row["kind"], infrastructure=infrastructure)
+        super().__init__("companion", row["kind"], time_limit=TIME_LIMIT, infrastructure=infrastructure)
         self.row = row
         self.user_id = row["user_id"]   # status messages of its tool lookups and the push go to the contact's owner only
         self.db = db
@@ -143,16 +145,17 @@ class CompanionJob(AgentJob):
         return "\n".join(lines)
 
     def _lookup(self, kind: str, values: dict) -> str:
-        """the pass's tools like a worker's (run_tools: detection and execution on the pass's intent, no spawn_job, polls,
+        """the pass's tools like a worker's (run_tools: detection and execution on the pass's intent, no spawn_job,
         images or memory writes), their results in MetaTask's format. "" without results, failed tools are left out"""
         query = prompts.intent(kind, values)
         execution = self.run_tools(query, query, ALWAYS_TOOLS.get(kind, []))
         calls = [entry["call"] for entry in execution.executed]
         self.tool_calls = len(calls)
         results = execution.get_result()
-        found = execution.results_prompt(results).strip()
+        found = execution.results_prompt(results, failed=False).strip()
         # a photo it took, attached when it sends its message (_maybe_message)
         self.attachments = [held for result in results.values() if isinstance(result, dict) for held in result.get("attachments") or []]
+        self.held_data = self.tool_registry.held_data(results)
         if calls:
             done = "; ".join(f"{c['tool']} {short(json.dumps({k: v for k, v in c.items() if k != 'tool'}, ensure_ascii=False), 150)}" for c in calls)
             self.log["lookup"] = f"{done} -> {len(found)} chars"
@@ -216,5 +219,7 @@ class CompanionJob(AgentJob):
         message_id, pushed = self.post_message(self.db, user_id, conversation_id, text, name)
         if self.attachments:
             self.tool_registry.attach_held(self.db, user_id, conversation_id, message_id, self.attachments, push=pushed)
+        if self.held_data:
+            self.tool_registry.show_held(self.db, user_id, conversation_id, message_id, self.held_data, push=pushed)
         self.log["message"] = f"sent #{message_id}, {'pushed' if pushed else 'stored (user not connected)'}: {short(text)!r}"
         return message_id, "sent"

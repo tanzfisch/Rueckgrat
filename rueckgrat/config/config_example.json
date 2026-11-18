@@ -33,6 +33,10 @@
           "interval": 15,
           "small_batch": 10
         },
+        "tasks": {
+          "max": 20,
+          "min_interval": 15
+        },
         "secret_key": "123...456"
       },
       "chat": {}

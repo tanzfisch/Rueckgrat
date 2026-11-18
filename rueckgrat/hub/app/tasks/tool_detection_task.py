@@ -1,4 +1,3 @@
-import re
 from .task_queue import Task
 from typing import List, Optional, Dict, Any, Tuple
 
@@ -10,18 +9,8 @@ MANDATORY_THRESHOLD = 0.7
 RECOMMENDED_THRESHOLD = 0.5
 MIN_DETECTION_WORDS = 4    # shorter messages ("Hi", "thanks!") skip the laya questions, they scored spawn_job 0.71 on "Hi"
 PROJECT_KEY = "project"    # the ids of the ToolRegistry.PROJECT_QUESTIONS: "project__<i>"
-
-# fetch_url is not a laya question but a regex to look for URLs
-TLDS = r"com|org|net|edu|gov|mil|int|info|biz|io|ai|app|dev|xyz|online|site|tech|blog|news|shop|store|cloud|page|link|live|media|tv"
-NOT_TLDS = r"py|md|sh|rs|pl|cc|cs|so|ps|hs|ml|mk|tf|pm|gz|js|ts|rb|kt|go|db"
-URL_PATTERN = re.compile(rf"""
-    [a-z][a-z0-9+.-]*://\S+                                   # any scheme, also glued to a word: protestshttps://...
-  | \bwww\.[\w-]+\.\S+                                       # www.example.org
-  | \blocalhost(?::\d+|/)\S*                                 # localhost:8080, localhost/x
-  | (?<![\w.])(?:\d{{1,3}}\.){{3}}\d{{1,3}}(?!\.?\d)(?::\d+)?(?:/\S*)?   # 192.168.2.39:7346/x
-  | (?<![\w@.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+       # bare host: reddit.com, nzherald.co.nz, bit.ly/x
-      (?:{TLDS}|(?!(?:{NOT_TLDS})(?![\w-]))[a-z]{{2}})(?![\w-])
-""", re.IGNORECASE | re.VERBOSE)
+WHOLE_SUFFIX = " (whole)"  # a question's score on the whole message in the trace, the plain id is its best part
+TEXT_SUFFIX = "__text"     # a tool's Tool.text_score in the trace
 
 
 class ToolDetectionTask(Task):
@@ -38,6 +27,7 @@ class ToolDetectionTask(Task):
         self.tool_names = None
         self.recommended = []
         self.scores = {}    # question id -> (its score, the question), for the trace
+        self._tool_scores: Dict[str, float] = {}    # tool -> its score: the best of its questions, the whole message's and its text_score
 
     def execute(self) -> None:
         try:
@@ -55,12 +45,23 @@ class ToolDetectionTask(Task):
             "recommended": self.recommended
         }
 
+    def tool_scores(self) -> Dict[str, float]:
+        """each tool's score of the last detection (laya_tune): the best of its questions, also on the whole message for a
+        Tool.whole_message one, and its Tool.text_score"""
+        return dict(self._tool_scores)
+
+    def _candidates(self) -> Dict[str, Any]:
+        """name -> class of the tools a detection picks from. the optional ones (PROMPT_TOOLS, companions like share_file)
+        are offered without one, the excluded ones never"""
+        return {name: cls for name, cls in self.tool_registry.tools.items()
+                if not self.tool_registry.optional(name) and name not in self.excluded_tools}
+
     def _questions(self) -> dict:
-        """one laya question per id "<tool>__<i>", a tool without questions gets one from its description"""
+        """one laya question per id "<tool>__<i>", a tool without questions gets one from its description, a Tool.text_only
+        one none"""
         questions = {}
-        for name, cls in self.tool_registry.tools.items():
-            # the optional ones (PROMPT_TOOLS, companions like share_file) are offered without a question
-            if self.tool_registry.optional(name) or name in self.excluded_tools or name == "fetch_url":
+        for name, cls in self._candidates().items():
+            if cls.text_only:
                 continue
 
             tool_questions = cls.question or [f"Does answering the user's latest message need the tool '{name}': {cls.get_description()}?"]
@@ -91,50 +92,60 @@ class ToolDetectionTask(Task):
             self.project = False
         return self.project
 
-    def _check_fetch_url(self) -> Optional[str]:
-        if "fetch_url" in self.excluded_tools:
-            return None
-        if URL_PATTERN.search(self.prompt or ""):
-            return "fetch_url"
-        return None
+    def _whole_ids(self, questions: dict) -> tuple:
+        """the ids of the questions of the Tool.whole_message tools, judged on the whole message too"""
+        whole = {name for name, cls in self._candidates().items() if cls.whole_message}
+        return tuple(key for key in questions if key.rsplit("__", 1)[0] in whole)
 
-    def _detect(self) -> Optional[List[str]]:
-        url_check = self._check_fetch_url()        
+    def _text_scores(self) -> Dict[str, float]:
+        """the tools' scores from code (Tool.text_score), only the ones above 0"""
+        scores = {name: cls.text_score(self.prompt) for name, cls in self._candidates().items()}
+        for name, score in scores.items():
+            if score > 0:
+                self.scores[f"{name}{TEXT_SUFFIX}"] = (score, "text_score")
+        return {name: score for name, score in scores.items() if score > 0}
+
+    def _bands(self, probabilities: Dict[str, float]) -> Tuple[List[str], List[str]]:
+        """(mandatory, recommended) of the tools by their scores and thresholds, ranked by the ToolRegistry"""
+        self._tool_scores = dict(probabilities)
+        mandatory = [name for name, p in probabilities.items() if p >= self.thresholds(name)[1]]
+        recommended = [name for name, p in probabilities.items() if self.thresholds(name)[0] <= p < self.thresholds(name)[1]]
+        return self.tool_registry.bands(mandatory, recommended)
+
+    def _detect(self) -> Tuple[Optional[List[str]], List[str]]:
+        text_scores = self._text_scores()
 
         if len(self.prompt.split()) < MIN_DETECTION_WORDS:
             logger.debug(f"tool detection skipped, fewer than {MIN_DETECTION_WORDS} words")
-            return self.tool_registry.bands([url_check] if url_check else [], [])
+            return self._bands(text_scores)
 
         questions = self._questions()
-        answers = self.infrastructure.decide(self.prompt, questions)
-        if answers is None:
-            return ([url_check] if url_check else None), []    # a link still selects fetch_url when laya is down; otherwise the caller falls back
+        decided = self.infrastructure.decide_whole(self.prompt, questions, self._whole_ids(questions))
+        if decided is None:
+            # laya is down: the text scores still select their tools (a link: fetch_url), without any the caller falls back
+            return self._bands(text_scores) if text_scores else (None, [])
 
+        answers, whole_answers = decided
         probabilities = {}
-        for key, answer in answers.items():
-            name = key.rsplit("__", 1)[0]
-            if name == "fetch_url":
-                continue
-            probabilities[name] = max(probabilities.get(name, 0.0), answer.get("noul", 0.0))
-            self.scores[key] = (answer.get("noul", 0.0), questions.get(key, {}).get("instructions", ""))
+        for suffix, scored in (("", answers), (WHOLE_SUFFIX, whole_answers)):
+            for key, answer in scored.items():
+                name = key.rsplit("__", 1)[0]
+                probabilities[name] = max(probabilities.get(name, 0.0), answer.get("noul", 0.0))
+                self.scores[f"{key}{suffix}"] = (answer.get("noul", 0.0), questions.get(key, {}).get("instructions", ""))
 
         # a fix or change of what was made earlier selects the PROJECT_TOOLS, only when there is a project to change
         project = probabilities.pop(PROJECT_KEY, 0.0)
         if project >= RECOMMENDED_THRESHOLD and self._has_project():
             for name in self.tool_registry.project_tools(self.excluded_tools):
                 probabilities[name] = max(probabilities.get(name, 0.0), project)
-        
-        tool_names = [name for name, p in probabilities.items() if p >= self.thresholds(name)[1]]
-        recommended = [name for name, p in probabilities.items() if self.thresholds(name)[0] <= p < self.thresholds(name)[1]]
 
-        probabilities["fetch_url"] = 1.0 if url_check else 0.0
-        logger.debug(f"tool probabilities:\n{Utils.pretty_scores(probabilities, 20, (RECOMMENDED_THRESHOLD, MANDATORY_THRESHOLD))}")
+        for name, score in text_scores.items():
+            probabilities[name] = max(probabilities.get(name, 0.0), score)
 
-        # add fetch_url if detected
-        if url_check:
-            tool_names.append(url_check)
-
-        return self.tool_registry.bands(tool_names, recommended)
+        logger.debug("tool probabilities:\n" + Utils.pretty_scores({
+            name: {"value": p, "recommended_threshold": self.thresholds(name)[0], "mandatory_threshold": self.thresholds(name)[1]}
+            for name, p in probabilities.items()}, 20))
+        return self._bands(probabilities)
 
     def trace(self, conversation_id: int, who: str) -> None:
         """the detection into the decision trace: the text it judged, each question's score and what it chose"""

@@ -114,6 +114,7 @@ class MetaTask(Task):
 
         MessageQueue().send_status_message("thinking")
         tool_detection_task = ToolDetectionTask(self.request.content, self.tool_registry, self.infrastructure,
+                                                excluded_tools=self.tool_registry.CHAT_EXCLUDED_TOOLS,
                                                 volume=SandboxVolume(self.get_user_id(), self.request.contact_id))
         self.add_sub_task(tool_detection_task)        
 
@@ -139,7 +140,8 @@ class MetaTask(Task):
                 tool_registry = self.tool_registry, 
                 tool_names = detected["tool_names"],
                 recommended_tools = detected.get("recommended") or [],
-                excluded_tools = self.tool_registry.REPLY_TOOLS,  # the reply calls these itself, see _run_reply_tools
+                # the reply calls the REPLY_TOOLS itself (_run_reply_tools), the CHAT_EXCLUDED_TOOLS are for jobs only
+                excluded_tools = self.tool_registry.REPLY_TOOLS + self.tool_registry.CHAT_EXCLUDED_TOOLS,
                 message_id = self.message_id,
                 detach = lambda: self.turns.set_state(self, "detached"),
                 history = 2     # the setup sees the last answer and the message before it: a quiz goes on

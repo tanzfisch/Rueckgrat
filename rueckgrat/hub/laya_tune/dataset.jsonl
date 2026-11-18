@@ -205,6 +205,8 @@
 {"lang": "en", "text": "Make a poster for the school fundraiser.", "labels": {"spawn_job": "r", "generate_image": "r"}}
 {"lang": "en", "text": "Create a React todo app with a Node backend and Postgres.", "labels": {"spawn_job": "M"}}
 {"lang": "en", "text": "Watch Bitcoin price hourly and alert if it falls under 60k.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Hey, find me the lyrics too. \"Trink, trink, Brüderlein, trink. Lass doch die Sorgen zu Haus.\"", "labels": {"websearch": "M"}}
+{"lang": "en", "text": "create a task that runs every 15min \"find me the best price for Kenwood Chef KVC3100\"", "labels": {"task": "M"}}
 
 {"comment": "checked by human until here", "lang": "en", "text": "Build a band website with gallery, tour dates and contact form.", "labels": {"spawn_job": "M"}}
 {"lang": "en", "text": "Code a Tetris clone in JavaScript.", "labels": {"spawn_job": "M"}}
@@ -391,6 +393,19 @@
 {"lang": "en", "text": "Just planted some tomatoes in the garden.", "labels": {}}
 {"lang": "en", "text": "The new keyboard is much better.", "labels": {}}
 {"lang": "en", "text": "Power went out for ten minutes last night.", "labels": {}}
+{"lang": "en", "text": "Remind me in 20 minutes to take the pizza out of the oven.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Wake me up at 6:30 tomorrow with an alarm.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Set an alarm for 7am every weekday.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Every morning at 8, tell me the weather in Berlin.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Remind me every Friday at 5pm to submit my timesheet.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Ping me every 2 hours to drink some water.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Remind me tonight at 9 to call mum.", "labels": {"task": "M"}}
+{"lang": "en", "text": "What reminders do I have?", "labels": {"task": "M"}}
+{"lang": "en", "text": "Cancel my wake-up alarm.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Move my timesheet reminder to Thursday.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Do you remember what we talked about yesterday?", "labels": {}}
+{"lang": "en", "text": "What time is it in Tokyo right now?", "labels": {"current_time": "M"}}
+{"lang": "en", "text": "My alarm clock broke this morning, so I was late for work.", "labels": {}}
 
 {"comment": "below this typos on purpose", "lang": "en", "text": "Quiz me on the captiols of Europe, one question at a time.", "labels": {"poll": "M"}}
 {"lang": "en", "text": "Help me decide wich laptop to buy by asking me a few questions.", "labels": {"poll": "M"}}
@@ -422,3 +437,98 @@
 {"lang": "en", "text": "Please rember that my sister's name is Anna.", "labels": {}}
 {"lang": "en", "text": "What's the weater like in Wellington today?", "labels": {"weather": "M"}}
 {"lang": "en", "text": "Who wrote Pride and Prejudic?", "labels": {"wikipedia": "M", "websearch": "r"}}
+{"lang": "en", "text": "Every 15 minutes, find me the cheapest price for a Sony WH-1000XM5.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Create a task: check the weather in Wellington every morning at 7.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Run a web search for news about the Rueckgrat project every day at noon.", "labels": {"task": "M"}}
+{"lang": "en", "text": "In 2 hours check the price of the Kenwood Chef again.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Each morning look up the exchange rate from NZD to EUR and tell me.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Schedule a daily job that searches the shops for a cheap air fryer.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Every hour search the web for new articles about the All Blacks.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Set up a task that runs every 30 minutes and checks if Tesla stock is below 200.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Tomorrow at 9am, tell me the weather in Christchurch.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Make a recurring task: every Monday give me an interesting Wikipedia article.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Run this every 6 hours: find me the best deal on an iPhone 16.", "labels": {"task": "M"}}
+{"lang": "en", "text": "create a task that runs every 20 min: what time is it in Tokyo", "labels": {"task": "M"}}
+{"lang": "en", "text": "Every weekday at 8:30 send me the top headlines from the web.", "labels": {"task": "M"}}
+{"lang": "en", "text": "In 45 minutes look up the opening hours of Te Papa for me.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Every evening at 6 convert 100 NZD to USD and tell me the rate.", "labels": {"task": "M"}}
+{"lang": "en", "text": "Find me the best price for a Kenwood Chef KVC3100.", "labels": {"price_finder": "M", "websearch": "r"}}
+{"lang": "en", "text": "The bus here comes every 15 minutes, it's great.", "labels": {}}
+{"lang": "en", "text": "I go running every morning at 6 before work.", "labels": {}}
+{"lang": "en", "text": "How often should I water my tomatoes, every day or every two days?", "labels": {"websearch": "r"}}
+{"lang": "en", "text": "Turn this short story into an audio file I can download: Once upon a time a little fox lived at the edge of the forest.", "labels": {"text_to_speech": "M"}}
+{"lang": "en", "text": "Make an audiobook out of the chapters you wrote for me.", "labels": {"text_to_speech": "M"}}
+{"lang": "en", "text": "Write a bedtime story about a brave dragon and give me an mp3 of it.", "labels": {"text_to_speech": "M"}}
+{"lang": "en", "text": "Record a voice memo that says happy birthday to my mum, I want to send it to her.", "labels": {"text_to_speech": "M"}}
+{"lang": "en", "text": "Convert notes.txt into speech so I can listen to it in the car.", "labels": {"text_to_speech": "M"}}
+{"lang": "en", "text": "Please create an audio version of my essay that I can play offline.", "labels": {"text_to_speech": "M"}}
+{"lang": "en", "text": "Research the history of Rome, write it as a book with several chapters and turn it into an audiobook.", "labels": {"spawn_job": "M", "text_to_speech": "r"}}
+{"lang": "en", "text": "Read this out loud to me.", "labels": {}}
+{"lang": "en", "text": "Can you say that again, a bit slower?", "labels": {}}
+{"lang": "en", "text": "What does your voice sound like?", "labels": {}}
+{"lang": "en", "text": "Which audiobook should I listen to next?", "labels": {}}
+{"lang": "en", "text": "Tell me a bedtime story about a dragon.", "labels": {}}
+{"lang": "en", "text": "I love listening to podcasts while I cook.", "labels": {}}
+{"comment": "t465: messages of several steps (spawn_job by the whole message or its shape) and long but simple ones", "lang": "en", "text": "Create an audiobook for me about the Younger Dryas impact hypothesis, in four chapters:\n\n1. **The Younger Dryas:** what it was, when it happened (about 12,900 to 11,700 years ago), and why it was such a fascinating period of sudden climate change and upheaval.\n2. **The impact hypothesis:** what the theory claims, the evidence its supporters point to, and the main criticisms from other scientists.\n3. **Graham Hancock:** his ideas about an advanced ancient civilisation that was wiped out during the Younger Dryas, and how mainstream archaeology responds to them.\n4. **Could it happen again?** Some speculation about whether a similar catastrophe could strike today and how our current civilisation would cope.\n\nResearch each topic first, write each chapter to its own file, then turn all four into a single audio file in your voice and give me the download link.", "labels": {"spawn_job": "r", "text_to_speech": "r", "websearch": "r"}}
+{"lang": "en", "text": "Write me an audio book about the younger drias impact theory. Some of the chapters I am interessted in are:\n* Overview on what is the younger drias impact theory.\n* What is the latest development in science on that topic\n* Some speculation over what we could learn from the findings regarding our own future.", "labels": {"text_to_speech": "r", "websearch": "r"}}
+{"lang": "en", "text": "I want you to write me an audio book about the younger drias impact theory. \n\nSome of the chapters I am interessted in are:\n\n•Overview on what is the younger drias impact theory.\n•What is the latest development in science on that topic\n•Some speculation over what we could learn from the findings regarding our own future.\n\nFeel free to add more chapters if you can come up with something interessting.\n\nDo the research, create a structure for the book and then spawn some workers so each of them work on pieces of it. Maybe per chapter.", "labels": {"spawn_job": "M", "text_to_speech": "r", "websearch": "r"}}
+{"lang": "en", "text": "Write a report on heat pumps for my house. Cover:\n- how they work\n- running costs in New Zealand compared to a gas heater\n- the best models available right now\n- government subsidies\nLook everything up online first, then save the report as a markdown file.", "labels": {"spawn_job": "r", "websearch": "r", "write_file": "r"}}
+{"lang": "en", "text": "Plan a 10 day road trip through the South Island for us. First research the best stops and where to stay, then make a day by day itinerary with driving times, and finally put it all in a document I can print.", "labels": {"spawn_job": "r", "websearch": "r", "write_file": "r"}}
+{"lang": "en", "text": "Find the five best laptops under 2000 dollars for programming, compare their reviews, specs and prices, and write the comparison as a table into a CSV file for me.", "labels": {"spawn_job": "r", "websearch": "r", "price_finder": "r", "write_file": "r"}}
+{"lang": "en", "text": "Write a short fantasy novel with 6 chapters about a dragon who is afraid of fire. Put each chapter in its own file and give me a summary at the end.", "labels": {"spawn_job": "r", "write_file": "r"}}
+{"lang": "en", "text": "Make a podcast episode about the history of coffee: research it, write a 15 minute script with an intro and three parts, and turn the script into audio.", "labels": {"spawn_job": "r", "text_to_speech": "r", "websearch": "r"}}
+{"lang": "en", "text": "Build me a habit tracker app.\n1. Users can add habits with a daily or weekly goal.\n2. A calendar view shows the streaks.\n3. Reminders as notifications.\n4. Data is stored in SQLite.\nUse Python and Flet, and put the code in separate files.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "I have an exam on the French revolution next week. Please research the main causes, the key events and the important people, then write me a study guide with a timeline and 20 quiz questions at the end, saved as a file.", "labels": {"spawn_job": "r", "websearch": "r", "write_file": "r", "wikipedia": "r"}}
+{"lang": "en", "text": "Go through the latest news about electric cars from this week, pick the five most important stories, summarise each one in a paragraph and put them together as a newsletter in a markdown file.", "labels": {"spawn_job": "r", "websearch": "r", "write_file": "r"}}
+{"lang": "en", "text": "Write a bedtime story in three parts about a brave little turtle, save every part as a file and then read all of it into one audio file for my daughter.", "labels": {"spawn_job": "r", "text_to_speech": "r", "write_file": "r"}}
+{"lang": "en", "text": "Do some market research for my coffee cart idea in Wellington: look up the competitors, their prices and locations, estimate the costs to get started, and write a short business plan from it.", "labels": {"spawn_job": "r", "websearch": "r"}}
+{"lang": "en", "text": "So yesterday I went to the beach with my sister and her two kids. First we built a huge sandcastle, then the tide came in and washed half of it away, and after that the little one cried for twenty minutes. Finally we got ice cream and everyone was happy again. It was such a lovely day, I wish we could do that more often.", "labels": {}}
+{"lang": "en", "text": "Can you help me answer this email from my landlord?\n\nHi Martin,\nI wanted to let you know that we will be doing maintenance on the hot water cylinder next Tuesday between 9 and 12. Please make sure someone is home to let the plumber in, or leave a key in the lock box. Also, the rent will go up by 20 dollars a week from the first of next month, as discussed in the inspection.\nKind regards,\nSusan", "labels": {}}
+{"lang": "en", "text": "I've been wondering for a while now, given that the universe is expanding and galaxies are moving away from each other faster than light in some cases, how is it possible that this doesn't break the rule that nothing can travel faster than light, and does that mean we will eventually not see any other galaxies at all?", "labels": {"wikipedia": "r", "websearch": "r"}}
+{"lang": "en", "text": "Here is my pancake recipe:\n1. Mix 2 cups of flour with 2 eggs.\n2. Add 1.5 cups of milk slowly.\n3. Let it rest for 10 minutes.\n4. Fry in butter.\nIs that too much milk?", "labels": {}}
+{"lang": "en", "text": "A few quick questions:\n1. What is the capital of Australia?\n2. How tall is Mount Everest?\n3. Who wrote Pride and Prejudice?", "labels": {"wikipedia": "r", "websearch": "r"}}
+{"lang": "en", "text": "Explain to me step by step how to change a flat tyre: first what tools I need, then how to loosen the nuts, and finally how to put the spare on.", "labels": {}}
+{"lang": "en", "text": "Please summarise these notes: We discussed the budget for next year. Marketing wants 20 percent more. IT needs new laptops for the whole team. Sarah will prepare the numbers by Friday. We meet again on the 3rd.", "labels": {}}
+{"lang": "en", "text": "Write me a poem about autumn in Auckland, with four stanzas, a rhyme scheme of ABAB, mention the pohutukawa trees and the rain, and end it on a hopeful note.", "labels": {}}
+{"lang": "en", "text": "What do you think of my cover letter? Dear hiring manager, I am writing to apply for the junior developer role. I have two years of experience with Python and have built several web apps. I love solving problems and working in a team. I would be thrilled to join your company and learn from your engineers. Sincerely, Martin.", "labels": {}}
+{"lang": "en", "text": "For the last three days I've had a headache in the morning, a sore throat, and I feel tired all afternoon. I drink plenty of water and sleep eight hours. Should I be worried or is it just a cold?", "labels": {}}
+{"lang": "en", "text": "Write a cover letter for a junior developer job and save it as a Word document.", "labels": {"write_file": "M"}}
+{"lang": "en", "text": "First tell me a joke, then tell me what you think about cats.", "labels": {}}
+{"lang": "en", "text": "Sort my shopping list by aisle please: milk, bread, apples, toothpaste, chicken, rice, bananas, dish soap, cheese, pasta.", "labels": {}}
+{"lang": "en", "text": "Turn this into an mp3 please: Welcome to our little shop, we are open from nine to five every day except Sunday.", "labels": {"text_to_speech": "M"}}
+{"lang": "en", "text": "Today was busy. I started with a run, then answered emails for two hours. After that I had lunch with Tom, and in the afternoon we worked on the garden fence. Finally I cooked dinner and watched a movie. What should I cook tomorrow?", "labels": {}}
+{"lang": "en", "text": "Look up the ten most popular hiking tracks near Queenstown, write a short guide for each one and save the guide as a PDF.", "labels": {"spawn_job": "r", "websearch": "r", "write_file": "r"}}
+{"lang": "en", "text": "Collect the reviews of the three best robot vacuums, compare them, then write me a recommendation as a markdown file.", "labels": {"spawn_job": "r", "websearch": "r", "price_finder": "r", "write_file": "r"}}
+{"lang": "en", "text": "Write a five part blog series about sourdough baking, one file per part, and then make an audio version of the first part.", "labels": {"spawn_job": "r", "write_file": "r", "text_to_speech": "r"}}
+{"lang": "en", "text": "Research my family name Schmidt, write a short history of it and turn it into an audio file I can play to my kids.", "labels": {"spawn_job": "r", "websearch": "r", "text_to_speech": "r"}}
+{"lang": "en", "text": "Create a full workout plan for 12 weeks: research good beginner programs, then write the plan week by week into a spreadsheet.", "labels": {"spawn_job": "r", "websearch": "r", "write_file": "r"}}
+{"lang": "en", "text": "Build a small website for my cafe with a menu page, an about page and a contact form, and put every page in its own file.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Can you write a short thank you note to my neighbour for looking after the cat while we were away?", "labels": {}}
+{"lang": "en", "text": "I first thought the movie was boring, then it got really exciting, and finally the ending made me cry. Have you seen it?", "labels": {}}
+{"lang": "en", "text": "Please translate this into German: We will arrive on Friday evening and leave on Sunday after lunch.", "labels": {}}
+{"lang": "en", "text": "Here are my notes from the lecture:\n- photosynthesis needs light\n- chlorophyll is green\n- oxygen is a by-product\nWhat did I miss?", "labels": {"wikipedia": "r"}}
+{"lang": "en", "text": "Write a haiku about rain and then another one about sunshine.", "labels": {}}
+{"lang": "en", "text": "My son asked me why the sky is blue and why sunsets are red, and I didn't know what to tell him. Can you explain it simply?", "labels": {"wikipedia": "r"}}
+{"lang": "en", "text": "Make me a list of ten names for a black kitten.", "labels": {}}
+{"lang": "en", "text": "Turn this sentence into a question: The train leaves at five.", "labels": {}}
+{"comment": "t490: join_files (joining audio or text files), and look-alikes that must not pick it", "lang": "en", "text": "Join chapter_01.mp3, chapter_02.mp3 and chapter_03.mp3 into one audio file.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Merge the four chapter audio files in ~/projects/sea_book into a single mp3.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Combine part1.wav and part2.wav into one recording.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Put all the mp3 files in the audio folder together into one long audiobook file, in name order.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Stitch these three voice memos together into one ogg file.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Concatenate notes_1.md and notes_2.md into one document.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Merge all the chapter text files of the book into one big manuscript file.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Combine the files intro.txt, main.txt and outro.txt into a single text file.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Join the audio of the chapters that were spoken in the step before into one file for the whole book.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Take the per-chapter mp3 files you made and glue them into one audiobook.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Merge the two podcast recordings episode_a.mp3 and episode_b.mp3, one after the other.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Combine every markdown file in the docs folder into one README.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Read chapter_01.md aloud and give me the mp3.", "labels": {"text_to_speech": "M"}}
+{"lang": "en", "text": "Speak all four chapter files into one audiobook mp3 in my voice.", "labels": {"text_to_speech": "M"}}
+{"lang": "en", "text": "Merge these two lists of names and remove the duplicates: Anna, Ben, Carl and Ben, Dora, Anna.", "labels": {}}
+{"lang": "en", "text": "Combine the flavours of lemon and ginger into a recipe for a cake.", "labels": {}}
+{"lang": "en", "text": "Join me for a walk later, what do you think about the weather?", "labels": {"weather": "r"}}
+{"lang": "en", "text": "What is the best way to merge two git branches?", "labels": {}}
+{"lang": "en", "text": "Write a short poem that combines the sea and the mountains.", "labels": {}}
+{"lang": "en", "text": "Put the chapters of the story in a better order and tell me why.", "labels": {}}
+{"comment": "t495: a writer task of an audiobook job, it writes the text, text_to_speech must not be picked", "lang": "en", "text": "Write eight distinct chapters for an audiobook about the Younger Dryas impact hypothesis, using the research in research_notes.txt. Write each chapter to its own text file, chapter_01.txt to chapter_08.txt, engaging and suitable for narration. Do not mention audio, narration, or the audiobook format in the text itself.", "labels": {"write_file": "M"}}

@@ -623,6 +623,61 @@ class Hub:
         return cls._transcripts(requests.delete, f"/{transcript_id}/bookmarks/{bookmark_id}") is not None
 
     @classmethod
+    def _tasks(cls, send, route: str = "", **kwargs) -> tuple[dict | None, str | None]:
+        """#170 (the hub's json answer of /tasks{route}, None) or (None, why not: the hub's reason or that it failed)"""
+        try:
+            response = send(
+                f"{cls.url}/tasks{route}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+                **kwargs,
+            )
+            if response.status_code == 200:
+                return response.json(), None
+            logger.error(f"tasks{route} - {response.status_code} {response.reason}")
+            try:
+                body = response.json()
+            except ValueError:
+                body = None
+            detail = body.get("detail") if isinstance(body, dict) else None
+            return None, detail if isinstance(detail, str) else f"the hub answered {response.status_code}"
+        except Exception as e:
+            logger.error(f"failed to reach tasks{route} {repr(e)}")
+            return None, "could not reach the hub"
+
+    @classmethod
+    def get_tasks(cls) -> tuple[list | None, dict]:
+        """the user's open tasks over all contacts, next first: [{id, contact_id, contact_name, task, repeat, repeat_text,
+        alarm, next_run, next_run_local, when}] (None on an error) and the limits {max_tasks, min_interval_minutes}"""
+        data, _ = cls._tasks(requests.get)
+        return (data.get("tasks", []), data.get("limits", {})) if data else (None, {})
+
+    @classmethod
+    def get_contact_tasks(cls, contact_id: int) -> list | None:
+        """the open tasks of one contact, None on an error"""
+        tasks, _ = cls.get_tasks()
+        return None if tasks is None else [task for task in tasks if task["contact_id"] == contact_id]
+
+    @classmethod
+    def create_task(cls, contact_id: int, task: str, when: str, repeat: str, alarm: bool) -> tuple[dict | None, str | None]:
+        """(the new task, None) or (None, why not). the task has companion_switched_on when its contact became a companion"""
+        data, error = cls._tasks(requests.post, json={"contact_id": contact_id, "task": task, "when": when, "repeat": repeat, "alarm": alarm})
+        return (data.get("task"), None) if data else (None, error)
+
+    @classmethod
+    def edit_task(cls, task_id: int, **changes) -> tuple[dict | None, str | None]:
+        """changes: task, when, repeat, alarm. (the task, None) or (None, why not)"""
+        data, error = cls._tasks(requests.patch, f"/{task_id}", json=changes)
+        return (data.get("task"), None) if data else (None, error)
+
+    @classmethod
+    def delete_task(cls, task_id: int) -> str | None:
+        """cancels a task: None, else why not"""
+        _, error = cls._tasks(requests.delete, f"/{task_id}")
+        return error
+
+    @classmethod
     def upload_contact_image(cls, contact_id: int, data: bytes) -> Optional[str]:
         """png, jpeg or webp bytes become the contact's profile image, returns its file key or None"""
         return cls._set_contact_image(requests.post, f"contacts/{contact_id}/image", data)
@@ -990,6 +1045,29 @@ class Hub:
         return None
 
     @classmethod
+    def save_message_file(cls, message_id: int, stored_name: str, path: str) -> bool:
+        """streams the attached file into path (an audio file is up to 100 MB, it is never held in memory as a whole).
+        False when the hub has no such file or writing failed"""
+        try:
+            with requests.get(
+                f"{cls.url}/messages/{message_id}/files/{stored_name}",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=30,
+                verify=cls.server_cert,
+                stream=True,
+            ) as response:
+                if response.status_code != 200:
+                    logger.error(f"save message file - {response.status_code} {response.reason}")
+                    return False
+                with open(path, "wb") as f:
+                    for chunk in response.iter_content(64 * 1024):
+                        f.write(chunk)
+            return True
+        except Exception as e:
+            logger.error(f"failed to save_message_file {repr(e)}")
+            return False
+
+    @classmethod
     def _get_conversation_files(cls, conversation_id: int, route: str, params: dict, timeout: int):
         """the hub's answer for the conversation's sandbox files, None on an error"""
         try:
@@ -1268,6 +1346,58 @@ class Hub:
         except Exception as e:
             logger.error(f"failed to upload_voice {repr(e)}")
         return None
+
+    @classmethod
+    def voice_of(cls, selection: dict | None, gender: str = "") -> Optional[str]:
+        """the voice uuid of a VoiceSelector.get_voice() selection: None -> "" (no voice), the kept uuid, a predefined
+        voice copied to the user's voices or an uploaded wav. None if the hub call failed"""
+        if selection is None:
+            return ""
+        if "voice_id" in selection:
+            return selection["voice_id"]
+        if "predefined_id" in selection:
+            return cls.use_predefined_voice(selection["predefined_id"])
+        return cls.upload_voice(selection["bytes"], gender)
+
+    @classmethod
+    def get_tts_voice(cls) -> Optional[str]:
+        """the voice uuid the user chose for the text_to_speech tool, "" the contact's voice, None if the hub can't be reached"""
+        try:
+            response = requests.get(
+                f"{cls.url}/users/me/tts_voice",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("voice_id", "") or ""
+            logger.error(f"get tts voice - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_tts_voice {repr(e)}")
+        return None
+
+    @classmethod
+    def set_tts_voice(cls, voice_id: str) -> str | None:
+        """one of the user's voice uuids, "" the contact's voice again. None on success, else an error message for the user"""
+        try:
+            response = requests.put(
+                f"{cls.url}/users/me/tts_voice",
+                json={"voice_id": voice_id},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return None
+            logger.error(f"set tts voice - {response.status_code} {response.reason}")
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+            return detail if isinstance(detail, str) else f"saving the voice failed ({response.status_code})"
+        except Exception as e:
+            logger.error(f"failed to set_tts_voice {repr(e)}")
+            return "could not reach the hub"
 
     @classmethod
     def get_predefined_voices(cls) -> list:

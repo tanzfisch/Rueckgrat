@@ -183,3 +183,31 @@ def task_prompt(kind: str, values: dict, result: str = "") -> str:
 def intent(kind: str, values: dict) -> str:
     """what the pass is about, without its instructions: the input of its tool detection and directing"""
     return TASKS[kind].split("INSTRUCTIONS:")[0].format(**values).strip()
+
+
+# ---------------------------------------------------------------- #170 a task of the user is due (TaskJob)
+# not the companion's own life: the user asked for it (task tool, tasks page), it runs whatever the chattiness and quiet
+# hours. placeholders: name, user_name, task, due_time ("07:30"), local_time, weekday, timezone, late (TASK_LATE_PART or "")
+TASK_RUN_PROMPT = """
+You are {name}. {user_name} asked you to do this at {due_time}: {task}
+{late}
+NOW: {local_time} ({weekday}, {timezone})
+
+INSTRUCTIONS:
+- do it now and write {user_name} the result as a chat message in your own voice
+- a reminder or a wake up call: remind {user_name} of it, short and warm
+- use what you looked up in LOOKUP_RESULT, never invent facts, prices or numbers that are not there. if nothing was found, say so
+- if a background job was started for it, say that it is working on it and will report back
+- if the task is to tell {user_name} only when something happens (a price drop, a change, a new item) and it did not happen, reply with exactly {silent}
+- reply with the message only, as long as the task needs it
+"""
+
+TASK_LATE_PART = "It was due at {due_time} but could not run then (the hub was down), it runs late now: mention that in a few words."
+
+TASK_SILENT = "SILENT"      # the reply of a pass with nothing to tell, no message is posted
+
+
+def user_task_prompt(values: dict, result: str = "") -> str:
+    """the user prompt of a user's task that is due (TaskJob)"""
+    prompt = TASK_RUN_PROMPT + (LOOKUP_RESULT if result else "")
+    return prompt.format(**values, silent=TASK_SILENT, result=result).strip()

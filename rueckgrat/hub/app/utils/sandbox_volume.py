@@ -20,9 +20,10 @@ import time
 import zipfile
 from contextlib import contextmanager, ExitStack
 from contextvars import ContextVar
-from typing import BinaryIO, Iterator
+from typing import BinaryIO, Iterator, Optional
 
 from app.common import get_logger
+from app.utils.text_files import sanitize_relative_path
 logger = get_logger()
 
 MOUNT_PATH = "/home"
@@ -38,7 +39,7 @@ IMAGES = "data/images"
 TTS = "data/tts"
 LAYOUT = (PROJECTS, WORKDIR, DOCUMENTS, IMAGES, TTS)
 SHELL_STATE = ".cache/rueckgrat/shell"
-HASH_CHARS = 12         # of the sha256 of a document's content, its folder in DOCUMENTS
+HASH_CHARS = 12         # of the sha256 of a document's (or audio file's) content, its folder in DOCUMENTS (TTS)
 # the image of the reader container: the python sandbox, in the image cache already (keep_template), it has find
 READER_IMAGE = "ghcr.io/vndee/sandbox-python-311-bullseye"
 READER_TIMEOUT = 30     # seconds for listing a folder
@@ -96,7 +97,17 @@ class SandboxVolume:
     @staticmethod
     def document_path(name: str, data: bytes) -> str:
         """where write_file keeps the file name (a relative path) with these bytes: DOCUMENTS/<hash>/<name>"""
-        return f"{DOCUMENTS}/{hashlib.sha256(data).hexdigest()[:HASH_CHARS]}/{name}"
+        return SandboxVolume._hashed_path(DOCUMENTS, name, data)
+
+    @staticmethod
+    def tts_path(name: str, data: bytes) -> str:
+        """where text_to_speech keeps the audio file name with these bytes: TTS/<hash>/<name>"""
+        return SandboxVolume._hashed_path(TTS, name, data)
+
+    @staticmethod
+    def _hashed_path(folder: str, name: str, data: bytes) -> str:
+        """folder/<hash of the content>/name: a file kept this way never overwrites another"""
+        return f"{folder}/{hashlib.sha256(data).hexdigest()[:HASH_CHARS]}/{name}"
 
     def current_dir(self, conversation_id: int) -> str:
         """the folder the conversation's bash ended in (its shell state), relative to MOUNT_PATH, its workdir when it
@@ -114,9 +125,10 @@ class SandboxVolume:
         except ValueError:
             return default
 
-    def resolve(self, path: str, conversation_id: int) -> str:
-        """a path as the AI gives it, absolute under MOUNT_PATH or relative to the conversation's current folder
-        (current_dir), as a clean_path. ValueError when it is outside the files"""
+    @staticmethod
+    def full_path(path: str) -> Optional[str]:
+        """a path the AI gives in full, under MOUNT_PATH (/home/...) or ~ (~/...), as a clean_path ("" the root). None for
+        a relative one. ValueError when it is outside the files"""
         path = (path or "").replace("\\", "/").strip()
         if path == MOUNT_PATH or path.startswith(MOUNT_PATH + "/"):
             joined = path.removeprefix(MOUNT_PATH).lstrip("/")
@@ -125,11 +137,62 @@ class SandboxVolume:
                 raise ValueError(f"{path} is outside your files")
             joined = path[1:].lstrip("/")
         else:
-            joined = posixpath.join(self.current_dir(conversation_id), path)
+            return None
+        return SandboxVolume._inside(path, joined)
+
+    @staticmethod
+    def _inside(path: str, joined: str) -> str:
+        """joined (path relative to MOUNT_PATH) normalized as a clean_path, ValueError when it leaves the files"""
         joined = posixpath.normpath(joined) if joined else ""
         if joined.startswith("..") or joined.startswith("/"):
             raise ValueError(f"{path} is outside your files")
-        return self.clean_path("" if joined == "." else joined)
+        return SandboxVolume.clean_path("" if joined == "." else joined)
+
+    @staticmethod
+    def file_path(path: str) -> Optional[str]:
+        """where a tool writes a file the AI names by its full path (full_path), None for a plain name (the tool keeps it
+        in its own folder, document_path, tts_path). ValueError when it is outside the files, the root, hidden (.cache) or
+        not a valid file name (sanitize_relative_path)"""
+        full = SandboxVolume.full_path(path)
+        if full is None:
+            return None
+        if not full or sanitize_relative_path(full) != full:
+            raise ValueError(f"{path} is not a valid path for a file (no hidden files or folders, at most 8 folders deep)")
+        return full
+
+    def resolve(self, path: str, conversation_id: int) -> str:
+        """a path as the AI gives it, absolute under MOUNT_PATH (full_path) or relative to the conversation's current
+        folder (current_dir), as a clean_path. ValueError when it is outside the files"""
+        full = self.full_path(path)
+        if full is not None:
+            return full
+        path = (path or "").replace("\\", "/").strip()
+        return self._inside(path, posixpath.join(self.current_dir(conversation_id), path))
+
+    def read_paths(self, paths: list[str], conversation_id: int, max_bytes: int) -> Iterator[tuple[str, bytes]]:
+        """(path below MOUNT_PATH, bytes) of the files of paths as the AI gives them (resolve), one after another in
+        their order, a folder's files by name: what text_to_speech speaks and join_files joins. ValueError naming the
+        path that is outside the files, not there, an empty folder or a file larger than max_bytes"""
+        for path in paths:
+            try:
+                real = self.resolve(path, conversation_id)
+                files = sorted(self.files(real, max_bytes=max_bytes))
+            except FileNotFoundError:
+                raise ValueError(f"{path} is not in your files")
+            except ValueError:
+                raise ValueError(f"{path} is not a path in your files")
+            if not files:
+                raise ValueError(f"{path} has no files")
+            for name, _, data in files:
+                if data is None:
+                    raise ValueError(f"{name} is larger than {max_bytes // (1024 * 1024)} MB")
+                yield name, data
+
+    def has_file(self, path: str) -> bool:
+        """whether something is at path (below MOUNT_PATH) already, a file or a folder. no volume, or the root: nothing.
+        ValueError for a path that leaves the files (clean_path)"""
+        path = self.clean_path(path)
+        return bool(path) and self._output(["test", "-e", posixpath.join(MOUNT_PATH, path)]) is not None
 
     def exists(self) -> bool:
         from docker.errors import NotFound

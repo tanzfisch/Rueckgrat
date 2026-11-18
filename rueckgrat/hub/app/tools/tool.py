@@ -10,9 +10,14 @@ class Tool(Task):
     description = ""    # one line for the tool index, every tool sets its own
     question = []       # yes/no decision questions: does the request involve this tool's purpose. the tool counts with its most likely question
     thresholds = None   # (recommended, mandatory) for the question scores, None: ToolDetectionTask's RECOMMENDED_THRESHOLD and MANDATORY_THRESHOLD
+    whole_message = False   # its questions are also judged on the whole message, not only part by part (a plan of several steps)
+    text_only = False   # no laya questions: text_score alone detects it (fetch_url: a link in the message)
     sequential = False  # the calls of sequential tools in one round run one after another in their order (they share the sandbox files)
     offered_with = ()   # names of tools this one is offered with as an optional tool (ToolRegistry.companions), no laya question of its own
     requires = ()       # the capabilities it needs (Infrastructure.available: "image", "embedding", "internet" ...), without one it is not offered
+    overrides = ()      # names of tools this one makes needless when both are detected (ToolRegistry.overridden), e.g. price_finder: websearch
+    fixable = False     # offered in a worker's fix rounds (ToolRegistry.fixable): a tool that makes or offers files, run again to fix a problem
+    HELD_DATA = "held_data"     # result key: {kind: value} show_data held without a stored message (ToolRegistry.show_held)
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
         super().__init__(user_id=user_id, conversation_id=conversation_id)
@@ -22,6 +27,12 @@ class Tool(Task):
         self.tool_call=tool_call
         self._response: Dict[str, Any] = {}
         self.message_id: Optional[int] = None
+
+    @classmethod
+    def text_score(cls, prompt: str) -> float:
+        """a score of the message from code (a pattern, its shape), on the scale of the laya scores: ToolDetectionTask takes
+        the higher one. 0.0: none"""
+        return 0.0
 
     def get_result(self) -> Dict[str, Any]:
         return dict(self._response)
@@ -41,17 +52,29 @@ class Tool(Task):
 
     def show_data(self, kind: str, value) -> None:
         """stores value as the data of kind of this call's message and sends it to the chat, e.g. show_data("poll", {...}).
-        the client shows it under the bubble by its kind. nothing without a stored message (a worker's or companion's call)"""
+        the client shows it under the bubble by its kind. without a stored message (a task's, companion's or worker's call)
+        the result holds it (HELD_DATA): whoever posts a message with the result shows it there (ToolRegistry.show_held)"""
         if not self.has_message():
+            self._response.setdefault(self.name(), {}).setdefault(self.HELD_DATA, {})[kind] = value
             return
-        self.db.set_message_data(self.message_id, kind, value)
-        MessageQueue().send_data({"data": {"conversation_id": self.get_conversation_id(), "message_id": self.message_id, "kind": kind, "value": value}},
-                                 user_id=self.get_user_id())
+        self.send_data(self.db, self.get_user_id(), self.get_conversation_id(), self.message_id, kind, value)
+
+    @staticmethod
+    def send_data(db, user_id: int, conversation_id: int, message_id: int, kind: str, value, push: bool = True) -> None:
+        """stores value as the data of kind of message_id (a reload shows it) and, push: sends it to the user's chat"""
+        db.set_message_data(message_id, kind, value)
+        if push:
+            MessageQueue().send_data({"data": {"conversation_id": conversation_id, "message_id": message_id, "kind": kind, "value": value}},
+                                     user_id=user_id)
 
     @classmethod
     def sharing(cls):
         """the context around a round's sequential calls of this tool (ToolRegistry._run_lane), e.g. one sandbox for all"""
         return nullcontext()
+
+    def background(self) -> bool:
+        """the call runs for an agent job, a task or a companion pass: no one waits for it (ToolExecutionTask background)"""
+        return self.tool_call.get("background") is True
 
     def runs_detached(self) -> bool:
         """a call of a DETACHED_TOOLS tool runs in the background. False keeps this call in its round"""
@@ -69,6 +92,12 @@ class Tool(Task):
         """attaches one file this tool held without a message (an item of its result's "attachments": {"tool", "name", ...})
         to message_id. only tools that hold files have it"""
         raise NotImplementedError(f"{cls.__name__} holds no attachments")
+
+    @classmethod
+    def looks_around(cls, call: Dict[str, Any], conversation_id: int) -> bool:
+        """whether call only reads where the conversation's work is (e.g. lists its folder): a recommended call like that
+        needs no value from the message (ToolRegistry.grounded). most tools: False"""
+        return False
 
     @classmethod
     def problems(cls, result: Dict[str, Any]) -> List[str]:

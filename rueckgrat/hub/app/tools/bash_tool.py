@@ -38,6 +38,7 @@ class BashTool(Tool):
     processes do not"""
     description = prompts.BASH_DESCRIPTION
     sequential = True
+    fixable = True
     thresholds = (0.6, 0.65)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the message ask to copy, move, rename, delete, list or unzip files or folders that already exist?",
@@ -57,6 +58,19 @@ class BashTool(Tool):
     @classmethod
     def sharing(cls):
         return SandboxVolume.sharing()
+
+    # a plain listing: "ls -la", "ls .", "ls <workdir>", "cd <workdir> && ls -la", nothing chained, piped or substituted
+    LISTING = re.compile(r"(?:cd\s+(?P<folder>[\w./~-]+)\s*&&\s*)?ls(?:\s+-[a-zA-Z]+)*(?:\s+(?P<path>[\w./~-]+))?")
+
+    @classmethod
+    def looks_around(cls, call: Dict[str, Any], conversation_id: int) -> bool:
+        """a plain ls of the conversation's workdir (LISTING): read only, where a worker looks for the files of the
+        steps before"""
+        match = cls.LISTING.fullmatch(str(call.get("command") or "").strip())
+        if not match:
+            return False
+        workdir = SandboxVolume.workdir(conversation_id)
+        return match["folder"] in (None, workdir, f"{workdir}/") and match["path"] in (None, ".", "./", workdir, f"{workdir}/")
 
     @classmethod
     def problems(cls, result: Dict[str, Any]) -> List[str]:
