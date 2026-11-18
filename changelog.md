@@ -29,6 +29,7 @@ Changelog
 - #213 copy path button on files in file explorer
 - #210 play button for audio files in contact fs
 - #218 added option to override voice for ai tools
+- #217 improved tts quality by using longer chungs for agent jobs and caching voice samples
 
 0.28.1
 ------
