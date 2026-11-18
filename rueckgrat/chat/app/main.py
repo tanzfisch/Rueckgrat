@@ -24,7 +24,7 @@ from app.ui import (
     TasksPage,
 )
 from app.ui import theme
-from app.ui.widgets import ImageOverlay, TextPreview, MessageBox, ConnectionBanner, AlarmBox
+from app.ui.widgets import ImageOverlay, TextPreview, AudioPlayer, MessageBox, ConnectionBanner, AlarmBox
 
 from app.utils import Paths, Notifier, KeepAlive, Capabilities
 from app.utils.config import RueckgratConfig
@@ -180,7 +180,7 @@ class App:
     async def _on_system_back(self, e):
         view = e.control
         # back closes the full screen image or text file first, then goes back a page
-        if ImageOverlay.close_open(self.page) or TextPreview.close_open(self.page):
+        if ImageOverlay.close_open(self.page) or TextPreview.close_open(self.page) or AudioPlayer.close_open(self.page):
             await view.confirm_pop(False)
             return
         # a page can take the back itself first (chat: hides the keyboard)

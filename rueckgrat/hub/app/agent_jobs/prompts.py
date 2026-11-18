@@ -5,6 +5,8 @@ merges the results; its workers (AgentJob) do one task each with the tools' resu
 placeholders, filled with str.format (literal json braces are doubled):
   WORKER_PROMPT              role (the worker's role in the plan), prompt (its task), tools (the TOOL_RESULTS block or "")
   FAILED_TOOLS_PART          failed: the failed tools with their errors, "; " separated
+  SAVED_FILES_PART           paths: the full paths of the files a worker's tools wrote, comma separated (AgentJob.result_text)
+  FILE_TOOLS_STUCK_PART      problems: what its file making tools still failed with after the fix rounds, "; " separated
   PLAN_PROMPT                prompt (the job), max_steps, max_workers
   REVIEW_PROMPT              done, total (finished step of how many), prompt, messages (the user's messages since the start,
                              one "- " line each, or "none"), results, remaining, max_steps, max_workers
@@ -23,10 +25,15 @@ EMPTY_WEBSEARCH_PART = ("\n\nThe web search found nothing useful. Do the task wi
 FAILED_TOOLS_PART = ("\n\nThese tools failed: {failed}. Do the task with what you have and your own knowledge, and say what could not be checked. "
                 "Reply FAILED: only when the task can not be done at all without them.\n")
 RESULTS_MARKER_PART = "\n\nRESULTS OF THE STEPS BEFORE:\n"    # the Controller appends the earlier results to a task after this
+SAVED_FILES_PART = "files saved: {paths}"
+FILE_TOOLS_STUCK_PART = "the files of the task were not made, still failing after the fix rounds: {problems}"
 
 WORKER_PROMPT = """You are the {role} in a background job. Do your task and report what you found or made.
 Facts, numbers and dates come only from the tool results below and from the task itself. Name the source of each fact as the tool results give it. Never make up facts, numbers or sources.
 Stay factual and neutral: report what the sources say, also where they disagree, without taking sides.
+Do only your own task: the job's other steps are done by other workers, do not do their part (e.g. a writer writes the text, it does not make the audio of it).
+Files the steps before saved are listed with their full paths ("files saved:"): use them, do not write them again.
+A file in another format than the task asks for, with the same content, does the task (e.g. audio as .ogg instead of .mp3, text as .md instead of .txt): say which format it is, that is not a failure.
 If you can not do the task with what you have, or a check of your task failed or could not be run, start your reply with FAILED: and the reason.
 
 YOUR TASK:
@@ -48,7 +55,14 @@ Use as few steps and tasks as the job needs, at most {max_steps} steps and at mo
 Each task has a role (one or two words, e.g. researcher, analyst, writer) and a prompt: full instructions the worker can follow on its own. Keep every detail of the job the task needs.
 The results of the steps before are added to each task automatically, so write every task self-contained and never use placeholders like {{design_context}} for them.
 Each worker can use the hub's tools on its own, e.g. a web search, reading a web page, wikipedia, the weather, calculations and conversions,
-writing files and generating images the user gets with the job's report. A task that makes files names each file and its path (e.g. index.html, css/style.css).
+writing text files, speaking text files into audio files (.mp3, .ogg or .wav, no other audio format), joining files into one file
+(audio files into one audio file, text files into one text file) and generating images the user gets with the job's report.
+Writing files makes text only: audio comes only from speaking text or from joining audio files.
+A work made of several parts (e.g. an audiobook, a podcast, a narrated documentary) keeps each part as its own file (one text file per chapter, episode or scene)
+and combines them at the end: one task speaks all the text parts into one audio file in one go, or one task per part makes its audio
+followed by a task that joins those audio files in order.
+A task that makes files names each file and its path (e.g. index.html, css/style.css). Each task does only its own part and names only that: a writer task writes the text and does not mention audio, narration or
+the final medium, turning the text into audio (or another medium) is a task of its own.
 A software project lives in its own folder ~/projects/<project-name>/ (short, lowercase, e.g. fractal_explorer): every task of the project names that folder,
 the task that creates the project also writes its PROJECT.md there (first line: what the project is in one sentence, then its status and how to run it).
 To change an existing project, its tasks work in its folder.
@@ -120,7 +134,10 @@ WHY IT FAILED:
 
 Keep the task's goal and every detail of the job it needs, change what made it fail. E.g. when a search found nothing
 useful, tell the worker to do the task from its own knowledge and to invent what the job leaves open. When the failure
-was bad luck (e.g. a timeout or a tool error), the task may stay as it is.
+was bad luck (e.g. a timeout or a tool error), the task may stay as it is. When a file was made in another format than
+asked (e.g. audio as .ogg instead of .mp3), that is no failure: let the task accept it, never ask for a conversion.
+The failed worker may have made some of the task's files already: tell the new worker to replace the task's own output
+files when they are there (with "overwrite": true), never other files.
 
 Respond with a json structure like this:
 {{

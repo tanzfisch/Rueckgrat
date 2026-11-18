@@ -102,6 +102,7 @@ class NodeTTSRequest(BaseModel):
     exaggeration: float = 0.5
     cfg_weight: float = 0.5
     language: str = ""  # multilingual model only, "" or unsupported = detected from the text
+    priority: str = "chat"  # "chat" (someone waits: first in the node's queue) or "background" (a job, task or companion pass)
 
 class HubTTSRequest(BaseModel):
     text: str

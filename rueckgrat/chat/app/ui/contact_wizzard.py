@@ -98,7 +98,7 @@ class ContactWizardForm(ft.Column):
         self.gender.select("male")
 
         self.backstory = ft.TextField(
-            hint_text="Who are they? Include looks like hair colour, eyes, build, plus personality and what they want from you ...",
+            hint_text="Who are they? Include looks like hair colour, eyes, build, plus personality and how they relate you ...",
             multiline=True,
             min_lines=10,
             max_lines=20,
@@ -167,7 +167,7 @@ class ContactWizardForm(ft.Column):
         return {
             "name": self.name_input.value or "",
             "gender": self.gender.get_selected(),
-            "backstory": self.backstory.value or "",
+            "backstory": self.backstory.value or "A friendly, capable assistant who enjoys helping people get things done. Curious, patient and honest, they explain things clearly, admit when they don't know something, and keep the conversation focused on what the user needs.",
             "sfw": "NSFW" if self.nsfw_switch.value else "SFW",
             "persistent": self.persistent_switch.value or False,
             "image_style": self.image_style.value or DEFAULT_IMAGE_STYLE,

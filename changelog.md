@@ -6,6 +6,28 @@ Changelog
 
 - #170 added task tool which creates repeating or one of tasks in the background 
 - #197 added tts tool which turns text in to speech for the user to donwload
+- #209 improved writing files to the sandbox
+-     write_file and text_to_speech take a full path, e.g. a project folder
+-     write_file only writes text, audio, image and archive files are refused
+-     an existing file is only replaced with the overwrite flag
+-     added join_files tool which joins text or audio files into one file, for jobs and tasks only
+-     text_to_speech writes mp3, ogg or wav
+-     job steps pass the paths of their saved files on to the next steps
+-     websearch answers are part of the tool results
+-     a bash ls of the work folder counts as grounded
+-     tools mark themselves as fixable instead of the FIX_TOOLS list, problems keep their tool's name
+-     a worker fails when its file tools still fail after the fix rounds
+-     tools don't name other tools, the planner and tool setup explain how they work together
+-     planner talks about works made of parts instead of audiobooks
+-     agent jobs run up to 8 h, tasks and companion passes up to 90 min, job llm calls up to 30 min
+-     tts timeout by priority: 4 min for chat, background requests wait as long as their job
+-     tts node queues speech requests: chat first, requests of gone clients are skipped, a full queue answers busy and background requests retry
+-     improved text_to_speech laya question, mandatory threshold 0.75
+-     docs: communication.md describes how chat, hub and nodes talk, CONTRIBUTING.md renamed to DEVELOPMENT.md
+- #216 added default backstory to character creation
+- #211 explorer button in conversations list
+- #213 copy path button on files in file explorer
+- #210 play button for audio files in contact fs
 
 0.28.1
 ------

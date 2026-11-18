@@ -2,7 +2,7 @@ import time
 import traceback
 import json
 from .task_queue import Task
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional, Callable, Tuple
 from ..utils.tool_prompt_compiler import ToolPromptCompiler
 from ..utils.prompt_compiler import build_context
 from ..utils.trace import Trace
@@ -20,7 +20,7 @@ class ToolExecutionTask(Task):
     def __init__(self, user_id: int, request: ChatRequest, context, db, infrastructure, tool_registry, tool_names: List[str],
                  message_id: int = None, excluded_tools: tuple = (), llm_timeout: Optional[float] = None,
                  recommended_tools: List[str] = (), detach: Optional[Callable[[], bool]] = None,
-                 tool_calls: Optional[List[Dict[str, Any]]] = None, fix_rounds: int = 0, history: int = 0):
+                 tool_calls: Optional[List[Dict[str, Any]]] = None, fix_rounds: int = 0, history: int = 0, background: bool = False):
         super().__init__(user_id=user_id)
         self.request = request
         self.context = context
@@ -32,10 +32,12 @@ class ToolExecutionTask(Task):
         self.message_id = message_id
         self.detach = detach    # ToolRegistry.execute: lets the DETACHED_TOOLS calls run in the background
         self.llm_timeout = llm_timeout
+        self.background = background    # an agent job's, task's or companion pass's: its calls carry it (Tool.background)
         self.tool_calls = tool_calls
         self.history = history          # how many messages before this turn's the setup sees (_history), 0 for a worker
         self.history_text: Optional[str] = None
-        self.fix_rounds = fix_rounds    # a worker's: more passes of the FIX_TOOLS while their calls fail (_fix), 0 for a chat turn
+        self.fix_rounds = fix_rounds    # a worker's: more passes of the fixable tools while their calls fail (_fix), 0 for a chat turn
+        self._failing: List[Tuple[str, str]] = []   # (tool name, problem) still there at the end (failing)
         self.tool_response = {}
         self.executed: List[Dict[str, Any]] = []    # {"call", "ms"} per call that ran, in order. the calls of a round run together and share its time
 
@@ -80,9 +82,10 @@ class ToolExecutionTask(Task):
                 return
 
             problems, requests = self._rounds(self.tool_names, self.recommended, self.request.content)
+            self._failing = problems
             if requests is not None:
                 problems += self._find_tools(requests)
-                self._fix(problems)
+                self._failing = self._fix(problems)
 
             logger.debug(f"execution task results:\n{Utils.pretty_print(self.tool_response)}")
 
@@ -90,14 +93,14 @@ class ToolExecutionTask(Task):
             logger.error(f"failed to direct tools {repr(e)}\n{traceback.format_exc()}")
 
     def _rounds(self, mandatory: List[str], recommended: List[str], prompt_text: str, step: str = "",
-                also: List[str] = ()) -> tuple[List[str], Optional[List[Dict[str, Any]]]]:
+                also: List[str] = ()) -> tuple[List[Tuple[str, str]], Optional[List[Dict[str, Any]]]]:
         """the rounds of a tool setup (ToolRegistry.rounds), also: optional tools offered in the last round (no round of
         their own). returns (what a fix round could repair, the find_tools calls), None for the calls when one of the
         PRIORITY_TOOLS was called: nothing runs after it (ToolRegistry.ends_setup)"""
         ranked_groups = self.tool_registry.rounds(mandatory, recommended)
         if ranked_groups and also:
             ranked_groups[-1] += [name for name in also if name not in ranked_groups[-1]]
-        problems: List[str] = []
+        problems: List[Tuple[str, str]] = []
         requests: List[Dict[str, Any]] = []
         for round, tools in enumerate(ranked_groups, 1):
             label = f"{step}{round}/{len(ranked_groups)}"
@@ -112,11 +115,11 @@ class ToolExecutionTask(Task):
                 return problems, None
         return problems, requests
 
-    def _find_tools(self, requests: List[Dict[str, Any]]) -> List[str]:
+    def _find_tools(self, requests: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
         """the find_tools calls: a detection on their tasks, the tools it finds that were not offered yet get extra rounds
         (with find_tools again, at most FIND_TOOLS_STEPS in a row). returns what a fix round could repair"""
         from .tool_detection_task import ToolDetectionTask     # tool_detection_task imports the task package too
-        problems: List[str] = []
+        problems: List[Tuple[str, str]] = []
         step = 0
         while requests and step < self.FIND_TOOLS_STEPS:
             step += 1
@@ -147,15 +150,15 @@ class ToolExecutionTask(Task):
             problems += found_problems
         return problems
 
-    def _round(self, label: str, tools: List[str], recommended: List[str], prompt_text: str) -> tuple[List[Dict[str, Any]], List[str]]:
+    def _round(self, label: str, tools: List[str], recommended: List[str], prompt_text: str) -> tuple[List[Dict[str, Any]], List[Tuple[str, str]]]:
         """one tool setup: one llm call writes the calls of tools (prompt_text: the task, with the earlier results), they run
         together and their results go into tool_response. returns (the calls that ran, what went wrong that a fix round
-        could repair: failed calls, a cut off reply)"""
+        could repair: (tool name, problem) of failed calls, a cut off reply)"""
         compiler = ToolPromptCompiler(prompt_text, self.tool_response, self.tool_registry, tools, recommended,
                                       history=self._history(),
                                       scope={"user_id": self.get_user_id(), "contact_id": self.request.contact_id,
                                              "conversation_id": self.request.conversation_id},
-                                      timezone=self._timezone())
+                                      timezone=self._timezone(), excluded=self.excluded_tools)
         messages = []
         context_prompt = build_context(self.request.name, self.context) if self.context else ""
         if context_prompt:
@@ -181,7 +184,7 @@ class ToolExecutionTask(Task):
         parsed, content = self.tool_registry.extract_tool_calls(response_content)
         tool_calls = [call for call in parsed or [] if call.get("tool") in tools]
         grounding = f"{prompt_text}\n{json.dumps(self.tool_response, ensure_ascii=False, default=str)}"
-        made_up = [call for call in tool_calls if call.get("tool") in recommended and not self.tool_registry.grounded(call, grounding)]
+        made_up = [call for call in tool_calls if call.get("tool") in recommended and not self.tool_registry.grounded(call, grounding, conversation_id)]
         if made_up:
             logger.warning(f"dropped recommended calls with no value from the message: {made_up}")
             tool_calls = [call for call in tool_calls if call not in made_up]
@@ -194,7 +197,8 @@ class ToolExecutionTask(Task):
                     cut_off=list(cut_off or []))
         if cut_off:
             logger.warning(f"setup reply cut off ({info.get('finish_reason') or 'unclosed call'}), {', '.join(cut_off)} calls missing")
-        problems = [f"{name}: {note['text']}" for name, note in (cut_off or {}).items() if name in self.tool_registry.FIX_TOOLS]
+        fixable = self.tool_registry.fixable(list(cut_off or {}))
+        problems = [(name, f"{name}: {note['text']}") for name, note in (cut_off or {}).items() if name in fixable]
         if self.fix_rounds:
             problems += self.tool_registry.not_called([t for t in tools if t not in recommended], tool_calls)
         results = self._run(tool_calls) if tool_calls else None
@@ -205,28 +209,51 @@ class ToolExecutionTask(Task):
         """the user's timezone for the setup prompt (clock.user_timezone), None without a user or db"""
         return user_timezone(self.db, self.get_user_id()) if self.db is not None and self.get_user_id() is not None else None
 
-    def _fix(self, problems: List[str]) -> None:
-        """a worker's fix rounds (fix_rounds, 0: none): while bash, run_code or write_file calls failed, were cut off or
-        files were not attached, those tools get one more pass with the results so far and what went wrong, at most
-        fix_rounds times. a "checks" result tells the reply the final state, so it does not claim that what failed works"""
-        tools = [name for name in self.tool_registry.FIX_TOOLS if name in self.tool_names + self.recommended]
+    def failing(self) -> List[Tuple[str, str]]:
+        """(tool name, problem) of what still went wrong when the task ended: after a worker's fix rounds, or of its
+        rounds when there were none (a chat turn)"""
+        return list(self._failing)
+
+    def _fix(self, problems: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+        """a worker's fix rounds (fix_rounds, 0: none): while calls of the fixable tools (Tool.fixable) failed, were cut
+        off or files were not attached, those tools get one more pass with the results so far and what went wrong, at
+        most fix_rounds times. a problem of a tool that did not run again in a round stays (nothing fixed it). a "checks"
+        result tells the reply the final state, so it does not claim that what failed works. returns the problems left"""
+        tools = self.tool_registry.fixable(self.tool_names + self.recommended)
         if not self.fix_rounds or not tools or not problems:
-            return
+            return problems
         conversation_id, fix = self.request.conversation_id, 0
         while problems and fix < self.fix_rounds:
             fix += 1
-            logger.info(f"fix round {fix}/{self.fix_rounds}: {'; '.join(problems)[:300]}")
-            Trace.write(conversation_id, f"fix round {fix}/{self.fix_rounds}", "\n".join(problems), tools=tools)
+            texts = [text for _, text in problems]
+            logger.info(f"fix round {fix}/{self.fix_rounds}: {'; '.join(texts)[:300]}")
+            Trace.write(conversation_id, f"fix round {fix}/{self.fix_rounds}", "\n".join(texts), tools=tools)
             prompt = self.request.content + tool_prompts.FIX_ROUND_PART.format(
-                fix=fix, total=self.fix_rounds, problems="\n".join(f"- {problem}" for problem in problems))
-            problems = []
-            for group in self.tool_registry.ranked_groups(tools):    # bash, run_code and share_file, then write_file
-                problems += self._round(f"fix {fix}/{self.fix_rounds}", group, group, prompt)[1]
-        text = tool_prompts.CHECKS_FAILED_PART.format(rounds=fix, problems="; ".join(problems)) if problems \
+                fix=fix, total=self.fix_rounds, problems="\n".join(f"- {text}" for text in texts))
+            found: List[Tuple[str, str]] = []
+            called = set()
+            for group in self.tool_registry.ranked_groups(tools):    # in TOOL_ORDER: bash, run_code and share_file before write_file
+                calls, group_problems = self._round(f"fix {fix}/{self.fix_rounds}", group, group, prompt)
+                called |= {call.get("tool") for call in calls}
+                found += group_problems
+            problems = [problem for problem in problems if problem[0] not in called] + found
+        texts = list(dict.fromkeys(text for _, text in problems))
+        text = tool_prompts.CHECKS_FAILED_PART.format(rounds=fix, problems="; ".join(texts)) if problems \
             else tool_prompts.CHECKS_FIXED_PART.format(rounds=fix)
         self.tool_response["checks"] = {"tool": "checks", "text": text}
         logger.info(f"fix rounds done: {text[:300]}")
-        Trace.write(conversation_id, "checks", text, fix_rounds=fix, still_failing=len(problems))
+        Trace.write(conversation_id, "checks", text, fix_rounds=fix, still_failing=len(problems),
+                    failing_tools=sorted({name for name, _ in problems}) or None)
+        return problems
+
+    def _call(self, call: Dict[str, Any]) -> Dict[str, Any]:
+        """the call as the tool gets it: with the llm timeout of an agent job, and background only when this task's (not the llm's)"""
+        call = {key: value for key, value in call.items() if key != "background"}
+        if self.llm_timeout:
+            call["llm_timeout"] = self.llm_timeout
+        if self.background:
+            call["background"] = True
+        return call
 
     def _run(self, tool_calls: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """runs the calls together, their results go into tool_response. returns them ({tool name: result}, None for none)"""
@@ -235,7 +262,7 @@ class ToolExecutionTask(Task):
             user_id=self.get_user_id(),
             contact_id=self.request.contact_id,
             conversation_id=self.request.conversation_id,
-            tool_calls=[dict(call, llm_timeout=self.llm_timeout) if self.llm_timeout else call for call in tool_calls],
+            tool_calls=[self._call(call) for call in tool_calls],
             message_id=self.message_id,
             excluded=self.excluded_tools,
             detach=self.detach
@@ -247,15 +274,18 @@ class ToolExecutionTask(Task):
         return tool_call_result
 
     @staticmethod
-    def results_prompt(results: Dict[str, Dict[str, Any]]) -> str:
-        """the TOOL_RESULTS block of the results for a reply prompt, failed tools left out. "" without results"""
+    def results_prompt(results: Dict[str, Dict[str, Any]], failed: bool = True) -> str:
+        """the TOOL_RESULTS block of the results for a reply prompt. a failed tool keeps its text (what failed, so the
+        reply does not claim it worked), or "failed: <error>" without one. failed False: failed tools are left out.
+        "" without results"""
         if not results:
             return ""
         lines = []
         for r in results.values():
             tool = r.get("tool", "unknown")
-            if "error" in r:
+            if "error" in r and not failed:
                 continue
-            lines.append(f"{tool}: {r.get('text', '')}")
+            text = r.get("text") or (f"failed: {r['error']}" if "error" in r else "")
+            lines.append(f"{tool}: {text}")
 
         return "\nTOOL_RESULTS\n" + "\n".join(lines) + "\n"

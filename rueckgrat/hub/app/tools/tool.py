@@ -16,6 +16,7 @@ class Tool(Task):
     offered_with = ()   # names of tools this one is offered with as an optional tool (ToolRegistry.companions), no laya question of its own
     requires = ()       # the capabilities it needs (Infrastructure.available: "image", "embedding", "internet" ...), without one it is not offered
     overrides = ()      # names of tools this one makes needless when both are detected (ToolRegistry.overridden), e.g. price_finder: websearch
+    fixable = False     # offered in a worker's fix rounds (ToolRegistry.fixable): a tool that makes or offers files, run again to fix a problem
     HELD_DATA = "held_data"     # result key: {kind: value} show_data held without a stored message (ToolRegistry.show_held)
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
@@ -71,6 +72,10 @@ class Tool(Task):
         """the context around a round's sequential calls of this tool (ToolRegistry._run_lane), e.g. one sandbox for all"""
         return nullcontext()
 
+    def background(self) -> bool:
+        """the call runs for an agent job, a task or a companion pass: no one waits for it (ToolExecutionTask background)"""
+        return self.tool_call.get("background") is True
+
     def runs_detached(self) -> bool:
         """a call of a DETACHED_TOOLS tool runs in the background. False keeps this call in its round"""
         return True
@@ -87,6 +92,12 @@ class Tool(Task):
         """attaches one file this tool held without a message (an item of its result's "attachments": {"tool", "name", ...})
         to message_id. only tools that hold files have it"""
         raise NotImplementedError(f"{cls.__name__} holds no attachments")
+
+    @classmethod
+    def looks_around(cls, call: Dict[str, Any], conversation_id: int) -> bool:
+        """whether call only reads where the conversation's work is (e.g. lists its folder): a recommended call like that
+        needs no value from the message (ToolRegistry.grounded). most tools: False"""
+        return False
 
     @classmethod
     def problems(cls, result: Dict[str, Any]) -> List[str]:

@@ -256,7 +256,7 @@ class Controller(AgentJob):
         parts = []
         for index, step in enumerate(self.done_steps, 1):
             for role, result in step:
-                parts.append(f"step {index}, {role}:\n{result.get('summary') or ''}\n{result.get('details') or ''}".strip())
+                parts.append(f"step {index}, {role}:\n{AgentJob.result_text(result)}".strip())
         return "\n\n".join(parts)[-MAX_CONTEXT_CHARS:]
 
     def _attachments(self) -> List[Dict[str, Any]]:

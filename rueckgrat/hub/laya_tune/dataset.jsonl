@@ -511,3 +511,24 @@
 {"lang": "en", "text": "My son asked me why the sky is blue and why sunsets are red, and I didn't know what to tell him. Can you explain it simply?", "labels": {"wikipedia": "r"}}
 {"lang": "en", "text": "Make me a list of ten names for a black kitten.", "labels": {}}
 {"lang": "en", "text": "Turn this sentence into a question: The train leaves at five.", "labels": {}}
+{"comment": "t490: join_files (joining audio or text files), and look-alikes that must not pick it", "lang": "en", "text": "Join chapter_01.mp3, chapter_02.mp3 and chapter_03.mp3 into one audio file.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Merge the four chapter audio files in ~/projects/sea_book into a single mp3.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Combine part1.wav and part2.wav into one recording.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Put all the mp3 files in the audio folder together into one long audiobook file, in name order.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Stitch these three voice memos together into one ogg file.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Concatenate notes_1.md and notes_2.md into one document.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Merge all the chapter text files of the book into one big manuscript file.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Combine the files intro.txt, main.txt and outro.txt into a single text file.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Join the audio of the chapters that were spoken in the step before into one file for the whole book.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Take the per-chapter mp3 files you made and glue them into one audiobook.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Merge the two podcast recordings episode_a.mp3 and episode_b.mp3, one after the other.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Combine every markdown file in the docs folder into one README.", "labels": {"join_files": "M"}}
+{"lang": "en", "text": "Read chapter_01.md aloud and give me the mp3.", "labels": {"text_to_speech": "M"}}
+{"lang": "en", "text": "Speak all four chapter files into one audiobook mp3 in my voice.", "labels": {"text_to_speech": "M"}}
+{"lang": "en", "text": "Merge these two lists of names and remove the duplicates: Anna, Ben, Carl and Ben, Dora, Anna.", "labels": {}}
+{"lang": "en", "text": "Combine the flavours of lemon and ginger into a recipe for a cake.", "labels": {}}
+{"lang": "en", "text": "Join me for a walk later, what do you think about the weather?", "labels": {"weather": "r"}}
+{"lang": "en", "text": "What is the best way to merge two git branches?", "labels": {}}
+{"lang": "en", "text": "Write a short poem that combines the sea and the mountains.", "labels": {}}
+{"lang": "en", "text": "Put the chapters of the story in a better order and tell me why.", "labels": {}}
+{"comment": "t495: a writer task of an audiobook job, it writes the text, text_to_speech must not be picked", "lang": "en", "text": "Write eight distinct chapters for an audiobook about the Younger Dryas impact hypothesis, using the research in research_notes.txt. Write each chapter to its own text file, chapter_01.txt to chapter_08.txt, engaging and suitable for narration. Do not mention audio, narration, or the audiobook format in the text itself.", "labels": {"write_file": "M"}}
