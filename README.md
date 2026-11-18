@@ -22,6 +22,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **fetch_url** — fetch content for given URL
     - **find_tools** — helps the AI to find tools it needs
     - **generate_image** — generate an image on request or on its own
+    - **join_files** — join audio or text files from the sandbox into one file in the given order (e.g. audiobook chapters), used by agent jobs and tasks
     - **show_map** — show a place on an OpenStreetMap map in the chat, tapping it opens the maps app
     - **poll** — ask the user a question with options to pick from in the chat
     - **price_finder** — looks for the best price of something and then shows you a ranked result in the chat
@@ -30,7 +31,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **spawn_job** — hand a bigger task to a background agent job that reports back when it is done
     - **task** — do something at a set time, once or repeating (reminders, alarms, wake-up calls, daily news or a price check); also list, change and cancel these tasks
     - **take_photo** — generate a photo of self, user, or both from current context
-    - **text_to_speech** — speak a short text or text files (e.g. the chapters of an audiobook) with the contact's voice into one audio file, downloadable by the user in chat (long ones as Ogg Opus)
+    - **text_to_speech** — speak a short text or text files (e.g. the chapters of an audiobook) with the contact's voice, or the voice chosen in the preferences, into one audio file (WAV, MP3 or Ogg), downloadable by the user in chat
     - **weather** — weather forcast for given location
     - **websearch** — search the web when requested or needed
     - **wikipedia** — search wikipedia when requested or needed
