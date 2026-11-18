@@ -1348,6 +1348,58 @@ class Hub:
         return None
 
     @classmethod
+    def voice_of(cls, selection: dict | None, gender: str = "") -> Optional[str]:
+        """the voice uuid of a VoiceSelector.get_voice() selection: None -> "" (no voice), the kept uuid, a predefined
+        voice copied to the user's voices or an uploaded wav. None if the hub call failed"""
+        if selection is None:
+            return ""
+        if "voice_id" in selection:
+            return selection["voice_id"]
+        if "predefined_id" in selection:
+            return cls.use_predefined_voice(selection["predefined_id"])
+        return cls.upload_voice(selection["bytes"], gender)
+
+    @classmethod
+    def get_tts_voice(cls) -> Optional[str]:
+        """the voice uuid the user chose for the text_to_speech tool, "" the contact's voice, None if the hub can't be reached"""
+        try:
+            response = requests.get(
+                f"{cls.url}/users/me/tts_voice",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("voice_id", "") or ""
+            logger.error(f"get tts voice - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_tts_voice {repr(e)}")
+        return None
+
+    @classmethod
+    def set_tts_voice(cls, voice_id: str) -> str | None:
+        """one of the user's voice uuids, "" the contact's voice again. None on success, else an error message for the user"""
+        try:
+            response = requests.put(
+                f"{cls.url}/users/me/tts_voice",
+                json={"voice_id": voice_id},
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return None
+            logger.error(f"set tts voice - {response.status_code} {response.reason}")
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+            return detail if isinstance(detail, str) else f"saving the voice failed ({response.status_code})"
+        except Exception as e:
+            logger.error(f"failed to set_tts_voice {repr(e)}")
+            return "could not reach the hub"
+
+    @classmethod
     def get_predefined_voices(cls) -> list:
         """the voices that come with rueckgrat, each with id, name, description, gender and language"""
         try:

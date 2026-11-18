@@ -66,12 +66,15 @@ class ColorFormatter(logging.Formatter):
         "CRITICAL": MAGENTA
     }
 
+    # the fields the formats use that a filter adds (UserFilter): a record that missed the filter still formats
+    DEFAULTS = {"user_prefix": ""}
+
     def __init__(self, use_colors=True, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.use_colors = use_colors
 
     def format(self, record):
-        record = logging.makeLogRecord(record.__dict__.copy())
+        record = logging.makeLogRecord({**self.DEFAULTS, **record.__dict__})    # a copy, the record itself stays
         msg = record.getMessage()
         
         if self.use_colors:
