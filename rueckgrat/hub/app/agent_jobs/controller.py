@@ -32,7 +32,8 @@ class Controller(AgentJob):
     refuses another Controller, so the tree is one level deep"""
 
     def __init__(self, prompt: str, job_id: Optional[str] = None, time_limit: float = DEFAULT_TIME_LIMIT,
-                 infrastructure=None, progress: Optional[Callable[[str, int, int], None]] = None, tool_context: Optional[Dict[str, Any]] = None):
+                 infrastructure=None, progress: Optional[Callable[[str, int, int], None]] = None, tool_context: Optional[Dict[str, Any]] = None,
+                 protocol: Optional[Protocol] = None):
         super().__init__("controller", prompt, job_id, time_limit, infrastructure, tool_context)
         self.progress = progress        # callback(name, step, total): 0, 0 while planning, then the step i of n that starts
         self.name = short_name(prompt)  # the planner's name for the job replaces it
@@ -43,7 +44,7 @@ class Controller(AgentJob):
         self.inbox: queue.Queue = queue.Queue()                  # the user's messages while the job runs, add_message()
         self.messages: List[str] = []                            # the ones the reviews have read
         self.replans = 0
-        self.protocol = Protocol()      # #174 the job's decision trace, its workers write into it too
+        self.protocol = protocol or Protocol()  # #174 the job's decision trace, its workers write into it too. #215 the spawn tool's is stored as it happens
         self.trace("job_started", prompt=prompt)
 
     def spawn(self, role: str, prompt: str, agent_class: Type[AgentJob] = AgentJob, time_limit: Optional[float] = None,
@@ -105,7 +106,19 @@ class Controller(AgentJob):
         attachments = self._attachments()
         if attachments:
             self.result = {**self.result, "attachments": attachments}
+        if not self._delivered(attachments):
+            logger.warning(f"controller {self.job_id}: the job asks for files, none was saved or offered")
+            self.trace("not_delivered", ok=False)
+            self.result = {**self.result, "summary": f"{prompts.NOT_DELIVERED_PART} {self.result.get('summary') or ''}".strip(), "delivered": False}
         return True
+
+    def _delivered(self, attachments: List[Dict[str, Any]]) -> bool:
+        """a job that asks for files (AgentJob.file_task of the job or one of its tasks) delivered some: a worker's tools saved
+        a file or hold one for the user. True for a job that asks for none"""
+        texts = [self.prompt] + [str(task.get("prompt") or "") for step in self.plan or [] for task in step]
+        if not any(AgentJob.file_task(text) for text in texts):
+            return True
+        return bool(attachments) or any(result.get("saved") for step in self.done_steps for _, result in step)
 
     def _retry(self, worker: AgentJob):
         """one llm call revises the failed worker's task with the reason it failed (or keeps it), a new worker runs it in
@@ -172,7 +185,7 @@ class Controller(AgentJob):
         # #174 the plan is stored once: the new one replaces it, the line says what changed
         removed, added = self.protocol.set_plan(self.name, self.plan, keep=len(self.done_steps))
         self.trace("review", step=finished, decision="restart" if action == "restart" else "refine",
-                   revision=self.protocol.plan["revision"], removed=removed, added=added)
+                   revision=self.protocol.revision(), removed=removed, added=added)
 
     @staticmethod
     def _strict_json(text: Optional[str]):

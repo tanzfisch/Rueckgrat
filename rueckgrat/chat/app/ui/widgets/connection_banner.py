@@ -13,6 +13,8 @@ SERVICE_ICONS = {
     "decision": (ft.Icons.ALT_ROUTE, "Decisions (Laya)"),
     "embedding": (ft.Icons.MEMORY, "Memory search (embeddings)"),
     "internet": (ft.Icons.PUBLIC_OFF, "Internet"),
+    "library": (ft.Icons.LOCAL_LIBRARY_OUTLINED, "Offline library (Project NOMAD)"),
+    "offline_map": (ft.Icons.MAP_OUTLINED, "Offline map (Project NOMAD)"),
 }
 
 

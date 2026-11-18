@@ -244,6 +244,10 @@ class Hub:
         cls.websocket_client.register_state_change(callback)
 
     @classmethod
+    def unregister_connection_state(cls, callback: Callable[[str], None]):
+        cls.websocket_client.unregister_state_change(callback)
+
+    @classmethod
     def unregister_incomming_message(cls, callback: Callable[[dict], None]):
         cls.websocket_client.unregister_incomming_message(callback)
 
@@ -279,9 +283,44 @@ class Hub:
 
     @classmethod
     def cancel_job(cls, job_id: str) -> bool:
-        """#152 the cancel button of a background job: the hub stops it and answers with job_progress state cancelled"""
+        """#152 the cancel button of a background job: the hub stops it and answers with a job_update state cancelled"""
         payload = {"cancel_job": {"job_id": job_id}}
         return cls.websocket_client.send_message(json.dumps(payload))
+
+    @classmethod
+    def get_jobs(cls) -> bool:
+        """#215 the Backroom: the hub answers with {"jobs": {"items": [job_update, ...]}} (it also sends it on connect)"""
+        return cls.websocket_client.send_message(json.dumps({"get_jobs": {}}))
+
+    @classmethod
+    def watch_protocol(cls, job_id: str, after_seq: int = 0) -> bool:
+        """#215 the hub sends the protocol's lines after after_seq as {"protocol_lines": {job_id, lines, plan}}, then the
+        new ones as they come, until unwatch_protocol. {"protocol_error": {job_id}}: the user has no such protocol"""
+        return cls.websocket_client.send_message(json.dumps({"watch_protocol": {"job_id": job_id, "after_seq": after_seq}}))
+
+    @classmethod
+    def unwatch_protocol(cls, job_id: str) -> bool:
+        return cls.websocket_client.send_message(json.dumps({"unwatch_protocol": {"job_id": job_id}}))
+
+    @classmethod
+    def get_protocol_output(cls, job_id: str, ref: str) -> bool:
+        """#215 a long text of a protocol line (its data.out ref): {"protocol_output": {job_id, ref, kind, text}}"""
+        return cls.websocket_client.send_message(json.dumps({"get_protocol_output": {"job_id": job_id, "ref": ref}}))
+
+    @classmethod
+    def contact_opened(cls, contact_id: int, conversation_id: int) -> bool:
+        """#167 the user opened this contact's conversation: a held surprise message is posted if there is one"""
+        return cls.websocket_client.send_message(json.dumps({"contact_opened": {"contact_id": contact_id, "conversation_id": conversation_id}}))
+
+    @classmethod
+    def contact_closed(cls, contact_id: int) -> bool:
+        """#167 the user left this contact's conversation"""
+        return cls.websocket_client.send_message(json.dumps({"contact_closed": {"contact_id": contact_id}}))
+
+    @classmethod
+    def typing(cls, contact_id: int, conversation_id: int) -> bool:
+        """#167 the user started typing: a still-held reach-out is dropped"""
+        return cls.websocket_client.send_message(json.dumps({"typing": {"contact_id": contact_id, "conversation_id": conversation_id}}))
 
     @classmethod
     def generate(cls, prompt: dict) -> bool:

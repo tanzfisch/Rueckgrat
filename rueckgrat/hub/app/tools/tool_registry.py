@@ -123,8 +123,12 @@ class ToolRegistry:
         return {name: tool for name, tool in self._registered.items() if self.usable(tool)}
 
     def usable(self, tool: type[Tool]) -> bool:
-        """the capabilities tool needs are available now (Infrastructure.available)"""
-        return not tool.requires or self.infrastructure is None or all(self.infrastructure.available(name) for name in tool.requires)
+        """the capabilities tool needs are available now (Infrastructure.available): all of Tool.requires and one of
+        Tool.requires_any"""
+        if self.infrastructure is None:
+            return True
+        return all(self.infrastructure.available(name) for name in tool.requires) and \
+            (not tool.requires_any or any(self.infrastructure.available(name) for name in tool.requires_any))
 
     def attach_held(self, db, user_id: int, conversation_id: int, message_id: int, attachments: List[Dict[str, Any]], push: bool = True) -> None:
         """attaches the files tools held without a message (their results' "attachments", each names its tool) to message_id,

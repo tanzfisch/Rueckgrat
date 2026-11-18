@@ -34,7 +34,7 @@ the settings' values (max_per_day, max_rows, max_sentences, messaging, life) com
 change the wording together and bump PROMPT_VERSION, it is logged with every pass so replies can be traced to a version.
 """
 
-PROMPT_VERSION = "4"
+PROMPT_VERSION = "5"
 
 # ---------------------------------------------------------------- the shared state of every pass
 STATE = """
@@ -132,7 +132,9 @@ MESSAGING {user_name}:
 - send only when you have something real: a moment of your day worth sharing, something that concerns {user_name}, a follow-up you promised
 - never send when {user_name} wrote very recently, it's night for them, or you have nothing new
 - reference your day and the conversation, never generic small talk ("how are you?")
-- the text is a chat message in your own voice, short (max {max_sentences} sentences), no greeting formulas, no questions just to get a reply
+- when you send, write two versions of the same thought, both in your own voice, short (max {max_sentences} sentences), no greeting formulas, no questions just to get a reply:
+  - reach_out: you write first, as you would in a message you send on your own
+  - surprise: {user_name} just opened the conversation while you were about to write; a light "oh, you are here" that still says the same thing, not overdone, not a theatrical surprise
 - reason = one sentence why you send or don't
 """
 
@@ -144,7 +146,7 @@ Return ONLY valid JSON in this format:
     "calendar": [
         {{"day": "today", "time": "HH:MM", "kind": "event", "note": ""}}
     ],
-    "message": {{"send": false, "reason": "", "text": ""}}
+    "message": {{"send": false, "reason": "", "reach_out": "", "surprise": ""}}
 }}
 """
 

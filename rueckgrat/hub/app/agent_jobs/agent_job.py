@@ -19,6 +19,12 @@ MAX_TOOL_CHARS = 12000
 WORKER_TOOLS = ["websearch"]   # always run for a worker, the controller's task sets its role and scope (not for a building worker, see BUILD_TOOLS)
 FAILED_LINE = re.compile(r"^\W*FAILED:", re.MULTILINE)    # a worker's reply with a line starting FAILED: failed, also mid-reply
 WORKER_FIX_ROUNDS = 3          # a worker's extra passes of the fixable tools (Tool.fixable) while their calls fail (ToolExecutionTask._fix)
+# a task that makes or uses files or runs something: it names a path in the contact's files or a file by its name
+# (main.py, css/style.css, `app.js`). a plain ".js" only with a folder or in backticks, "Node.js" is a name too
+FILE_TASK = re.compile(r"~/|/home/|`[^`\s]+\.js`|(?<![\w.])[\w-]+/[\w./-]*\.js\b|(?<![\w.])[\w-]+(?:/[\w.-]+)*\.(?:py|ipynb|ts|tsx|jsx|"
+                       r"html?|css|scss|md|txt|json|ya?ml|toml|ini|cfg|sh|csv|tsv|xml|svg|png|jpe?g|gif|webp|mp3|ogg|wav|"
+                       r"c|cc|cpp|h|hpp|rs|go|java|kt|rb|php|lua|sql|pdf|docx?|xlsx?)\b", re.IGNORECASE)
+LINK = re.compile(r"\b(?:https?|ftp)://\S+|\bwww\.\S+", re.IGNORECASE)    # a link names a page, not a file to make (file_task)
 
 class AgentJob:
     # never offered besides the registry's WORKER_EXCLUDED_TOOLS. a worker takes no photos: take_photo is an optional
@@ -32,6 +38,9 @@ class AgentJob:
     # a worker whose detection made one of these mandatory has to make its file: when it still fails after the fix rounds
     # the worker fails in code (step), the llm can't report a file that is not there
     FILE_TOOLS = ("text_to_speech", "write_file", "run_code", "join_files")
+    # the tools that make, run or offer something: a worker whose task makes files or runs commands (FILE_TASK) and that
+    # called none of them and holds no file fails in code (_idle), it can't have done its task
+    MAKE_TOOLS = BUILD_TOOLS + ("share_file", "generate_image")
     _turns = None           # the hub's Turns, see set_turns
     connections = None      # user_id -> open /ws connections
 
@@ -67,6 +76,9 @@ class AgentJob:
         self.excluded_tools = ()    # a retried task's worker: the tools that failed the attempts before (Controller._retry)
         self.failed_tools = []      # the tools that failed or found nothing in this worker's run, a failed result names them
         self._stuck: List[str] = []     # the problems of its mandatory FILE_TOOLS left after the fix rounds (_use_tools)
+        self._offered: List[str] = []   # the tools its tool setup offered (_use_tools), for _idle's reason
+        self._called: List[str] = []    # the tools it called, in order (_use_tools)
+        self._detected: List[str] = []  # the tools its detection made mandatory (_use_tools)
 
     def trace(self, action: str, ok=None, step=None, task=None, **data):
         """#174 one line of this agent in the job's protocol, by default in its own step and task"""
@@ -100,12 +112,17 @@ class AgentJob:
         if self._stuck:
             self._fail_stuck()
             return True
+        idle = self._idle() if self.tool_context else ""
+        if idle:
+            self._fail_idle(idle)
+            return True
         text = self.chat([{"role": "user", "content": prompts.WORKER_PROMPT.format(role=self.role, prompt=self.prompt, tools=tools)}], 0.3).strip()
         if not text or FAILED_LINE.search(text):
             self.result = {"error": text or "no reply from the llm", **({"failed_tools": self.failed_tools} if self.failed_tools else {})}
         else:
             self.result = {"summary": text, "details": "", **({"attachments": self.attachments} if self.attachments else {}),
-                           **({"saved": self._saved} if self._saved else {})}
+                           **({"saved": self._saved} if self._saved else {}),
+                           **({"tools": list(dict.fromkeys(self._called))} if self.tool_context else {})}
         self.trace("done", ok="error" not in self.result, **({"error": text or "no reply"} if "error" in self.result else {"summary": text}))
         return True
 
@@ -118,12 +135,38 @@ class AgentJob:
         logger.warning(f"agent {self.role} {self.job_id}: {error[:300]}")
         self.trace("done", ok=False, error=error)
 
+    def _idle(self) -> str:
+        """why a worker fails that can't have done its task: its own task makes or uses files or runs commands (FILE_TASK,
+        or its detection made a BUILD_TOOLS one mandatory) but it called none of the MAKE_TOOLS and its tools wrote and
+        hold no file, so a reply that it did is made up. "" when it is not idle"""
+        task = self.prompt.partition(prompts.RESULTS_MARKER_PART)[0]
+        if not (self.file_task(task) or any(name in self.BUILD_TOOLS for name in self._detected)):
+            return ""
+        if self._saved or self.attachments or any(name in self.MAKE_TOOLS for name in self._called):
+            return ""
+        return prompts.IDLE_WORKER_PART.format(offered=", ".join(self._offered) or "none", called=", ".join(self._called) or "none")
+
+    @staticmethod
+    def file_task(text: str) -> bool:
+        """text (a task or a job) makes or uses files or runs commands: FILE_TASK outside its links"""
+        return bool(FILE_TASK.search(LINK.sub(" ", text or "")))
+
+    def _fail_idle(self, reason: str) -> None:
+        """the worker's failed result when it is idle (_idle), no llm call: the retry or the job's failure says why"""
+        self.result = {"error": reason, **({"failed_tools": self.failed_tools} if self.failed_tools else {})}
+        logger.warning(f"agent {self.role} {self.job_id}: {reason}")
+        self.trace("done", ok=False, error=reason)
+
     @staticmethod
     def result_text(result: Dict[str, Any]) -> str:
-        """a worker's result as text for the steps after it: its summary, details and the files its tools wrote with their
-        full paths, so a later worker uses them instead of making them again"""
+        """a worker's result as text for the steps after it, the reviews and the merge: its summary, details, the tools it
+        called, the files its tools wrote with their full paths (so a later worker uses them instead of making them again)
+        and the files it holds for the user. what a reply only claims shows as no tool and no file"""
         saved = prompts.SAVED_FILES_PART.format(paths=", ".join(result["saved"])) if result.get("saved") else ""
-        return "\n".join(part for part in (result.get("summary") or "", result.get("details") or "", saved) if part).strip()
+        names = [str(held.get("name")) for held in result.get("attachments") or [] if held.get("name")]
+        held = prompts.ATTACHED_FILES_PART.format(names=", ".join(names)) if names else ""
+        used = prompts.TOOLS_USED_PART.format(tools=", ".join(result["tools"]) or "none") if "tools" in result else ""
+        return "\n".join(part for part in (result.get("summary") or "", result.get("details") or "", used, saved, held) if part).strip()
 
     def _use_tools(self) -> str:
         """a worker's tools (run_tools) and their results as the TOOL_RESULTS block. a failed tool or a search that found
@@ -146,6 +189,8 @@ class AgentJob:
         if failed:
             logger.warning(f"agent {self.role} {self.job_id}: tools failed {'; '.join(failed)}")
         self._stuck = [text for name, text in execution.failing() if name in self.FILE_TOOLS and name in execution.tool_names]
+        self._offered = list(dict.fromkeys(execution.tool_names + execution.recommended))
+        self._called = [entry["call"].get("tool") for entry in execution.executed]
 
         text = execution.results_prompt(results)
         if empty_search:
@@ -159,15 +204,21 @@ class AgentJob:
     def run_tools(self, detect: str, query: str, always: list, optional_when=()):
         """detects and runs the tools of detect. always: run in any case, unless the detection found one of optional_when"""
         from app.tasks import ToolDetectionTask, ToolExecutionTask
+        from app.tasks.tool_detection_task import SOURCE_LLM
         context = self.tool_context
         registry = context["tool_registry"]
         excluded = tuple(name for name in registry.WORKER_EXCLUDED_TOOLS if name not in self.ALLOWED_TOOLS) + self.EXCLUDED_TOOLS + tuple(self.excluded_tools)
         detection = ToolDetectionTask(detect, registry, self.infrastructure, excluded_tools=excluded)
         registry.task_queue.run(detection)
         detection.trace(context["conversation_id"], f"{self.role} {self.job_id}")
-        detected = (detection.get_result() or {}).get("tool_names") or []
-        recommended = (detection.get_result() or {}).get("recommended") or []
-        if any(name in detected for name in optional_when):
+        detection_result = detection.get_result() or {}
+        decided = detection_result.get("tool_names")     # None: nothing decided (no laya, no llm pick, no text score)
+        detected = decided or []
+        recommended = detection_result.get("recommended") or []
+        self._detected = list(detected)
+        # the llm's pick without laya only recommends: a build tool it picked counts as found here too
+        found = detected + (recommended if detection.source() == SOURCE_LLM else [])
+        if any(name in found for name in optional_when):
             always = [name for name in always if name in detected]
 
         request = ChatRequest(
@@ -191,10 +242,11 @@ class AgentJob:
             fix_rounds=WORKER_FIX_ROUNDS, background=True
         )
         
-        logger.info(f"agent {self.role} {self.job_id}: tools {execution.tool_names}, recommended {execution.recommended}, detected {detected}")
-        self.trace("tools", tools=execution.tool_names, recommended=execution.recommended or None, detected=detected)
+        logger.info(f"agent {self.role} {self.job_id}: tools {execution.tool_names}, recommended {execution.recommended}, detected {decided}"
+                    f" ({detection.source() or 'nothing decided'})")
+        self.trace("tools", tools=execution.tool_names, recommended=execution.recommended or None, detected=decided, detection=detection.source())
         Trace.write(context["conversation_id"], f"tools of {self.role} {self.job_id}", f"TOOL SETUP QUERY:\n{query}",
-                    mandatory=execution.tool_names, recommended=execution.recommended, detected=detected, always=list(always),
+                    mandatory=execution.tool_names, recommended=execution.recommended, detected=decided, detection=detection.source(), always=list(always),
                     rounds=registry.rounds(execution.tool_names, execution.recommended), excluded=list(excluded))
         registry.task_queue.run(execution)
         self._trace_calls(execution)

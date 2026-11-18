@@ -316,6 +316,8 @@ Example (offset):
 
 FETCH_URL_DESCRIPTION = "reads a web page the user gives a link to and returns a condensed summary of it"
 
+FETCH_URL_OFFLINE_PART = "no internet right now, {url} can not be read. Pages in the local network still work."
+
 FETCH_URL_PROMPT = """
 FETCH_URL:
 Use when the user gives a URL and wants to know what is on the page.
@@ -645,11 +647,13 @@ Example:
 
 # ---------------------------------------------------------------- websearch
 
-WEBSEARCH_DESCRIPTION = "searches the web for current, factual or local information (news, events, prices, stocks, opening hours)"
+WEBSEARCH_DESCRIPTION = ("searches the web or the offline library for current, factual or local information (news, events, "
+                         "prices, stocks, opening hours, how-tos)")
 
 WEBSEARCH_PROMPT = """
 WEBSEARCH:
 Use for current, factual, real-time, or location-specific information, or when you need fresh ideas.
+It searches the web, or the offline library (encyclopedias, manuals, Q&A sites) when there is no internet; the results say which.
 
 Parameters:
 - query (string, required): the search query
@@ -665,11 +669,13 @@ WEBSEARCH_ANSWER_LINE = "{source}: {answer} ({url})"
 
 # ---------------------------------------------------------------- wikipedia
 
-WIKIPEDIA_DESCRIPTION = "encyclopedic summary of a well known person, place, thing, concept or historic event"
+WIKIPEDIA_DESCRIPTION = ("encyclopedic summary of a well known person, place, thing, concept or historic event, from the web "
+                         "or the offline library")
 
 WIKIPEDIA_PROMPT = """
 WIKIPEDIA:
 Use for a quick encyclopedic summary of a well-known person, place, thing, or event. Not for news or current values.
+Without internet the summary comes from the offline library's copy of Wikipedia, which may be older.
 
 Parameters:
 - query (string, required): the topic

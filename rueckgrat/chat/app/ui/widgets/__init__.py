@@ -23,6 +23,8 @@ from .audio_player import AudioPlayer
 from .files_panel import FilesPanel
 from .files_dock import FilesDock
 from .alarm_box import AlarmBox
+from .backroom_job_card import BackroomJobCard
+from .protocol_view import ProtocolView, show_protocol
 
 __all__ = [
     "MessageBox", 
@@ -54,4 +56,7 @@ __all__ = [
     "FilesPanel",
     "FilesDock",
     "AlarmBox",
+    "BackroomJobCard",
+    "ProtocolView",
+    "show_protocol",
 ]

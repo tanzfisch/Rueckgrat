@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 import requests
 from .tool import Tool
 from . import prompts
+from app.utils.library import Library, LibraryError
 import re
 
 from app.common import get_logger, MessageQueue
@@ -20,6 +21,7 @@ PHOTON_URL = "https://photon.komoot.io/api/"
 OPEN_METEO_URL = "https://geocoding-api.open-meteo.com/v1/search"
 TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 TILE_DIR = Path("/hub/images/map_tiles")
+OFFLINE_TILE_DIR = TILE_DIR / "offline"     # the tiles the hub drew from NOMAD's map files, apart from the osm ones
 TILE_MAX_AGE = 7 * 24 * 3600
 MAX_ZOOM = 16
 MAP_TIMEOUT = 10
@@ -135,6 +137,27 @@ def _open_meteo(query: str) -> Optional[Dict[str, Any]]:
 
 GEOCODERS = [("nominatim", _nominatim), ("photon", _photon), ("open-meteo", _open_meteo)]
 
+# zoom of a place found offline by the decimals of its Wikipedia coordinates (how exact they are): a country has none,
+# a region 1-2, a city or a mountain 4-5 (degrees, minutes, seconds), a building 6 or more
+DECIMALS_ZOOM = {0: 5, 1: 8, 2: 10, 3: 12, 4: 13, 5: 13}
+
+
+def geocode_offline(query: str, library: Library) -> Optional[Dict[str, Any]]:
+    """the place from the offline library's Wikipedia: the article about query and its coordinates, None without them.
+    raises LibraryError when the library does not answer"""
+    book = library.wikipedia_book("en")
+    if book is None:
+        return None
+    candidates = [query] + ([query.split(",", 1)[0].strip()] if "," in query else [])
+    for candidate in candidates:     # "Sky Tower, Victoria Street West, Auckland": the whole text, then its first part
+        article = library.lookup(book["id"], candidate)
+        coordinates = Library.coordinates(article["html"]) if article else None
+        if coordinates:
+            lat, lon, decimals = coordinates
+            return _place(lat, lon, article["title"], DECIMALS_ZOOM.get(decimals, MAX_ZOOM - 1))
+    return None
+
+
 def geocode(query: str) -> Optional[Dict[str, Any]]:
     """{"lat", "lon", "display_name", "zoom"} of the first service with a match: nominatim, photon, open-meteo.
     None if all of them answered without a match. raises when none matched and one failed, so a failure is not cached"""
@@ -165,10 +188,37 @@ def geocode(query: str) -> Optional[Dict[str, Any]]:
         return place
 
 
-def get_tile(z: int, x: int, y: int) -> Optional[bytes]:
-    """png bytes of one osm tile, from the cache if it's younger than TILE_MAX_AGE, else downloaded (an old copy if that fails)"""
+def get_tile(z: int, x: int, y: int, infrastructure=None) -> Optional[bytes]:
+    """png bytes of one map tile: osm while the internet is there (infrastructure.available), drawn from NOMAD's map files
+    without it or when osm has none. None when neither has it"""
     if not (0 <= z <= MAX_ZOOM and 0 <= x < 2 ** z and 0 <= y < 2 ** z):
         return None
+    online = infrastructure is None or infrastructure.available("internet")
+    tile = _osm_tile(z, x, y) if online else None
+    if tile is None and infrastructure is not None and infrastructure.available("offline_map"):
+        tile = _offline_tile(z, x, y, infrastructure.nomad().offline_map())
+    return tile
+
+
+def _offline_tile(z: int, x: int, y: int, offline_map) -> Optional[bytes]:
+    """a tile drawn from NOMAD's map files, cached like the osm tiles (TILE_MAX_AGE)"""
+    path = OFFLINE_TILE_DIR / str(z) / str(x) / f"{y}.png"
+    if path.is_file() and time.time() - path.stat().st_mtime < TILE_MAX_AGE:
+        return path.read_bytes()
+    try:
+        tile = offline_map.render(z, x, y)
+    except Exception as e:
+        logger.error(f"offline map tile {z}/{x}/{y} - {e!r}")
+        tile = None
+    if tile is None:
+        return path.read_bytes() if path.is_file() else None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(tile)
+    return tile
+
+
+def _osm_tile(z: int, x: int, y: int) -> Optional[bytes]:
+    """png bytes of one osm tile, from the cache if it's younger than TILE_MAX_AGE, else downloaded (an old copy if that fails)"""
     path = TILE_DIR / str(z) / str(x) / f"{y}.png"
     if path.is_file() and time.time() - path.stat().st_mtime < TILE_MAX_AGE:
         return path.read_bytes()
@@ -186,7 +236,7 @@ def get_tile(z: int, x: int, y: int) -> Optional[bytes]:
 
 class MapTool(Tool):
     description = prompts.MAP_DESCRIPTION
-    requires = ("internet",)    # geocoding and the map tiles
+    requires_any = ("internet", "offline_map")  # geocoding and tiles online, else NOMAD's map and its library's coordinates
     thresholds = (0.45, 0.5)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask how to get to a place?",
@@ -210,17 +260,30 @@ class MapTool(Tool):
         
         MessageQueue().send_status_message("looking up the map")
 
-        try:
-            place = geocode(query)
-        except Exception as e:
-            logger.error(f"geocoding '{query}' failed: {e}")
-            place = None
+        online = self.infrastructure is None or self.infrastructure.available("internet")
+        place = None
+        if online:
+            try:
+                place = geocode(query)
+            except Exception as e:
+                logger.error(f"geocoding '{query}' failed: {e}")
+        nomad = self.infrastructure.nomad() if self.infrastructure is not None else None
+        library = nomad.library() if nomad is not None else None
+        if place is None and library is not None:
+            try:
+                place = geocode_offline(query, library)
+                if place:
+                    logger.info(f"geocoded '{query}' with the offline library")
+            except LibraryError as e:
+                logger.error(f"offline geocoding '{query}' failed: {e}")
 
         if place is None:
             logger.error(f"can't find place in map")
             return
         
         place = {"query": query, "label": label, **place}
+        if not online and nomad is not None and nomad.url():
+            place["link"] = nomad.map_link(place["lat"], place["lon"], place["zoom"])     # the tap opens NOMAD's map
         self.show_data("map", place)
         self.add_result({"tool": self.name(), "text": self._text(place["display_name"]), "place": place})
 

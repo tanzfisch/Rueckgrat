@@ -3,7 +3,7 @@ from typing import Dict,  Any
 from .websearch_tool import WebsearchTool
 from . import prompts
 from app.tasks.summarize_task import SummarizeTask
-from app.utils.url_check import check_url, FetchBlocked
+from app.utils.url_check import check_url, is_local_host, FetchBlocked
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -33,6 +33,8 @@ def normalize_url(url: str) -> str:
 class FetchUrlTool(WebsearchTool):
     """subclass of WebsearchTool only to reuse _extract_page and _get_org_name, everything else is its own"""
     description = prompts.FETCH_URL_DESCRIPTION
+    requires = ()       # always there: a link in the LAN (NOMAD, a NAS) works without the internet
+    requires_any = ()
     text_only = True    # no laya question: a link in the message selects it (text_score)
     PAGE_TIMEOUT = 20           # one page the user is waiting for, not a batch
     BROWSER_FALLBACK = True     # the user asked for this page, worth a headless browser if plain http comes back thin
@@ -59,7 +61,7 @@ class FetchUrlTool(WebsearchTool):
         MessageQueue().send_status_message("reading the page")
 
         try:
-            check_url(url)
+            self._check(url)
             page = self._extract_page(url)
             if not page:
                 logger.error(f"failed to extract page {url}")
@@ -84,8 +86,22 @@ class FetchUrlTool(WebsearchTool):
             
         except FetchBlocked as e:
             logger.error(f"failed to fetch {url} {repr(e)}")
+            self.add_result({"tool": self.name(), "error": str(e)})
         except Exception as e:
             logger.error(f"failed to fetch {url} {repr(e)}")
+
+    def _check(self, url: str) -> None:
+        """raises FetchBlocked when url may not be fetched (url_check) or needs the internet while it is not there
+        (also simulated): only a host in the LAN or on this machine is fetched then"""
+        online = self.infrastructure is None or self.infrastructure.available("internet")
+        try:
+            parsed, _, ips = check_url(url)
+        except FetchBlocked as e:
+            if not online and str(e).startswith("can't resolve"):
+                raise FetchBlocked(prompts.FETCH_URL_OFFLINE_PART.format(url=url))
+            raise
+        if not online and not is_local_host(parsed.hostname, ips):
+            raise FetchBlocked(prompts.FETCH_URL_OFFLINE_PART.format(url=url))
 
     @classmethod
     def prompt(cls) -> str:

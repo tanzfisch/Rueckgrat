@@ -1,9 +1,11 @@
+import asyncio
+
 import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import Header, MessageBox, OneLineBubble
-from app.utils import Hub
+from app.ui.widgets import Header, MessageBox, OneLineBubble, BackroomJobCard, show_protocol
+from app.utils import Hub, Backroom
 from app.common import get_logger
 
 logger = get_logger()
@@ -13,6 +15,7 @@ REPEATS = ["once", "every 15 minutes", "every 30 minutes", "hourly", "every 2 ho
            "every 12 hours", "daily", "weekdays", "weekly"]
 EDITOR_WIDTH = 400
 WHEN_HINT = "07:30, tomorrow 07:30, friday 18:00, 2026-11-18 07:30 or in 20 minutes"
+TICK = 1.0      # seconds: the running jobs' elapsed time
 
 
 def _update(control: ft.Control):
@@ -22,47 +25,133 @@ def _update(control: ft.Control):
         pass  # not on the page (anymore)
 
 
-class TasksPage(BasePage):
-    """#170 the user's open tasks with all contacts (the task tool, GET /tasks): contact, next run, repeat, alarm and text,
-    next first. "+" makes one, a task's buttons change or cancel it. the hub checks the values and the limits"""
+class BackroomPage(BasePage):
+    """#215 the Backroom: what the contacts do in the background, of all contacts. the agent jobs and the task and
+    companion passes (Backroom, live from the hub: running ones and those of the last day) with their protocols and the
+    cancel of a running agent job, then #170 the user's scheduled tasks (the task tool, GET /tasks): contact, next run,
+    repeat, alarm and text, next first. "+" makes one, a task's buttons show its last run's protocol, change or cancel it"""
 
     def __init__(self, navigator):
         super().__init__(navigator)
-        self.header = Header(navigator, selected_contact=False)
-        self.header.on_go_back = self.on_go_back
-        self.status = ft.Text("loading...", color=theme.TEXT_DIM)
-        self.list_view = ft.ListView(expand=True, spacing=8)
-        self.contacts: list[dict] = []
+        self._header = Header(navigator, selected_contact=False)
+        self._header.on_go_back = self.on_go_back
+        self._title = ft.Text("Backroom", size=20, weight=ft.FontWeight.BOLD, color=theme.TEXT)
+        self._jobs_status = ft.Text("", color=theme.TEXT_DIM)
+        self._jobs_view = ft.Column(spacing=8)
+        self._status = ft.Text("loading...", color=theme.TEXT_DIM)
+        self._tasks_view = ft.Column(spacing=8)
+        self._list_view = ft.ListView(expand=True, spacing=8, controls=[
+            self._section("Jobs"), self._jobs_status, self._jobs_view,
+            self._section("Scheduled tasks"), self._status, self._tasks_view,
+        ])
+        self._cards: dict[str, BackroomJobCard] = {}        # job_id -> its card
+        self._task_buttons: dict[int, ft.IconButton] = {}   # task id -> its protocol button
+        self._contacts: list[dict] = []
+        self._ticking = False
         self.controls = [
             ft.Container(
                 expand=True,
                 margin=20,
-                content=ft.Column(expand=True, controls=[self.header, self.status, self.list_view]),
+                content=ft.Column(expand=True, controls=[self._header, self._title, self._list_view]),
             ),
         ]
+
+    @staticmethod
+    def _section(text: str) -> ft.Control:
+        return ft.Text(text, weight=ft.FontWeight.BOLD, color=theme.TEXT_LABEL)
 
     def on_go_back(self, e=None):
         self.navigator.back()
 
     def on_enter(self, **kwargs):
+        Backroom.add_listener(self._on_jobs)
+        self.show_jobs()
         self.load_tasks()
+        Hub.get_jobs()      # fresh, the listener shows it
+        self._ticking = True
+        self.page.run_task(self._tick)
+
+    def on_leave(self):
+        self._ticking = False
+        Backroom.remove_listener(self._on_jobs)
+
+    async def _tick(self):
+        while self._ticking:
+            await asyncio.sleep(TICK)
+            for card in list(self._cards.values()):
+                card.tick()
+
+    def _on_jobs(self, job_id):
+        """Backroom: a job changed (job_id) or all of them (None)"""
+        if job_id is not None and job_id in self._cards and Backroom.job(job_id) is not None:
+            card = self._cards[job_id]
+            was_running = card.job().get("state") == "running"
+            card.set_job(Backroom.job(job_id))
+            if was_running == (card.job().get("state") == "running"):
+                self._update_task_buttons()
+                return      # same place in the list
+        self.show_jobs()
+
+    def show_jobs(self):
+        jobs = Backroom.jobs()
+        cards = {}
+        for job in jobs:
+            card = self._cards.get(job["job_id"])
+            if card is None:
+                card = BackroomJobCard(job, on_protocol=self.open_protocol, on_cancel=self.confirm_cancel)
+            elif card.job() != job:
+                card.set_job(job)
+            cards[job["job_id"]] = card
+        self._cards = cards
+        self._jobs_view.controls = [cards[job["job_id"]] for job in jobs]
+        running = Backroom.running_count()
+        self._jobs_status.value = (f"{running} running, " if running else "") + f"{len(jobs)} of the last day" if jobs else \
+            "nothing running, nothing in the last day"
+        self._update_task_buttons()
+        _update(self._jobs_status)
+        _update(self._jobs_view)
+
+    def _update_task_buttons(self):
+        for task_id, button in self._task_buttons.items():
+            disabled = Backroom.latest_for_source(task_id) is None
+            if button.disabled != disabled:
+                button.disabled = disabled
+                _update(button)
+
+    def open_protocol(self, job: dict):
+        show_protocol(self.page, job)
+
+    def open_task_protocol(self, task: dict):
+        """the protocol of the task's last run"""
+        job = Backroom.latest_for_source(task["id"])
+        if job is not None:
+            self.open_protocol(job)
+
+    def confirm_cancel(self, job: dict):
+        def cancel():
+            if not Hub.cancel_job(job["job_id"]):
+                MessageBox.error(self.page, "No connection to the hub, the job runs on.", title="Job not cancelled")
+
+        MessageBox.confirm(self.page, f"Cancel the job \"{job.get('name')}\" of {job.get('contact_name') or 'the contact'}?", cancel,
+                           title="Cancel job", ok_text="Cancel job")
 
     def load_tasks(self):
         tasks, limits = Hub.get_tasks()
-        self.contacts = Hub.get_contacts() or []
+        self._contacts = Hub.get_contacts() or []
         add = OneLineBubble("+")
         add.height = 40
         add.on_click = lambda e: self.open_editor(None)
         if tasks is None:
-            self.status.value = "the tasks could not be loaded"
+            self._status.value = "the tasks could not be loaded"
             tasks = []
         else:
             limit = f" of {limits['max_tasks']}" if limits.get("max_tasks") else ""
-            self.status.value = f"{len(tasks)}{limit} open tasks" if tasks else \
+            self._status.value = f"{len(tasks)}{limit} open tasks" if tasks else \
                 "no open tasks. ask a contact to remind you of something, or add one here"
-        self.list_view.controls = [add] + [self._task_card(task) for task in tasks]
-        _update(self.status)
-        _update(self.list_view)
+        self._task_buttons = {}
+        self._tasks_view.controls = [add] + [self._task_card(task) for task in tasks]
+        _update(self._status)
+        _update(self._tasks_view)
 
     def _task_card(self, task: dict) -> ft.Control:
         details = f"{task['next_run_local']}  ·  {task['repeat_text']}" + ("  ·  ⏰ alarm" if task["alarm"] else "")
@@ -81,12 +170,19 @@ class TasksPage(BasePage):
                         spacing=2,
                         expand=True,
                     ),
+                    self._task_protocol_button(task),
                     ft.IconButton(icon=ft.Icons.EDIT, tooltip="change", on_click=lambda e, t=task: self.open_editor(t)),
                     ft.IconButton(icon=ft.Icons.DELETE, tooltip="cancel the task", on_click=lambda e, t=task: self.confirm_delete(t)),
                 ],
                 vertical_alignment=ft.CrossAxisAlignment.START,
             ),
         )
+
+    def _task_protocol_button(self, task: dict) -> ft.IconButton:
+        button = ft.IconButton(icon=ft.Icons.RECEIPT_LONG, tooltip="protocol of its last run", disabled=Backroom.latest_for_source(task["id"]) is None,
+                               on_click=lambda e, t=task: self.open_task_protocol(t))
+        self._task_buttons[task["id"]] = button
+        return button
 
     def confirm_delete(self, task: dict):
         def delete():
@@ -106,8 +202,8 @@ class TasksPage(BasePage):
             repeats.append(task["repeat_text"])
         contact = ft.Dropdown(
             label="Contact",
-            value=str(task["contact_id"]) if task else (str(self.contacts[0]["id"]) if len(self.contacts) == 1 else None),
-            options=[ft.DropdownOption(key=str(c["id"]), text=c.get("name") or f"#{c['id']}") for c in self.contacts],
+            value=str(task["contact_id"]) if task else (str(self._contacts[0]["id"]) if len(self._contacts) == 1 else None),
+            options=[ft.DropdownOption(key=str(c["id"]), text=c.get("name") or f"#{c['id']}") for c in self._contacts],
             disabled=task is not None,
             width=EDITOR_WIDTH,
             **theme.STYLES["field"],

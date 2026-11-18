@@ -8,7 +8,7 @@ from app.ui.widgets import Header, VoiceSelector, ProfileImageSlot, MessageBox
 from app.utils import Contact, Hub, Capabilities
 from app.audio import Text_To_Speech
 from app.common import (get_logger, Utils, IMAGE_STYLE_OPTIONS, IMAGE_STYLE_ICONS, CHATTINESS_OPTIONS, QUIET_HOUR_OPTIONS, PHOTO_OPTIONS,
-                        put_companion_switch, pop_companion_switch)
+                        REACH_WINDOW_OPTIONS, put_companion_switch, pop_companion_switch)
 
 logger = get_logger()
 
@@ -20,6 +20,7 @@ PROFILE_SECTIONS = [
         ("Quiet from (default 22:00)", ["companion_settings", "quiet_from"], "select"),
         ("Quiet until (default 08:00, the same hour twice: never quiet)", ["companion_settings", "quiet_until"], "select"),
         ("Photos (default allowed)", ["companion_settings", "photos"], "select"),
+        ("Reach-out window (default 1 hour)", ["companion_settings", "reach_window"], "select"),
     ]),
     ("Story", [
         ("Background", ["background_hook"], "text"),
@@ -66,6 +67,7 @@ SELECT_OPTIONS = {
     ("companion_settings", "quiet_from"): QUIET_HOUR_OPTIONS,
     ("companion_settings", "quiet_until"): QUIET_HOUR_OPTIONS,
     ("companion_settings", "photos"): PHOTO_OPTIONS,
+    ("companion_settings", "reach_window"): REACH_WINDOW_OPTIONS,
 }
 
 # optional images for "select" fields, keyed by key path: {stored value: image src shown in front of the option}
