@@ -124,7 +124,7 @@ class MetaTask(Task):
         try:            
             self.wait_for([tool_detection_task])
             detected = tool_detection_task.get_result() or []
-            logger.debug(f"tools detected: {detected}")
+            logger.debug(f"tools detected ({tool_detection_task.source() or 'nothing decided'}): {detected}")
             tool_detection_task.trace(self.request.conversation_id, "turn")
 
             contact = self.db.get_contact_by_id(self.request.contact_id)

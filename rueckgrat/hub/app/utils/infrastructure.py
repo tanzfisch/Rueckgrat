@@ -15,6 +15,8 @@ from typing import Optional, Dict, Callable, Tuple
 from dataclasses import dataclass
 from ..tasks.image_task import ImageRequest
 from .tts_cache import TtsCache
+from .hub_settings import HubSettings
+from .nomad import Nomad
 
 from app.common import get_logger, ChatRequestLlama, DownloadQueue, WebSocketClient
 logger = get_logger()
@@ -37,6 +39,9 @@ CAPABILITY_SERVICES = {
     "embedding": "text_to_embedding",
 }
 INTERNET = "internet"               # the capability of the tools that fetch from the web, the hub probes it
+LIBRARY = "library"                 # the offline library (Project NOMAD's kiwix), the fallback of the web lookups
+OFFLINE_MAP = "offline_map"         # NOMAD's map files, the map bubble's tiles without the internet
+SIMULATE_OFFLINE = "simulate_offline"   # hub setting: "1" -> the internet counts as not there (testing the offline paths)
 CAPABILITY_TICK_SECONDS = 2         # how often the watcher looks at the node connections, a (re)connect asks the node right away
 CAPABILITY_REFRESH_SECONDS = 30     # a connected node is asked for its loaded modules this often
 CAPABILITY_TIMEOUT = 5              # seconds for a node's /capabilities
@@ -96,6 +101,9 @@ class Infrastructure:
     # class defaults, so an instance without __init__ (laya_tune: Infrastructure.__new__ and node_by_type for decide) works too
     internet: Optional[bool] = None     # the last internet probe, None: not probed yet (counts as online)
     _live = False                       # connected to the nodes' websockets and watching their capabilities
+    _settings: Optional[HubSettings] = None
+    _nomad: Optional[Nomad] = None
+    _simulated_offline = False          # the hub setting SIMULATE_OFFLINE, read by refresh_settings
 
     @staticmethod
     def slot_context() -> Optional[int]:
@@ -120,6 +128,9 @@ class Infrastructure:
         self.nodes: list[WebSocketClientNode] = []
         self._capability_state: dict = {}
         self._watch_stop = threading.Event()
+        self._settings = HubSettings()
+        self._nomad = Nomad(lambda: self._settings.get("nomad_url"))
+        self.refresh_settings()
         logger.info(f"llm slot context {self.slot_context() or 'unknown'}, long replies {self.long_reply_tokens()} tokens")
         if not INFRASTRUCTURE_CONFIG_PATH.exists():
             logger.error(f"no infrastructure config found at {INFRASTRUCTURE_CONFIG_PATH}")
@@ -185,12 +196,35 @@ class Infrastructure:
             threading.Thread(target=self._watch_capabilities, name="capabilities", daemon=True).start()
 
     ########### capabilities: which optional parts are there right now. only the llm is mandatory
+    def nomad(self) -> Optional[Nomad]:
+        """the configured Project NOMAD (offline library and map), None in an instance without __init__"""
+        return self._nomad
+
+    def settings(self) -> Optional[HubSettings]:
+        return self._settings
+
+    def simulated_offline(self) -> bool:
+        """the hub setting SIMULATE_OFFLINE is on: the internet counts as not there, whatever the probe says"""
+        return self._simulated_offline
+
+    def refresh_settings(self) -> None:
+        """reads the runtime hub settings again (hub management changes them without a restart)"""
+        if self._settings is not None:
+            simulated = self._settings.get(SIMULATE_OFFLINE) == "1"
+            if simulated != self._simulated_offline:
+                logger.info(f"simulated offline {'on: the internet counts as not there' if simulated else 'off'}")
+            self._simulated_offline = simulated
+
     def available(self, name: str) -> bool:
-        """capability name (CAPABILITY_SERVICES or INTERNET) can be used now: its service is configured, its node connected and
-        the module loaded there (the node's last /capabilities). hub management (connect_nodes(connect=False)) has no websockets
-        and does not watch: configured is enough there"""
+        """capability name (CAPABILITY_SERVICES, INTERNET, LIBRARY or OFFLINE_MAP) can be used now: its service is configured,
+        its node connected and the module loaded there (the node's last /capabilities). hub management (connect_nodes(connect=False))
+        has no websockets and does not watch: configured is enough there"""
         if name == INTERNET:
-            return self.internet is not False
+            return self.internet is not False and not self._simulated_offline
+        if name == LIBRARY:
+            return self._nomad is not None and self._nomad.library() is not None
+        if name == OFFLINE_MAP:
+            return self._nomad is not None and self._nomad.offline_map() is not None
         service_type = CAPABILITY_SERVICES.get(name)
         node = self.node_by_type.get(service_type) if service_type else None
         if node is None:
@@ -201,12 +235,18 @@ class Infrastructure:
 
     def capabilities(self) -> dict[str, bool]:
         """every capability -> available(), for the hub's /capabilities and /health"""
-        return {name: self.available(name) for name in [*CAPABILITY_SERVICES, INTERNET]}
+        return {name: self.available(name) for name in [*CAPABILITY_SERVICES, INTERNET, LIBRARY, OFFLINE_MAP]}
+
+    def internet_mode(self) -> str:
+        """how the internet capability is decided, for /capabilities: "simulated offline" (hub setting) or "probed" """
+        return "simulated offline" if self._simulated_offline else "probed"
 
     def expected(self) -> list[str]:
-        """the capabilities this system is set up for: its service is configured in infrastructure.json, the internet always.
-        one of them not available is missing (the app shows it), one not configured is simply not installed"""
-        return [name for name, service_type in CAPABILITY_SERVICES.items() if service_type in self.node_by_type] + [INTERNET]
+        """the capabilities this system is set up for: its service is configured in infrastructure.json, the internet always,
+        the library and the offline map when a NOMAD is configured. one of them not available is missing (the app shows it),
+        one not configured is simply not installed"""
+        offline = [LIBRARY, OFFLINE_MAP] if self._nomad is not None and self._nomad.configured() else []
+        return [name for name, service_type in CAPABILITY_SERVICES.items() if service_type in self.node_by_type] + [INTERNET] + offline
 
     async def wait_available(self, name: str, seconds: float) -> bool:
         """available(name), waiting up to seconds for it (a node that is reconnecting). False when it is not there by then"""
@@ -218,7 +258,10 @@ class Infrastructure:
         return True
 
     def probe_internet(self) -> bool:
-        """online when one of INTERNET_PROBE_URLS answers at all, sets self.internet"""
+        """online when one of INTERNET_PROBE_URLS answers at all, sets self.internet. simulated offline: no request,
+        False (self.internet keeps the last real probe)"""
+        if self._simulated_offline:
+            return False
         for url in INTERNET_PROBE_URLS:
             try:
                 requests.head(url, timeout=INTERNET_PROBE_TIMEOUT, allow_redirects=False)
@@ -231,13 +274,20 @@ class Infrastructure:
 
     def _watch_capabilities(self):
         """asks a node for its loaded modules when it connects or reconnects and every CAPABILITY_REFRESH_SECONDS while it is
-        connected, probes the internet every INTERNET_PROBE_SECONDS. a change is logged"""
+        connected, probes the internet and NOMAD every INTERNET_PROBE_SECONDS (NOMAD also right after its url changed), reads
+        the hub settings every tick. a change is logged"""
         connected: dict[WebSocketClientNode, bool] = {}
         asked: dict[WebSocketClientNode, float] = {}
         probed = None
+        nomad_url = None
         while True:
             try:
                 now = time.monotonic()
+                self.refresh_settings()
+                configured = self._settings.get("nomad_url")
+                if configured != nomad_url:
+                    nomad_url = configured
+                    probed = None
                 for node in self.nodes:
                     up = node.is_connected()
                     if up and (not connected.get(node) or now - asked.get(node, 0.0) >= CAPABILITY_REFRESH_SECONDS):
@@ -246,6 +296,7 @@ class Infrastructure:
                     connected[node] = up
                 if probed is None or now - probed >= INTERNET_PROBE_SECONDS:
                     self.probe_internet()
+                    self._nomad.probe()
                     probed = now
                 self._log_capabilities()
             except Exception as e:

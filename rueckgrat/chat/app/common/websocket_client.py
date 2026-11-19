@@ -57,6 +57,10 @@ class WebSocketClient:
         "rejected" when the peer refuses the token (401/403, no more retries), "stopped" on close()"""
         self.state_handlers.append(callback)
 
+    def unregister_state_change(self, callback: Callable[[str], None]):
+        if callback in self.state_handlers:
+            self.state_handlers.remove(callback)
+
     def _notify_state(self, state: str):
         for cb in list(self.state_handlers):
             try:

@@ -8,13 +8,13 @@ Hub management tool (signup invites and users), run inside the hub container:
     docker exec -it rueckgrat_hub python -m app.hub_management invite remove 4
     docker exec -it rueckgrat_hub python -m app.hub_management invite modify 4 --nsfw on
     docker exec -it rueckgrat_hub python -m app.hub_management invite modify 4 --nsfw          (asks: on or off?)
-    docker exec -it rueckgrat_hub python -m app.hub_management user create martin
-    docker exec -it rueckgrat_hub python -m app.hub_management user create martin --password secret --nsfw
+    docker exec -it rueckgrat_hub python -m app.hub_management user create [UserName]
+    docker exec -it rueckgrat_hub python -m app.hub_management user create [UserName] --password secret --nsfw
     docker exec -it rueckgrat_hub python -m app.hub_management user list
-    docker exec -it rueckgrat_hub python -m app.hub_management user modify martin --nsfw off
-    docker exec -it rueckgrat_hub python -m app.hub_management user modify martin --nsfw       (asks: on or off?)
+    docker exec -it rueckgrat_hub python -m app.hub_management user modify [UserName] --nsfw off
+    docker exec -it rueckgrat_hub python -m app.hub_management user modify [UserName] --nsfw       (asks: on or off?)
     docker exec -it rueckgrat_hub python -m app.hub_management companion list
-    docker exec -it rueckgrat_hub python -m app.hub_management companion list --user martin
+    docker exec -it rueckgrat_hub python -m app.hub_management companion list --user [UserName]
     docker exec -it rueckgrat_hub python -m app.hub_management companion status 31
     docker exec -it rueckgrat_hub python -m app.hub_management companion status 31 --log 50 --json
     docker exec -it rueckgrat_hub python -m app.hub_management maintenance status
@@ -25,6 +25,10 @@ Hub management tool (signup invites and users), run inside the hub container:
     docker exec -it rueckgrat_hub python -m app.hub_management protocol show 12
     docker exec -it rueckgrat_hub python -m app.hub_management protocol show 12 --json
     docker exec -it rueckgrat_hub python -m app.hub_management protocol tools
+    docker exec -it rueckgrat_hub python -m app.hub_management offline status
+    docker exec -it rueckgrat_hub python -m app.hub_management offline nomad http://192.168.2.177:8080
+    docker exec -it rueckgrat_hub python -m app.hub_management offline nomad --clear
+    docker exec -it rueckgrat_hub python -m app.hub_management offline simulate on
 
 Whoever can run docker on the host is trusted as admin.
 """
@@ -187,6 +191,58 @@ def maintenance_run(db, args):
     maintenance_status(db)
 
 
+def offline_command(args, settings=None, http_get=None):
+    """offline status / nomad / simulate: the hub settings of the offline features (HubSettings, the running hub picks a
+    change up within seconds, NOMAD on its next probe), no restart"""
+    import requests
+    from app.utils.hub_settings import HubSettings
+    from app.utils.library import LibraryError
+    from app.utils.nomad import Nomad, normalize_nomad_url
+    settings = settings or HubSettings()
+    http_get = http_get or requests.get
+    if args.action == "simulate":
+        settings.set("simulate_offline", "1" if args.state == "on" else "")
+        print("simulated offline on: the hub uses no internet (web search, Wikipedia, maps, rates, public links) and takes "
+              "the offline ways" if args.state == "on" else "simulated offline off: the hub probes the internet again")
+        return
+    if args.action == "nomad":
+        if args.clear:
+            settings.set("nomad_url", "")
+            print("NOMAD switched off (also against NOMAD_URL in .env)")
+            return
+        if args.reset:
+            settings.reset("nomad_url")
+            print(f"NOMAD from .env again: {settings.get('nomad_url') or 'not set'}")
+            return
+        url = normalize_nomad_url(args.url or "")
+        if not url:
+            print("give the NOMAD url, e.g. http://192.168.2.177:8080, or --clear / --reset")
+            return
+        try:
+            ok = http_get(f"{url}/api/health", timeout=5).status_code == 200
+        except Exception:
+            ok = False
+        settings.set("nomad_url", url)
+        print(f"NOMAD set to {url}" + ("" if ok else f" (not reachable right now, {url}/api/health did not answer)"))
+        return
+    url = settings.get("nomad_url")
+    nomad = Nomad(lambda: url, http_get)
+    nomad.probe()
+    library, offline_map = nomad.library(), nomad.offline_map()
+    library_text = "not there"
+    if library:
+        try:
+            library_text = f"{library.base_url()}, {len(library.books())} books"
+        except LibraryError as e:
+            library_text = f"{library.base_url()}, {e}"
+    print_table(f"{'SETTING':<20} VALUE", [
+        f"{'nomad':<20} {normalize_nomad_url(url) or 'not set'} ({settings.source('nomad_url')})",
+        f"{'library':<20} {library_text}",
+        f"{'offline map':<20} {f'{len(offline_map.archives())} map file(s)' if offline_map else 'not there'}",
+        f"{'simulated offline':<20} {'on' if settings.get('simulate_offline') == '1' else 'off'}",
+    ])
+
+
 def add_nsfw_switch(cmd):
     # "--nsfw on" / "--nsfw off", or just "--nsfw" (value None) to be asked
     cmd.add_argument("--nsfw", nargs="?", choices=["on", "off"], required=True,
@@ -203,7 +259,7 @@ def resolve_nsfw(value):
 def main():
     parser = argparse.ArgumentParser(
         prog="python -m app.hub_management",
-        description="hub management: signup invites and users",
+        description="hub management: signup invites, users and the offline features",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""commands:
   invite create [--email EMAIL] [--days N] [--max-uses N] [--nsfw on|off]
@@ -253,7 +309,14 @@ def main():
                   --full: in full. --json: plan, lines, tool calls and outputs. read only
   protocol tools  the tool calls of the stored protocols per tool: calls, failures, durations, last error. read only
                   grouped by step, workers indented, long values wrapped and clipped to a few lines
-      --full      long values in full""",
+      --full      long values in full
+
+  offline status  the offline features: the NOMAD url (and where it comes from), its library and map, simulated offline
+  offline nomad URL | --clear | --reset
+                  where Project NOMAD runs (offline library and map, the fallbacks without internet), --clear: none
+                  (also against NOMAD_URL in .env), --reset: back to NOMAD_URL from .env. no restart needed
+  offline simulate on|off
+                  on: the hub acts as if there were no internet (testing the offline fallbacks), the LAN still works""",
     )
     # two levels of subcommands: first the noun (invite/user), then the action
     nouns = parser.add_subparsers(dest="noun", required=True)
@@ -316,7 +379,7 @@ def main():
     stats.add_argument("--minutes", type=int, default=10, help="active in the last N minutes (default 10)")
 
     # --- protocol (read only) ---
-    protocol = nouns.add_parser("protocol", help="the agent jobs' decision traces, read only")
+    protocol = nouns.add_parser("protocol", help="the decision traces of the agent jobs, task and companion passes, read only")
     protocol_actions = protocol.add_subparsers(dest="action", required=True)
     protocol_list = protocol_actions.add_parser("list", help="the protocols of about the last day, newest first")
     protocol_list.add_argument("--limit", type=int, default=20, help="at most N protocols (default 20)")
@@ -326,7 +389,21 @@ def main():
     protocol_show.add_argument("--full", action="store_true", help="long texts in full, not clipped to a few lines")
     protocol_actions.add_parser("tools", help="failures and durations per tool over the stored protocols")
 
+    # --- offline (hub settings, no restart) ---
+    offline = nouns.add_parser("offline", help="the offline features: Project NOMAD and simulated offline")
+    offline_actions = offline.add_subparsers(dest="action", required=True)
+    offline_actions.add_parser("status", help="NOMAD, its library and map, simulated offline")
+    nomad = offline_actions.add_parser("nomad", help="set, clear or reset the NOMAD url")
+    nomad.add_argument("url", nargs="?", default=None, help="e.g. http://192.168.2.177:8080")
+    nomad.add_argument("--clear", action="store_true", help="no NOMAD, also against NOMAD_URL in .env")
+    nomad.add_argument("--reset", action="store_true", help="NOMAD_URL from .env again")
+    simulate = offline_actions.add_parser("simulate", help="act as if there were no internet")
+    simulate.add_argument("state", choices=["on", "off"])
+
     args = parser.parse_args()
+    if args.noun == "offline":
+        offline_command(args)
+        return
     if args.noun == "protocol":
         print_protocols(ChatDB.read_only(DB_PATH), args)
         return
@@ -395,8 +472,9 @@ def print_protocols(db, args):
     """#174 protocol list / show / tools"""
     if args.action == "list":
         rows = db.get_protocols(args.limit)
-        print_table(f"{'ID':<5} {'CREATED (UTC)':<20} {'CONV':<6} {'MSG':<7} {'STATUS':<10} {'LINES':<6} {'TOOLS':<6} {'FAILED':<7} JOB",
-                    [f"{r['id']:<5} {r['created_at']:<20} {r['conversation_id']:<6} {r['message_id']:<7} {r['status'] or '-':<10} "
+        dash = lambda value: "-" if value is None else value    # a pass has no conversation or message when it starts
+        print_table(f"{'ID':<5} {'CREATED (UTC)':<20} {'KIND':<10} {'CONV':<6} {'MSG':<7} {'STATUS':<12} {'LINES':<6} {'TOOLS':<6} {'FAILED':<7} JOB",
+                    [f"{r['id']:<5} {r['created_at']:<20} {r['kind']:<10} {dash(r['conversation_id']):<6} {dash(r['message_id']):<7} {r['status'] or '-':<12} "
                      f"{r['lines']:<6} {r['tool_calls']:<6} {r['failed_calls']:<7} {r['name']}" for r in rows], empty="No protocols")
         return
     if args.action == "tools":
@@ -438,7 +516,8 @@ def print_protocol(protocol, full=False, width=None):
     outputs = {ref: o["text"] for ref, o in protocol.get("outputs", {}).items()}
     calls = {c["call"]: c for c in protocol.get("tool_calls", [])}
     print()
-    print("\n".join(textwrap.wrap(f"protocol {protocol['id']}: conversation {protocol['conversation_id']}, message {protocol['message_id']}, "
+    print("\n".join(textwrap.wrap(f"protocol {protocol['id']} ({protocol.get('kind', 'job')}, {protocol.get('status', '-')}): "
+                                   f"conversation {protocol['conversation_id'] or '-'}, message {protocol['message_id'] or '-'}, "
                                    f"job {protocol['job_id']}, created {protocol['created_at']} UTC", width, subsequent_indent="  ")))
     plan = protocol.get("plan")
     if plan:

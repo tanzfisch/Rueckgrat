@@ -45,6 +45,8 @@ class PriceFinderTool(WebsearchTool):
     is shown under the answer: a podium of the best three and a list of more finds (the message's "prices" data, the client's
     PriceView), the reply gets the finds as text"""
     description = prompts.PRICE_FINDER_DESCRIPTION
+    requires = ("internet",)    # shops on the web only, no offline way
+    requires_any = ()
     thresholds = (0.55, 0.6)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     overrides = ("websearch",)  # it searches the web itself, a websearch next to it only finds the same shops again
     question = [

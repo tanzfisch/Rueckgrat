@@ -1,6 +1,23 @@
 Changelog
 =========
 
+0.30.0
+------
+
+- #215 unify protocols for jobs, tasks and companions
+- #220 added uninstall script
+- #167 companion greeting handling
+- #222 offline websearch, wikipedia and maps with an optional Project NOMAD in the LAN
+-     installer asks for the NOMAD url, hub manager offline nomad changes or clears it later, no restart
+-     wikipedia and websearch fall back to NOMAD's kiwix library without internet, websearch searches all books of the language
+-     book list is read live from kiwix, the hub keeps no copy
+-     show_map draws offline tiles in the hub from NOMAD's pmtiles, places are found by their wikipedia coordinates, a tap opens NOMAD's map
+-     fetch_url is always available, without internet it still reads pages in the LAN, NOMAD and kiwix are allowed automatically
+-     convert works offline, currency rates are saved once a day and fetched on the first hub start
+-     hub manager offline simulate on|off acts as if there were no internet, offline status shows NOMAD, its library and map
+-     new capabilities library and offline_map, shown in the chat's status
+-     added pmtiles, mapbox-vector-tile and Pillow hub dependencies
+
 0.29.0
 ------
 

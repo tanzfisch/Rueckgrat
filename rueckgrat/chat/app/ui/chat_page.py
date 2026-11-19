@@ -5,9 +5,9 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, PriceView, FileCards, FilesDock, MessageBox
+from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, PriceView, FileCards, FilesDock, MessageBox, show_protocol
 from app.audio import Text_To_Speech
-from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig, Capabilities, ContactFiles
+from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig, Capabilities, ContactFiles, Backroom
 from app.common import get_logger, Utils
 
 logger = get_logger()
@@ -35,7 +35,9 @@ class ChatPage(BasePage):
         self._pending_images: dict[int, list[str]] = {}  # message id -> image file names that came before its bubble
         self._pending_files: dict[int, list] = {}       # message id -> text file cards that came before its bubble
         self._pending_data: dict[int, dict] = {}        # message id -> {kind: value} a tool pushed before its bubble (_set_data)
+        self._protocol_buttons: set[int] = set()        # #215 the message ids of reports that have their 'open protocol' button
         self.user_role_name = ""   # set from the user's own character profile in on_enter
+        self._told_typing = False   # #167 typing was already sent for this visit, so a held reach-out is dropped once
 
         self.files_btn = ft.IconButton(
             icon=ft.Icons.FOLDER_OPEN,
@@ -49,7 +51,7 @@ class ChatPage(BasePage):
         self.header.on_go_back = self.on_go_back
 
         self.history = ft.ListView(expand=True, spacing=4, padding=0, auto_scroll=True)
-        self.status_widget = StatusWidget(on_cancel_job=Hub.cancel_job)
+        self.status_widget = StatusWidget(on_cancel_job=self._confirm_cancel_job)
         self.status_row = ft.Row(controls=[self.status_widget])   # always the last row, messages go above it
 
         self._input_focused = False
@@ -67,6 +69,7 @@ class ChatPage(BasePage):
             border=ft.NoInputBorder(),
             on_focus=lambda e: setattr(self, "_input_focused", True),
             on_blur=lambda e: setattr(self, "_input_focused", False),
+            on_change=lambda e: self._on_typing(),
             text_style=ft.TextStyle(
                 font_family="DejaVu Sans",
                 font_family_fallback=["Noto Color Emoji"],
@@ -208,6 +211,7 @@ class ChatPage(BasePage):
         self._pending_images.clear()
         self._pending_files.clear()
         self._pending_data.clear()
+        self._protocol_buttons.clear()
         self._play_btn = None
         self.history.controls = [self.status_row]
         self.history.update()
@@ -234,13 +238,68 @@ class ChatPage(BasePage):
         self.temperature = float(self.contact.get_llm_temperature())
         Hub.register_incomming_message(self.on_incomming_message)
         Capabilities.listen(self._on_capabilities)
+        self.status_widget.on_jobs(Backroom.jobs())     # #215 the running agent jobs' rows
+        Backroom.add_listener(self._on_jobs)
+        self._told_typing = False
+        Hub.register_connection_state(self._on_connection_state)
+        Hub.contact_opened(self.contact_id, self.conversation_id)
 
     def on_leave(self):
         if self.page:
             self.page.run_task(self._stop_mic)
             self.files_dock.detach()
+        if self.contact_id is not None:
+            Hub.contact_closed(self.contact_id)
+        Hub.unregister_connection_state(self._on_connection_state)
         Hub.unregister_incomming_message(self.on_incomming_message)
         Capabilities.unlisten(self._on_capabilities)
+        Backroom.remove_listener(self._on_jobs)
+
+    def _on_connection_state(self, state: str):
+        """#167 after a reconnect the hub no longer knows this contact is open"""
+        if state == "reconnected" and self.contact_id is not None and self.conversation_id is not None:
+            Hub.contact_opened(self.contact_id, self.conversation_id)
+
+    def _on_typing(self):
+        """#167 the first keystroke of this visit drops a still-held reach-out"""
+        if (self.input_box.value or "").strip():
+            self._tell_typing()
+
+    def _tell_typing(self):
+        if self._told_typing or self.contact_id is None or self.conversation_id is None:
+            return
+        self._told_typing = True
+        Hub.typing(self.contact_id, self.conversation_id)
+
+    def _confirm_cancel_job(self, job_id: str) -> bool:
+        """#152 the cancel button of a job's row: asks first. False: the row's button stays (the job_update removes the row)"""
+        job = Backroom.job(job_id) or {}
+        MessageBox.confirm(self.page, f"Cancel the job \"{job.get('name') or 'background job'}\"?", lambda: Hub.cancel_job(job_id),
+                           title="Cancel job", ok_text="Cancel job")
+        return False
+
+    def _on_jobs(self, job_id):
+        """#215 Backroom: a job got its report message (or a snapshot came): its 'open protocol' button under it"""
+        jobs = [Backroom.job(job_id)] if job_id is not None else Backroom.jobs()
+        added = False
+        for job in jobs:
+            if job and job.get("report_message_id") in self._bubbles and job["report_message_id"] not in self._protocol_buttons:
+                added = self._add_protocol_button(job["report_message_id"], self._bubbles[job["report_message_id"]], job) or added
+        if added:
+            try:
+                self.history.update()
+            except RuntimeError:
+                pass
+
+    def _add_protocol_button(self, message_id: int, bubble: ChatBubble, job: dict) -> bool:
+        if message_id in self._protocol_buttons:
+            return False
+        self._protocol_buttons.add(message_id)
+        bubble.action_row.add_button(ft.IconButton(
+            icon=ft.Icons.RECEIPT_LONG, icon_size=16, tooltip="open protocol",
+            on_click=lambda e, job_id=job["job_id"]: show_protocol(self.page, Backroom.job(job_id) or job),
+        ))
+        return True
 
     def _on_capabilities(self, lost: set):
         """speech or the mic went away while in use: they stop (their buttons are hidden by Capabilities.bind)"""
@@ -258,6 +317,7 @@ class ChatPage(BasePage):
         self.mic_btn.selected = not self.mic_btn.selected
         if self.mic_btn.selected:
             self.mic_btn.icon = ft.Icons.MIC
+            self._tell_typing()
             if self.page:
                 self.page.run_task(self._start_mic)
         else:
@@ -364,6 +424,9 @@ class ChatPage(BasePage):
                 ), "tts"))
             if sources:
                 bubble.action_row.set_sources(sources)
+            report_of = Backroom.for_report(message_id) if role == "assistant" else None
+            if report_of:   # #215 the report of a job or pass
+                self._add_protocol_button(message_id, bubble, report_of)
 
             style = {
                 "user": theme.STYLES["chat_user"],
@@ -629,8 +692,10 @@ class ChatPage(BasePage):
             if "status" in message and message["status"].get("conversation_id", self.conversation_id) == self.conversation_id:
                 self.status_widget.on_status_message(message["status"])
 
-            if "job_progress" in message:     # #152 background jobs, shown whatever conversation is open
-                self.status_widget.on_job_progress(message["job_progress"])
+            if "job_update" in message:     # #152 #215 background jobs, shown whatever conversation is open
+                self.status_widget.on_job_update(message["job_update"])
+            if "jobs" in message:           # the hub's snapshot (connect, get_jobs)
+                self.status_widget.on_jobs((message["jobs"] or {}).get("items") or [])
 
             if "delta" in message and message["conversation_id"] == self.conversation_id:
                 message_id = message.get("message_id")

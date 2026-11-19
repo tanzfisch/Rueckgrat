@@ -22,6 +22,16 @@ PHOTO_OPTIONS = {
 }
 DEFAULT_PHOTOS = "allowed"
 
+# how long a prepared reach-out waits for the user to open the contact (surprise) before it is sent (reach_out)
+REACH_WINDOW_OPTIONS = {
+    "15m": "15 minutes, more likely to catch you walking in",
+    "30m": "30 minutes",
+    "1h": "1 hour",
+    "2h": "2 hours",
+    "4h": "4 hours, more independent",
+}
+DEFAULT_REACH_WINDOW = "1h"
+
 
 def put_companion_switch(data: dict, on: bool):
     """the companion switch into an exported character file, as profile.companion_settings.companion"""

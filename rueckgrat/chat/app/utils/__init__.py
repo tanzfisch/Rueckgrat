@@ -8,5 +8,6 @@ from .keep_alive import KeepAlive
 from .capabilities import Capabilities
 from .alarm import Alarm
 from .contact_files import ContactFiles
+from .backroom import Backroom, duration_text
 
-__all__ = ["Hub", "Contact", "RueckgratConfig", "Paths", "AudioStreamer", "Notifier", "KeepAlive", "Capabilities", "Alarm", "ContactFiles"]
+__all__ = ["Hub", "Contact", "RueckgratConfig", "Paths", "AudioStreamer", "Notifier", "KeepAlive", "Capabilities", "Alarm", "ContactFiles", "Backroom", "duration_text"]

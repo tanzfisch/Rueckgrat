@@ -1,9 +1,9 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from . import prompts
 from app.common import (Utils, CHATTINESS_OPTIONS, DEFAULT_CHATTINESS, QUIET_HOUR_OPTIONS, DEFAULT_QUIET_FROM,
-                        DEFAULT_QUIET_UNTIL, PHOTO_OPTIONS, DEFAULT_PHOTOS)
+                        DEFAULT_QUIET_UNTIL, PHOTO_OPTIONS, DEFAULT_PHOTOS, REACH_WINDOW_OPTIONS, DEFAULT_REACH_WINDOW)
 
 USER_ACTIVE_MINUTES = 30        # the user wrote that recently: they are chatting, don't interrupt
 
@@ -18,6 +18,16 @@ class Chattiness:
     max_sentences: int          # of a message, in the prompt
 
 
+# #167 how long a prepared pair waits before the reach_out version is sent
+REACH_WINDOWS = {
+    "15m": timedelta(minutes=15),
+    "30m": timedelta(minutes=30),
+    "1h": timedelta(hours=1),
+    "2h": timedelta(hours=2),
+    "4h": timedelta(hours=4),
+}
+
+
 # "balanced" is how the companion behaved before the settings (#183)
 CHATTINESS = {
     "chatty": Chattiness(max_per_day=6, min_hours=1, max_rows=6, max_pending=16, max_sentences=4),
@@ -30,7 +40,7 @@ CHATTINESS = {
 
 class CompanionSettings:
     """a companion's settings (profile.companion_settings, see app.common.companion_settings) and what follows from them:
-    its message limits, quiet hours, photos and how busy its day is. a missing or unknown value is the default"""
+    its message limits, quiet hours, photos, the reach-out window and how busy its day is. a missing or unknown value is the default"""
 
     def __init__(self, contact: dict):
         settings = Utils.get_nested_value(contact, ["profile", "companion_settings"], {})
@@ -41,6 +51,8 @@ class CompanionSettings:
         self.quiet_from = int(pick("quiet_from", QUIET_HOUR_OPTIONS, DEFAULT_QUIET_FROM)[:2])
         self.quiet_until = int(pick("quiet_until", QUIET_HOUR_OPTIONS, DEFAULT_QUIET_UNTIL)[:2])
         self.photos = pick("photos", PHOTO_OPTIONS, DEFAULT_PHOTOS) == "allowed"
+        self.reach_window_name = pick("reach_window", REACH_WINDOW_OPTIONS, DEFAULT_REACH_WINDOW)
+        self.reach_window = REACH_WINDOWS[self.reach_window_name]
 
     @property
     def excluded_tools(self) -> tuple:
@@ -84,4 +96,4 @@ class CompanionSettings:
         quiet = "never quiet" if self.quiet_from == self.quiet_until else f"quiet {self.quiet_from}-{self.quiet_until}h"
         return (f"{self.chattiness_name}: {self.chattiness.max_per_day}/day, {self.chattiness.min_hours:g}h apart, {quiet}, "
                 f"not within {USER_ACTIVE_MINUTES} min of the user writing, {self.chattiness.max_rows} rows per pass, "
-                f"photos {'allowed' if self.photos else 'never'}")
+                f"photos {'allowed' if self.photos else 'never'}, reach window {self.reach_window_name}")

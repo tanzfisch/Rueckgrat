@@ -45,10 +45,21 @@ class StatusWidget(ft.Row):
             self.label.visible = False
         self._sync()
 
-    def on_job_progress(self, job: dict):
-        """#152 MessageQueue.send_job_progress: adds or updates the job's row while it runs, removes it when it is done or failed"""
+    def on_jobs(self, jobs: list[dict]):
+        """#215 the hub's snapshot (on connect, get_jobs): the rows of the agent jobs that run, the others go"""
+        running = {job.get("job_id") for job in jobs if job.get("kind") == "job" and job.get("state") == "running"}
+        for job_id in [job_id for job_id in self.job_rows if job_id not in running]:
+            self.jobs.controls.remove(self.job_rows.pop(job_id))
+        for job in jobs:
+            if job.get("job_id") in running:
+                self.on_job_update(job, sync=False)
+        self._show_jobs()
+
+    def on_job_update(self, job: dict, sync: bool = True):
+        """#152 #215 the hub's job_update of an agent job (no task or companion pass): adds or updates its row while it
+        runs, removes it when it ended"""
         job_id = job.get("job_id")
-        if not job_id:
+        if not job_id or job.get("kind", "job") != "job":
             return
         if job.get("state", "running") == "running":
             row = self.job_rows.get(job_id)
@@ -62,12 +73,16 @@ class StatusWidget(ft.Row):
             row.controls[1].value = max(0, min(100, job.get("percent") or 0)) / 100
         elif job_id in self.job_rows:
             self.jobs.controls.remove(self.job_rows.pop(job_id))
+        if sync:
+            self._show_jobs()
+
+    def _show_jobs(self):
         self.jobs.visible = bool(self.job_rows)
         self.visible = self.jobs.visible or self.gif.visible or self.label.visible
         self._sync()
 
     def _cancel_job(self, e, job_id: str):
-        """the hub's job_progress "cancelled" removes the row. not sent (no connection): the button stays"""
+        """the hub's job_update "cancelled" removes the row. not sent (no connection): the button stays"""
         if self.on_cancel_job and self.on_cancel_job(job_id) is not False:
             e.control.disabled = True
             self._sync()

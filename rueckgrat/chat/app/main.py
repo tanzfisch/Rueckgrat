@@ -21,12 +21,12 @@ from app.ui import (
     ImagePage,
     GalleryPage,
     TranscribePage,
-    TasksPage,
+    BackroomPage,
 )
 from app.ui import theme
 from app.ui.widgets import ImageOverlay, TextPreview, AudioPlayer, MessageBox, ConnectionBanner, AlarmBox
 
-from app.utils import Paths, Notifier, KeepAlive, Capabilities
+from app.utils import Paths, Notifier, KeepAlive, Capabilities, Backroom
 from app.utils.config import RueckgratConfig
 
 from app.common import get_logger, set_log_level
@@ -48,7 +48,7 @@ PAGES = {
     "image": ImagePage,
     "gallery": GalleryPage,
     "transcribe": TranscribePage,
-    "tasks": TasksPage,
+    "backroom": BackroomPage,
 }
 ROOT_PAGES = {"login", "initial_settings", "contacts"}
 MAX_STACK = 20
@@ -301,6 +301,7 @@ def main():
         atexit.register(Hub.shutdown)
 
     Hub.register_incomming_message(on_incomming_message)
+    Backroom.attach()   # #215 the jobs and passes of the Backroom, from the hub's snapshot and job_update
 
     def flet_main(page: ft.Page):
         theme.apply_theme(page, config.theme, config.font_scale)
@@ -313,6 +314,7 @@ def main():
 
     ft.run(flet_main)
     Hub.unregister_incomming_message(on_incomming_message)
+    Backroom.detach()
 
 
 if __name__ == "__main__":

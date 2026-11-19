@@ -1,6 +1,6 @@
 import flet as ft
 from app.ui import theme
-from app.utils import Contact, Hub, Paths, Capabilities
+from app.utils import Contact, Hub, Paths, Capabilities, Backroom
 
 # the app level views, in the order of the tools grid: (route, icon, label, the capabilities it needs to be offered)
 TOOLS = [
@@ -9,8 +9,9 @@ TOOLS = [
     ("image", ft.Icons.IMAGE, "image generation", ("image",)),
     ("gallery", ft.Icons.PHOTO_LIBRARY, "gallery", ()),
     ("transcribe", ft.Icons.TRANSCRIBE, "transcribe", ()),   # the saved transcripts work without stt, its record button shows it
-    ("tasks", ft.Icons.ALARM, "tasks", ()),     # #170 the user's tasks with all contacts
+    ("backroom", ft.Icons.DOOR_BACK_DOOR, "Backroom", ()),    # #215 the agent jobs, passes and #170 tasks of all contacts
 ]
+BACKROOM = "backroom"   # its tile and the tools button show how many jobs and passes run (Backroom.running_count)
 
 
 class Header(ft.Row):
@@ -82,8 +83,10 @@ class Header(ft.Row):
         controls.append(ft.Container(expand=True))
         controls.extend(actions or [])
 
+        self._tools_btn = None
         if Hub.access_token:
-            controls.append(self._tools_menu())
+            self._tools_btn = self._tools_menu()
+            controls.append(self._tools_btn)
         controls.append(self.menu_btn)
 
         super().__init__(
@@ -100,7 +103,32 @@ class Header(ft.Row):
             height=40,
             style=theme.STYLES["icon_button"]["style"],
             on_click=self._open_tools,
+            badge=self._running_badge(),
         )
+
+    @staticmethod
+    def _running_badge() -> ft.Badge | None:
+        """#215 the number of running jobs and passes, None while none runs"""
+        running = Backroom.running_count()
+        return ft.Badge(label=str(running), bgcolor=theme.ACCENT, text_color=theme.ON_ACCENT) if running else None
+
+    def did_mount(self):
+        if self._tools_btn is not None:
+            Backroom.add_listener(self._on_jobs)
+
+    def will_unmount(self):
+        Backroom.remove_listener(self._on_jobs)
+
+    def _on_jobs(self, job_id=None):
+        """Backroom changed: the running count on the tools button"""
+        badge = self._running_badge()
+        if (badge and badge.label) == (self._tools_btn.badge and self._tools_btn.badge.label):
+            return
+        self._tools_btn.badge = badge
+        try:
+            self._tools_btn.update()
+        except RuntimeError:
+            Backroom.remove_listener(self._on_jobs)     # not on the page any more
 
     def _open_tools(self, e):
         """the app level views as a grid of tiles (icon + label), a tap switches to it"""
@@ -116,8 +144,10 @@ class Header(ft.Row):
                 padding=8,
                 ink=True,
                 on_click=lambda e, r=route: pick(r),
+                tooltip=label,
                 content=ft.Column(
-                    [ft.Icon(icon, size=32), ft.Text(label, text_align=ft.TextAlign.CENTER, color=theme.TEXT)],
+                    [ft.Icon(icon, size=32, badge=self._running_badge() if route == BACKROOM else None),
+                     ft.Text(label, text_align=ft.TextAlign.CENTER, color=theme.TEXT)],
                     alignment=ft.MainAxisAlignment.CENTER,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     spacing=6,

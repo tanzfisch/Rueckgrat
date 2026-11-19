@@ -2,15 +2,19 @@ import threading
 from datetime import datetime, time, timedelta
 
 from .companion_job import CompanionJob, short
+from .outreach import Outreach
 from .task_job import TaskJob
 from app.utils import clock
 from app.utils.clock import to_db, from_db, user_timezone, next_occurrence, last_occurrence, at_local
+from app.agent_jobs.protocol import Protocol, ProtocolStore
+from app.agent_jobs.job_monitor import JobMonitor, RunningJob
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 MAX_SLEEP = 60                  # wall clock seconds, also picks up new companions and rows added by other paths
 MIN_SLEEP = 1
+NAME_CHARS = 40                 # #215 a pass's name in the Backroom
 PLANNING_TIME = time(0, 5)      # the only always-on row: the night planning, local time. it schedules everything else
 RESTART_GRACE = timedelta(minutes=5)    # a repeating user's task due this shortly before the hub started still fires
 
@@ -56,12 +60,18 @@ class CompanionScheduler:
             self._wake.clear()
 
     def sleep_seconds(self, now: datetime | None = None) -> float:
-        """wall clock seconds until the next due row (the companion clock may run faster)"""
-        due = self.db.next_companion_due()
+        """wall clock seconds until the next due calendar row or held reach-out (the companion clock may run faster)"""
+        now = now or clock.now()
+        due = []
+        calendar = self.db.next_companion_due()
+        if calendar:
+            due.append(from_db(calendar))
+        outreach = Outreach().next_due()
+        if outreach:
+            due.append(outreach)
         if not due:
             return MAX_SLEEP
-        now = now or clock.now()
-        return min(MAX_SLEEP, max(MIN_SLEEP, (from_db(due) - now).total_seconds()))
+        return min(MAX_SLEEP, max(MIN_SLEEP, (min(due) - now).total_seconds()))
 
     def missed(self, row: dict, occurrence: datetime, cutoff: datetime) -> str | None:
         """why a due row gets no pass, None: it fires. the companion's rows before the cutoff; a user's task only when it
@@ -93,6 +103,8 @@ class CompanionScheduler:
         now = now or clock.now()
         if self.db.drop_inactive_companion_rows():
             logger.info("dropped the calendar rows of contacts that are no companions")
+        Outreach().drop_inactive()
+        Outreach().deliver_due(now)
         for contact in self.db.unseeded_companions():
             self.seed(contact["id"], user_timezone(self.db, contact["user_id"]), now)
 
@@ -125,6 +137,7 @@ class CompanionScheduler:
             job = TaskJob(row, self.db, self.infrastructure, self.tool_registry, tz, now, occurrence)
         else:
             job = CompanionJob(row, self.db, self.infrastructure, self.tool_registry, tz, now)
+        self._watch(job, row, occurrence)
         try:
             with MessageQueue.user_scope(row["user_id"]):    # status messages of its tool lookups go to the contact's owner only
                 job.run()
@@ -135,4 +148,24 @@ class CompanionScheduler:
         if job.outcome is None:
             job.log.setdefault("error", "the pass failed")
         self.db.add_companion_log(row["contact_id"], to_db(now), {**record, **job.log})
+        self._unwatch(job, row, outcome)
         return {"row": row["id"], **outcome}
+
+    def _watch(self, job, row: dict, occurrence: datetime):
+        """#215 the pass gets a protocol (stored as it happens) and shows in the Backroom (JobMonitor) while it runs"""
+        kind = "task" if row["kind"] == self.db.TASK_KIND else "companion"
+        name = short(row["note"], NAME_CHARS) if kind == "task" else short(f"{row['kind'].replace('_', ' ')}: {row['note'] or ''}".rstrip(": "), NAME_CHARS)
+        job.protocol = Protocol(ProtocolStore.create(self.db, job.job_id, kind, row["user_id"], name, contact_id=row["contact_id"],
+                                                     source_id=row["id"], time_limit=job.time_limit))
+        JobMonitor().start(RunningJob(job.job_id, kind, name, row["user_id"], job.protocol, job.time_limit,
+                                      contact_id=row["contact_id"], source_id=row["id"]))
+        job.trace("pass_started", kind=row["kind"], note=row["note"] or None, occurrence=to_db(occurrence), recurrence=row["recurrence"] or None)
+
+    def _unwatch(self, job, row: dict, outcome: dict):
+        """the pass's last line (what it decided, companion_log), its end and the message it sent"""
+        ok = job.outcome is not None
+        job.trace("pass_finished", ok=ok, result=outcome.get("result") or None, message_id=outcome.get("message_id"),
+                  **{key: value for key, value in job.log.items() if key not in ("ok", "step", "task", "result", "message_id")})
+        JobMonitor().finish(job.job_id, "done" if ok else "failed")
+        if outcome.get("message_id"):
+            JobMonitor().report(row["user_id"], job.job_id, outcome["message_id"])

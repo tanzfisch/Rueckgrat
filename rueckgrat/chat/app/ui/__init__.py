@@ -12,7 +12,7 @@ from .translate_page import TranslatePage
 from .image_page import ImagePage
 from .gallery_page import GalleryPage
 from .transcribe_page import TranscribePage
-from .tasks_page import TasksPage
+from .backroom_page import BackroomPage
 
 
 __all__ = [
@@ -30,5 +30,5 @@ __all__ = [
     "ImagePage",
     "GalleryPage",
     "TranscribePage",
-    "TasksPage",
+    "BackroomPage",
 ]

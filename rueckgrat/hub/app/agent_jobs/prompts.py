@@ -7,6 +7,10 @@ placeholders, filled with str.format (literal json braces are doubled):
   FAILED_TOOLS_PART          failed: the failed tools with their errors, "; " separated
   SAVED_FILES_PART           paths: the full paths of the files a worker's tools wrote, comma separated (AgentJob.result_text)
   FILE_TOOLS_STUCK_PART      problems: what its file making tools still failed with after the fix rounds, "; " separated
+  IDLE_WORKER_PART           offered, called: the tools a worker was offered and the ones it called, comma separated ("none")
+  ATTACHED_FILES_PART        names: the files a worker holds for the user, comma separated (AgentJob.result_text)
+  TOOLS_USED_PART            tools: the tools a worker called, comma separated, or "none" (AgentJob.result_text)
+  NOT_DELIVERED_PART         none: the job makes files but no worker saved or holds one (Controller._delivered)
   PLAN_PROMPT                prompt (the job), max_steps, max_workers
   REVIEW_PROMPT              done, total (finished step of how many), prompt, messages (the user's messages since the start,
                              one "- " line each, or "none"), results, remaining, max_steps, max_workers
@@ -27,6 +31,12 @@ FAILED_TOOLS_PART = ("\n\nThese tools failed: {failed}. Do the task with what yo
 RESULTS_MARKER_PART = "\n\nRESULTS OF THE STEPS BEFORE:\n"    # the Controller appends the earlier results to a task after this
 SAVED_FILES_PART = "files saved: {paths}"
 FILE_TOOLS_STUCK_PART = "the files of the task were not made, still failing after the fix rounds: {problems}"
+IDLE_WORKER_PART = ("the task makes or uses files or runs commands, but nothing was made, run or saved: no tool for it was called "
+                    "(offered: {offered}; called: {called})")
+ATTACHED_FILES_PART = "files offered to the user: {names}"
+TOOLS_USED_PART = "tools used: {tools}"
+NOT_DELIVERED_PART = ("NOTHING WAS DELIVERED: the job asks for files, but no step saved a file or offered one to the user. "
+                      "Whatever the results claim, no file was made.")
 
 WORKER_PROMPT = """You are the {role} in a background job. Do your task and report what you found or made.
 Facts, numbers and dates come only from the tool results below and from the task itself. Name the source of each fact as the tool results give it. Never make up facts, numbers or sources.
@@ -34,6 +44,7 @@ Stay factual and neutral: report what the sources say, also where they disagree,
 Do only your own task: the job's other steps are done by other workers, do not do their part (e.g. a writer writes the text, it does not make the audio of it).
 Files the steps before saved are listed with their full paths ("files saved:"): use them, do not write them again.
 A file in another format than the task asks for, with the same content, does the task (e.g. audio as .ogg instead of .mp3, text as .md instead of .txt): say which format it is, that is not a failure.
+Only what the tool results below show counts as done: a file is made, a command is run or a check passed only when a tool result says so. Never report files, commands, outputs or exit codes the tool results do not show.
 If you can not do the task with what you have, or a check of your task failed or could not be run, start your reply with FAILED: and the reason.
 
 YOUR TASK:
@@ -102,6 +113,9 @@ THE RESULTS SO FAR:
 THE REMAINING STEPS:
 {remaining}
 
+A step did only what its "tools used:", "files saved:" and "files offered to the user:" lines show: when it says it made files, ran commands
+or tested something but no tool that does that was used, it did not do it, treat its files and checks as missing.
+
 Choose one action:
 - "continue": the remaining steps still fit.
 - "replan": the results so far stay, but the remaining steps must change, e.g. a step found nothing useful, the results
@@ -162,4 +176,7 @@ Respond with a json structure like this:
 }}
 
 Use only what the results say, add nothing.
+A step did only what its "tools used:", "files saved:" and "files offered to the user:" lines show: when it says it made files, ran commands
+or tested something but no tool that does that was used, it did not do it.
+When the job asks for files and no result has a "files saved:" or "files offered to the user:" line, the summary says that no file was delivered: never call the job done, built or working then.
 """
