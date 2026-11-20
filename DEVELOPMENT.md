@@ -36,6 +36,8 @@ Write `private` to allow your whole home network. This does not include the hub 
 
 You can also set this in the installer config as `"fetch_allow"` in the hub section, so it is kept when you reinstall.
 
+Project NOMAD (see the README) does not need to be listed: the hub allows its address and its library on its own.
+
 ## Chat on Android
 
 Build the APK by hand instead of with the installer

@@ -543,6 +543,218 @@ validate_ip() {
     fi
 }
 
+# ===============================================
+# LAN discovery - the machines this user can install Rückgrat on (uninstall.sh uses it too)
+# ===============================================
+
+readonly LAN_SCAN_MAX_HOSTS=1024    # a bigger subnet is narrowed to the /24 around this machine's address
+readonly LAN_SCAN_TIMEOUT=1         # seconds for one port 22 probe
+readonly LAN_SCAN_JOBS=64           # probes at the same time
+readonly LAN_SSH_TIMEOUT=5          # seconds for the ssh login of one host
+
+# LAN_PROBE_CMD - shell code lan_probe_host runs on a host, prints key=value lines:
+#   name, sudo (yes: without password, password: in a sudo group, no), rsync (yes/no), installed (yes/no),
+#   running (rueckgrat containers running)
+# installed: rueckgrat containers there (docker without sudo password), or the installer's copy in ~/$REMOTE_DIR
+read -r -d '' LAN_PROBE_CMD <<'PROBE' || true
+echo "name=$(uname -n)"
+if sudo -n true 2>/dev/null; then echo sudo=yes
+elif id -nG | grep -qwE 'sudo|wheel|admin'; then echo sudo=password
+else echo sudo=no; fi
+if command -v rsync >/dev/null 2>&1; then echo rsync=yes; else echo rsync=no; fi
+n=0 r=0
+if command -v docker >/dev/null 2>&1; then
+    d=docker; docker info >/dev/null 2>&1 || d="sudo -n docker"
+    n=$($d ps -aq --filter label=com.docker.compose.project=rueckgrat 2>/dev/null | wc -l)
+    r=$($d ps -q --filter label=com.docker.compose.project=rueckgrat 2>/dev/null | wc -l)
+fi
+echo "running=$r"
+if [ "$n" -gt 0 ] || [ -f "$HOME/$REMOTE_DIR/install.sh" ]; then echo installed=yes; else echo installed=no; fi
+PROBE
+
+# lan_subnets - the IPv4 subnets of this machine's LAN interfaces, one per line as <own ip>/<prefix>
+# (docker, bridges, vpn and other virtual interfaces are skipped)
+lan_subnets() {
+    command -v ip >/dev/null 2>&1 || return 0
+    ip -o -4 addr show scope global 2>/dev/null | awk '
+        $2 ~ /^(docker|br-|veth|virbr|cni|flannel|podman|lxc|lxd|vmnet|vboxnet|tun|tap|wg|tailscale|zt)/ { next }
+        { print $4 }' | sort -u
+}
+
+ip_to_int() {
+    local a b c d
+    IFS=. read -r a b c d <<< "$1"
+    echo $(( (a << 24) | (b << 16) | (c << 8) | d ))
+}
+
+int_to_ip() {
+    echo "$(( ($1 >> 24) & 255 )).$(( ($1 >> 16) & 255 )).$(( ($1 >> 8) & 255 )).$(( $1 & 255 ))"
+}
+
+# lan_subnet_range - network/prefix that gets scanned for a subnet (narrowed to a /24 if it is too big)
+# Usage: lan_subnet_range 192.168.2.39/24   -> 192.168.2.0/24
+lan_subnet_range() {
+    local addr="${1%/*}" prefix="${1#*/}" size
+    (( (1 << (32 - prefix)) > LAN_SCAN_MAX_HOSTS )) && prefix=24
+    size=$(( 1 << (32 - prefix) ))
+    echo "$(int_to_ip $(( $(ip_to_int "$addr") & ~(size - 1) & 0xFFFFFFFF )))/$prefix"
+}
+
+# lan_subnet_hosts - every host address of lan_subnet_range, one per line (no network and broadcast address)
+# Usage: lan_subnet_hosts 192.168.2.39/24
+lan_subnet_hosts() {
+    local range prefix base size n
+    range=$(lan_subnet_range "$1")
+    prefix="${range#*/}"
+    (( prefix >= 31 )) && return 0
+    size=$(( 1 << (32 - prefix) ))
+    base=$(ip_to_int "${range%/*}")
+    for (( n = base + 1; n < base + size - 1; n++ )); do
+        int_to_ip "$n"
+    done
+}
+
+# lan_ssh_hosts - the addresses in the subnets with an open ssh port, sorted, one per line.
+# nmap if it is installed, otherwise parallel bash /dev/tcp probes
+# Usage: lan_ssh_hosts <subnet>...
+lan_ssh_hosts() {
+    local subnet
+    for subnet in "$@"; do
+        if command -v nmap >/dev/null 2>&1; then
+            { nmap -n -Pn -sT -p 22 --open -T4 --max-retries 1 --host-timeout 5s -oG - "$(lan_subnet_range "$subnet")" 2>/dev/null || true; } |
+                awk '/22\/open/ { print $2 }'
+        else
+            # shellcheck disable=SC2016 # $1 is expanded by the probing bash
+            { lan_subnet_hosts "$subnet" | xargs -r -P "$LAN_SCAN_JOBS" -I{} \
+                timeout "$LAN_SCAN_TIMEOUT" bash -c 'exec 3<>"/dev/tcp/$1/22" && echo "$1"' _ {} 2>/dev/null || true; }
+        fi
+    done | sort -u -t. -k1,1n -k2,2n -k3,3n -k4,4n
+}
+
+# lan_probe_host - LAN_PROBE_CMD on one host without asking anything: ssh key login as SUDO_USER (BatchMode).
+# this machine directly when it needs no ssh (lan_discover). new host keys go to a throwaway file, so nothing
+# is pinned in ~/.ssh/known_hosts before you pick the host; a changed key still fails
+# Usage: lan_probe_host <addr> <throwaway known_hosts file> <direct: true|false>
+lan_probe_host() {
+    local addr="$1" known="$2" direct="$3"
+    if $direct && is_local_host "$addr"; then
+        sh -s <<< "REMOTE_DIR=$REMOTE_DIR; $LAN_PROBE_CMD" 2>/dev/null
+        return
+    fi
+    timeout $(( LAN_SSH_TIMEOUT * 3 )) ssh -o BatchMode=yes -o ConnectTimeout="$LAN_SSH_TIMEOUT" -o User="$SUDO_USER" \
+        -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$known $HOME/.ssh/known_hosts" \
+        "$addr" sh -s <<< "REMOTE_DIR=$REMOTE_DIR; $LAN_PROBE_CMD" 2>/dev/null
+}
+
+# lan_unusable - why a probed host can't be used, empty if it can
+# install: sudo (password is fine, sudo_prepare asks once) and rsync (sync_host), uninstall: sudo and Rückgrat there
+# Usage: lan_unusable install|uninstall <sudo> <rsync> <installed> <direct>
+lan_unusable() {
+    local mode="$1" sudo="$2" rsync="$3" installed="$4" direct="$5"
+    [[ "$sudo" == no ]] && { echo "no sudo rights"; return; }
+    if [[ "$mode" == install ]]; then
+        [[ "$rsync" == yes ]] || $direct || echo "rsync missing"
+    else
+        [[ "$installed" == yes ]] || echo "no Rückgrat"
+    fi
+    return 0
+}
+
+# lan_discover - find the machines on the LAN this user can log in to with the ssh key and use for install or
+# uninstall. fills LAN_ADDRS, LAN_NAMES, LAN_SUDO, LAN_INSTALLED, LAN_RUNNING (same index). quick and quiet: no prompts,
+# hosts without a key login are left out, the others that can't be used are listed with the reason.
+# this machine: install --in-place and uninstall need no ssh to it, so it is checked directly
+# Usage: lan_discover install|uninstall
+lan_discover() {
+    local mode="$1" direct=false subnets=() addrs=() addr tmp i=0 k v reason
+    local -A info
+    LAN_ADDRS=() LAN_NAMES=() LAN_SUDO=() LAN_INSTALLED=() LAN_RUNNING=()
+    [[ "$mode" == uninstall ]] || $IN_PLACE && direct=true
+
+    mapfile -t subnets < <(lan_subnets)
+    if (( ${#subnets[@]} )); then
+        echo "🔎 Searching ${subnets[*]} for machines with ssh..."
+        mapfile -t addrs < <(lan_ssh_hosts "${subnets[@]}")
+    fi
+    if $direct && [[ -n "${HOST_ADDR:-}" && " ${addrs[*]} " != *" $HOST_ADDR "* ]]; then
+        addrs=("$HOST_ADDR" "${addrs[@]}")
+    fi
+    if (( ${#addrs[@]} == 0 )); then
+        echo "   no machine with ssh found"
+        return 0
+    fi
+
+    echo "🔑 Checking login and sudo for $SUDO_USER on ${#addrs[@]} machine(s)..."
+    tmp=$(mktemp -d)
+    for addr in "${addrs[@]}"; do
+        lan_probe_host "$addr" "$tmp/known_hosts" "$direct" > "$tmp/host-$addr" &
+        (( ++i % LAN_SCAN_JOBS == 0 )) && wait
+    done
+    wait
+
+    for addr in "${addrs[@]}"; do
+        info=()
+        while IFS='=' read -r k v; do
+            [[ -n "$k" ]] && info[$k]="$v"
+        done < "$tmp/host-$addr"
+        [[ -n "${info[name]:-}" ]] || continue
+        reason=$(lan_unusable "$mode" "${info[sudo]:-no}" "${info[rsync]:-no}" "${info[installed]:-no}" \
+            "$($direct && is_local_host "$addr" && echo true || echo false)")
+        if [[ -n "$reason" ]]; then
+            echo "   ⏭️ $addr (${info[name]}): $reason"
+            continue
+        fi
+        LAN_ADDRS+=("$addr")
+        LAN_NAMES+=("${info[name]}")
+        LAN_SUDO+=("${info[sudo]}")
+        LAN_INSTALLED+=("${info[installed]:-no}")
+        LAN_RUNNING+=("${info[running]:-0}")
+    done
+    rm -rf "$tmp"
+}
+
+# lan_host_label - one menu line for a discovered host
+# Usage: lan_host_label <index>
+lan_host_label() {
+    local i="$1" label
+    label=$(printf "%-15s %s" "${LAN_ADDRS[i]}" "${LAN_NAMES[i]}")
+    is_local_host "${LAN_ADDRS[i]}" && label+=" (this machine)"
+    [[ "${LAN_SUDO[i]}" == password ]] && label+="  🔐 sudo asks for the password"
+    [[ "${LAN_INSTALLED[i]}" == yes ]] && label+="  ✅ Rückgrat installed (${LAN_RUNNING[i]:-0} running)"
+    echo "$label"
+}
+
+# select_target_host - the next install target: a number from the LAN_ADDRS menu or a typed IP, empty = done.
+# without discovered hosts it is the plain question
+# Usage: select_target_host <address already in the plan>...   (result in REPLY)
+select_target_host() {
+    local chosen=" $* " i
+    if (( ${#LAN_ADDRS[@]} == 0 )); then
+        read_tty "Target host (IP/hostname, empty=done): " ""
+        return
+    fi
+    echo "Machines found on the LAN:"
+    for i in "${!LAN_ADDRS[@]}"; do
+        printf "   %2d) %s%s\n" $(( i + 1 )) "$(lan_host_label "$i")" \
+            "$([[ "$chosen" == *" ${LAN_ADDRS[i]} "* ]] && echo "  [selected]")"
+    done
+    while true; do
+        read_tty "Target host (number, or type an IP, empty=done): " ""
+        if [[ "$REPLY" =~ ^[0-9]+$ ]]; then
+            if (( REPLY < 1 || REPLY > ${#LAN_ADDRS[@]} )); then
+                echo "   ⚠️ pick 1-${#LAN_ADDRS[@]}"
+                continue
+            fi
+            REPLY="${LAN_ADDRS[REPLY - 1]}"
+        fi
+        if [[ -n "$REPLY" && "$chosen" == *" $REPLY "* ]]; then
+            echo "   ⚠️ $REPLY is selected already"
+            continue
+        fi
+        return
+    done
+}
+
 # setup - Interactively collect target hosts + per-host components, then the
 # optional Cloudflare node (asked once, after all hosts)
 # Supports json config file loading/saving 
@@ -569,11 +781,15 @@ setup() {
     echo "Select hosts and their configuration"
 
     local hosts_json='[]'
-    local host_addr host_json services_json
+    local host_addr host_json services_json chosen=()
+
+    LAN_ADDRS=()
+    $NO_SCAN || lan_discover install
 
     while true; do
         echo ""
-        read_tty "Target host (IP/hostname, empty=done): " ""
+        mapfile -t chosen < <(jq -r '.[].addr' <<< "$hosts_json")
+        select_target_host "${chosen[@]}"
         host_addr=$REPLY
         [[ -z "$host_addr" ]] && break
 
@@ -644,7 +860,7 @@ setup() {
         if $INSTALL_HUB; then
             # hub.secret_key signs the hub's login tokens, saved here like cloudflare.token (empty = not saved)
             host_json=$(jq --arg port "$HUB_PORT" --arg signup_mode "$SIGNUP_MODE" --arg secret_key "$HUB_SECRET_KEY" \
-                --arg fetch_allow "${HUB_FETCH_ALLOW:-}" \
+                --arg fetch_allow "${HUB_FETCH_ALLOW:-}" --arg nomad_url "${HUB_NOMAD_URL:-}" \
                 --arg m_start "$HUB_MAINTENANCE_START" --arg m_end "$HUB_MAINTENANCE_END" --arg m_batch "$HUB_MAINTENANCE_BATCH" \
                 --arg m_interval "$HUB_MAINTENANCE_INTERVAL" --arg m_small "$HUB_MAINTENANCE_SMALL_BATCH" \
                 --arg t_max "$HUB_TASKS_MAX" --arg t_interval "$HUB_TASKS_MIN_INTERVAL" \
@@ -653,7 +869,8 @@ setup() {
                                            interval: ($m_interval | tonumber), small_batch: ($m_small | tonumber)},
                              tasks: {max: ($t_max | tonumber), min_interval: ($t_interval | tonumber)}}
                             + (if $secret_key == "" then {} else {secret_key: $secret_key} end)
-                            + (if $fetch_allow == "" then {} else {fetch_allow: $fetch_allow} end))}' <<< "$host_json")
+                            + (if $fetch_allow == "" then {} else {fetch_allow: $fetch_allow} end)
+                            + (if $nomad_url == "" then {} else {nomad_url: $nomad_url} end))}' <<< "$host_json")
         fi
 
         if $INSTALL_CHAT; then
@@ -662,6 +879,11 @@ setup() {
 
         hosts_json=$(jq --argjson host "$host_json" '. + [$host]' <<< "$hosts_json")
     done
+
+    if ! jq -e 'any(.[]; any(.node.services[]?; .type == "text_to_text"))' <<< "$hosts_json" >/dev/null; then
+        echo ""
+        echo "⚠️ Warning: no host runs llama-server, Rückgrat needs an LLM to answer"
+    fi
 
     local cloudflare_json users_json
     select_cloudflare "$hosts_json"
@@ -732,6 +954,7 @@ select_cloudflare() {
     hub_port="${hub_port:-$HUB_PORT_DEFAULT}"
 
     echo ""
+    service_hint " " cloudflare
     read_tty "Would you also like a Cloudflare node (tunnel to the hub)? (y/N): " "n"
     if ! [[ "$REPLY" =~ ^[Yy]$ ]]; then
         echo -e "\e[1A\e[K [⚫] Cloudflare"
@@ -797,6 +1020,31 @@ select_hub_secret() {
     fi
 }
 
+# select_nomad - Ask where Project NOMAD runs in the network (optional): its offline library and map are the
+# hub's fallbacks without internet. Saved in the hub host's config as "hub.nomad_url" -> NOMAD_URL in .env.
+# Changeable later without a reinstall: python -m app.hub_management offline nomad URL (in the hub container)
+# Usage: select_nomad
+# Sets: HUB_NOMAD_URL ("" = none)
+select_nomad() {
+    HUB_NOMAD_URL=""
+    [[ "${YES:-false}" == true ]] && return 0
+    service_hint "     " nomad
+    read_tty "NOMAD url (e.g. http://[IP]:8080, empty=none): " ""
+    local url="${REPLY// /}"
+    if [[ -z "$url" ]]; then
+        echo -e "\e[1A\e[K     NOMAD: none"
+        return 0
+    fi
+    [[ "$url" =~ ^https?:// ]] || url="http://$url"
+    url=$(sed -E 's#^(https?://[^/]+).*#\1#' <<< "$url")
+    HUB_NOMAD_URL="$url"
+    if curl -fsS -m 5 "$url/api/health" >/dev/null 2>&1; then
+        echo -e "\e[1A\e[K     NOMAD: $url ✅"
+    else
+        echo -e "\e[1A\e[K     NOMAD: $url (⚠️ not reachable right now, kept anyway)"
+    fi
+}
+
 # select_maintenance - the hub's maintenance (conversation summaries): a nightly window with a big batch,
 # and small batches during the day. times are each user's local time
 # Sets: HUB_MAINTENANCE_START, HUB_MAINTENANCE_END, HUB_MAINTENANCE_BATCH, HUB_MAINTENANCE_INTERVAL, HUB_MAINTENANCE_SMALL_BATCH
@@ -808,15 +1056,15 @@ select_maintenance() {
     read_setting "Nightly maintenance until?" "$HUB_MAINTENANCE_END_DEFAULT" "$hhmm"
     HUB_MAINTENANCE_END=$REPLY
     echo -e "\e[1A\e[K     Maintenance until: $HUB_MAINTENANCE_END"
-    read_setting "Items per night?" "$HUB_MAINTENANCE_BATCH_DEFAULT" "$number"
+    read_setting "Maintenance items per night?" "$HUB_MAINTENANCE_BATCH_DEFAULT" "$number"
     HUB_MAINTENANCE_BATCH=$REPLY
-    echo -e "\e[1A\e[K     Items per night: $HUB_MAINTENANCE_BATCH"
-    read_setting "During the day, run every how many minutes (0 = never)?" "$HUB_MAINTENANCE_INTERVAL_DEFAULT" "$number"
+    echo -e "\e[1A\e[K     Maintenance items per night: $HUB_MAINTENANCE_BATCH"
+    read_setting "Maintenance during the day, run every how many minutes (0 = never)?" "$HUB_MAINTENANCE_INTERVAL_DEFAULT" "$number"
     HUB_MAINTENANCE_INTERVAL=$REPLY
-    echo -e "\e[1A\e[K     During the day every: $HUB_MAINTENANCE_INTERVAL min"
-    read_setting "Items per daytime run?" "$HUB_MAINTENANCE_SMALL_BATCH_DEFAULT" "$number"
+    echo -e "\e[1A\e[K     Maintenance during the day every: $HUB_MAINTENANCE_INTERVAL min"
+    read_setting "Maintenance items per daytime run?" "$HUB_MAINTENANCE_SMALL_BATCH_DEFAULT" "$number"
     HUB_MAINTENANCE_SMALL_BATCH=$REPLY
-    echo -e "\e[1A\e[K     Items per daytime run: $HUB_MAINTENANCE_SMALL_BATCH"
+    echo -e "\e[1A\e[K     Maintenance items per daytime run: $HUB_MAINTENANCE_SMALL_BATCH"
 }
 
 # select_tasks - the limits of the users' tasks (#170, the task tool and the tasks page of the app), per user
@@ -829,6 +1077,35 @@ select_tasks() {
     read_setting "A task repeats at most every how many minutes?" "$HUB_TASKS_MIN_INTERVAL_DEFAULT" "$positive"
     HUB_TASKS_MIN_INTERVAL=$REPLY
     echo -e "\e[1A\e[K     Tasks repeat at most every: $HUB_TASKS_MIN_INTERVAL min"
+}
+
+# service_hint - One or two short lines before a component's question
+# Usage: service_hint <indent> <key>   (chat, hub, node, llm, image, tts, stt, embedding, decision, cloudflare, nomad)
+SERVICE_HINTS_SHOWN=" "
+service_hint() {
+    local indent="$1" key="$2" line lead="💡" lines=()
+    [[ "$SERVICE_HINTS_SHOWN" == *" $key "* ]] && return 0
+    SERVICE_HINTS_SHOWN+="$key "
+    case "$key" in
+        chat)       lines=("The Rückgrat chat app: chat, voice and the transcribe app. An Android build is offered at the end of the install.") ;;
+        hub)        lines=("Exactly one is required: this is the server the apps log in to.") ;;
+        node)       lines=("Runs the AI services. One or more machines can be nodes.") ;;
+        llm)        lines=("At least one is required: the LLM writes every reply, plans background jobs and calls the tools. Nothing works without it.") ;;
+        image)      lines=("Image tools (pictures on request, contact photos), contact profile pictures and the gallery. Without: no image generation.") ;;
+        tts)        lines=("Replies read aloud, text into audio files. Without: text only.") ;;
+        stt)        lines=("Speak into the chat with the mic, record in the transcribe app. Without: typing only.") ;;
+        embedding)  lines=("Long-term memory: contacts remember facts and find them and earlier conversations again. Without: no memories.") ;;
+        decision)   lines=("Laya picks the tools for each message, fast and accurate, and filters earlier conversations for memory search."
+                           "Without: the LLM picks the tools, about 5 s more per message.") ;;
+        cloudflare) lines=("Reach the hub from outside your network through a Cloudflare tunnel, requires no open ports.") ;;
+        nomad)      lines=("Use project NOMAD if it is available in your network: offline library and map so Web search, Wikipedia and the map keep working without internet."
+                           "Without: those need the internet.") ;;
+        *)          return 0 ;;
+    esac
+    for line in "${lines[@]}"; do
+        echo "${indent}${lead} $line"
+        lead="  "     # a second line goes under the first one's text
+    done
 }
 
 # select_tts_model - Ask which Chatterbox model the TTS node of this host uses.
@@ -867,15 +1144,18 @@ select_components() {
     INSTALL_EMBEDDING=false
     INSTALL_DECISION=false
     HUB_SECRET_KEY=""
+    HUB_NOMAD_URL=""
     REGISTRY_JSON="${REGISTRY_JSON:-$WORKING_DIR/rueckgrat/node/data/registry.json}"
 
     echo "Select components:"
     echo ""
 
+    service_hint " " chat
     read_tty "Install native chat client? (Y/n): " "Y"
     [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_CHAT=true
     echo -e "\e[1A\e[K [$( [[ $INSTALL_CHAT == true ]] && echo '✅' || echo '⚫' )] Native Chat Client"
 
+    service_hint " " hub
     read_tty "Install Hub? (Y/n): " "Y"
     [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_HUB=true
     echo -e "\e[1A\e[K [$( [[ $INSTALL_HUB == true ]] && echo '✅' || echo '⚫' )] Hub"
@@ -893,8 +1173,10 @@ select_components() {
         select_maintenance
         select_tasks
         select_hub_secret
+        select_nomad
     fi
 
+    service_hint " " node
     read_tty "Install Node? (Y/n): " "Y"
     [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_NODE=true
     echo -e "\e[1A\e[K [$( [[ $INSTALL_NODE == true ]] && echo '✅' || echo '⚫' )] Node"
@@ -903,6 +1185,7 @@ select_components() {
         NODE_PORT=$REPLY
         echo -e "\e[1A\e[K     Port: $NODE_PORT"
 
+        service_hint "     " llm
         read_tty "Install llama-server on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_LLAMA=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_LLAMA == true ]] && echo '✅' || echo '⚫' )] llama-server"
@@ -939,10 +1222,12 @@ select_components() {
             echo -e "         Selected model: $INSTALL_LLAMA_MODEL"
         fi
 
+        service_hint "     " image
         read_tty "Install image generation on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_IMAGE_GEN=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_IMAGE_GEN == true ]] && echo '✅' || echo '⚫' )] ImageGen"
 
+        service_hint "     " tts
         read_tty "Install text to speech (Chatterbox) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_TTS=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_TTS == true ]] && echo '✅' || echo '⚫' )] TTS"
@@ -950,6 +1235,7 @@ select_components() {
             select_tts_model
         fi
 
+        service_hint "     " stt
         read_tty "Install speech to text (faster-whisper) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_STT=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_STT == true ]] && echo '✅' || echo '⚫' )] STT"
@@ -959,10 +1245,12 @@ select_components() {
             echo -e "\e[1A\e[K         Workers: $STT_WORKERS"
         fi
 
+        service_hint "     " embedding
         read_tty "Install text embeddings (memory search) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_EMBEDDING=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_EMBEDDING == true ]] && echo '✅' || echo '⚫' )] Embedding"
 
+        service_hint "     " decision
         read_tty "Install decision model (using Laya) on Node? (Y/n): " "Y"
         [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_DECISION=true
         echo -e "\e[1A\e[K     [$( [[ $INSTALL_DECISION == true ]] && echo '✅' || echo '⚫' )] Decision"
@@ -1052,6 +1340,12 @@ deploy_hub() {
     if [[ -n "${HUB_FETCH_ALLOW:-}" ]]; then
         set_env_value HUB_FETCH_ALLOW "$HUB_FETCH_ALLOW"
         echo "   fetch allow  $HUB_FETCH_ALLOW"
+    fi
+    # optional: where Project NOMAD runs (offline library and map). not in the config -> .env is left alone,
+    # the hub management (offline nomad) can set it later
+    if [[ -n "${HUB_NOMAD_URL:-}" ]]; then
+        set_env_value NOMAD_URL "$HUB_NOMAD_URL"
+        echo "   nomad        $HUB_NOMAD_URL"
     fi
 
     set_env_value HUB_MAINTENANCE_START "${HUB_MAINTENANCE_START:-$HUB_MAINTENANCE_START_DEFAULT}"
@@ -1533,6 +1827,7 @@ parse_host_config() {
     SIGNUP_MODE=""
     HUB_SECRET_KEY=""
     HUB_FETCH_ALLOW=""
+    HUB_NOMAD_URL=""
     HUB_MAINTENANCE_START=""
     HUB_MAINTENANCE_END=""
     HUB_MAINTENANCE_BATCH=""
@@ -1557,6 +1852,7 @@ parse_host_config() {
         SIGNUP_MODE=$(echo "$host_config" | jq -r '.hub.signup_mode // empty')
         HUB_SECRET_KEY=$(echo "$host_config" | jq -r '.hub.secret_key // empty')
         HUB_FETCH_ALLOW=$(echo "$host_config" | jq -r '.hub.fetch_allow // empty')
+        HUB_NOMAD_URL=$(echo "$host_config" | jq -r '.hub.nomad_url // empty')
         # configs from before these options have no "maintenance" -> the defaults
         HUB_MAINTENANCE_START=$(echo "$host_config" | jq -r '.hub.maintenance.start // empty')
         HUB_MAINTENANCE_END=$(echo "$host_config" | jq -r '.hub.maintenance.end // empty')
@@ -1943,6 +2239,7 @@ usage() {
     echo "  --host-config | -hc    STRING       partial config for just one host"    
     echo "  --sync | -s                         Dev mode: rsync local tree to remote hosts only"
     echo "  --in-place                          Install in the current directory when the target is this host"
+    echo "  --no-scan                           Don't search the LAN for target hosts, only type them in"
     echo "  --apk | -a                          Only build the Android APK of the chat client, then exit"
     echo "  --user | -u            USER         Sudo username"
     echo "  --info | -i                         Print system info"
@@ -2221,6 +2518,7 @@ main() {
     NO_CACHE=""
     SYNC_ONLY=false
     IN_PLACE=false
+    NO_SCAN=false
     APK_ONLY=false
     HOST_MODELS_DIR=HOST_MODELS_DIR_DEFAULT
     NODE_PORT=NODE_PORT_DEFAULT
@@ -2287,6 +2585,7 @@ main() {
             -f|--fresh) CLEAN_BUILD=true; NO_CACHE="--no-cache"; shift ;;
             -s|--sync) SYNC_ONLY=true; shift ;;
             --in-place) IN_PLACE=true; shift ;;
+            --no-scan) NO_SCAN=true; shift ;;
             -a|--apk) APK_ONLY=true; shift ;;
             -y|--yes) YES=true; shift ;;
             -h|--help) usage; exit 0 ;;

@@ -1,10 +1,10 @@
 import re
-import asyncio
 import textwrap
 import flet as ft
 from urllib.parse import urlparse
 from app.ui import theme
 from app.ui.widgets.image_grid import ImageGrid
+from app.ui.widgets.copy_button import CopyButton
 
 from app.common import get_logger
 logger = get_logger()
@@ -13,6 +13,8 @@ logger = get_logger()
 FAVICON_SIZE = 20   # source buttons: the favicon and its fallback icon
 CODE_RADIUS = theme.RADIUS - 4
 _QUOTE_LINE = re.compile(r"^[ \t]{0,3}> ?(.*)$")
+_TABLE_DELIMITER = re.compile(r"^[ \t]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$")   # |---|:--:|
+_TABLE_CELL_SPLIT = re.compile(r"(?<!\\)\|")     # a | that is not escaped (\|)
 
 class BubbleActions(ft.Row):
     """the row of small buttons under a bubble, e.g. play and the sources of a web search"""
@@ -66,6 +68,10 @@ class ChatBubble(ft.Container):
 
     def clear_content(self):
         self.raw_content = ""
+
+    def copy_text(self) -> str:
+        """the whole message as its markdown, without the [IMAGE: ...] and [MOOD: ...] tags"""
+        return re.sub(r"[ \t]*\[(?:IMAGE|MOOD):\s*.*?\]", "", self.raw_content).strip()
 
     def _split_blockquotes(self, text: str) -> list[dict]:
         """text and quote runs. a quote is consecutive '>' lines, including a blank gap before another '>' line"""
@@ -122,8 +128,12 @@ class ChatBubble(ft.Container):
                     for part in self._split_blockquotes(item["value"]):
                         if part["type"] == "quote":
                             self._add_quote(part["value"])
-                        elif part["value"].strip():
-                            self._add_text(part["value"])
+                            continue
+                        for block in self._split_tables(part["value"]):
+                            if block["type"] == "table":
+                                self._add_table(block["value"])
+                            elif block["value"].strip():
+                                self._add_text(block["value"])
                 elif item["type"] == "code":
                     self._add_code(item["value"])
         except Exception as e:
@@ -158,32 +168,26 @@ class ChatBubble(ft.Container):
         m = re.fullmatch(r"\s*```[^\n]*\n(.*?)\n?[ \t]*```\s*", textwrap.dedent(block), re.DOTALL)
         return m.group(1) if m else block
 
+    @staticmethod
+    def _with_copy(control: ft.Control, text: str, kind: str) -> ft.Stack:
+        """control with a compact copy button for text over its top right corner, data {"id": kind}. The button is
+        positioned and no higher than a text line, so the block keeps its own height"""
+        return ft.Stack([control, CopyButton(text, compact=True, top=3, right=1)], data={"id": kind})
+
+    @staticmethod
+    def _copy_room() -> ft.Padding:
+        """right padding of a text or table block, its copy button does not cover the text"""
+        return ft.Padding(0, 0, CopyButton.compact_size() + 4, 0)
+
     def _add_code(self, content: str):
         content = textwrap.dedent(content)  # a block of a list item, it is shown at full width
-        code = self._code_text(content)
-
-        async def copy(e):   # #173 copies the block's code, the icon shows a check for a moment
-            await ft.Clipboard().set(code)
-            e.control.icon = ft.Icons.CHECK
-            e.control.update()
-            await asyncio.sleep(1.5)
-            e.control.icon = ft.Icons.CONTENT_COPY
-            e.control.update()
-
+        # #173 the button copies the block's code
         self.body.controls.append(
             ft.Container(
-                content=ft.Stack([
-                    ft.Row(
-                        [self._md(content, code=True)],
-                        scroll=ft.ScrollMode.AUTO,
-                        wrap=False,
-                    ),
-                    ft.IconButton(icon=ft.Icons.CONTENT_COPY, icon_size=16, icon_color=theme.TEXT, tooltip="Copy",
-                                  top=0, right=0, on_click=copy),
-                ]),
+                content=self._with_copy(ft.Row([self._md(content, code=True)], scroll=ft.ScrollMode.AUTO, wrap=False),
+                                        self._code_text(content), "code"),
                 border_radius=CODE_RADIUS,
                 clip_behavior=ft.ClipBehavior.ANTI_ALIAS,   # the code background keeps the rounded corners
-                data={"id": "code"},
             )
         )
 
@@ -197,30 +201,53 @@ class ChatBubble(ft.Container):
 
     def _add_quote(self, content: str):
         """the quote still renders as markdown, so the theme background and corners apply. the button copies the text"""
-        copied = self.quote_text(content)
+        self.body.controls.append(self._with_copy(self._md(content), self._quote_text(content), "quote"))
 
-        async def copy(e):
-            await ft.Clipboard().set(copied)
-            e.control.icon = ft.Icons.CHECK
-            e.control.update()
-            await asyncio.sleep(1.5)
-            e.control.icon = ft.Icons.CONTENT_COPY
-            e.control.update()
+    @staticmethod
+    def _split_tables(text: str) -> list[dict]:
+        """text and table runs. a table is a line with | followed by a delimiter line (|---|---|) and the | lines after it"""
+        lines = text.splitlines(keepends=True)
+        parts, buf, i = [], [], 0
+        while i < len(lines):
+            if not ("|" in lines[i] and i + 1 < len(lines) and "|" in lines[i + 1] and _TABLE_DELIMITER.match(lines[i + 1])):
+                buf.append(lines[i])
+                i += 1
+                continue
+            if buf:
+                parts.append({"type": "text", "value": "".join(buf)})
+                buf = []
+            j = i + 2
+            while j < len(lines) and "|" in lines[j] and lines[j].strip():
+                j += 1
+            parts.append({"type": "table", "value": "".join(lines[i:j])})
+            i = j
+        if buf:
+            parts.append({"type": "text", "value": "".join(buf)})
+        return parts
 
-        self.body.controls.append(
-            ft.Stack([
-                self._md(content),
-                ft.IconButton(icon=ft.Icons.CONTENT_COPY, icon_size=16, icon_color=theme.TEXT, tooltip="Copy",
-                              top=0, right=0, on_click=copy),
-            ], data={"id": "quote"})
-        )
+    @staticmethod
+    def _table_text(block: str) -> str:
+        """the table tab separated, a line per row without the delimiter line: pastes into a spreadsheet"""
+        rows = []
+        for line in block.strip("\n").splitlines():
+            if _TABLE_DELIMITER.match(line):
+                continue
+            cells = _TABLE_CELL_SPLIT.split(line.strip())
+            if cells and cells[0] == "":
+                cells = cells[1:]
+            if cells and cells[-1] == "":
+                cells = cells[:-1]
+            rows.append("\t".join(cell.strip().replace("\\|", "|") for cell in cells))
+        return "\n".join(rows)
+
+    def _add_table(self, content: str):
+        self.body.controls.append(self._with_copy(ft.Container(content=self._md(content), padding=self._copy_room()),
+                                                  self._table_text(content), "table"))
 
     def _add_text(self, content: str):
-        self.body.controls.append(
-            ft.Container(
-                content=self._md(content)
-            )
-        )
+        """paragraphs, lists and headings between the other blocks, the button copies their markdown"""
+        self.body.controls.append(self._with_copy(ft.Container(content=self._md(content), padding=self._copy_room()),
+                                                  content.strip("\n"), "text"))
 
     def _parse_content(self, content: str) -> list[dict]:
         parts = []

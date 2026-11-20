@@ -134,7 +134,7 @@ class ToolExecutionTask(Task):
             offered = set(self.tool_names + self.recommended)
             mandatory, recommended = ([name for name in band if name not in offered] for band in detected)
             found, detected = mandatory + recommended, detected[0] + detected[1]
-            logger.info(f"find_tools {step}/{self.FIND_TOOLS_STEPS}: {task[:200]} -> {detected or 'nothing'}, new: {found}")
+            logger.info(f"find_tools {step}/{self.FIND_TOOLS_STEPS} ({detection.source() or 'nothing decided'}): {task[:200]} -> {detected or 'nothing'}, new: {found}")
             text = tool_prompts.FIND_TOOLS_FOUND_PART.format(task=task, tools=", ".join(found)) if found \
                 else tool_prompts.FIND_TOOLS_OFFERED_PART.format(task=task, tools=", ".join(detected)) if detected \
                 else tool_prompts.FIND_TOOLS_NONE_PART.format(task=task)

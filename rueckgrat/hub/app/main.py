@@ -22,13 +22,16 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from app.utils import ChatDB, Infrastructure, ImageType, ImageStore, fence_code
 from app.tools import ToolRegistry, SpawnAgentJobTool, TaskTool
-from app.tools.map_tool import get_tile
+from app.tools.map_tool import MapTiles
+from app.tools.conversion_tool import RateRefresher
 from app.agent_jobs import AgentJob
+from app.agent_jobs.job_monitor import JobMonitor
 from app.tasks import TaskQueue, MetaTask, AssistantImageTask, ContactGeneratorTask, TranslateTask, GenerateImageTask
 from app.tasks.transcript_tasks import TranscriptSummaryTask, TranscriptEnhanceTask, enhanceable
 from app.tasks.turns import Turns
 from app.utils.tts_stream import TtsStreams
 from app.companion import CompanionScheduler
+from app.companion.outreach import Outreach
 from app.companion.user_tasks import UserTasks, TaskError, TaskNotFound
 from app.utils.clock import user_timezone_name, valid_timezone
 from app.maintenance import MaintenanceSweeper, maintenance_tasks
@@ -58,12 +61,18 @@ async def lifespan(app: FastAPI):
     stale_jobs = app.state.db.fail_stale_jobs()     # their threads died with the last hub, before any new job can start
     if stale_jobs:
         logger.info(f"{stale_jobs} interrupted job(s) set to failed")
+    interrupted = app.state.db.interrupt_protocols()    # #215 the jobs and passes that ran when the last hub stopped
+    if interrupted:
+        logger.info(f"{interrupted} protocol(s) of interrupted jobs or passes")
     old_protocols = app.state.db.prune_protocols()     # #174 job protocols older than PROTOCOL_RETENTION_HOURS
     if old_protocols:
         logger.info(f"{old_protocols} old job protocol(s) deleted")
     app.state.image_store = ImageStore(app.state.db, app.state.infrastructure)
     app.state.task_queue = TaskQueue(max_parallel = 10)
     app.state.turns = Turns(app.state.db)
+
+    app.state.map_tiles = MapTiles(app.state.infrastructure)
+    app.state.map_tiles.clear_offline()     # drawn by the last hub, maybe with other fonts or style
 
     logger.info("loading tool registry")
     app.state.tool_registry = ToolRegistry(
@@ -78,6 +87,9 @@ async def lifespan(app: FastAPI):
     AgentJob.set_turns(app.state.turns)
     AgentJob.connections = app.state.connections
     SpawnAgentJobTool.tool_registry = app.state.tool_registry    # the job's workers use the tools like a chat reply
+    # #215 the Backroom: the running jobs and passes and their protocols, live to the user's open /ws
+    JobMonitor().configure(app.state.db, AgentJob.user_connected)
+    Outreach().configure(app.state.db, app.state.tool_registry)
 
     # proactive companions: a CompanionJob per due row of their calendars
     app.state.companion = CompanionScheduler(app.state.db, app.state.infrastructure, app.state.tool_registry)
@@ -90,6 +102,10 @@ async def lifespan(app: FastAPI):
     app.state.maintenance = MaintenanceSweeper(app.state.db, app.state.task_queue, maintenance_tasks(app.state.db, app.state.infrastructure),
                                                is_busy=lambda: app.state.turns.any_busy() or not app.state.task_queue.queue.empty())
     app.state.maintenance.start()
+
+    # the exchange rates for conversions without the internet: right away when none are saved (first start), then daily
+    app.state.rates = RateRefresher(app.state.infrastructure)
+    app.state.rates.start()
 
     logger.info("loading vad")
     app.state.vad = load_silero_vad(onnx=True)
@@ -106,6 +122,8 @@ async def lifespan(app: FastAPI):
 
     app.state.companion.stop()
     app.state.maintenance.stop()
+    app.state.rates.stop()
+    JobMonitor().stop()
     app.state.task_queue.stop()
 
     logger.info("hub shut down")
@@ -480,9 +498,11 @@ def health():
 
 @app.get("/capabilities")
 def get_capabilities():
-    """what can be used now: {"llm", "tts", "stt", "image", "decision", "embedding", "internet": bool, "expected": [names]}.
+    """what can be used now: {"llm", "tts", "stt", "image", "decision", "embedding", "internet", "library", "offline_map": bool,
+    "expected": [names], "internet_mode": "probed" or "simulated offline" (hub setting, the internet counts as not there)}.
     expected: what the system is set up for (configured, the internet always), not available there means missing. no login, like /signup-mode"""
-    return {**app.state.infrastructure.capabilities(), "expected": app.state.infrastructure.expected()}
+    return {**app.state.infrastructure.capabilities(), "expected": app.state.infrastructure.expected(),
+            "internet_mode": app.state.infrastructure.internet_mode()}
 
 @app.put("/log-level/{level}")
 def _set_log_level(level: str, username: str = Depends(get_current_user)):
@@ -650,6 +670,8 @@ def set_companion(contact_id: int, request: CompanionRequest, username: str = De
     with logger_context(user_id):
         if not app.state.db.set_contact_companion(user_id, contact_id, request.enabled):
             raise HTTPException(status_code=404, detail="contact not found")
+        if not request.enabled:
+            Outreach().drop_contact(contact_id)
         app.state.companion.wake()
         return {"status": "ok"}
 
@@ -1304,8 +1326,8 @@ def get_model_url(model_name: str, username: str = Depends(get_current_user)):
 @app.get("/map/tiles/{z}/{x}/{y}")
 async def get_map_tile(z: int, x: int, y: int, username: str = Depends(get_current_user)):
     """one openstreetmap tile for a map bubble. the hub fetches it with its own user agent and caches it (tile policy),
-    so the client talks to no one but its hub"""
-    tile = await run_in_threadpool(get_tile, z, x, y)
+    so the client talks to no one but its hub. without the internet the hub draws it from NOMAD's map files"""
+    tile = await run_in_threadpool(app.state.map_tiles.tile, z, x, y)
     if tile is None:
         raise HTTPException(status_code=404, detail="tile not available")
     return Response(content=tile, media_type="image/png", headers={"Cache-Control": "max-age=604800"})
@@ -1424,6 +1446,23 @@ async def download_file(file_path: str, username: str = Depends(get_current_user
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
+def _job_request(data: dict, key: str) -> tuple[str, dict]:
+    """#215 (job_id, the request) of a Backroom request {key: {job_id, ...}}, job_id "" if it has none"""
+    request = data.get(key) if isinstance(data.get(key), dict) else {}
+    return str(request.get("job_id") or ""), request
+
+
+def _contact_event(data: dict, key: str) -> tuple[int | None, int | None]:
+    """#167 (contact_id, conversation_id) of {key: {contact_id, conversation_id}}, None when a value is missing or not an int"""
+    request = data.get(key) if isinstance(data.get(key), dict) else {}
+    def number(name):
+        try:
+            return int(request[name]) if request.get(name) is not None else None
+        except (TypeError, ValueError):
+            return None
+    return number("contact_id"), number("conversation_id")
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_current_user_ws)):
     await websocket.accept()
@@ -1435,6 +1474,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
     session = MessageQueue().connect(user_id)
     with logger_context(user_id):
         app.state.connections[user_id] += 1
+        await run_in_threadpool(JobMonitor().send_snapshot, user_id, session)   # #215 the Backroom's jobs
 
         async def safe_close(code: int = 1000):
             if not closed.is_set():
@@ -1488,13 +1528,28 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                                 chat_request.content = fenced
                                 MessageQueue().send_data({"fenced": {"conversation_id": chat_request.conversation_id, "content": fenced}}, user_id=user_id)
                             
+                            Outreach().on_user_message(user_id, chat_request.contact_id)
                             SpawnAgentJobTool.add_message(user_id, chat_request.conversation_id, chat_request.content)
                             job = MetaTask(user_id, chat_request, app.state.db, app.state.infrastructure, app.state.tool_registry, app.state.turns)
                             app.state.turns.start(job)  # stores the user message, or merges it into the reply still being made
                             app.state.task_queue.add(job)
                     elif "cancel_job" in data:
-                        # #152 the cancel button of a job's progress row, only the job's own user can cancel it
-                        SpawnAgentJobTool.cancel(user_id, str((data["cancel_job"] or {}).get("job_id") or ""))
+                        # #152 the cancel button of a job, only the job's own user can cancel it
+                        JobMonitor().cancel(user_id, _job_request(data, "cancel_job")[0])
+                    elif "get_jobs" in data:    # #215 the Backroom: the snapshot again
+                        await run_in_threadpool(JobMonitor().send_snapshot, user_id, session)
+                    elif "watch_protocol" in data:  # its lines after after_seq, then live, to this websocket only
+                        job_id, request = _job_request(data, "watch_protocol")
+                        try:
+                            after_seq = max(0, int(request.get("after_seq") or 0))
+                        except (TypeError, ValueError):
+                            after_seq = 0
+                        await run_in_threadpool(JobMonitor().watch, session, user_id, job_id, after_seq)
+                    elif "unwatch_protocol" in data:
+                        JobMonitor().unwatch(session, _job_request(data, "unwatch_protocol")[0])
+                    elif "get_protocol_output" in data:     # a long text of a line, when the app expands it
+                        job_id, request = _job_request(data, "get_protocol_output")
+                        await run_in_threadpool(JobMonitor().send_output, session, user_id, job_id, str(request.get("ref") or ""))
                     elif "generate" in data:
                         generate = data["generate"]
                         if "generate_profile" in generate:
@@ -1517,6 +1572,21 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
                         generate_image = data["generate_image"]   # image tool, the result goes back as {"generated_image": ...}
                         job = GenerateImageTask(user_id, generate_image["prompt"], app.state.db, app.state.infrastructure, generate_image.get("request_id", ""))
                         app.state.task_queue.add(job)
+                    elif "contact_opened" in data:  # #167 the surprise version of a held reach-out, if there is one
+                        contact_id, conversation_id = _contact_event(data, "contact_opened")
+                        if contact_id is not None and conversation_id is not None and app.state.db.owns_contact(user_id, contact_id)                                 and app.state.db.owns_conversation(user_id, conversation_id):
+                            await run_in_threadpool(Outreach().on_opened, user_id, contact_id, conversation_id, session)
+                        else:
+                            logger.warning(f"user {user_id} sent contact_opened for foreign or unknown contact {contact_id} / conversation {conversation_id}")
+                    elif "contact_closed" in data:
+                        contact_id, _ = _contact_event(data, "contact_closed")
+                        Outreach().on_closed(session, contact_id)
+                    elif "typing" in data:
+                        contact_id, conversation_id = _contact_event(data, "typing")
+                        if contact_id is not None and app.state.db.owns_contact(user_id, contact_id):
+                            Outreach().on_typing(user_id, contact_id)
+                        else:
+                            logger.warning(f"user {user_id} sent typing for foreign or unknown contact {contact_id}")
                     else:                    
                         logger.error(f"unknown request {data}")
                         await websocket.send_text(
@@ -1564,6 +1634,8 @@ async def websocket_endpoint(websocket: WebSocket, username: str = Depends(get_c
             await safe_close()
         finally:    # also when the handler is cancelled: an open session would swallow the user's messages
             MessageQueue().disconnect(session)
+            JobMonitor().disconnect(session)    # its protocol watches end
+            Outreach().disconnect(session)
             app.state.connections[user_id] -= 1
             for task in (receiver_task, sender_task):
                 task.cancel()

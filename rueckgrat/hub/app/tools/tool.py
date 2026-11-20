@@ -15,6 +15,7 @@ class Tool(Task):
     sequential = False  # the calls of sequential tools in one round run one after another in their order (they share the sandbox files)
     offered_with = ()   # names of tools this one is offered with as an optional tool (ToolRegistry.companions), no laya question of its own
     requires = ()       # the capabilities it needs (Infrastructure.available: "image", "embedding", "internet" ...), without one it is not offered
+    requires_any = ()   # of these capabilities at least one (an online and an offline way, e.g. "internet" or "library"), () no such need
     overrides = ()      # names of tools this one makes needless when both are detected (ToolRegistry.overridden), e.g. price_finder: websearch
     fixable = False     # offered in a worker's fix rounds (ToolRegistry.fixable): a tool that makes or offers files, run again to fix a problem
     HELD_DATA = "held_data"     # result key: {kind: value} show_data held without a stored message (ToolRegistry.show_held)

@@ -12,6 +12,8 @@ HUB_FETCH_ALLOW (rueckgrat/.env, needs a hub rebuild) opens local targets, comma
   - private:            all private/LAN ranges (10/8, 172.16/12 incl. the docker networks, 192.168/16,
                         100.64/10, fc00::/7). not loopback, not link-local
 Cloud metadata (169.254.169.254, fd00:ec2::254) stays blocked unless that exact address is listed.
+allow_endpoints: host:port pairs the hub opens itself, the configured Project NOMAD and its library (Nomad.probe), only
+those ports, nothing else of that host.
 """
 import ipaddress
 import os
@@ -32,6 +34,26 @@ MAX_BYTES = 10 * 1024 * 1024    # a page, not a download
 METADATA_IPS = {ipaddress.ip_address("169.254.169.254"), ipaddress.ip_address("fd00:ec2::254")}
 PRIVATE_NETS = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7")]
 REDIRECT_STATUS = {301, 302, 303, 307, 308}
+_endpoints: frozenset = frozenset()     # (host name, port) the hub allows on its own (allow_endpoints)
+
+
+def allow_endpoints(endpoints) -> None:
+    """(host, port) pairs that may be fetched whatever their address, e.g. the configured NOMAD. replaces the last set"""
+    global _endpoints
+    _endpoints = frozenset((str(host).lower().rstrip("."), int(port)) for host, port in endpoints)
+
+
+def allowed_endpoints() -> frozenset:
+    return _endpoints
+
+
+def is_local_host(hostname: str, ips) -> bool:
+    """the host is in the LAN or on this machine (no internet needed to reach it): an allowed endpoint's host or no
+    global address"""
+    hostname = str(hostname).lower().rstrip(".")
+    if any(hostname == host for host, _ in _endpoints):
+        return True
+    return all(not (getattr(ip, "ipv4_mapped", None) or ip).is_global for ip in ips) if ips else False
 
 
 class FetchBlocked(Exception):
@@ -110,6 +132,8 @@ def check_url(url: str) -> tuple:
         raise FetchBlocked(f"can't resolve the host of '{url}'")
     if not ips:
         raise FetchBlocked(f"can't resolve the host of '{url}'")
+    if (hostname, port) in _endpoints:
+        return parsed, port, ips
     policy = fetch_policy()
     for ip in ips:
         reason = policy.allows(ip, hostname)

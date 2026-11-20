@@ -16,7 +16,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **bash** — run bash commands in a sandbox
     - **calculate** — calculate given expression
     - **run_code** — write a small program and run it in a fresh sandbox container (Python, JavaScript, C++, Java, Go)
-    - **convert** — conversion between numerous units
+    - **convert** — conversion between numerous units and currencies (exchange rates are saved once a day, so currencies still convert without internet)
     - **current_time** — current time for given location
     - **date_calc** — date calculations
     - **fetch_url** — fetch content for given URL
@@ -38,7 +38,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - **write_file** — write text or code files, downloadable by the user in chat
     - **share_file** — attach files or folders already in the sandbox to the answer, downloadable by the user in chat
 
-    Some tools are only offered while the matching service is available: **generate_image** and **take_photo** need an image node, **text_to_speech** a TTS node, **remember** and **search_memory** a text-embeddings node, and **websearch**, **fetch_url**, **wikipedia**, **weather**, **price_finder** and **show_map** need internet.
+    Some tools are only offered while the matching service is available: **generate_image** and **take_photo** need an image node, **text_to_speech** a TTS node, **remember** and **search_memory** a text-embeddings node, **weather** and **price_finder** need internet, and **websearch**, **wikipedia** and **show_map** need internet or [Project NOMAD](#offline-with-project-nomad). **fetch_url** is always there: without internet it still reads pages in your network.
 
 - agent jobs running in the background
     - a controller plans the job in steps and delegates each step to up multiple sub agents working in parallel, each with its own role (e.g. researcher, analyst, writer)
@@ -120,7 +120,8 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen, TTS, STT, text embeddings), an optional Cloudflare tunnel and an optional Android APK of the chat client.
+The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen, TTS, STT, text embeddings, Laya decisions), an optional Cloudflare tunnel, an optional [Project NOMAD](#offline-with-project-nomad) in your network and an optional Android APK of the chat client.
+Before each component it says in a line or two what the component brings and what is missing without it. The LLM (llama-server on one node) is required, and the installer warns when no host runs one.
 
 Run chat natively:
 
@@ -165,6 +166,18 @@ The easiest way is a separate user just for Rueckgrat, with your ssh key and sud
 `-u` tells the installer which user to log in as on every machine. Without it, it uses the user you are logged in as. Rueckgrat is then installed in that user's home folder (`~/Rueckgrat-install`).
 
 Keep in mind that sudo without a password means anyone who gets your ssh key can do anything on those machines. Protect your key with a passphrase.
+
+**Picking the machines**
+
+The installer searches your LAN for machines it can install on (your ssh key works there, the user has sudo, `rsync` is installed) and lists them. Pick one by its number or type an IP, an empty answer ends the list. `--no-scan` skips the search.
+
+### Uninstall
+
+```bash
+./uninstall.sh
+```
+
+It searches the LAN for machines with Rückgrat (or takes them as arguments, e.g. `./uninstall.sh 192.168.2.10`), shows what it found on each and asks before it removes anything: the Rückgrat containers, images and network, `~/Rueckgrat-install` and the chat certificate. Your data volumes (users, chats, images, voices, files) and the downloaded models are only deleted when you say yes to the separate questions, or with `--volumes` and `--models`. `--dry-run` only shows what would be removed. To only stop Rückgrat without removing anything, use `./uninstall.sh --stop` (or answer `s` when it asks per machine); start the containers again with `docker start $(docker ps -aq --filter label=com.docker.compose.project=rueckgrat)`. Docker, the NVIDIA toolkit and the packages the installer added stay, and so does a git checkout you installed from.
 
 ## Android
 
@@ -220,11 +233,24 @@ docker exec -it rueckgrat_hub python -m app.hub_management user list
 docker exec -it rueckgrat_hub python -m app.hub_management companion status [contact_id]
 docker exec -it rueckgrat_hub python -m app.hub_management maintenance status
 docker exec -it rueckgrat_hub python -m app.hub_management stats
+docker exec -it rueckgrat_hub python -m app.hub_management offline status
+docker exec -it rueckgrat_hub python -m app.hub_management offline nomad [url | --clear | --reset]
+docker exec -it rueckgrat_hub python -m app.hub_management offline simulate [on | off]
 ```
 
 **Note: The invite token is printed only once, copy it immediately.**
 
 To let the AI read websites on your home network or on the hub machine, see [Local web pages](DEVELOPMENT.md#local-web-pages).
+
+## Offline with Project NOMAD
+
+[Project NOMAD](https://www.projectnomad.us/) keeps Wikipedia, other reference books and a world map in your own network. When the hub knows where NOMAD runs:
+
+- **websearch** always searches NOMAD's offline library next to the web, the best answers of both make the result, without internet only the library
+- **wikipedia** uses the offline library when there is no internet or Wikipedia does not answer
+- **show_map** without internet finds places through the offline Wikipedia and draws the map from NOMAD's map files, tapping the map opens NOMAD's map
+
+The installer asks for the NOMAD address (you can skip it). Set, change or remove it later with `offline nomad`, no restart needed. `offline status` shows what the hub found: the books of the library and the map files. With `offline simulate on` the hub acts as if there were no internet, to try the offline features, and `offline simulate off` ends that. The chat's status shows the library and the offline map like the other services.
 
 # Hardware requirements
 

@@ -14,6 +14,7 @@ placeholders, filled with str.format (literal json braces are doubled):
   TRANSLATE_PROMPT          source, target: the language names
   TRANSCRIPT_SUMMARY_PROMPT, TRANSCRIPT_ENHANCE_PROMPT, TRANSCRIPT_ENHANCE_ONE_PROMPT   none (the text is the user message)
   UPDATE_CONTEXT_PROMPT     context (the current context as json), messages (one "- ..." line per latest message)
+  TOOL_PICK_PROMPT          tools (one "- name: description" line per tool), text (the message or task the tools are for)
 """
 
 # ---------------------------------------------------------------- contact generator (ContactGeneratorTask)
@@ -198,3 +199,16 @@ Leave out navigation, ads and cookie notices. Reply with the summary only.
 """
 
 SUMMARIZE_FOCUS_PART = "\nFocus on: {focus}"
+
+# ---------------------------------------------------------------- tool detection without laya (ToolDetectionTask._pick)
+
+TOOL_PICK_PROMPT = """TOOLS:
+{tools}
+
+TEXT:
+{text}
+
+Which of the TOOLS does doing what the TEXT asks need? Pick only tools the TEXT clearly needs, none when it needs none
+(small talk, a question you can answer yourself). Files to make, change, read or run need the tools that work with files.
+Respond with json like this: {{"tools": ["name", ...]}}
+"""

@@ -1,5 +1,8 @@
 from typing import Dict, Any, Optional, Tuple
+from pathlib import Path
+import json
 import math
+import os
 import re
 import threading
 import time
@@ -170,6 +173,12 @@ LIVE_RATE_URLS = [
 ]
 LIVE_RATE_TIMEOUT = 10        # seconds per request
 LIVE_RATE_CACHE_SECONDS = 3600
+# the saved rates for offline: one table of SAVED_RATE_BASE (every other rate is a cross rate through it), fetched on
+# the hub's start when there is none and then once a day (RateRefresher), in the hub's db volume
+SAVED_RATE_PATH = Path("/hub/db/conversion_rates.json")
+SAVED_RATE_BASE = "usd"
+SAVED_RATE_MAX_AGE = 24 * 3600
+SAVED_RATE_CHECK_SECONDS = 3600     # how often the refresher looks whether the saved rates are due
 
 METALS = {
     "xau": ["gold"],
@@ -212,6 +221,10 @@ class ConversionError(Exception):
     """a user facing problem (unknown unit, mismatch, no rate), its message goes back to the LLM"""
 
 
+class RatesUnavailable(ConversionError):
+    """the rate service could not be asked (no internet, unreachable): the saved rates are used instead"""
+
+
 class LiveRateProvider:
     """fetches and caches the rate table of one base currency. shared by all tool instances (class level cache)"""
     _cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
@@ -226,8 +239,16 @@ class LiveRateProvider:
             if cached and time.time() - cached[0] < LIVE_RATE_CACHE_SECONDS:
                 return cached[1]
         if not online:
-            raise ConversionError("exchange rates need the internet, which is not available right now")
+            raise RatesUnavailable("exchange rates need the internet, which is not available right now")
+        table = cls.fetch(code)
+        with cls._lock:
+            cls._cache[code] = (time.time(), table)
+        return table
 
+    @staticmethod
+    def fetch(code: str) -> Dict[str, Any]:
+        """the rate table of code from the service, no cache. ConversionError for an unknown code, RatesUnavailable when
+        no mirror answers"""
         last_error = None
         for url in LIVE_RATE_URLS:
             try:
@@ -236,27 +257,130 @@ class LiveRateProvider:
                     raise ConversionError(f"unknown unit or currency '{code.upper()}'")
                 resp.raise_for_status()
                 data = resp.json()
-                table = {"date": data.get("date", "unknown"), "rates": data[code]}
-                with cls._lock:
-                    cls._cache[code] = (time.time(), table)
-                return table
+                return {"date": data.get("date", "unknown"), "rates": data[code]}
             except ConversionError:
                 raise
             except Exception as e:
                 logger.warning(f"live rate fetch failed {url.format(code=code)} {repr(e)}")
                 last_error = e
-        raise ConversionError(f"exchange rate service unreachable ({type(last_error).__name__})")
+        raise RatesUnavailable(f"exchange rate service unreachable ({type(last_error).__name__})")
 
     @classmethod
-    def rate(cls, from_code: str, to_code: str, online: bool = True) -> Tuple[float, str]:
-        """units of to_code per 1 from_code, plus the rate date"""
+    def rate(cls, from_code: str, to_code: str, online: bool = True) -> Tuple[float, str, bool]:
+        """units of to_code per 1 from_code, the rate date and whether it is a saved rate: the live rate, the saved rates
+        (SavedRates) when the internet is not there or the service does not answer"""
         if from_code == to_code:
-            return 1.0, "n/a"
-        table = cls.get_table(from_code, online)
+            return 1.0, "n/a", False
+        try:
+            table = cls.get_table(from_code, online)
+        except RatesUnavailable as e:
+            saved = SavedRates.shared().rate(from_code, to_code)
+            if saved is None:
+                raise RatesUnavailable(f"{e}, and no exchange rates are saved yet")
+            return saved[0], saved[1], True
         rate = table["rates"].get(to_code)
         if rate is None:
             raise ConversionError(f"unknown unit or currency '{to_code.upper()}'")
-        return float(rate), table["date"]
+        return float(rate), table["date"], False
+
+
+class SavedRates:
+    """the rate table of SAVED_RATE_BASE in a file (a few kB), for the conversions without the internet. read on each use"""
+    _shared: Optional["SavedRates"] = None
+
+    def __init__(self, path: Path = SAVED_RATE_PATH):
+        self._path = Path(path)
+
+    @classmethod
+    def shared(cls) -> "SavedRates":
+        """the hub's one instance (SAVED_RATE_PATH)"""
+        if cls._shared is None:
+            cls._shared = SavedRates()
+        return cls._shared
+
+    @classmethod
+    def set_shared(cls, saved: Optional["SavedRates"]) -> None:
+        cls._shared = saved
+
+    def path(self) -> Path:
+        return self._path
+
+    def table(self) -> Optional[Dict[str, Any]]:
+        """{"base", "date", "fetched_at", "rates"} or None when nothing is saved (or the file is broken)"""
+        if not self._path.is_file():
+            return None
+        try:
+            table = json.loads(self._path.read_text(encoding="utf-8"))
+            if not isinstance(table.get("rates"), dict):
+                raise ValueError("no rates")
+        except (OSError, ValueError, AttributeError) as e:
+            logger.error(f"saved exchange rates {self._path} not readable: {e!r}")
+            return None
+        return table
+
+    def rate(self, from_code: str, to_code: str) -> Optional[Tuple[float, str]]:
+        """(units of to_code per 1 from_code, the rates' date) through the base currency, None without saved rates.
+        ConversionError for a code the saved table does not know"""
+        table = self.table()
+        if table is None:
+            return None
+        rates = {**table["rates"], table.get("base", SAVED_RATE_BASE): 1.0}
+        for code in (from_code, to_code):
+            if not rates.get(code):
+                raise ConversionError(f"unknown unit or currency '{code.upper()}'")
+        return float(rates[to_code]) / float(rates[from_code]), str(table.get("date", "unknown"))
+
+    def due(self) -> bool:
+        """nothing saved or older than SAVED_RATE_MAX_AGE"""
+        table = self.table()
+        return table is None or time.time() - float(table.get("fetched_at", 0)) >= SAVED_RATE_MAX_AGE
+
+    def refresh(self) -> bool:
+        """fetches the base table and saves it. False (logged) when the service does not answer"""
+        try:
+            fetched = LiveRateProvider.fetch(SAVED_RATE_BASE)
+        except ConversionError as e:
+            logger.warning(f"saving the exchange rates failed: {e}")
+            return False
+        table = {"base": SAVED_RATE_BASE, "date": fetched["date"], "fetched_at": time.time(), "rates": fetched["rates"]}
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(table), encoding="utf-8")
+        os.replace(tmp, self._path)
+        logger.info(f"exchange rates of {table['date']} saved ({len(table['rates'])} currencies)")
+        return True
+
+
+class RateRefresher:
+    """keeps the saved rates fresh: right on start when there are none (the first start after the install), then once a
+    day, only while the internet is there (infrastructure.available)"""
+
+    def __init__(self, infrastructure, saved: Optional[SavedRates] = None):
+        self._infrastructure = infrastructure
+        self._saved = saved or SavedRates.shared()
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, name="rates", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def check(self) -> bool:
+        """one round: refreshes when due and online. True when it saved new rates"""
+        if self._saved.due() and (self._infrastructure is None or self._infrastructure.available("internet")):
+            return self._saved.refresh()
+        return False
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.check()
+            except Exception as e:
+                logger.error(f"rate refresher {e!r}")
+            self._stop.wait(SAVED_RATE_CHECK_SECONDS)
 
 
 def _normalize(text: str) -> str:
@@ -328,7 +452,7 @@ def _format(value: float) -> str:
 
 def convert(amount: Any, from_unit: str, to_unit: str, online: bool = True) -> Dict[str, Any]:
     """core conversion, no side effects. raises ConversionError for user facing problems.
-    online False: units only, the live rates (currencies, metals) only from the cache"""
+    online False: units only, the live rates (currencies, metals) from the in-memory cache or the saved rates (SavedRates)"""
     try:
         value = float(str(amount).replace(",", "").replace("_", "").strip())
     except ValueError:
@@ -349,14 +473,16 @@ def convert(amount: Any, from_unit: str, to_unit: str, online: bool = True) -> D
         }
 
     if src["kind"] == "live" and dst["kind"] == "live":
-        rate, date = LiveRateProvider.rate(src["code"], dst["code"], online)
+        rate, date, saved = LiveRateProvider.rate(src["code"], dst["code"], online)
         result = value * src["multiplier"] * rate / dst["multiplier"]
         unit_rate = src["multiplier"] * rate / dst["multiplier"]
+        note = f", saved rates of {date}, no live rates right now" if saved else ""
         return {
             "amount": value, "from": src["unit"], "to": dst["unit"], "result": result,
             "rate": unit_rate,
-            "text": f"{_format(value)} {src['unit']} = {_format(result)} {dst['unit']} (1 {src['unit']} = {_format(unit_rate)} {dst['unit']})",
-            "category": "currency", "date": date, "source": "fawazahmed0 exchange-api (daily rates)",
+            "text": f"{_format(value)} {src['unit']} = {_format(result)} {dst['unit']} (1 {src['unit']} = {_format(unit_rate)} {dst['unit']}{note})",
+            "category": "currency", "date": date, "saved": saved,
+            "source": "fawazahmed0 exchange-api (daily rates)" + (", saved" if saved else ""),
         }
 
     static, live = (src, dst) if src["kind"] == "static" else (dst, src)
@@ -393,7 +519,7 @@ class ConversionTool(Tool):
         MessageQueue().send_status_message("converting")
 
         try:
-            # units work offline, the currencies and metals need the internet (Infrastructure.available)
+            # units work offline, the currencies and metals need the internet (Infrastructure.available) or the saved rates
             online = self.infrastructure is None or self.infrastructure.available("internet")
             result = convert(amount, from_unit, to_unit, online)
             self.add_result({"tool": self.name(), "text": result['text']})

@@ -5,6 +5,7 @@ from .tool import Tool
 from . import prompts
 from app.tasks.find_answer_task import FindAnswerTask
 import time
+from contextvars import copy_context
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 import tldextract
 from bs4 import BeautifulSoup
@@ -12,13 +13,18 @@ from ddgs import DDGS
 from app.utils.content_filter import strip_text_noise
 from app.utils.page_render import render_page
 from app.utils.url_check import is_public_http_url, fetch, FetchBlocked
+from app.utils.library import Library, LibraryError
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 class WebsearchTool(Tool):
     description = prompts.WEBSEARCH_DESCRIPTION
-    requires = ("internet",)    # also fetch_url and price_finder, they build on it
+    requires_any = ("internet", "library")     # the web and the offline library (Project NOMAD). its subclasses set their own
+    GOOD_ANSWERS = 3            # answers in the result, the web's and the library's compete for them by quality
+    LIBRARY_PAGES = 6           # offline: the best library hits read per search
+    LIBRARY_PAGES_ONLINE = 3    # next to the web: fewer, their answer finding shares the llm with the web pages'
+    LIBRARY_PAGE_CHARS = 8000   # of one library page's text, for the answer finding
     thresholds = (0.65, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask you to search the internet for something?",
@@ -33,12 +39,16 @@ class WebsearchTool(Tool):
         "Does the user want to find a shop, restaurant or business in a town?",
     ]
 
-    def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
-        super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
-
     @classmethod
     def name(cls) -> str: 
         return "websearch"
+
+    def _online(self) -> bool:
+        return self.infrastructure is None or self.infrastructure.available("internet")
+
+    def _library(self) -> Optional[Library]:
+        nomad = self.infrastructure.nomad() if self.infrastructure is not None else None
+        return nomad.library() if nomad is not None else None
     
     def _keep_content_lines(self, text):
         # sentences, headlines and live blog posts have 4+ words, times, scores and prices have digits. menu items have neither
@@ -415,8 +425,7 @@ class WebsearchTool(Tool):
         good_results = []
         seen_urls = set()
         i = 0
-        threshold = 5
-        target = 3
+        target = self.GOOD_ANSWERS
 
         while i < len(search_results) and len(good_results) < target:
             batch = search_results[i:i+5]
@@ -426,7 +435,7 @@ class WebsearchTool(Tool):
             with ThreadPoolExecutor(max_workers=len(batch), thread_name_prefix="extract") as pool:
                 extractions = list(pool.map(self._extract_page, [result["url"] for result in batch]))
 
-            batch_find_answers = []
+            candidates = []
             for result, extraction in zip(batch, extractions):
                 if extraction:
                     result["url"] = extraction["url"]
@@ -440,37 +449,99 @@ class WebsearchTool(Tool):
                 if result["url"] in seen_urls:
                     continue
                 seen_urls.add(result["url"])
-
-                find_answers_task = FindAnswerTask(question=query, information=information, infrastructure=self.infrastructure)
-                self.add_sub_task(find_answers_task)
-                batch_find_answers.append((result, find_answers_task))
-
-            if batch_find_answers:
-                self.wait_for([j[1] for j in batch_find_answers])
-
-            for result, find_answers_task in batch_find_answers:
-                url = result["url"]
-                source = self._get_org_name(url)
-                title = result["title"]
-
-                answer = find_answers_task.get_result()
-                if not answer:
-                    logger.debug(f"no answer for {url}")
-                    continue
-                if answer["quality"] > threshold:
-                    good_results.append({ 
-                        "answer": answer['answer'], 
-                        "answer_quality": answer['quality'],
-                        "source": source,
-                        "title": title,
-                        "url": url,
-                    })
-                    self.add_source(url, title)
-                    if len(good_results) >= target:
-                        break
-                else:
-                    logger.debug(f"missed threshold: {answer['answer']} at {answer['quality']}")
+                candidates.append({"url": result["url"], "title": result["title"], "source": self._get_org_name(result["url"]),
+                                   "information": information})
+            good_results += self._good_answers(query, candidates, target - len(good_results))
         return good_results
+
+    def _good_answers(self, query: str, candidates: list, target: int) -> list:
+        """the answers to query the candidates ({"url", "title", "source", "information"}) give above the quality threshold,
+        at most target"""
+        threshold = 5
+        jobs = []
+        for candidate in candidates:
+            find_answers_task = FindAnswerTask(question=query, information=candidate["information"], infrastructure=self.infrastructure)
+            self.add_sub_task(find_answers_task)
+            jobs.append((candidate, find_answers_task))
+        if jobs:
+            self.wait_for([j[1] for j in jobs])
+
+        good_results = []
+        for candidate, find_answers_task in jobs:
+            url = candidate["url"]
+            answer = find_answers_task.get_result()
+            if not answer:
+                logger.debug(f"no answer for {url}")
+                continue
+            if answer["quality"] > threshold:
+                good_results.append({
+                    "answer": answer['answer'],
+                    "answer_quality": answer['quality'],
+                    "source": candidate["source"],
+                    "title": candidate["title"],
+                    "url": url,
+                })
+                if len(good_results) >= target:
+                    break
+            else:
+                logger.debug(f"missed threshold: {answer['answer']} at {answer['quality']}")
+        return good_results
+
+    def _library_answers(self, query: str, library: Library, pages: int) -> list:
+        """the good answers to query from the offline library: its full text search over the books of one language, the
+        best pages hits read (one per title)"""
+        try:
+            hits = library.search(query, "en", pages * 2)[:pages]
+        except LibraryError as e:
+            logger.warning(f"library search {query!r} failed: {e}")
+            return []
+        if not hits:
+            return []
+
+        def read(hit):
+            try:
+                return Library.page_text(library.article(hit["book_id"], hit["path"]), self.LIBRARY_PAGE_CHARS)
+            except LibraryError as e:
+                logger.debug(f"library page {hit['url']}: {e}")
+                return ""
+
+        with ThreadPoolExecutor(max_workers=len(hits), thread_name_prefix="library") as pool:
+            texts = list(pool.map(read, hits))
+        candidates = [{"url": hit["url"], "title": hit["title"], "source": f"{hit['book']} (offline library)",
+                       "information": f"{hit['title']}\n{text}"} for hit, text in zip(hits, texts) if text]
+        return self._good_answers(query, candidates, self.GOOD_ANSWERS)
+
+    def _web_answers(self, query: str) -> list:
+        """the good answers to query from the web. nothing useful (no hits, or no page answers it): once more with the
+        key words only. [] when the web search fails"""
+        try:
+            answers = self._answers(query, query)
+            short = self.shorter(query)
+            if not answers and short:
+                logger.info(f"websearch found nothing useful for {query!r}, trying {short!r}")
+                answers = self._answers(query, short)
+            return answers
+        except Exception as e:
+            logger.error(f"web search {query!r} failed {e!r}")
+            return []
+
+    @staticmethod
+    def _answers_of(future, query: str) -> list:
+        """the library answers of future (None: no library search), [] when the library search failed"""
+        if future is None:
+            return []
+        try:
+            return future.result()
+        except Exception as e:
+            logger.error(f"library search {query!r} failed {e!r}")
+            return []
+
+    def _best(self, answers: list) -> list:
+        """the GOOD_ANSWERS best answers by quality, each added as a source"""
+        best = sorted(answers, key=lambda a: a["answer_quality"], reverse=True)[:self.GOOD_ANSWERS]
+        for answer in best:
+            self.add_source(answer["url"], answer["title"])
+        return best
 
     def execute(self) -> None:
         try:
@@ -478,15 +549,22 @@ class WebsearchTool(Tool):
                 logger.error("invalid websearch")
                 return None
             
-            MessageQueue().send_status_message("searching the web")
-            
             query = self.tool_call["query"]
-            # nothing useful (no hits, or no page answers it): once more with the key words only
-            good_results = self._answers(query, query)
-            short = self.shorter(query)
-            if not good_results and short:
-                logger.info(f"websearch found nothing useful for {query!r}, trying {short!r}")
-                good_results = self._answers(query, short)
+            online, library = self._online(), self._library()
+            MessageQueue().send_status_message("searching the web and the offline library" if online and library is not None
+                                               else "searching the web" if online else "searching the offline library")
+            # the library on a thread of its own (with this call's context: user, session, quiet), the web here: the
+            # library's few requests and its answer finding run while the search engines are asked
+            pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="library") if library is not None else None
+            try:
+                pages = self.LIBRARY_PAGES_ONLINE if online else self.LIBRARY_PAGES
+                library_future = pool.submit(copy_context().run, self._library_answers, query, library, pages) if pool else None
+                answers = self._web_answers(query) if online else []
+                answers += self._answers_of(library_future, query)
+            finally:
+                if pool is not None:
+                    pool.shutdown(wait=False)
+            good_results = self._best(answers)
 
             if good_results:
                 self.add_result({"tool": self.name(), "text": self._text(query, good_results)})

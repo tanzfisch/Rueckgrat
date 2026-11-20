@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 
 from app.agent_jobs.agent_job import AgentJob
 from . import prompts
+from .outreach import Outreach
 from .settings import CompanionSettings
 from app.utils.clock import to_db, from_db, local_day, at_local, parse_hhmm
 
@@ -198,13 +199,18 @@ class CompanionJob(AgentJob):
 
     def _maybe_message(self, message, user_id: int, conversation_id: int, name: str, local: datetime,
                        user_minutes: float | None, sent_today: int, sent_recently: bool) -> tuple[int | None, str]:
-        """stores the message like a normal reply and pushes it when the user is connected"""
+        """holds both versions of the message (#167) until the user opens the contact or the window passes"""
         if not isinstance(message, dict):
             return None, "no message decision"
         if message.get("send") is not True:
             return None, f"model: {str(message.get('reason', ''))[:200]}"
-        text = str(message.get("text") or "").strip()[:1000]
-        if not text:
+        reach_out = str(message.get("reach_out") or message.get("text") or "").strip()[:1000]
+        surprise = str(message.get("surprise") or "").strip()[:1000]
+        if not surprise:
+            surprise = reach_out
+        if not reach_out:
+            reach_out = surprise
+        if not reach_out:
             return None, "empty text"
         allowed, reason = self.settings.may_message(local, user_minutes, sent_today, sent_recently)
         turns = self.get_turns()
@@ -213,13 +219,17 @@ class CompanionJob(AgentJob):
         if allowed and not self.db.is_companion(self.row["contact_id"]):
             allowed, reason = False, "switched off during the pass"
         if not allowed:
-            self.log["message"] = f"quiet: {reason}, wanted to say {short(text)!r}"
+            self.log["message"] = f"quiet: {reason}, wanted to say {short(reach_out)!r}"
             return None, reason
 
-        message_id, pushed = self.post_message(self.db, user_id, conversation_id, text, name)
-        if self.attachments:
-            self.tool_registry.attach_held(self.db, user_id, conversation_id, message_id, self.attachments, push=pushed)
-        if self.held_data:
-            self.tool_registry.show_held(self.db, user_id, conversation_id, message_id, self.held_data, push=pushed)
-        self.log["message"] = f"sent #{message_id}, {'pushed' if pushed else 'stored (user not connected)'}: {short(text)!r}"
-        return message_id, "sent"
+        # #167 hold both versions; they are posted when the user opens the contact or the window passes
+        message_id, reason = Outreach().hold(
+            user_id, self.row["contact_id"], conversation_id, name, surprise, reach_out,
+            self.settings.reach_window, now=self.now, source_id=self.row["id"], job_id=self.job_id,
+            attachments=self.attachments or None, held_data=self.held_data or None)
+        if message_id:
+            self.log["message"] = f"sent #{message_id} (surprise, contact was open): {short(surprise)!r}"
+            return message_id, "sent"
+        self.log["message"] = (f"held until {self.now + self.settings.reach_window:%Y-%m-%d %H:%M} UTC: "
+                               f"surprise {short(surprise)!r}, reach_out {short(reach_out)!r}")
+        return None, reason

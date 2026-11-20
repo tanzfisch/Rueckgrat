@@ -223,7 +223,7 @@ A few details of that path:
 4. Tool detection (`ToolDetectionTask`) asks Laya about each tool, and for `spawn_job` also about the message as a whole. A high complexity score from code can only make `spawn_job` recommended, not mandatory. Messages shorter than 4 words skip the Laya questions.
 5. Mandatory tools are run on the hub (`ToolExecutionTask`). Some of those tools call a node (image, TTS, embeddings, …), others run entirely on the hub (calculator, websearch, write_file, spawn_job, …).
 6. `ChatTask` builds the prompt (character, history, tool results) and starts a streamed `infrastructure.chat`. Visible tokens are appended to the assistant message in the database and pushed to the client as `{"delta", "conversation_id", "message_id"}`. Tool-call markup is stripped before the user sees it; reply tools at the end of the answer are run afterwards.
-7. Status frames are `{"status": {"message": "thinking"}}`, then `"finalize answer"`, then `{"status": {"state": "done"}}`. Agent jobs also send `{"job_progress": ...}`. A follow-up that merges into the same turn can cancel the partial reply (`{"cancelled": ...}`).
+7. Status frames are `{"status": {"message": "thinking"}}`, then `"finalize answer"`, then `{"status": {"state": "done"}}`. Agent jobs and task / companion passes also send `{"job_update": ...}` (see the Backroom below). A follow-up that merges into the same turn can cancel the partial reply (`{"cancelled": ...}`).
 
 Other `/ws` requests from the client, handled the same way (a task on the hub, result pushed back):
 
@@ -231,6 +231,20 @@ Other `/ws` requests from the client, handled the same way (a task on the hub, r
 - `{"generate_image": ...}` — the standalone image tool
 - `{"generate": {"generate_profile": ...}}` — contact generation
 - `{"cancel_job": {"job_id": ...}}` — cancel a job that belongs to this user
+
+The Backroom (#215): the agent jobs and the task and companion passes of all of the user's contacts, with their protocols written to the database as they happen (`job_protocols`, a job that ran when the hub stopped is `interrupted`). The hub's `JobMonitor` pushes:
+
+- `{"jobs": {"items": [...]}}` on connect and on `{"get_jobs": {}}`: the running ones and those of the last 24 hours, each like a `job_update`
+- `{"job_update": {job_id, kind (job / task / companion), name, state (running / done / failed / cancelled / interrupted), contact_id, contact_name, conversation_id, report_message_id, source_id, step, total, percent, current [{task, role, state, attempt}], started_at, finished_at, elapsed, time_limit, last_action, cancellable, seq}}` to all of the user's websockets: at most once a second per job, at once on a state, step or plan change
+- `{"protocol_lines": {job_id, lines [{seq, at, agent, agent_id, step, task, action, ok, data}], plan?}}` after `{"watch_protocol": {job_id, after_seq}}`, to that websocket only: the lines after after_seq, then the new ones every 0.5 s (at most 200 per frame) until `{"unwatch_protocol": {job_id}}` or the websocket closes. after a reconnect the app watches again from its last seq
+- `{"protocol_output": {job_id, ref, kind, text}}` for `{"get_protocol_output": {job_id, ref}}`: a long text of a line (its `data.out`)
+- `{"protocol_error": {job_id, ref?, error}}`: the user has no such protocol or text
+
+Companion reach-out (#167): when a companion decides to write first it prepares two versions of the same thought in one call and holds them in memory, for a window set per companion (default one hour). A hub restart forgets a still-held pair; the next companion pass makes a new one. The client tells the hub when a contact is opened, left, or the user starts typing:
+
+- `{"contact_opened": {"contact_id", "conversation_id"}}` — if a pair is still held and the window has not passed, the hub posts the surprise version as a normal `{"chat": ...}` assistant message (no generation delay). If the window has already passed, it posts the reach_out version. After a reconnect the chat page sends this again, because open contacts are also only remembered in memory
+- `{"contact_closed": {"contact_id"}}` — this websocket left the contact
+- `{"typing": {"contact_id", "conversation_id"}}` — the user started typing or speaking; a still-held pair is dropped. A user `{"chat": ...}` message to that contact does the same
 
 # Audio
 

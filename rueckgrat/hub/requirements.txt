@@ -20,3 +20,7 @@ ddgs==9.16.0
 sqlite-vec==0.1.9
 llm-sandbox[docker]==0.3.46
 soundfile
+pmtiles
+mapbox-vector-tile
+Pillow
+fonttools

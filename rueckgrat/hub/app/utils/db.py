@@ -14,8 +14,8 @@ logger = get_logger()
 # a different model with another size needs this changed and SCHEMA_VERSION bumped
 MEMORY_EMBEDDING_DIM = 384
 # PRAGMA user_version of a db made by this hub. bump it on every schema change: until 1.0 an older db is wiped, never migrated
-SCHEMA_VERSION = 10
-# #174 job protocols older than this are deleted (save_protocol and hub start), they are for looking into recent jobs
+SCHEMA_VERSION = 11
+# #174 finished job protocols older than this are deleted (at the end of a job and at hub start), they are for looking into recent jobs
 PROTOCOL_RETENTION_HOURS = 24
 
 class ChatDB:
@@ -315,22 +315,34 @@ class ChatDB:
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         )""")
 
-        # #174 the decision trace of a job (app.agent_jobs.protocol, its comment has the fields), written when the job ends.
-        # keyed by the conversation and the user message that started the job (job_id too, should one message ever start two
-        # jobs). id is the protocol id of hub management. message_id has no foreign key: an edited or deleted message keeps
-        # its job's protocol until the retention ends. plan: JSON, the current plan only. the lines, tool calls and outputs
-        # go with their protocol (ON DELETE CASCADE, also the retention)
+        # #174 #215 the decision trace of an agent job, a user's task pass or a companion pass (app.agent_jobs.protocol, its
+        # comment has the fields), written as it happens. id is the protocol id of hub management, job_id the job's own id
+        # (jobs.id of an agent job, the AgentJob id of a pass: no jobs row, so no foreign key). kind: job / task / companion.
+        # conversation_id, message_id: an agent job's conversation and the user message that started it (no foreign key: an
+        # edited or deleted message keeps its job's protocol until the retention ends). report_message_id: the message that
+        # told the user about it. source_id: a pass's companion_calendar row. status: running until it ends, interrupted when
+        # the hub restarted while it ran. plan: JSON, the current plan only. time_limit: seconds. created_at: its start (UTC).
+        # the lines, tool calls and outputs go with their protocol (ON DELETE CASCADE, also the retention)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS job_protocols (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            conversation_id INTEGER NOT NULL,
-            message_id INTEGER NOT NULL,
-            job_id TEXT NOT NULL,
+            job_id TEXT NOT NULL UNIQUE,
+            kind TEXT NOT NULL CHECK (kind IN ('job', 'task', 'companion')),
+            user_id INTEGER NOT NULL,
+            contact_id INTEGER DEFAULT NULL,
+            conversation_id INTEGER DEFAULT NULL,
+            message_id INTEGER DEFAULT NULL,
+            report_message_id INTEGER DEFAULT NULL,
+            source_id INTEGER DEFAULT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'done', 'failed', 'cancelled', 'interrupted')),
             plan TEXT DEFAULT NULL CHECK (plan IS NULL OR json_valid(plan)),
+            time_limit INTEGER DEFAULT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (conversation_id, message_id, job_id),
-            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
-            FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+            finished_at TEXT DEFAULT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         )""")
         # one per action. step: the controller's step (1-based) or NULL, task: the plan's task id or NULL, ok: 1 / 0 / NULL.
         # data: JSON, the action's other fields, data.out = {field: ref} for the long texts in protocol_outputs
@@ -446,6 +458,7 @@ class ChatDB:
             ("idx_contact_memories_contact", "contact_memories(user_id, contact_id)"),
             ("idx_companion_log_contact", "companion_log(contact_id)"),
             ("idx_jobs_conversation", "jobs(conversation_id)"),
+            ("idx_job_protocols_user", "job_protocols(user_id)"),
             ("idx_transcripts_user", "transcripts(user_id)"),
             ("idx_transcript_segments_transcript", "transcript_segments(transcript_id)"),
             ("idx_transcript_bookmarks_transcript", "transcript_bookmarks(transcript_id)"),
@@ -739,28 +752,72 @@ class ChatDB:
             row = conn.execute("SELECT MAX(id) FROM messages WHERE conversation_id = ? AND role = 'user'", (conversation_id,)).fetchone()
             return row[0] if row else None
 
-    def save_protocol(self, conversation_id: int, message_id: int, job_id: str, protocol: dict) -> int:
-        """#174 a job's protocol (Protocol.export: plan, lines, tool_calls, outputs). again for the same key replaces it.
-        prunes the old ones. returns its id"""
+    def create_protocol(self, job_id: str, kind: str, user_id: int, name: str, contact_id: int = None, conversation_id: int = None,
+                        message_id: int = None, source_id: int = None, time_limit: int = None) -> int:
+        """#215 the protocol row of a job or pass that starts (status running), returns its id"""
         with self.get_connection() as conn:
-            conn.execute("DELETE FROM job_protocols WHERE conversation_id = ? AND message_id = ? AND job_id = ?", (conversation_id, message_id, job_id))
-            protocol_id = conn.execute("INSERT INTO job_protocols (conversation_id, message_id, job_id, plan) VALUES (?, ?, ?, ?)",
-                                       (conversation_id, message_id, job_id,
-                                        json.dumps(protocol["plan"], ensure_ascii=False) if protocol.get("plan") else None)).lastrowid
-            conn.executemany("INSERT INTO protocol_lines (protocol_id, seq, at, agent, agent_id, step, task, action, ok, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                             [(protocol_id, seq, l["at"], l["agent"], l["agent_id"], l["step"], l["task"], l["action"], l["ok"],
-                               json.dumps(l["data"], ensure_ascii=False, default=str)) for seq, l in enumerate(protocol.get("lines", []), 1)])
-            conn.executemany("INSERT INTO protocol_tool_calls (protocol_id, call, at, agent_id, step, task, tool, args, ok, error, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                             [(protocol_id, c["call"], c["at"], c["agent_id"], c["step"], c["task"], c["tool"] or "?", c["args"], c["ok"], c["error"], c["duration_ms"])
-                              for c in protocol.get("tool_calls", [])])
-            conn.executemany("INSERT INTO protocol_outputs (protocol_id, ref, kind, text) VALUES (?, ?, ?, ?)",
-                             [(protocol_id, ref, o["kind"], o["text"]) for ref, o in protocol.get("outputs", {}).items()])
-            self._prune_protocols(conn)
+            protocol_id = conn.execute("""INSERT INTO job_protocols (job_id, kind, user_id, name, contact_id, conversation_id, message_id, source_id, time_limit)
+                                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                       (job_id, kind, user_id, name or "", contact_id, conversation_id, message_id, source_id,
+                                        None if time_limit is None else int(time_limit))).lastrowid
             conn.commit()
             return protocol_id
 
+    @staticmethod
+    def _add_protocol_outputs(conn, protocol_id: int, outputs: dict):
+        conn.executemany("INSERT INTO protocol_outputs (protocol_id, ref, kind, text) VALUES (?, ?, ?, ?)",
+                         [(protocol_id, ref, o["kind"], o["text"]) for ref, o in outputs.items()])
+
+    def add_protocol_line(self, protocol_id: int, seq: int, line: dict, outputs: dict):
+        """#215 one line of a running protocol and the long texts it moved to the outputs {ref: {kind, text}}"""
+        with self.get_connection() as conn:
+            self._add_protocol_outputs(conn, protocol_id, outputs)
+            conn.execute("INSERT INTO protocol_lines (protocol_id, seq, at, agent, agent_id, step, task, action, ok, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         (protocol_id, seq, line["at"], line["agent"], line["agent_id"], line["step"], line["task"], line["action"], line["ok"],
+                          json.dumps(line["data"], ensure_ascii=False, default=str)))
+            conn.commit()
+
+    def add_protocol_tool_call(self, protocol_id: int, call: dict):
+        with self.get_connection() as conn:
+            conn.execute("INSERT INTO protocol_tool_calls (protocol_id, call, at, agent_id, step, task, tool, args, ok, error, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         (protocol_id, call["call"], call["at"], call["agent_id"], call["step"], call["task"], call["tool"] or "?", call["args"],
+                          call["ok"], call["error"], call["duration_ms"]))
+            conn.commit()
+
+    def set_protocol_plan(self, protocol_id: int, plan: dict, outputs: dict):
+        """the current plan (its name is the protocol's name too) and the long texts of its new tasks"""
+        with self.get_connection() as conn:
+            self._add_protocol_outputs(conn, protocol_id, outputs)
+            conn.execute("UPDATE job_protocols SET plan = ?, name = COALESCE(?, name) WHERE id = ?",
+                         (json.dumps(plan, ensure_ascii=False), plan.get("name") or None, protocol_id))
+            conn.commit()
+
+    def finish_protocol(self, protocol_id: int, status: str, name: str = None):
+        """the end of a job or pass: done, failed or cancelled. prunes the old ones"""
+        with self.get_connection() as conn:
+            conn.execute("UPDATE job_protocols SET status = ?, name = COALESCE(?, name), finished_at = CURRENT_TIMESTAMP WHERE id = ?",
+                         (status, name or None, protocol_id))
+            self._prune_protocols(conn)
+            conn.commit()
+
+    def set_protocol_report(self, user_id: int, job_id: str, message_id: int) -> bool:
+        """the message that told the user about the job or pass (its conversation too). False: no such protocol of the user"""
+        with self.get_connection() as conn:
+            count = conn.execute("""UPDATE job_protocols SET report_message_id = ?,
+                                    conversation_id = COALESCE((SELECT conversation_id FROM messages WHERE id = ?), conversation_id)
+                                    WHERE job_id = ? AND user_id = ?""", (message_id, message_id, job_id, user_id)).rowcount
+            conn.commit()
+            return count > 0
+
+    def interrupt_protocols(self) -> int:
+        """at hub start: the protocols still running lost their job with the old hub. returns how many"""
+        with self.get_connection() as conn:
+            count = conn.execute("UPDATE job_protocols SET status = 'interrupted', finished_at = CURRENT_TIMESTAMP WHERE status = 'running'").rowcount
+            conn.commit()
+            return count
+
     def prune_protocols(self) -> int:
-        """deletes the protocols older than PROTOCOL_RETENTION_HOURS, returns how many"""
+        """deletes the finished protocols older than PROTOCOL_RETENTION_HOURS, returns how many"""
         with self.get_connection() as conn:
             count = self._prune_protocols(conn)
             conn.commit()
@@ -768,14 +825,70 @@ class ChatDB:
 
     @staticmethod
     def _prune_protocols(conn) -> int:
-        return conn.execute("DELETE FROM job_protocols WHERE created_at < datetime('now', ?)", (f"-{PROTOCOL_RETENTION_HOURS} hours",)).rowcount
+        return conn.execute("DELETE FROM job_protocols WHERE status != 'running' AND COALESCE(finished_at, created_at) < datetime('now', ?)",
+                            (f"-{PROTOCOL_RETENTION_HOURS} hours",)).rowcount
+
+    _SUMMARY = """SELECT p.job_id, p.kind, p.name, p.status, p.contact_id, c.name AS contact_name, p.conversation_id, p.message_id,
+                         p.report_message_id, p.source_id, p.time_limit, p.created_at AS started_at, p.finished_at,
+                         (SELECT MAX(seq) FROM protocol_lines l WHERE l.protocol_id = p.id) AS seq
+                  FROM job_protocols p LEFT JOIN contacts c ON c.id = p.contact_id"""
+
+    @staticmethod
+    def _utc(value):
+        """a db timestamp (UTC, 'YYYY-MM-DD HH:MM:SS') as ISO 8601 with Z, None stays None"""
+        return f"{value.replace(' ', 'T')}Z" if value and "T" not in value else value
+
+    def _summary(self, row) -> dict:
+        return {**dict(row), "started_at": self._utc(row["started_at"]), "finished_at": self._utc(row["finished_at"]), "seq": row["seq"] or 0}
+
+    def protocol_summaries(self, user_id: int) -> list:
+        """#215 the user's protocols running or finished in the last PROTOCOL_RETENTION_HOURS (all contacts), newest first: job_id, kind, name, status, contact_id,
+        contact_name, conversation_id, message_id, report_message_id, source_id, time_limit, started_at, finished_at (ISO, UTC), seq"""
+        with self.get_connection() as conn:
+            rows = conn.execute(f"""{self._SUMMARY} WHERE p.user_id = ?
+                                    AND (p.status = 'running' OR COALESCE(p.finished_at, p.created_at) >= datetime('now', ?))
+                                    ORDER BY p.id DESC""", (user_id, f"-{PROTOCOL_RETENTION_HOURS} hours")).fetchall()
+        return [self._summary(row) for row in rows]
+
+    def protocol_summary(self, user_id: int, job_id: str) -> dict | None:
+        """one of protocol_summaries, None if the user has no protocol with that job_id"""
+        with self.get_connection() as conn:
+            row = conn.execute(f"{self._SUMMARY} WHERE p.user_id = ? AND p.job_id = ?", (user_id, job_id)).fetchone()
+        return self._summary(row) if row else None
+
+    def contact_name(self, contact_id: int) -> str | None:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT name FROM contacts WHERE id = ?", (contact_id,)).fetchone()
+        return row["name"] if row else None
+
+    def protocol_lines(self, user_id: int, job_id: str, after_seq: int = 0):
+        """#215 (plan, lines after after_seq [{seq, at, agent, agent_id, step, task, action, ok, data}]) of the user's protocol,
+        None if the user has none with that job_id"""
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT id, plan FROM job_protocols WHERE user_id = ? AND job_id = ?", (user_id, job_id)).fetchone()
+            if row is None:
+                return None
+            lines = conn.execute("SELECT * FROM protocol_lines WHERE protocol_id = ? AND seq > ? ORDER BY seq", (row["id"], after_seq)).fetchall()
+        return json.loads(row["plan"]) if row["plan"] else None, [self._line(line) for line in lines]
+
+    @staticmethod
+    def _line(line) -> dict:
+        return {**{k: line[k] for k in line.keys() if k != "protocol_id"}, "ok": None if line["ok"] is None else bool(line["ok"]),
+                "data": json.loads(line["data"])}
+
+    def protocol_output(self, user_id: int, job_id: str, ref: str) -> dict | None:
+        """{kind, text} of a long text of the user's protocol, None if there is none"""
+        with self.get_connection() as conn:
+            row = conn.execute("""SELECT o.kind, o.text FROM protocol_outputs o JOIN job_protocols p ON p.id = o.protocol_id
+                                  WHERE p.user_id = ? AND p.job_id = ? AND o.ref = ?""", (user_id, job_id, ref)).fetchone()
+        return dict(row) if row else None
 
     def get_protocols(self, limit: int = 20) -> list:
-        """the newest protocols first: id, created_at (UTC), conversation_id, message_id, job_id, job status, job name
-        (the plan's, else the start of the prompt), lines, tool calls and failed tool calls"""
+        """the newest protocols first: id, created_at (UTC), kind, user_id, conversation_id, message_id, job_id, status, name
+        (the plan's, else the start of the job's prompt), lines, tool calls and failed tool calls"""
         with self.get_connection() as conn:
-            rows = conn.execute("""SELECT p.id, p.created_at, p.conversation_id, p.message_id, p.job_id, j.status,
-                                          COALESCE(json_extract(p.plan, '$.name'), j.prompt) AS name,
+            rows = conn.execute("""SELECT p.id, p.created_at, p.kind, p.user_id, p.conversation_id, p.message_id, p.job_id, p.status,
+                                          COALESCE(NULLIF(p.name, ''), j.prompt) AS name,
                                           (SELECT COUNT(*) FROM protocol_lines l WHERE l.protocol_id = p.id) AS lines,
                                           (SELECT COUNT(*) FROM protocol_tool_calls c WHERE c.protocol_id = p.id) AS tool_calls,
                                           (SELECT COUNT(*) FROM protocol_tool_calls c WHERE c.protocol_id = p.id AND NOT c.ok) AS failed_calls
@@ -783,7 +896,7 @@ class ChatDB:
         return [{**dict(row), "name": " ".join(str(row["name"] or "").split()[:6])} for row in rows]
 
     def get_protocol(self, protocol_id: int) -> dict | None:
-        """one protocol: its key, plan, lines, tool_calls and outputs {ref: {kind, text}}. None if there is none with that id"""
+        """one protocol: its row, plan, lines, tool_calls and outputs {ref: {kind, text}}. None if there is none with that id"""
         with self.get_connection() as conn:
             row = conn.execute("SELECT * FROM job_protocols WHERE id = ?", (protocol_id,)).fetchone()
             if row is None:
@@ -791,9 +904,8 @@ class ChatDB:
             lines = conn.execute("SELECT * FROM protocol_lines WHERE protocol_id = ? ORDER BY seq", (protocol_id,)).fetchall()
             calls = conn.execute("SELECT * FROM protocol_tool_calls WHERE protocol_id = ? ORDER BY call", (protocol_id,)).fetchall()
             outputs = conn.execute("SELECT ref, kind, text FROM protocol_outputs WHERE protocol_id = ?", (protocol_id,)).fetchall()
-        flag = lambda value: None if value is None else bool(value)
         return {**dict(row), "plan": json.loads(row["plan"]) if row["plan"] else None,
-                "lines": [{**{k: line[k] for k in line.keys() if k not in ("protocol_id", "seq")}, "ok": flag(line["ok"]), "data": json.loads(line["data"])} for line in lines],
+                "lines": [{k: v for k, v in self._line(line).items() if k != "seq"} for line in lines],
                 "tool_calls": [{**{k: call[k] for k in call.keys() if k != "protocol_id"}, "ok": bool(call["ok"])} for call in calls],
                 "outputs": {o["ref"]: {"kind": o["kind"], "text": o["text"]} for o in outputs}}
 
@@ -2652,6 +2764,14 @@ class ChatDB:
                 DELETE FROM companion_calendar
                 WHERE id = ? AND kind = ? AND status = 'pending' AND contact_id IN (SELECT id FROM contacts WHERE user_id = ?)
             """, (task_id, self.TASK_KIND, user_id))
+            conn.commit()
+            return cursor.rowcount == 1
+
+
+    def set_companion_row_message(self, row_id: int, message_id: int) -> bool:
+        """the pass already finished; the message was posted later from a held reach-out (#167, in memory)"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("UPDATE companion_calendar SET message_id = ? WHERE id = ?", (message_id, row_id))
             conn.commit()
             return cursor.rowcount == 1
 

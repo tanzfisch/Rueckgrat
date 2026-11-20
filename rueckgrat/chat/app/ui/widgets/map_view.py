@@ -25,7 +25,10 @@ def _world_pixel(lat: float, lon: float, zoom: int) -> tuple[float, float]:
 
 def map_url(place: dict, android: bool) -> str:
     """android: a geo: uri, the maps app pins the coordinates with the label.
-    else google maps search: the address text finds the place with its place card, the coordinates if there is no text"""
+    else google maps search: the address text finds the place with its place card, the coordinates if there is no text.
+    a place the hub found without the internet has its own link (the offline map in the LAN), that one"""
+    if place.get("link"):
+        return place["link"]
     lat, lon = place["lat"], place["lon"]
     if android:
         label = place.get("label") or place.get("query") or place.get("display_name") or ""

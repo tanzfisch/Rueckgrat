@@ -122,18 +122,6 @@ class MessageQueue:
     def send_status_message(self, message: str, user_id=_UNSET, conversation_id=_UNSET):
         self._push_status({"message": message}, user_id, conversation_id)
 
-    def send_job_progress(self, job_id: str, name: str, percent: int, state: str = "running",
-                          step: Optional[int] = None, total: Optional[int] = None, user_id=_UNSET):
-        self._push(
-                {"job_progress": {
-                "job_id": job_id, 
-                "name": name, 
-                "percent": max(0, min(100, int(percent))), 
-                "state": state,
-                "step": step, 
-                "total": total
-                }}, user_id)
-
     def send_data(self, data: dict, user_id=_UNSET, session=_UNSET):
         self._push(data, user_id, session)
 
