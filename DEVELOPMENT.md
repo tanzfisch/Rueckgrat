@@ -89,3 +89,87 @@ docker run -d --name dozzle \
 ```
 
 Then open with http://localhost:8088/ in browser
+
+## Using WebDAV
+
+The hub can share the AI's sandbox files over WebDAV, one folder per contact, named `<name> (<id>)`. Turn it on with `HUB_WEBDAV=true` in `rueckgrat/.env` and log in with your hub user name and password. Always go through Caddy (`https://rueckgrat.hub/dav/`), never the plain hub port, or the password travels unencrypted.
+
+While you hold a lock on any file of a contact, or the contact is paused (`PUT /contacts/{id}/files/ai_writes` with `{"paused": true}`), the AI can't write to that contact's files.
+
+Virtual environments, caches and installed packages are not shared: `HUB_WEBDAV_EXCLUDE` in `rueckgrat/.env`, comma separated, for example `HUB_WEBDAV_EXCLUDE=.venv,venv,__pycache__,build`. Names match whole file or folder names at any depth. The installer offers `HUB_WEBDAV_EXCLUDE_DEFAULT` (`.venv,venv,__pycache__,node_modules,.mypy_cache,.pytest_cache,.ruff_cache,.tox,.nox,.gradle,.cache`) and writes the answer; without the variable (or empty) the hub uses the same list.
+
+A good way to work in the share on Linux is davfs2 for the mount and direnv for a venv that lives outside it.
+
+### Mount the share with davfs2
+
+```
+sudo apt install davfs2      # answer "Yes" to letting unprivileged users mount
+sudo usermod -aG davfs2 $USER
+mkdir -p ~/rueckgrat ~/.davfs2/certs
+```
+
+Log out and back in so the group change takes effect.
+
+Add this line to `/etc/fstab` (replace `martin` with your user):
+
+```
+https://rueckgrat.hub/dav/  /home/martin/rueckgrat  davfs  user,noauto,rw,uid=martin,gid=martin  0  0
+```
+
+Store the login so it isn't asked every time:
+
+```
+echo 'https://rueckgrat.hub/dav/ <user> <password>' >> ~/.davfs2/secrets
+chmod 600 ~/.davfs2/secrets
+```
+
+The hub uses a self-signed certificate. Copy it (or Caddy's root CA) to `~/.davfs2/certs/rueckgrat.pem` and add this line to `~/.davfs2/davfs2.conf`:
+
+```
+trust_server_cert ~/.davfs2/certs/rueckgrat.pem
+```
+
+Mount and unmount:
+
+```
+mount ~/rueckgrat
+umount ~/rueckgrat
+```
+
+davfs2 caches files locally and uploads a file when it's closed, so a save can take a moment to reach the AI.
+
+### Keep the venv outside the share with direnv
+
+A venv only works on the machine that made it, and it's slow over WebDAV, so keep it outside the share.
+
+Install [uv](https://docs.astral.sh/uv/) and direnv:
+
+```
+curl -LsSf https://astral.sh/uv/install.sh | sh
+sudo apt install direnv
+echo 'eval "$(direnv hook bash)"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Create the venv outside the share and install the project's requirements:
+
+```
+cd ~/rueckgrat/<contact>/<project>
+uv venv ~/.venvs/<project>
+VIRTUAL_ENV=~/.venvs/<project> uv pip install -r requirements.txt
+```
+
+Create a file `.envrc` in the project folder:
+
+```
+export VIRTUAL_ENV=~/.venvs/<project>
+PATH_add "$VIRTUAL_ENV/bin"
+```
+
+Allow it once:
+
+```
+direnv allow
+```
+
+From now on the venv is active whenever you `cd` into the project folder, and `python main.py` uses it.

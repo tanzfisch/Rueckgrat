@@ -10,7 +10,14 @@ reader containers of SandboxVolume (the hub has no volume mounted), a folder's l
 while the user holds a WebDAV lock anywhere in a contact's files (an editor that locks the file it has open), or paused
 the AI's writes (pause), the AI does not write them: SandboxVolume.write_block asks write_block here, its file writes are
 refused and its sandboxes see the files read only. the locks are wsgidav's own (its LockStorageDict, in memory: a hub
-restart drops them like the pauses)"""
+restart drops them like the pauses)
+
+some folders are not shared (HUB_WEBDAV_EXCLUDE, the installer writes it; unset or empty: EXCLUDED): virtual
+environments, caches and installed packages work only where they were made (their paths, their python) and walking
+them over WebDAV is slow. a file or folder of such a
+name, at any depth, is not in the listings and can't be read (404), nor made, locked or copied or moved onto (403,
+_Excluded). copying a folder leaves them out, moving or deleting a folder takes them along, a replaced folder loses
+them. the AI keeps them in its sandbox"""
 import io
 import logging
 import os
@@ -20,13 +27,14 @@ import tempfile
 import threading
 import time
 from typing import Callable, Optional
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlparse
 
 from wsgidav import util
-from wsgidav.dav_error import DAVError, HTTP_FORBIDDEN
+from wsgidav.dav_error import DAVError, HTTP_FORBIDDEN, HTTP_NOT_FOUND
 from wsgidav.dav_provider import DAVCollection, DAVNonCollection, DAVProvider
 from wsgidav.dc.base_dc import BaseDomainController
 from wsgidav.lock_man.lock_storage import LockStorageDict
+from wsgidav.mw.base_mw import BaseMiddleware
 
 from app.common import get_logger
 from app.utils.sandbox_volume import SandboxVolume, SPOOL_BYTES
@@ -34,6 +42,10 @@ logger = get_logger()
 
 MOUNT = "/dav"
 ENABLED_ENV = "HUB_WEBDAV"
+EXCLUDE_ENV = "HUB_WEBDAV_EXCLUDE"     # comma separated names not shared, unset or empty: EXCLUDED
+# the hub's own like its other settings' defaults (the installer offers its HUB_WEBDAV_EXCLUDE_DEFAULT, the same list)
+EXCLUDED = (".venv", "venv", "__pycache__", "node_modules", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".nox",
+            ".gradle", ".cache")
 REALM = "Rueckgrat"
 LISTING_SECONDS = 2.0       # a folder's listing is used again this long: a client asks for the same folder many times
 LISTING_CACHE = 256         # listings kept at most
@@ -55,11 +67,26 @@ class SandboxDav:
         self._listings: dict[tuple[str, str], tuple[float, list[dict]]] = {}
         self._lock = threading.Lock()
         self._wsgi = None
+        self._excluded = self.excluded_names()
 
     @staticmethod
     def enabled() -> bool:
         """HUB_WEBDAV is on (true, 1, yes, on)"""
         return os.environ.get(ENABLED_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+    @staticmethod
+    def excluded_names() -> frozenset[str]:
+        """the names not shared: HUB_WEBDAV_EXCLUDE (comma separated), unset or empty: EXCLUDED"""
+        given = os.environ.get(EXCLUDE_ENV, "").strip()
+        names = (name.strip() for name in given.split(",")) if given else EXCLUDED
+        return frozenset(name for name in names if name and "/" not in name and name not in (".", ".."))
+
+    def excludes(self) -> frozenset[str]:
+        return self._excluded
+
+    def excluded(self, path: str) -> bool:
+        """whether path (in the share, below MOUNT) is or is in an excluded file or folder (a whole name of it)"""
+        return any(part in self._excluded for part in path.split("/"))
 
     def configure(self, db, verify: Callable[[str, str], Optional[int]]) -> None:
         """the db (the users' contacts) and verify(user name, password): the user's id when they match, else None"""
@@ -78,7 +105,8 @@ class SandboxDav:
                     "property_manager": True,       # dead properties (the clients' own), in memory
                     "http_authenticator": {"domain_controller": _Users, "accept_basic": True, "accept_digest": False,
                                            "default_to_digest": False},
-                    "rueckgrat_dav": self,          # for _Users
+                    "rueckgrat_dav": self,          # for _Users and _Excluded
+                    "middleware_stack": _Excluded.stack(),
                     # directory_slash off: its redirect of a folder without "/" leaves out MOUNT (and the clients
                     # don't follow redirects)
                     "dir_browser": {"enable": True, "response_trailer": False, "davmount": True,
@@ -98,6 +126,7 @@ class SandboxDav:
         app.mount(MOUNT, share)
         app.add_route(MOUNT, _Root(share), include_in_schema=False)
         _QuietAccess.install()
+        logger.info(f"webdav leaves out: {', '.join(sorted(self._excluded)) or 'nothing'}")
 
     # ---------------------------------------------------------------- users and contacts
     def user(self, user_name: str, password: str) -> Optional[int]:
@@ -128,7 +157,8 @@ class SandboxDav:
 
     # ---------------------------------------------------------------- listings
     def listing(self, volume: SandboxVolume, folder: str) -> list[dict]:
-        """the files and folders in folder (SandboxVolume.entries without links and special files), the same one for
+        """the files and folders in folder (SandboxVolume.entries without links, special files and the excluded names),
+        the same one for
         LISTING_SECONDS. FileNotFoundError when the folder isn't there"""
         key = (volume.name, folder)
         now = time.monotonic()
@@ -136,7 +166,8 @@ class SandboxDav:
             kept = self._listings.get(key)
             if kept is not None and now - kept[0] < LISTING_SECONDS:
                 return kept[1]
-        entries = [entry for entry in volume.entries(folder) if entry["type"] in ("dir", "file")]
+        entries = [entry for entry in volume.entries(folder)
+                   if entry["type"] in ("dir", "file") and entry["name"] not in self._excluded]
         with self._lock:
             self._listings[key] = (now, entries)
             if len(self._listings) > LISTING_CACHE:
@@ -198,11 +229,44 @@ class _Root:
                            "raw_path": (scope.get("raw_path") or scope["path"].encode()) + b"/"}, receive, send)
 
 
+class _Excluded(BaseMiddleware):
+    """the excluded names (SandboxDav.excluded) in a request, after the login: a path that is or is in one is not there
+    (404), making or locking one is refused (403, gvfs and davfs2 show "permission denied"), as is a copy or move onto
+    one. the listings leave them out (SandboxDav.listing)"""
+    CREATE = frozenset(("PUT", "MKCOL", "LOCK"))
+    ONTO = frozenset(("COPY", "MOVE"))
+
+    @classmethod
+    def stack(cls) -> list:
+        """wsgidav's middleware with this one right after the login"""
+        from wsgidav.default_conf import DEFAULT_CONFIG
+        from wsgidav.http_authenticator import HTTPAuthenticator
+        stack = list(DEFAULT_CONFIG["middleware_stack"])
+        stack.insert(stack.index(HTTPAuthenticator) + 1, cls)
+        return stack
+
+    def __call__(self, environ, start_response):
+        dav: SandboxDav = self.config["rueckgrat_dav"]
+        method = environ.get("REQUEST_METHOD", "").upper()
+        if dav.excluded(environ.get("PATH_INFO", "")):
+            status = HTTP_FORBIDDEN if method in self.CREATE else HTTP_NOT_FOUND
+            return util.send_status_response(environ, start_response, DAVError(status, "not shared"))
+        if method in self.ONTO and environ.get("HTTP_DESTINATION"):
+            target = urlparse(unquote(environ["HTTP_DESTINATION"]), allow_fragments=False).path
+            if target == MOUNT or target.startswith(MOUNT + "/"):
+                target = target[len(MOUNT):]
+            if dav.excluded(target):
+                return util.send_status_response(environ, start_response, DAVError(HTTP_FORBIDDEN, "not shared"))
+        return self.next_app(environ, start_response)
+
+
 class _QuietAccess(logging.Filter):
-    """drops uvicorn's access log lines of the share's successful requests (MOUNT and below, status < 400): a client
-    walks the folders over and over. its 4xx and 5xx (failed logins, errors) and all other requests stay. next to the
-    hub's QuietPathFilter (app.common) on the same logger"""
+    """drops uvicorn's access log lines of the share's (MOUNT and below) successful requests (status < 400) and of its
+    existence probes that find nothing (404 of PROBES): a client walks the folders over and over, editors look for
+    their .vscode, .github ... again and again. the rest of its 4xx and 5xx (failed logins, locks, errors, a 404 of a
+    write or GET) and all other requests stay. next to the hub's QuietPathFilter (app.common) on the same logger"""
     LOGGER = "uvicorn.access"
+    PROBES = frozenset(("PROPFIND", "HEAD", "OPTIONS"))
 
     @classmethod
     def install(cls) -> None:
@@ -219,9 +283,10 @@ class _QuietAccess(logging.Filter):
         if path != MOUNT and not path.startswith(MOUNT + "/"):
             return True
         try:
-            return int(args[4]) >= 400
+            status = int(args[4])
         except (TypeError, ValueError):
             return True
+        return status >= 400 and not (status == 404 and str(args[1]).upper() in self.PROBES)
 
 
 class _Locks(LockStorageDict):
@@ -385,7 +450,7 @@ class _Item:
             self._volume.delete(target)
             self._volume.make_folder(target)
         else:
-            self._volume.copy(self._inner(), target)
+            self._volume.copy(self._inner(), target, skip=self.provider.dav().excludes())
         self._changed(dest_path)
         return True
 

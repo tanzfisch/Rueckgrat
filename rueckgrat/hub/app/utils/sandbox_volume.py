@@ -25,7 +25,7 @@ import time
 import zipfile
 from contextlib import contextmanager, ExitStack
 from contextvars import ContextVar
-from typing import BinaryIO, Callable, Iterator, Optional
+from typing import BinaryIO, Callable, Iterable, Iterator, Optional
 
 from app.common import get_logger
 from app.utils.text_files import sanitize_relative_path
@@ -413,9 +413,14 @@ class SandboxVolume:
         """source to target, what is at target replaced. never the root"""
         self._run(["sh", "-c", 'rm -rf -- "$2" && mv -T -- "$1" "$2"', "sh", self._at(source), self._at(target)])
 
-    def copy(self, source: str, target: str) -> None:
-        """source to target with everything in it (times and modes kept), what is at target replaced. never the root"""
-        self._run(["sh", "-c", 'rm -rf -- "$2" && cp -a -T -- "$1" "$2"', "sh", self._at(source), self._at(target)])
+    def copy(self, source: str, target: str, skip: Iterable[str] = ()) -> None:
+        """source to target with everything in it (times and modes kept), what is at target replaced. never the root.
+        skip: names of files and folders in a copied folder that are left out, at any depth"""
+        script = ('src=$1 dst=$2; shift 2; rm -rf -- "$dst" || exit 1; '
+                  'if [ -d "$src" ] && [ ! -L "$src" ]; then '
+                  'mkdir -- "$dst" && tar -C "$src" -cf - --no-wildcards "$@" . | tar -C "$dst" -xpf -; '
+                  'else cp -a -T -- "$src" "$dst"; fi')
+        self._run(["sh", "-c", script, "sh", self._at(source), self._at(target), *(f"--exclude={name}" for name in skip)])
 
     def _walk(self, path: str, exclude: bool) -> Iterator[tuple[list[str], tarfile.TarInfo, tarfile.TarFile]]:
         """(parts below path, member, its tar) of the folders and regular files at path (a clean_path), read from a

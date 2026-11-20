@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.31.0
+------
+
+- #193 webdav for colaborative access to the files an AI is working on
+
 0.30.0
 ------
 

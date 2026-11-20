@@ -56,6 +56,8 @@ The files the AI works with (bash, run_code, written documents, one folder per c
 - **macOS**: Finder, Go, Connect to Server, `https://rueckgrat.hub/dav/`
 - **Windows**: Explorer, This PC, Map network drive, `https://rueckgrat.hub/dav/` (the hub's certificate must be trusted by Windows)
 
+Virtual environments, caches and installed packages are not shared, they only work where they were made: `.venv`, `venv`, `__pycache__`, `node_modules`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`, `.gradle` and `.cache`, at any depth. They don't show up on the drive and can't be created there; copying a folder leaves them out, moving or deleting a folder takes them along. The AI keeps them in its sandbox. The installer offers this list and you can change it; it is `HUB_WEBDAV_EXCLUDE` in `rueckgrat/.env` (comma separated).
+
 ### Tools available to the AI
 | Name | Discription |
 |-|-|
@@ -130,7 +132,7 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen, TTS, STT, text embeddings, Laya decisions), an optional Cloudflare tunnel, an optional [Project NOMAD](#offline-with-project-nomad) in your network and an optional Android APK of the chat client.
+The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen, TTS, STT, text embeddings, Laya decisions), an optional Cloudflare tunnel, an optional [Project NOMAD](#offline-with-project-nomad) in your network, an optional [WebDAV share](#access-ais-files-with-webdav) of the AI's files and an optional Android APK of the chat client.
 Before each component it says in a line or two what the component brings and what is missing without it. The LLM (llama-server on one node) is required, and the installer warns when no host runs one.
 
 Run chat natively:
