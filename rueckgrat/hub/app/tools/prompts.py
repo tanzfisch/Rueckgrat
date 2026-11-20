@@ -647,13 +647,13 @@ Example:
 
 # ---------------------------------------------------------------- websearch
 
-WEBSEARCH_DESCRIPTION = ("searches the web or the offline library for current, factual or local information (news, events, "
+WEBSEARCH_DESCRIPTION = ("searches the web and the offline library for current, factual or local information (news, events, "
                          "prices, stocks, opening hours, how-tos)")
 
 WEBSEARCH_PROMPT = """
 WEBSEARCH:
 Use for current, factual, real-time, or location-specific information, or when you need fresh ideas.
-It searches the web, or the offline library (encyclopedias, manuals, Q&A sites) when there is no internet; the results say which.
+It searches the web and the offline library (encyclopedias, manuals, Q&A sites) together, without internet only the library; each result says where it comes from.
 
 Parameters:
 - query (string, required): the search query

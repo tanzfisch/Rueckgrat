@@ -20,6 +20,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     playwright install --with-deps --only-shell chromium && \
     rm -rf /var/lib/apt/lists/*
 
+# Noto fonts for the offline map's place names in every script, Latin to CJK, ~+135 MB of which ~90 MB CJK
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-core fonts-noto-cjk && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY app app
 
 USER hubuser

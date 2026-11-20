@@ -2,12 +2,16 @@
 Offline map tiles: the hub draws the 256 px png tiles of the map bubble itself from Project NOMAD's Protomaps vector
 tiles (.pmtiles files served with byte ranges: <nomad>/pmtiles/<file>). The detailed region extracts first, world.pmtiles
 (zoom 0-5) where they have no tile, a zoom beyond a file's max zoom is drawn from its deepest tile (overzoom).
-A simple light style: water, land, parks and woods, buildings, roads, borders and place names.
+A simple light style: water, land, parks and woods, buildings, roads, borders and place names. Place names are the English
+name where the tiles have one, else the local name, drawn in the first of the Noto fonts (hub Dockerfile) that has all its
+glyphs: Latin, Cyrillic, Greek, Arabic, Hebrew, Thai, Devanagari, Chinese, Japanese and Korean, right to left and shaped by
+Pillow's raqm layout. A name no font can draw is left out rather than drawn as boxes.
 """
 import gzip
 import io
 import math
 import threading
+import unicodedata
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -45,6 +49,15 @@ ROADS = [   # (kinds, colour, width in px at zoom 15, minimum width), drawn from
 PLACE_RANK = {"country": 0, "region": 1, "locality": 2, "macrohood": 3, "neighbourhood": 4}
 PLACE_MIN_ZOOM = {"country": 0, "region": 5, "locality": 6, "macrohood": 12, "neighbourhood": 14}
 MAX_LABELS = 12
+LABEL_NAMES = ("name:en", "name")       # the first a place has is its label
+FONT_FILES = [  # (file, face index) in order of preference, from fonts-noto-core and fonts-noto-cjk
+    ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", 0),     # Latin, Cyrillic, Greek
+    ("/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf", 0),
+    ("/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf", 0),
+    ("/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf", 0),
+    ("/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf", 0),
+    ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 0),     # Chinese, Japanese, Korean (the JP face)
+]
 
 
 class PmtilesArchive:
@@ -118,6 +131,56 @@ class PmtilesArchive:
             data = self._bytes(h["tile_data_offset"] + entry.offset, entry.length)
             return gzip.decompress(data) if h["tile_compression"] == Compression.GZIP else data
         return None
+
+
+class LabelFonts:
+    """the label font for a text: the first of the font files that has all its glyphs. Missing files are left out,
+    each file's character map is read once"""
+
+    def __init__(self, files: List[Tuple[str, int]]):
+        self._files = files
+        self._cmaps: Optional[List[Tuple[str, int, frozenset]]] = None
+        self._sized: Dict[Tuple[str, int, int], Any] = {}
+        self._lock = threading.Lock()
+
+    def _load(self) -> List[Tuple[str, int, frozenset]]:
+        with self._lock:
+            if self._cmaps is None:
+                from fontTools.ttLib import TTFont, TTLibError
+                cmaps = []
+                for path, index in self._files:
+                    try:
+                        with TTFont(path, fontNumber=index, lazy=True) as font:
+                            cmaps.append((path, index, frozenset(font.getBestCmap())))
+                    except (OSError, TTLibError) as e:      # missing, broken, or no such face in the collection
+                        logger.debug(f"label font {path}#{index} left out: {e}")
+                if not cmaps:
+                    logger.warning("no label fonts installed, offline map tiles have no place names")
+                self._cmaps = cmaps
+            return self._cmaps
+
+    def font_file(self, text: str) -> Optional[Tuple[str, int]]:
+        """(file, face index) of the first font with every glyph of text, None when none has them all"""
+        needed = {ord(c) for c in text if not c.isspace() and unicodedata.category(c) != "Cf"}   # Cf: joiners, direction marks
+        for path, index, cmap in self._load():
+            if needed <= cmap:
+                return path, index
+        return None
+
+    def font(self, text: str, size: int):
+        """the Pillow font to draw text in at size px, None when no font has all its glyphs"""
+        found = self.font_file(text)
+        if found is None:
+            return None
+        from PIL import ImageFont
+        key = (found[0], found[1], size)
+        with self._lock:
+            if key not in self._sized:
+                self._sized[key] = ImageFont.truetype(found[0], size, index=found[1])
+            return self._sized[key]
+
+
+LABEL_FONTS = LabelFonts(FONT_FILES)
 
 
 def tile_lonlat(z: int, x: int, y: int) -> Tuple[float, float]:
@@ -233,18 +296,11 @@ class TileRenderer:
                 if len(line) >= 2:
                     self._draw.line(line, fill=colour, width=SCALE)
 
-    def _font(self, size: int):
-        from PIL import ImageFont
-        try:
-            return ImageFont.load_default(size=size)
-        except TypeError:       # an old Pillow without scalable default font
-            return ImageFont.load_default()
-
     def _places(self) -> None:
         places = []
         for extent, feature in self._features("places"):
             props = feature.get("properties", {})
-            kind, name = props.get("kind"), props.get("name")
+            kind, name = props.get("kind"), next((props[key] for key in LABEL_NAMES if props.get(key)), None)
             if not name or kind not in PLACE_RANK or self._z < PLACE_MIN_ZOOM[kind]:
                 continue
             if feature["geometry"].get("type") != "Point":
@@ -253,7 +309,9 @@ class TileRenderer:
         for rank, _, name, (px, py) in sorted(places)[:MAX_LABELS * 3]:
             if len(self._labels) >= MAX_LABELS:
                 break
-            font = self._font((14 if rank <= 1 else 12) * SCALE)
+            font = LABEL_FONTS.font(name, (14 if rank <= 1 else 12) * SCALE)
+            if font is None:
+                continue
             box = self._draw.textbbox((px, py), name, font=font, anchor="mm")
             if box[2] < 0 or box[0] > self._size or box[3] < 0 or box[1] > self._size:
                 continue

@@ -18,6 +18,7 @@ from .poll import PollView
 from .map_view import MapView
 from .price_view import PriceView
 from .text_preview import TextPreview
+from .copy_button import CopyButton
 from .file_card import FileCard, FileCards
 from .audio_player import AudioPlayer
 from .files_panel import FilesPanel
@@ -50,6 +51,7 @@ __all__ = [
     "MapView",
     "PriceView",
     "TextPreview",
+    "CopyButton",
     "FileCard",
     "FileCards",
     "AudioPlayer",

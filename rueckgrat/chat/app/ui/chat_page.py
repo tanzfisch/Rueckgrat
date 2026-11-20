@@ -5,7 +5,7 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import ChatBubble, Header, EmojiPicker, StatusWidget, PollView, MapView, PriceView, FileCards, FilesDock, MessageBox, show_protocol
+from app.ui.widgets import ChatBubble, CopyButton, Header, EmojiPicker, StatusWidget, PollView, MapView, PriceView, FileCards, FilesDock, MessageBox, show_protocol
 from app.audio import Text_To_Speech
 from app.utils import Hub, Contact, Paths, AudioStreamer, RueckgratConfig, Capabilities, ContactFiles, Backroom
 from app.common import get_logger, Utils
@@ -422,6 +422,7 @@ class ChatPage(BasePage):
                     icon=ft.Icons.PLAY_ARROW, icon_size=16, tooltip="Play",
                     on_click=lambda e, b=bubble: self._on_play(e.control, b),
                 ), "tts"))
+                bubble.action_row.add_button(CopyButton(bubble.copy_text, tooltip="Copy reply"))
             if sources:
                 bubble.action_row.set_sources(sources)
             report_of = Backroom.for_report(message_id) if role == "assistant" else None

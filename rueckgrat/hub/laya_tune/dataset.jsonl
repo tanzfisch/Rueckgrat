@@ -532,3 +532,5 @@
 {"lang": "en", "text": "Write a short poem that combines the sea and the mountains.", "labels": {}}
 {"lang": "en", "text": "Put the chapters of the story in a better order and tell me why.", "labels": {}}
 {"comment": "t495: a writer task of an audiobook job, it writes the text, text_to_speech must not be picked", "lang": "en", "text": "Write eight distinct chapters for an audiobook about the Younger Dryas impact hypothesis, using the research in research_notes.txt. Write each chapter to its own text file, chapter_01.txt to chapter_08.txt, engaging and suitable for narration. Do not mention audio, narration, or the audiobook format in the text itself.", "labels": {"write_file": "M"}}
+{"lang": "en", "text": "where is the pyramid of giza?", "labels": {"show_map": "M", "wikipedia": "r"}}
+{"lang": "en", "text": "Where's Wellington", "labels": {"show_map": "M"}}

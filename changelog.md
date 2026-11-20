@@ -17,6 +17,17 @@ Changelog
 -     hub manager offline simulate on|off acts as if there were no internet, offline status shows NOMAD, its library and map
 -     new capabilities library and offline_map, shown in the chat's status
 -     added pmtiles, mapbox-vector-tile and Pillow hub dependencies
+- fixed offline library links with special characters in their path (encoded twice)
+- websearch always searches NOMAD's library next to the web, the best answers of both make the result
+- copy buttons on every text block of a bubble (text, code, quotes, tables tab separated) and in the text preview
+- a copy button for the whole reply under the assistant's bubble, also without sources
+- block copy buttons are small and sit in the top right corner, one line messages keep their height
+- fixed quote blocks breaking the rendering of their bubble
+- the yellow connection bar is semi transparent and lets clicks through
+- show_map is picked for questions where a place is, e.g. "where is the pyramid of giza?" or "Where's Wellington"
+- offline map labels use the English name, else the local one in the Noto font of its script (Cyrillic, Greek, Arabic, Hebrew, Thai, Devanagari, CJK), nothing drawn as boxes
+- offline map tiles drawn by the last hub are cleared on hub start
+- added Noto fonts (~135 MB) to the hub image and the fonttools hub dependency
 
 0.29.0
 ------

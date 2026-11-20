@@ -19,13 +19,15 @@ SERVICE_ICONS = {
 
 
 class ConnectionBanner(ft.SafeArea):
-    """app wide strip at the top (lives in page.overlay): red while the hub connection is lost,
+    """app wide strip at the top (lives in page.overlay), see-through and click-through (the header's buttons under it
+    still work, the icons' tooltips do not show): red while the hub connection is lost,
     briefly green once it is back. fed by Hub.register_connection_state.
     while the hub is connected it also shows a small icon per service the system is set up for but that is not available
-    now (Capabilities.missing, live through Capabilities.listen), each with its name as tooltip. a service that is not
+    now (Capabilities.missing, live through Capabilities.listen), its name in the icon's tooltip. a service that is not
     installed shows nothing, with nothing missing and the connection fine the strip is hidden"""
     SHOW_AFTER = 2  # s, short drops (flapping) show nothing
     HIDE_AFTER = 1  # s the green "reconnected" stays
+    OPACITY = 0.65  # of the strip's colour, what is under it shows through
 
     def __init__(self):
         self._lost = False
@@ -37,6 +39,7 @@ class ConnectionBanner(ft.SafeArea):
         self.missing = ft.Row(spacing=6, tight=True, visible=False)
         self.strip = ft.Container(
             padding=8,
+            ignore_interactions=True,     # taps and clicks go to the controls under the strip
             content=ft.Row([self.icon, self.text, self.missing], alignment=ft.MainAxisAlignment.CENTER, spacing=8),
         )
         super().__init__(left=0, top=0, right=0, visible=False, content=self.strip)
@@ -87,7 +90,7 @@ class ConnectionBanner(ft.SafeArea):
             icon, text, color = ft.Icons.WARNING_AMBER, "not available:", theme.WARNING
         self.icon.icon = icon
         self.text.value = text
-        self.strip.bgcolor = color
+        self.strip.bgcolor = ft.Colors.with_opacity(self.OPACITY, color)
         self.icon.color = self.text.color = theme.ON_ACCENT   # the mode may have changed since start
         try:
             self.update()

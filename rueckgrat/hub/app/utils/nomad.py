@@ -93,10 +93,6 @@ class Nomad:
         state = (url, kiwix if library else "", len(offline_map.archives()) if offline_map else 0)
         if state != self._state:
             self._state = state
-            if url:
-                logger.info(f"nomad {url}: library {state[1] or '-'}, offline map {state[2]} file(s)")
-            else:
-                logger.info("nomad: not configured")
 
     def _json(self, url: str):
         resp = self._get(url, timeout=NOMAD_TIMEOUT)

@@ -6,6 +6,7 @@ import re
 import flet as ft
 from app.ui import theme
 from .message_box import MessageBox
+from .copy_button import CopyButton
 
 from app.common import get_logger
 logger = get_logger()
@@ -53,6 +54,7 @@ class TextPreview(ft.Container):
                     ft.Icon(ft.Icons.DESCRIPTION_OUTLINED, color=theme.TEXT, size=18),
                     ft.Text(name, color=theme.TEXT, weight=ft.FontWeight.BOLD, size=14, expand=True,
                             max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                    CopyButton(text),     # the whole file
                     ft.IconButton(icon=ft.Icons.CLOSE, icon_size=20, icon_color=theme.TEXT, tooltip="Close",
                                   on_click=self._close),
                 ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
