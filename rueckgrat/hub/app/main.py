@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from app.utils import ChatDB, Infrastructure, ImageType, ImageStore, fence_code
 from app.tools import ToolRegistry, SpawnAgentJobTool, TaskTool
-from app.tools.map_tool import get_tile
+from app.tools.map_tool import MapTiles
 from app.tools.conversion_tool import RateRefresher
 from app.agent_jobs import AgentJob
 from app.agent_jobs.job_monitor import JobMonitor
@@ -70,6 +70,9 @@ async def lifespan(app: FastAPI):
     app.state.image_store = ImageStore(app.state.db, app.state.infrastructure)
     app.state.task_queue = TaskQueue(max_parallel = 10)
     app.state.turns = Turns(app.state.db)
+
+    app.state.map_tiles = MapTiles(app.state.infrastructure)
+    app.state.map_tiles.clear_offline()     # drawn by the last hub, maybe with other fonts or style
 
     logger.info("loading tool registry")
     app.state.tool_registry = ToolRegistry(
@@ -1324,7 +1327,7 @@ def get_model_url(model_name: str, username: str = Depends(get_current_user)):
 async def get_map_tile(z: int, x: int, y: int, username: str = Depends(get_current_user)):
     """one openstreetmap tile for a map bubble. the hub fetches it with its own user agent and caches it (tile policy),
     so the client talks to no one but its hub. without the internet the hub draws it from NOMAD's map files"""
-    tile = await run_in_threadpool(get_tile, z, x, y, app.state.infrastructure)
+    tile = await run_in_threadpool(app.state.map_tiles.tile, z, x, y)
     if tile is None:
         raise HTTPException(status_code=404, detail="tile not available")
     return Response(content=tile, media_type="image/png", headers={"Cache-Control": "max-age=604800"})

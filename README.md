@@ -244,10 +244,11 @@ To let the AI read websites on your home network or on the hub machine, see [Loc
 
 ## Offline with Project NOMAD
 
-[Project NOMAD](https://www.projectnomad.us/) keeps Wikipedia, other reference books and a world map in your own network. When the hub knows where NOMAD runs, it uses it whenever there is no internet or an online service fails:
+[Project NOMAD](https://www.projectnomad.us/) keeps Wikipedia, other reference books and a world map in your own network. When the hub knows where NOMAD runs:
 
-- **websearch** and **wikipedia** search NOMAD's offline library
-- **show_map** finds places through the offline Wikipedia and draws the map from NOMAD's map files, tapping the map opens NOMAD's map
+- **websearch** always searches NOMAD's offline library next to the web, the best answers of both make the result, without internet only the library
+- **wikipedia** uses the offline library when there is no internet or Wikipedia does not answer
+- **show_map** without internet finds places through the offline Wikipedia and draws the map from NOMAD's map files, tapping the map opens NOMAD's map
 
 The installer asks for the NOMAD address (you can skip it). Set, change or remove it later with `offline nomad`, no restart needed. `offline status` shows what the hub found: the books of the library and the map files. With `offline simulate on` the hub acts as if there were no internet, to try the offline features, and `offline simulate off` ends that. The chat's status shows the library and the offline map like the other services.
 

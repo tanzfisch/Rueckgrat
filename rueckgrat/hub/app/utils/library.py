@@ -12,7 +12,7 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import requests
 from bs4 import BeautifulSoup
@@ -149,9 +149,9 @@ class Library:
                 if not match or not title or title.lower() in seen:
                     continue
                 seen.add(title.lower())
-                book_id, path = match.group(1), match.group(2)
+                book_id, path = unquote(match.group(1)), unquote(match.group(2))     # the link is url encoded, a path is not
                 book = (item.find("book").findtext("title") if item.find("book") is not None else None) or titles.get(book_id, book_id)
-                hits.append({"title": title, "book_id": book_id, "book": book, "path": path, "url": f"{self._base}{link}"})
+                hits.append({"title": title, "book_id": book_id, "book": book, "path": path, "url": self.content_url(book_id, path)})
         return hits
 
     def suggest(self, book_id: str, term: str, count: int = 5) -> List[Dict[str, str]]:
@@ -182,7 +182,7 @@ class Library:
                 item = None
             match = re.match(r"/content/[^/]+/(.+)", item.findtext("link") or "") if item is not None else None
             if match:
-                best = {"title": " ".join((item.findtext("title") or "").split()), "path": match.group(1)}
+                best = {"title": " ".join((item.findtext("title") or "").split()), "path": unquote(match.group(1))}
         if best is None and suggestions:
             best = suggestions[0]
         if best is None:
