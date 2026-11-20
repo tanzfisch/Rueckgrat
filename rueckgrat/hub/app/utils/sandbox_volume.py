@@ -3,7 +3,11 @@ sandboxes of all the contact's conversations, so projects outlive a conversation
 the sandboxes are started through the host's docker.sock, a bind path would be a host path. removed with the contact,
 or by the maintenance (ConversationVolumeMaintenanceTask) when the contact is gone or after STALE_DAYS without a message
 in any of its conversations. the user browses and downloads them through a short lived reader container
-(SandboxVolume.entries, read_file, write_zip, files): the hub has no volume mounted.
+(SandboxVolume.entries, read_file, write_zip, files): the hub has no volume mounted. the user's own changes (the
+WebDAV share, sandbox_dav) go through reader containers too (upload, make_folder, delete, move, copy).
+
+the AI writes (write_file, the bash and run_code sandboxes) ask write_block first: while the user holds the files (a
+WebDAV lock, a pause, set_write_check) write_file is refused (FilesLocked) and a sandbox gets the files read only.
 
 the layout (LAYOUT, made at every sandbox start):
   projects/<name>/        one folder per project, its PROJECT.md says what it is, its status and how to run it
@@ -16,11 +20,12 @@ import hashlib
 import io
 import posixpath
 import tarfile
+import tempfile
 import time
 import zipfile
 from contextlib import contextmanager, ExitStack
 from contextvars import ContextVar
-from typing import BinaryIO, Iterator, Optional
+from typing import BinaryIO, Callable, Iterator, Optional
 
 from app.common import get_logger
 from app.utils.text_files import sanitize_relative_path
@@ -44,6 +49,9 @@ HASH_CHARS = 12         # of the sha256 of a document's (or audio file's) conten
 READER_IMAGE = "ghcr.io/vndee/sandbox-python-311-bullseye"
 READER_TIMEOUT = 30     # seconds for listing a folder
 CHUNK = 64 * 1024
+SPOOL_BYTES = 32 * 1024 * 1024     # an upload's tar is kept in memory up to this size, on disk beyond
+# a find -printf line of entries and info, \0 ends it: a name may hold tabs and newlines
+FIND_FORMAT = "%y\\t%s\\t%T@\\t%f\\0"
 # left out of a zip on request: version control, caches and installed packages, not the user's work
 EXCLUDED = frozenset({".git", ".cache", ".local", ".npm", "__pycache__", "node_modules", ".venv", "venv"})
 # the open sandboxes of a sharing() block: {"stack": ExitStack, "sessions": {key: (its ExitStack, session)}}
@@ -57,10 +65,27 @@ def _client():
     return docker.from_env()
 
 
+class FilesLocked(PermissionError):
+    """an AI write while the user holds the files (SandboxVolume.write_block), the message says why"""
+
+
 class SandboxVolume:
+    _write_check: Optional[Callable[["SandboxVolume"], Optional[str]]] = None     # set_write_check
+
     def __init__(self, user_id: int, contact_id: int):
         self.user_id = int(user_id)
         self.contact_id = int(contact_id)
+
+    @classmethod
+    def set_write_check(cls, check: Optional[Callable[["SandboxVolume"], Optional[str]]]) -> None:
+        """check(volume): why the AI may not write the volume's files now (the user holds them), None when it may.
+        None: no check, the AI always writes"""
+        SandboxVolume._write_check = check
+
+    def write_block(self) -> Optional[str]:
+        """why the AI may not write these files now (set_write_check), None when it may"""
+        check = SandboxVolume._write_check
+        return check(self) if check is not None else None
 
     @classmethod
     def of_conversation(cls, db, user_id: int, conversation_id: int) -> "SandboxVolume":
@@ -229,6 +254,16 @@ class SandboxVolume:
         finally:
             container.remove(force=True)
 
+    def _run(self, command: list[str]) -> None:
+        """command in a reader container with the volume writable (made on first use), as SANDBOX_USER.
+        OSError with its error output when it fails"""
+        with self._reader(command, read_only=False) as container:
+            container.start()
+            status = container.wait(timeout=READER_TIMEOUT)
+            if status.get("StatusCode"):
+                error = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace").strip()
+                raise OSError(error or f"{command[0]} failed")
+
     def _output(self, command: list[str]) -> bytes | None:
         """the stdout of command in a reader container, None when it failed. no volume: None"""
         if not self.exists():
@@ -248,20 +283,34 @@ class SandboxVolume:
                 raise FileNotFoundError(path)
             return []
         folder = posixpath.join(MOUNT_PATH, path) if path else MOUNT_PATH
-        # \0 ends a line: a name may hold tabs and newlines. -P (the default): links are listed, never followed
-        output = self._output(["find", folder, "-mindepth", "1", "-maxdepth", "1", "-printf", "%y\\t%s\\t%T@\\t%f\\0"])
+        # -P (the default): links are listed, never followed
+        output = self._output(["find", folder, "-mindepth", "1", "-maxdepth", "1", "-printf", FIND_FORMAT])
         if output is None:
             raise FileNotFoundError(path)
+        return sorted(self._parse_entries(output, path), key=lambda entry: (entry["type"] != "dir", entry["name"].lower()))
+
+    def info(self, path: str) -> Optional[dict]:
+        """the entry of path like the ones of entries, the root is a folder. None when nothing is there"""
+        path = self.clean_path(path)
+        if not path:
+            return {"name": "", "path": "", "type": "dir", "size": 0, "modified": 0}
+        output = self._output(["find", posixpath.join(MOUNT_PATH, path), "-maxdepth", "0", "-printf", FIND_FORMAT])
+        entries = self._parse_entries(output or b"", posixpath.dirname(path))
+        return entries[0] if entries else None
+
+    @staticmethod
+    def _parse_entries(output: bytes, folder: str) -> list[dict]:
+        """the entries of find's FIND_FORMAT lines of the files in folder (a clean_path)"""
         kinds = {"d": "dir", "f": "file", "l": "link"}
         entries = []
         for line in output.decode("utf-8", errors="replace").split("\0"):
             if line.count("\t") < 3:
                 continue
             kind, size, modified, name = line.split("\t", 3)
-            entries.append({"name": name, "path": posixpath.join(path, name) if path else name,
+            entries.append({"name": name, "path": posixpath.join(folder, name) if folder else name,
                             "type": kinds.get(kind, "other"), "size": int(size) if kind != "d" else 0,
                             "modified": int(float(modified))})
-        return sorted(entries, key=lambda entry: (entry["type"] != "dir", entry["name"].lower()))
+        return entries
 
     def has_project(self) -> bool:
         """whether the files hold the user's work: anything not hidden in PROJECTS or WORKDIR (of any conversation).
@@ -306,29 +355,67 @@ class SandboxVolume:
                     yield data
         return posixpath.basename(path), int(stat["size"]), chunks()
 
+    def open_file(self, path: str) -> BinaryIO:
+        """one regular file to read like read_file, closing it removes its reader container"""
+        _, _, chunks = self.read_file(path)
+        return io.BufferedReader(_ChunkReader(chunks), CHUNK)
+
     def write_file(self, path: str, data: bytes) -> str:
-        """writes data as the file path (a clean_path, its folders made), owned by SANDBOX_USER, through a reader
-        container with the volume writable. an existing file is replaced. returns path"""
+        """an AI tool's write (upload): FilesLocked while the user holds the files (write_block). returns path"""
+        reason = self.write_block()
+        if reason:
+            raise FilesLocked(reason)
+        return self.upload(path, io.BytesIO(data), len(data))
+
+    def upload(self, path: str, source: BinaryIO, size: int) -> str:
+        """writes size bytes of source as the file path (a clean_path, its folders made), owned by SANDBOX_USER, through
+        a reader container with the volume writable. an existing file is replaced. the user's own write, no
+        write_block. returns path"""
         path = self.clean_path(path)
         if not path:
             raise ValueError("no file name")
-        archive = io.BytesIO()
         now = time.time()
-        with tarfile.open(fileobj=archive, mode="w") as tar:
-            parts = path.split("/")
-            for depth in range(1, len(parts)):
-                folder = tarfile.TarInfo("/".join(parts[:depth]))
-                folder.type, folder.mode, folder.mtime = tarfile.DIRTYPE, 0o755, now
-                folder.uid = folder.gid = SANDBOX_UID
-                tar.addfile(folder)
-            member = tarfile.TarInfo(path)
-            member.size, member.mode, member.mtime = len(data), 0o644, now
-            member.uid = member.gid = SANDBOX_UID
-            tar.addfile(member, io.BytesIO(data))
-        with self._reader(read_only=False) as container:
-            if not container.put_archive(MOUNT_PATH, archive.getvalue()):
-                raise OSError(f"{path} could not be written")
+        with tempfile.SpooledTemporaryFile(max_size=SPOOL_BYTES) as archive:
+            with tarfile.open(fileobj=archive, mode="w") as tar:
+                parts = path.split("/")
+                for depth in range(1, len(parts)):
+                    folder = tarfile.TarInfo("/".join(parts[:depth]))
+                    folder.type, folder.mode, folder.mtime = tarfile.DIRTYPE, 0o755, now
+                    folder.uid = folder.gid = SANDBOX_UID
+                    tar.addfile(folder)
+                member = tarfile.TarInfo(path)
+                member.size, member.mode, member.mtime = size, 0o644, now
+                member.uid = member.gid = SANDBOX_UID
+                tar.addfile(member, source)
+            archive.seek(0)
+            with self._reader(read_only=False) as container:
+                if not container.put_archive(MOUNT_PATH, archive):
+                    raise OSError(f"{path} could not be written")
         return path
+
+    @classmethod
+    def _at(cls, path: str) -> str:
+        """the absolute path of path (a clean_path) in a container, ValueError for the root"""
+        path = cls.clean_path(path)
+        if not path:
+            raise ValueError("not the root of the files")
+        return posixpath.join(MOUNT_PATH, path)
+
+    def make_folder(self, path: str) -> None:
+        """a new folder at path, its parent must be there. OSError when it can't be made"""
+        self._run(["mkdir", "--", self._at(path)])
+
+    def delete(self, path: str) -> None:
+        """the file or folder at path with everything in it, the user's own change. never the root"""
+        self._run(["rm", "-rf", "--", self._at(path)])
+
+    def move(self, source: str, target: str) -> None:
+        """source to target, what is at target replaced. never the root"""
+        self._run(["sh", "-c", 'rm -rf -- "$2" && mv -T -- "$1" "$2"', "sh", self._at(source), self._at(target)])
+
+    def copy(self, source: str, target: str) -> None:
+        """source to target with everything in it (times and modes kept), what is at target replaced. never the root"""
+        self._run(["sh", "-c", 'rm -rf -- "$2" && cp -a -T -- "$1" "$2"', "sh", self._at(source), self._at(target)])
 
     def _walk(self, path: str, exclude: bool) -> Iterator[tuple[list[str], tarfile.TarInfo, tarfile.TarFile]]:
         """(parts below path, member, its tar) of the folders and regular files at path (a clean_path), read from a
@@ -431,13 +518,26 @@ class SandboxVolume:
         """a fresh llm sandbox container with the volume at MOUNT_PATH, removed when the block ends.
         keep_template: the language image stays, no pull per run"""
         from llm_sandbox import SandboxSession
-        configs = {**runtime_configs, "mounts": [*runtime_configs.get("mounts", []), self._mount()]}
+        mount = self._session_mount()
+        configs = {**runtime_configs, "mounts": [*runtime_configs.get("mounts", []), mount]}
         with SandboxSession(keep_template=True, runtime_configs=configs, encoding_errors="replace", **kwargs) as session:
+            if mount["ReadOnly"]:
+                yield session
+                return
             self._own(session.container, layout=True)
             try:
                 yield session
             finally:
                 self._own(session.container)
+
+    def _session_mount(self):
+        """the mount of a sandbox: writable, read only while the user holds the files (write_block). the volume is made
+        first, a read only mount never makes it"""
+        if not self.write_block():
+            return self._mount()
+        if not self.exists():
+            self._mount()
+        return self._mount(read_only=True)
 
     def remove(self) -> None:
         """the volume and its files. a volume that isn't there, or no docker, is nothing to remove"""
@@ -478,3 +578,9 @@ class _ChunkReader(io.RawIOBase):
         n = min(len(buffer), len(self._rest))
         buffer[:n], self._rest = self._rest[:n], self._rest[n:]
         return n
+
+    def close(self) -> None:
+        """a generator of chunks is closed too: its reader container goes (read_file)"""
+        if not self.closed and hasattr(self._chunks, "close"):
+            self._chunks.close()
+        super().close()

@@ -30,6 +30,8 @@ from app.tasks import TaskQueue, MetaTask, AssistantImageTask, ContactGeneratorT
 from app.tasks.transcript_tasks import TranscriptSummaryTask, TranscriptEnhanceTask, enhanceable
 from app.tasks.turns import Turns
 from app.utils.tts_stream import TtsStreams
+from app.utils.sandbox_volume import SandboxVolume
+from app.utils.sandbox_dav import SandboxDav, MOUNT as DAV_MOUNT
 from app.companion import CompanionScheduler
 from app.companion.outreach import Outreach
 from app.companion.user_tasks import UserTasks, TaskError, TaskNotFound
@@ -98,6 +100,12 @@ async def lifespan(app: FastAPI):
     app.state.tasks = UserTasks(app.state.db, wake=app.state.companion.wake)
     TaskTool.tasks = app.state.tasks
 
+    # #193 the contacts' files as a network drive (HUB_WEBDAV): the user's locks and pause hold the AI's writes back
+    if webdav is not None:
+        webdav.configure(app.state.db, verified_user_id)
+        SandboxVolume.set_write_check(webdav.write_block)
+        logger.info(f"webdav serves the files at {DAV_MOUNT}")
+
     # nightly maintenance in each user's quiet hours (HUB_MAINTENANCE_START/END), waits while a reply is being made
     app.state.maintenance = MaintenanceSweeper(app.state.db, app.state.task_queue, maintenance_tasks(app.state.db, app.state.infrastructure),
                                                is_busy=lambda: app.state.turns.any_busy() or not app.state.task_queue.queue.empty())
@@ -134,6 +142,10 @@ async def lifespan(app: FastAPI):
 _docs = os.environ.get("HUB_DOCS", "").lower() in ("1", "true", "yes")
 app = FastAPI(lifespan=lifespan, **({} if _docs else {"docs_url": None, "redoc_url": None, "openapi_url": None}))
 security = HTTPBearer(auto_error=False)
+# #193 the contacts' files over WebDAV at DAV_MOUNT, the hub's users log in with their passwords. off unless HUB_WEBDAV=true
+webdav = SandboxDav() if SandboxDav.enabled() else None
+if webdav is not None:
+    webdav.mount(app)
 
 ########### user handling
 # signs every access and refresh token. set HUB_SECRET_KEY in rueckgrat/.env (e.g. openssl rand -hex 32).
@@ -178,6 +190,11 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
     except InvalidHashError:
         return False
+
+def verified_user_id(username: str, password: str) -> int | None:
+    """the id of the user when the password is theirs, else None (WebDAV's login)"""
+    user = app.state.db.get_user(username or "")
+    return user["id"] if user and verify_password(password or "", user["password"]) else None
 
 def create_access_token(username: str):
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -736,7 +753,6 @@ def delete_contact(contact_id: int, username: str = Depends(get_current_user)):
         image_keys = app.state.db.get_contact_image_keys(contact_id)
         if app.state.db.delete_contact(contact_id):
             released_images = app.state.image_store.release(image_keys, drop_conversation_images=False)
-            from app.utils.sandbox_volume import SandboxVolume
             SandboxVolume(user_id, contact_id).remove()
             return {"status": "ok", "released_images": released_images}
         else:
@@ -1355,7 +1371,6 @@ def conversation_files(username: str, conversation_id: int, read):
     """read(volume) on the volume of the logged in user's conversation's contact: 404 for a conversation not theirs or
     a path that isn't there, 400 for a path leaving the files, 503 without docker"""
     from docker.errors import DockerException
-    from app.utils.sandbox_volume import SandboxVolume
     user_id = app.state.db.get_user_id(username)
     with logger_context(user_id):
         if not app.state.db.owns_conversation(user_id, conversation_id):
@@ -1408,6 +1423,30 @@ def zip_conversation_files(conversation_id: int, path: str = "", exclude: bool =
             while data := target.read(64 * 1024):
                 yield data
     return StreamingResponse(chunks(), media_type="application/zip", headers=attachment_headers(name, size))
+
+class AiWritesRequest(BaseModel):
+    paused: bool
+
+def ai_writes(username: str, contact_id: int, paused: bool | None = None) -> dict:
+    """{"paused", "locked"} of the AI's writes to the logged in user's contact's files, paused set first unless None.
+    404 without WebDAV or for a contact not theirs"""
+    user_id = app.state.db.get_user_id(username)
+    with logger_context(user_id):
+        if webdav is None or not app.state.db.owns_contact(user_id, contact_id):
+            raise HTTPException(status_code=404, detail="not found")
+        if paused is not None:
+            webdav.pause(user_id, contact_id, paused)
+        return {"paused": webdav.paused(user_id, contact_id), "locked": webdav.locked(contact_id)}
+
+@app.get("/contacts/{contact_id}/files/ai_writes")
+def get_ai_writes(contact_id: int, username: str = Depends(get_current_user)):
+    """#193 whether the AI may write the contact's files: paused by the user, locked over WebDAV"""
+    return ai_writes(username, contact_id)
+
+@app.put("/contacts/{contact_id}/files/ai_writes")
+def put_ai_writes(contact_id: int, request: AiWritesRequest, username: str = Depends(get_current_user)):
+    """#193 pauses ({"paused": true}) or resumes the AI's writes to the contact's files"""
+    return ai_writes(username, contact_id, request.paused)
 
 ########### downloads
 @app.get("/downloads/{file_path:path}")

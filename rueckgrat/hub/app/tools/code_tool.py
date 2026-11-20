@@ -107,6 +107,7 @@ def run_call(call: Dict[str, Any], volume: SandboxVolume) -> Dict[str, Any]:
     if bad or len(libraries) > MAX_LIBRARIES:
         return {"tool": "run_code", "error": f"invalid library list {libraries}, at most {MAX_LIBRARIES} plain package names. Nothing ran."}
     try:
+        blocked = volume.write_block()      # the program sees the files read only
         exit_code, stdout, stderr = run_in_sandbox(language, code, libraries, volume)
     except Exception as e:
         if type(e).__name__ == "SandboxTimeoutError":
@@ -114,7 +115,8 @@ def run_call(call: Dict[str, Any], volume: SandboxVolume) -> Dict[str, Any]:
                                                  f"{INSTALL_TIMEOUT if libraries else RUN_TIMEOUT} seconds"}
         logger.error(f"sandbox run failed: {repr(e)}")
         return {"tool": "run_code", "error": f"the code could not be run: {type(e).__name__}: {str(e)[:300]}"}
-    return {"tool": "run_code", "text": format_result(language, libraries, exit_code, stdout, stderr)}
+    text = format_result(language, libraries, exit_code, stdout, stderr)
+    return {"tool": "run_code", "text": text + (f"\nNOTE: the files are read only: {blocked}" if blocked else "")}
 
 
 class RunCodeTool(Tool):
