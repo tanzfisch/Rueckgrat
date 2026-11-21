@@ -89,7 +89,6 @@ class BashTool(Tool):
             restore = RESTORE.format(state=SandboxVolume.shell_state(self.get_conversation_id()),
                                      workdir=SandboxVolume.workdir(self.get_conversation_id()))
             volume = SandboxVolume(self.get_user_id(), self.contact_id)
-            blocked = volume.write_block()      # the sandbox sees the files read only (a sandbox of this round stays as it is)
             with volume.session(configs, lang="python", skip_environment_setup=True) as session:
                 started = time.monotonic()
                 result = session.execute_command(f"timeout {COMMAND_TIMEOUT} bash -c {shlex.quote(restore + command)}",
@@ -105,8 +104,6 @@ class BashTool(Tool):
         text += f"\nSTDOUT:\n{clip(result.stdout) or '(empty)'}"
         if (result.stderr or "").strip():
             text += f"\nSTDERR:\n{clip(result.stderr, tail=True)}"
-        if blocked:
-            text += f"\nNOTE: the files are read only: {blocked}"
         return {"tool": self.name(), "text": text}
 
     def execute(self) -> None:

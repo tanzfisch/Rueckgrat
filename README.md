@@ -48,15 +48,25 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
 
 If you run [Project NOMAD](https://www.projectnomad.us/) in your network you can register it with hub during installation. Then the will fall back on it for *websearch*, *wikipedia* and *show_map* in case the internet is down.
 
-### Access AI's files with WebDAV
+### Access AI's files as a network drive
 
-The files the AI works with (bash, run_code, written documents, one folder per contact) can be mounted on your computer as a network drive using webdav. 
+The files the AI works with (bash, run_code, written documents, one folder per contact) can be mounted on your computer as a network drive, over WebDAV or SMB. Log in with your hub user name and password (make sure the user has a password). The app's settings, tab Network, list each contact's folder address with a copy button.
+
+**WebDAV** is served by the hub through its https address, so it also works from outside your network (Cloudflare tunnel):
 
 - **Linux**: in the file manager (Nautilus, Dolphin, Thunar) open `davs://rueckgrat.hub/dav/`, or `gio mount davs://rueckgrat.hub/dav/`, or with davfs2: `sudo mount -t davfs https://rueckgrat.hub/dav/ /mnt/rueckgrat`
 - **macOS**: Finder, Go, Connect to Server, `https://rueckgrat.hub/dav/`
 - **Windows**: Explorer, This PC, Map network drive, `https://rueckgrat.hub/dav/` (the hub's certificate must be trusted by Windows)
 
-Virtual environments, caches and installed packages are not shared, they only work where they were made: `.venv`, `venv`, `__pycache__`, `node_modules`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`, `.gradle` and `.cache`, at any depth. They don't show up on the drive and can't be created there; copying a folder leaves them out, moving or deleting a folder takes them along. The AI keeps them in its sandbox. The installer offers this list and you can change it; it is `HUB_WEBDAV_EXCLUDE` in `rueckgrat/.env` (comma separated).
+**SMB** is the usual network drive of Windows, macOS and Linux, faster than WebDAV, in your local network only (port 445 of the hub's machine, or `HUB_SMB_PORT` in `rueckgrat/.env` when 445 is taken; the installer asks). Each contact is a share of its own, named `<name> (<id>)`; you see only your own contacts. Log in to the app once after SMB is turned on (or after your password changed elsewhere): SMB needs a form of the password the hub only gets when you type it. A contact's share shows up once the AI has used its files.
+
+- **Linux**: in the file manager open `smb://rueckgrat.hub/`, or `gio mount "smb://rueckgrat.hub/Lena (3)"`, or with cifs-utils: `sudo mount -t cifs "//rueckgrat.hub/Lena (3)" /mnt/lena -o username=<user>,uid=$(id -u),gid=$(id -g)` (add `,port=<n>` when `HUB_SMB_PORT` isn't 445)
+- **macOS**: Finder, Go, Connect to Server, `smb://rueckgrat.hub`
+- **Windows**: Explorer, `\\rueckgrat.hub`, then right-click a contact, Map network drive
+
+Use the hub machine's name or address in your network for `rueckgrat.hub`. On another port than 445: `smb://rueckgrat.hub:<port>/` for the file managers and Finder; Windows only connects to 445.
+
+Virtual environments, caches and installed packages are not shared, they only work where they were made: `.venv`, `venv`, `__pycache__`, `node_modules`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`, `.gradle` and `.cache`, at any depth. They don't show up on the drive and can't be created there; copying a folder leaves them out. The AI keeps them in its sandbox. The installer offers this comma separated list to configure it `HUB_FILE_SHARE_EXCLUDE` in `rueckgrat/.env`.
 
 ### Tools available to the AI
 | Name | Discription |
@@ -132,7 +142,7 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen, TTS, STT, text embeddings, Laya decisions), an optional Cloudflare tunnel, an optional [Project NOMAD](#offline-with-project-nomad) in your network, an optional [WebDAV share](#access-ais-files-with-webdav) of the AI's files and an optional Android APK of the chat client.
+The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen, TTS, STT, text embeddings, Laya decisions), an optional Cloudflare tunnel, an optional [Project NOMAD](#offline-with-project-nomad) in your network, an optional [network drive](#access-ais-files-as-a-network-drive) (WebDAV or SMB) of the AI's files and an optional Android APK of the chat client.
 Before each component it says in a line or two what the component brings and what is missing without it. The LLM (llama-server on one node) is required, and the installer warns when no host runs one.
 
 Run chat natively:

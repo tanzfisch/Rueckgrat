@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /hub
 
 RUN useradd -m hubuser \
- && mkdir -p /hub/images /hub/voices /hub/db /hub/files \
+ && mkdir -p /hub/images /hub/voices /hub/db /hub/files /hub/smb \
  && chown -R hubuser:hubuser /hub
 
 COPY requirements.txt .

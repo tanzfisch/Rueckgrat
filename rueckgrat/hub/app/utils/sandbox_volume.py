@@ -6,9 +6,6 @@ in any of its conversations. the user browses and downloads them through a short
 (SandboxVolume.entries, read_file, write_zip, files): the hub has no volume mounted. the user's own changes (the
 WebDAV share, sandbox_dav) go through reader containers too (upload, make_folder, delete, move, copy).
 
-the AI writes (write_file, the bash and run_code sandboxes) ask write_block first: while the user holds the files (a
-WebDAV lock, a pause, set_write_check) write_file is refused (FilesLocked) and a sandbox gets the files read only.
-
 the layout (LAYOUT, made at every sandbox start):
   projects/<name>/        one folder per project, its PROJECT.md says what it is, its status and how to run it
   workdir/<conversation>/ where bash and run_code of a conversation start, its scratch work
@@ -25,7 +22,7 @@ import time
 import zipfile
 from contextlib import contextmanager, ExitStack
 from contextvars import ContextVar
-from typing import BinaryIO, Callable, Iterable, Iterator, Optional
+from typing import BinaryIO, Iterable, Iterator, Optional
 
 from app.common import get_logger
 from app.utils.text_files import sanitize_relative_path
@@ -65,27 +62,10 @@ def _client():
     return docker.from_env()
 
 
-class FilesLocked(PermissionError):
-    """an AI write while the user holds the files (SandboxVolume.write_block), the message says why"""
-
-
 class SandboxVolume:
-    _write_check: Optional[Callable[["SandboxVolume"], Optional[str]]] = None     # set_write_check
-
     def __init__(self, user_id: int, contact_id: int):
         self.user_id = int(user_id)
         self.contact_id = int(contact_id)
-
-    @classmethod
-    def set_write_check(cls, check: Optional[Callable[["SandboxVolume"], Optional[str]]]) -> None:
-        """check(volume): why the AI may not write the volume's files now (the user holds them), None when it may.
-        None: no check, the AI always writes"""
-        SandboxVolume._write_check = check
-
-    def write_block(self) -> Optional[str]:
-        """why the AI may not write these files now (set_write_check), None when it may"""
-        check = SandboxVolume._write_check
-        return check(self) if check is not None else None
 
     @classmethod
     def of_conversation(cls, db, user_id: int, conversation_id: int) -> "SandboxVolume":
@@ -361,16 +341,12 @@ class SandboxVolume:
         return io.BufferedReader(_ChunkReader(chunks), CHUNK)
 
     def write_file(self, path: str, data: bytes) -> str:
-        """an AI tool's write (upload): FilesLocked while the user holds the files (write_block). returns path"""
-        reason = self.write_block()
-        if reason:
-            raise FilesLocked(reason)
+        """an AI tool's write of data (upload). returns path"""
         return self.upload(path, io.BytesIO(data), len(data))
 
     def upload(self, path: str, source: BinaryIO, size: int) -> str:
         """writes size bytes of source as the file path (a clean_path, its folders made), owned by SANDBOX_USER, through
-        a reader container with the volume writable. an existing file is replaced. the user's own write, no
-        write_block. returns path"""
+        a reader container with the volume writable. an existing file is replaced. returns path"""
         path = self.clean_path(path)
         if not path:
             raise ValueError("no file name")
@@ -523,26 +499,13 @@ class SandboxVolume:
         """a fresh llm sandbox container with the volume at MOUNT_PATH, removed when the block ends.
         keep_template: the language image stays, no pull per run"""
         from llm_sandbox import SandboxSession
-        mount = self._session_mount()
-        configs = {**runtime_configs, "mounts": [*runtime_configs.get("mounts", []), mount]}
+        configs = {**runtime_configs, "mounts": [*runtime_configs.get("mounts", []), self._mount()]}
         with SandboxSession(keep_template=True, runtime_configs=configs, encoding_errors="replace", **kwargs) as session:
-            if mount["ReadOnly"]:
-                yield session
-                return
             self._own(session.container, layout=True)
             try:
                 yield session
             finally:
                 self._own(session.container)
-
-    def _session_mount(self):
-        """the mount of a sandbox: writable, read only while the user holds the files (write_block). the volume is made
-        first, a read only mount never makes it"""
-        if not self.write_block():
-            return self._mount()
-        if not self.exists():
-            self._mount()
-        return self._mount(read_only=True)
 
     def remove(self) -> None:
         """the volume and its files. a volume that isn't there, or no docker, is nothing to remove"""
