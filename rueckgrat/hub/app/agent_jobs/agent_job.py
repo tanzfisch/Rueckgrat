@@ -216,7 +216,7 @@ class AgentJob:
         detected = decided or []
         recommended = detection_result.get("recommended") or []
         self._detected = list(detected)
-        # the llm's pick without laya only recommends: a build tool it picked counts as found here too
+        # the llm's pick without laya recommends (but a PRIORITY_TOOLS one): a build tool it picked counts as found here too
         found = detected + (recommended if detection.source() == SOURCE_LLM else [])
         if any(name in found for name in optional_when):
             always = [name for name in always if name in detected]

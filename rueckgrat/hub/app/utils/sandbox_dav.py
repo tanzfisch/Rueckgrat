@@ -1,5 +1,5 @@
-"""#193 the contacts' sandbox files (SandboxVolume) as a WebDAV share: the user mounts them as a network drive. off unless
-HUB_WEBDAV is on, then the hub serves it at MOUNT (/dav) with wsgidav (main.py: SandboxDav.mount).
+"""#193 the contacts' sandbox files (SandboxVolume) as a WebDAV share (a FileShare): the user mounts them as a network
+drive. with HUB_FILE_SHARE=webdav the hub serves it at MOUNT (/dav) with wsgidav (main.py: SandboxDav.mount).
 
   /dav/                     the user's contacts, one folder "<name> (<id>)" each
   /dav/<name> (<id>)/...    the contact's files, as the AI sees them under /home
@@ -7,22 +7,15 @@ HUB_WEBDAV is on, then the hub serves it at MOUNT (/dav) with wsgidav (main.py: 
 the hub's user name and password log in (HTTP Basic, the hub is behind caddy's https). each request works through the
 reader containers of SandboxVolume (the hub has no volume mounted), a folder's listing is kept LISTING_SECONDS.
 
-while the user holds a WebDAV lock anywhere in a contact's files (an editor that locks the file it has open), or paused
-the AI's writes (pause), the AI does not write them: SandboxVolume.write_block asks write_block here, its file writes are
-refused and its sandboxes see the files read only. the locks are wsgidav's own (its LockStorageDict, in memory: a hub
-restart drops them like the pauses)
+the clients' WebDAV locks (an editor that locks the file it has open) are wsgidav's own (its LockStorageDict, in
+memory: a hub restart drops them), between the clients only: the AI's writes don't see them
 
-some folders are not shared (HUB_WEBDAV_EXCLUDE, the installer writes it; unset or empty: EXCLUDED): virtual
-environments, caches and installed packages work only where they were made (their paths, their python) and walking
-them over WebDAV is slow. a file or folder of such a
-name, at any depth, is not in the listings and can't be read (404), nor made, locked or copied or moved onto (403,
-_Excluded). copying a folder leaves them out, moving or deleting a folder takes them along, a replaced folder loses
-them. the AI keeps them in its sandbox"""
+a file or folder of an excluded name (FileShare.excluded) is not in the listings and can't be read (404), nor made,
+locked or copied or moved onto (403, _Excluded). copying a folder leaves them out, moving or deleting a folder takes
+them along, a replaced folder loses them. the AI keeps them in its sandbox"""
 import io
 import logging
-import os
 import posixpath
-import re
 import tempfile
 import threading
 import time
@@ -37,61 +30,28 @@ from wsgidav.lock_man.lock_storage import LockStorageDict
 from wsgidav.mw.base_mw import BaseMiddleware
 
 from app.common import get_logger
+from app.utils.file_share import FileShare
 from app.utils.sandbox_volume import SandboxVolume, SPOOL_BYTES
 logger = get_logger()
 
 MOUNT = "/dav"
-ENABLED_ENV = "HUB_WEBDAV"
-EXCLUDE_ENV = "HUB_WEBDAV_EXCLUDE"     # comma separated names not shared, unset or empty: EXCLUDED
-# the hub's own like its other settings' defaults (the installer offers its HUB_WEBDAV_EXCLUDE_DEFAULT, the same list)
-EXCLUDED = (".venv", "venv", "__pycache__", "node_modules", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".nox",
-            ".gradle", ".cache")
 REALM = "Rueckgrat"
 LISTING_SECONDS = 2.0       # a folder's listing is used again this long: a client asks for the same folder many times
 LISTING_CACHE = 256         # listings kept at most
 USER_ID = "rueckgrat.user_id"   # the logged in user's id in the request's environ (_Users)
-PAUSED_REASON = "the user paused your writes to the files, they are read only until the user resumes them"
-LOCKED_REASON = "the user has files open over the network drive (a WebDAV lock), they are read only until the user closes them"
-_FOLDER_ID = re.compile(r"\((\d+)\)$")
-_UNSAFE = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
 
 
-class SandboxDav:
+class SandboxDav(FileShare):
+    TITLE = "WebDAV"
+
     def __init__(self, volumes: Callable[[int, int], SandboxVolume] = SandboxVolume):
         """volumes(user id, contact id): the files of a contact"""
+        super().__init__()
         self._volumes = volumes
-        self._db = None
-        self._verify: Optional[Callable[[str, str], Optional[int]]] = None
         self._locks = _Locks()
-        self._paused: set[tuple[int, int]] = set()
         self._listings: dict[tuple[str, str], tuple[float, list[dict]]] = {}
         self._lock = threading.Lock()
         self._wsgi = None
-        self._excluded = self.excluded_names()
-
-    @staticmethod
-    def enabled() -> bool:
-        """HUB_WEBDAV is on (true, 1, yes, on)"""
-        return os.environ.get(ENABLED_ENV, "").strip().lower() in ("1", "true", "yes", "on")
-
-    @staticmethod
-    def excluded_names() -> frozenset[str]:
-        """the names not shared: HUB_WEBDAV_EXCLUDE (comma separated), unset or empty: EXCLUDED"""
-        given = os.environ.get(EXCLUDE_ENV, "").strip()
-        names = (name.strip() for name in given.split(",")) if given else EXCLUDED
-        return frozenset(name for name in names if name and "/" not in name and name not in (".", ".."))
-
-    def excludes(self) -> frozenset[str]:
-        return self._excluded
-
-    def excluded(self, path: str) -> bool:
-        """whether path (in the share, below MOUNT) is or is in an excluded file or folder (a whole name of it)"""
-        return any(part in self._excluded for part in path.split("/"))
-
-    def configure(self, db, verify: Callable[[str, str], Optional[int]]) -> None:
-        """the db (the users' contacts) and verify(user name, password): the user's id when they match, else None"""
-        self._db = db
-        self._verify = verify
 
     def wsgi(self):
         """the wsgidav app of the share, made once"""
@@ -128,21 +88,14 @@ class SandboxDav:
         _QuietAccess.install()
         logger.info(f"webdav leaves out: {', '.join(sorted(self._excluded)) or 'nothing'}")
 
+    def _address(self, host: str, name: str, contact_id: int) -> str:
+        """the folder's https URL (with the port, the way the app reaches the hub)"""
+        return f"https://{host}{MOUNT}/{quote(self.folder_name(name, contact_id))}/"
+
     # ---------------------------------------------------------------- users and contacts
     def user(self, user_name: str, password: str) -> Optional[int]:
         """the id of the user these credentials log in, None when they don't (or the hub isn't configured yet)"""
         return self._verify(user_name, password) if self._verify is not None else None
-
-    @staticmethod
-    def folder_name(name: str, contact_id: int) -> str:
-        """the folder of a contact in the share: its name made safe for a file name, its id in brackets"""
-        return f"{_UNSAFE.sub('_', name or '').strip() or 'contact'} ({int(contact_id)})"
-
-    @staticmethod
-    def folder_contact(folder: str) -> Optional[int]:
-        """the contact id of a folder_name, None for another name"""
-        match = _FOLDER_ID.search(folder or "")
-        return int(match.group(1)) if match else None
 
     def folders(self, user_id: int) -> list[str]:
         """the folder names of the user's contacts"""
@@ -190,30 +143,6 @@ class SandboxDav:
         with self._lock:
             for key in [key for key in self._listings if key[0] == volume.name]:
                 del self._listings[key]
-
-    # ---------------------------------------------------------------- the AI's writes
-    def pause(self, user_id: int, contact_id: int, paused: bool) -> None:
-        """pauses (or resumes) the AI's writes to the contact's files"""
-        with self._lock:
-            (self._paused.add if paused else self._paused.discard)((int(user_id), int(contact_id)))
-
-    def paused(self, user_id: int, contact_id: int) -> bool:
-        with self._lock:
-            return (int(user_id), int(contact_id)) in self._paused
-
-    def locked(self, contact_id: int) -> bool:
-        """whether a WebDAV lock is held anywhere in the contact's files (expired ones are not)"""
-        locks = self._locks.get_lock_list("/", include_root=True, include_children=True, token_only=False)
-        # a lock's root is the quoted path of what it locks (DAVResource.get_ref_url)
-        return any(self.folder_contact(unquote(lock["root"]).strip("/").split("/")[0]) == int(contact_id) for lock in locks)
-
-    def write_block(self, volume: SandboxVolume) -> Optional[str]:
-        """why the AI may not write the files now (paused, locked), None when it may: SandboxVolume.set_write_check"""
-        if self.paused(volume.user_id, volume.contact_id):
-            return PAUSED_REASON
-        if self.locked(volume.contact_id):
-            return LOCKED_REASON
-        return None
 
 
 class _Root:

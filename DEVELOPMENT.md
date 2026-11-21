@@ -92,11 +92,11 @@ Then open with http://localhost:8088/ in browser
 
 ## Using WebDAV
 
-The hub can share the AI's sandbox files over WebDAV, one folder per contact, named `<name> (<id>)`. Turn it on with `HUB_WEBDAV=true` in `rueckgrat/.env` and log in with your hub user name and password. Always go through Caddy (`https://rueckgrat.hub/dav/`), never the plain hub port, or the password travels unencrypted.
+The hub can share the AI's sandbox files over WebDAV, one folder per contact, named `<name> (<id>)`. Turn it on with `HUB_FILE_SHARE=webdav` in `rueckgrat/.env` and log in with your hub user name and password. Always go through Caddy (`https://rueckgrat.hub/dav/`), never the plain hub port, or the password travels unencrypted.
 
-While you hold a lock on any file of a contact, or the contact is paused (`PUT /contacts/{id}/files/ai_writes` with `{"paused": true}`), the AI can't write to that contact's files.
+The AI can write a contact's files while you have them open, over WebDAV or SMB. Nothing holds it back, so know when it's working on them.
 
-Virtual environments, caches and installed packages are not shared: `HUB_WEBDAV_EXCLUDE` in `rueckgrat/.env`, comma separated, for example `HUB_WEBDAV_EXCLUDE=.venv,venv,__pycache__,build`. Names match whole file or folder names at any depth. The installer offers `HUB_WEBDAV_EXCLUDE_DEFAULT` (`.venv,venv,__pycache__,node_modules,.mypy_cache,.pytest_cache,.ruff_cache,.tox,.nox,.gradle,.cache`) and writes the answer; without the variable (or empty) the hub uses the same list.
+Virtual environments, caches and installed packages are not shared: `HUB_FILE_SHARE_EXCLUDE` in `rueckgrat/.env`, comma separated, for example `HUB_FILE_SHARE_EXCLUDE=.venv,venv,__pycache__,build`. It applies to SMB too. Names match whole file or folder names at any depth. The installer offers `HUB_FILE_SHARE_EXCLUDE_DEFAULT` (`.venv,venv,__pycache__,node_modules,.mypy_cache,.pytest_cache,.ruff_cache,.tox,.nox,.gradle,.cache`) and writes the answer; without the variable (or empty) the hub uses the same list.
 
 A good way to work in the share on Linux is davfs2 for the mount and direnv for a venv that lives outside it.
 
@@ -138,9 +138,47 @@ umount ~/rueckgrat
 
 davfs2 caches files locally and uploads a file when it's closed, so a save can take a moment to reach the AI.
 
+The app's settings (tab Network, below the hub connection, only with a file share) list the folders' addresses: `GET /file_share` gives `FileShare.connect` (`SandboxDav` / `SandboxSmb`: title, notes, the user's contacts with a folder, each name and address; `null` without a file share). The addresses use the host the app reached the hub with (the request's `Host`), SMB's the hub's `HUB_SMB_PORT` (compose passes it to the hub too). SMB leaves out the contacts without a share yet and adds a note when the user has no SMB login yet. The mount commands stay here: davfs2 above, mount.cifs below.
+
+## Using SMB
+
+With `HUB_FILE_SHARE=smb` the `smb` service (`rueckgrat/smb`, Samba, compose profile `smb`) shares each contact's files as an SMB share named `<name> (<id>)`. Only the contact's user can open it and sees it in the list. Start it with the hub:
+
+```
+cd rueckgrat
+docker compose --profile smb up -d --build hub smb
+```
+
+How it fits together:
+
+- The hub writes the users and shares into the volume `hub_smb` (`/hub/smb` in the hub, `/state` in the smb service): `passwd` (one unix user `rg<user id>` per hub user, uid 20000 + id), `smbpasswd` (their NT hashes), `users.map` (the hub user name each logs in with) and `shares.conf` (the shares, included by `smb.conf`). It refreshes them every 15 s and right after a login. The smb service reloads its config when `shares.conf` changes. No restarts.
+- SMB logins check an NT hash (MD4 of the password), and the hub keeps only the argon2 hash. So the hub takes the NT hash when the password is typed: signup, login, password change. It's dropped when the hub password changes another way, for example through hub management, until the user logs in again. Empty passwords get no SMB login.
+- The shares are the contacts' docker volumes, read straight from docker's volumes folder. The installer writes it as `HUB_SMB_VOLUMES` (`docker info`'s root plus `/volumes`, default `/var/lib/docker/volumes`). Samba works in them as the sandbox user (uid 1000), so what you create belongs to the AI's sandbox user too. A share exists once the contact's volume does, which is after the AI first used its files.
+- Excluded names are `veto files`: hidden, can't be opened or created, and a folder holding only those can still be deleted.
+- SMB3 only, signing required, encryption when the client supports it. No guests. Clients from private addresses only (`hosts allow`), published on IPv4 at `HUB_SMB_PORT` (default 445; the container listens on 445 either way). Set it in `rueckgrat/.env` when something on the host already uses 445.
+
+Mount on Linux with a credentials file:
+
+```
+sudo apt install cifs-utils
+printf 'username=<user>\npassword=<password>\n' > ~/.smb-rueckgrat && chmod 600 ~/.smb-rueckgrat
+sudo mkdir -p /mnt/lena
+sudo mount -t cifs "//rueckgrat.hub/Lena (3)" /mnt/lena -o credentials=$HOME/.smb-rueckgrat,uid=$(id -u),gid=$(id -g),vers=3.1.1
+```
+
+or in `/etc/fstab` (`\040` is a space):
+
+```
+//rueckgrat.hub/Lena\040(3)  /mnt/lena  cifs  credentials=/home/martin/.smb-rueckgrat,uid=martin,gid=martin,vers=3.1.1,noauto,user  0  0
+```
+
+With `HUB_SMB_PORT` other than 445, add `port=<n>` to the mount options (both lines above), use `smb://rueckgrat.hub:<n>/...` for gio and macOS and `smbclient -p <n>`. Windows only connects to 445.
+
+Without root: `gio mount "smb://rueckgrat.hub/Lena (3)"`. It's mounted under `/run/user/$(id -u)/gvfs/`. `smbclient -L //rueckgrat.hub -U <user>` lists your shares. macOS: Finder, Go, Connect to Server, `smb://rueckgrat.hub`. Windows: `\\rueckgrat.hub` in Explorer, or `net use L: "\\rueckgrat.hub\Lena (3)" /user:<user>`.
+
 ### Keep the venv outside the share with direnv
 
-A venv only works on the machine that made it, and it's slow over WebDAV, so keep it outside the share.
+A venv only works on the machine that made it, and it's slow over the network, so keep it outside the share.
 
 Install [uv](https://docs.astral.sh/uv/) and direnv:
 

@@ -196,12 +196,13 @@ class ToolRegistry:
 
     def rounds(self, tool_names: List[str], recommended: List[str] = ()) -> List[List[str]]:
         """the rounds of a tool setup (ranked_groups of all tools). a recommended PRIORITY_TOOLS one is a round on its own,
-        highest first: before the others when it outranks every mandatory tool (none but the PROMPT_TOOLS, which always are,
-        or only a lower PRIORITY_TOOLS one), else after them, so an uncertain one does not take over from a sure tool.
-        ToolExecutionTask stops after a round that called one (ends_setup)"""
+        highest first: before the others when it outranks every sure tool (a mandatory one that is not optional: the
+        PROMPT_TOOLS and the companions like share_file always are there, they are no detection's), else after them, so an
+        uncertain one does not take over from a sure tool. ToolExecutionTask stops after a round that called one
+        (ends_setup). the same for every detection (laya, the llm's pick, the text scores): only the bands count"""
         names = list(dict.fromkeys(list(tool_names or []) + list(recommended or [])))
         own = [name for name in self.PRIORITY_TOOLS if name in (recommended or []) and name not in (tool_names or [])]
-        sure = [name for name in tool_names or [] if name not in self.PROMPT_TOOLS]
+        sure = [name for name in tool_names or [] if not self.optional(name)]
         rest = self.ranked_groups([name for name in names if name not in own])
         first = [[name] for name in own if all(other in self.PRIORITY_TOOLS and self.outranks(name, other) for other in sure)]
         return first + rest + [[name] for name in own if [name] not in first]
