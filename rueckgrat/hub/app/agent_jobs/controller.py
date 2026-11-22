@@ -7,6 +7,8 @@ from uuid import uuid4
 from .agent_job import AgentJob, DEFAULT_TIME_LIMIT
 from . import prompts
 from .protocol import Protocol
+from app.tools.bash_tool import BashTool     # the projects listed as its prompt lists them
+from app.utils.sandbox_volume import SandboxVolume, MOUNT_PATH, PROJECTS
 
 from app.common import get_logger, Utils
 logger = get_logger()
@@ -17,7 +19,8 @@ MAX_CONTEXT_CHARS = 12000   # the results of the steps before, passed on to the 
 
 MAX_NAME_CHARS = 40         # the job's name in the StatusWidget
 MAX_REPLANS = 3             # replan / restart of the reviews per job, after that the plan stays (no more reviews)
-MAX_TASK_RETRIES = 1        # a failed task (FAILED, an error, timed out) runs again this often, with a revised prompt, before the job fails
+MAX_TASK_RETRIES = 1        # a failed task (FAILED, an error, timed out) runs again this often, with a revised prompt, before the job fails.
+                            # a task the sandbox can't check (UNSUPPORTED) did not fail: no retry, the same sandbox can't either
 
 
 def short_name(text: str) -> str:
@@ -44,6 +47,8 @@ class Controller(AgentJob):
         self.inbox: queue.Queue = queue.Queue()                  # the user's messages while the job runs, add_message()
         self.messages: List[str] = []                            # the ones the reviews have read
         self.replans = 0
+        self._project_line = ""     # the job's project folder line every task gets (_project), "" without a project
+        self._renaming = None       # (the folder the plan named, the one the job got) when they differ (_project, _renamed)
         self.protocol = protocol or Protocol()  # #174 the job's decision trace, its workers write into it too. #215 the spawn tool's is stored as it happens
         self.trace("job_started", prompt=prompt)
 
@@ -58,6 +63,7 @@ class Controller(AgentJob):
         self.workers.append(worker)
         worker.protocol, worker.plan_step, worker.plan_task, worker.attempt = self.protocol, step, task, attempt
         worker.excluded_tools = tuple(excluded_tools)
+        worker.set_project(self._project_line)
         self.trace("spawned", step=step, task=task, worker_id=worker.job_id, role=role, attempt=attempt if attempt > 1 else None,
                    prompt=prompt.partition(prompts.RESULTS_MARKER_PART)[0])
         worker.start()
@@ -106,6 +112,10 @@ class Controller(AgentJob):
         attachments = self._attachments()
         if attachments:
             self.result = {**self.result, "attachments": attachments}
+        warnings = self._warnings()
+        if warnings:
+            self.trace("warnings", warnings=warnings)
+            self.result = {**self.result, "warnings": warnings}
         if not self._delivered(attachments):
             logger.warning(f"controller {self.job_id}: the job asks for files, none was saved or offered")
             self.trace("not_delivered", ok=False)
@@ -176,6 +186,7 @@ class Controller(AgentJob):
             self.trace("review", step=finished, decision="keep", reason="continue" if action == "continue" else "no usable review")
             return
         self.replans += 1
+        steps = self._renamed(steps)
         if action == "restart":
             self.done_steps = []
             self.plan = steps
@@ -206,8 +217,9 @@ class Controller(AgentJob):
     def make_plan(self) -> List[List[Dict[str, str]]]:
         """the steps from one llm call. no usable plan (also invalid json): one step, one worker does the whole job"""
         fallback = [[{"role": "worker", "prompt": self.prompt}]]
+        known = self._projects()
         reply = self.chat([{"role": "user", "content": prompts.PLAN_PROMPT.format(
-            prompt=self.prompt, max_steps=MAX_STEPS, max_workers=MAX_WORKERS_PER_STEP)}], 0.2)
+            prompt=self.prompt, max_steps=MAX_STEPS, max_workers=MAX_WORKERS_PER_STEP, projects=BashTool.projects_text(known))}], 0.2)
         data = self._strict_json(reply)
         plan = self._valid_plan(data)
         name = str(data.get("name") or "").strip() if isinstance(data, dict) else ""
@@ -220,10 +232,57 @@ class Controller(AgentJob):
             self.protocol.set_plan(self.name, fallback)
             self.trace("plan", ok=False, revision=0, steps=1, tasks=1, fallback=True, reason=reason, reply=reply or None)
             return fallback
+        plan = self._project(data.get("project"), known, plan)
         logger.info(f"controller {self.job_id}: plan {[[task['role'] for task in step] for step in plan]}")
         self.protocol.set_plan(self.name, plan)
         self.trace("plan", revision=0, steps=len(plan), tasks=sum(map(len, plan)), fallback=False)
         return plan
+
+    def _projects(self) -> Optional[List[tuple]]:
+        """the contact's projects [(folder, first line of its PROJECT.md)] (SandboxVolume.projects), None without tools
+        or when they can't be read"""
+        if not self.tool_context:
+            return None
+        try:
+            return SandboxVolume(self.tool_context["user_id"], self.tool_context["contact_id"]).projects()
+        except Exception as e:
+            logger.warning(f"controller {self.job_id}: projects not listed {repr(e)}")
+            return None
+
+    def _project(self, project, known: Optional[List[tuple]], plan: List[List[Dict[str, str]]]) -> List[List[Dict[str, str]]]:
+        """the plan's "project" {"mode": new|continue|none, "name"}: continue with a listed folder (known) works in that
+        folder; new, or continue with a folder that is not listed, gets a new one (SandboxVolume.reserve_project), the
+        plan's tasks name it instead of the one the plan named. every task gets its line (spawn). returns the plan"""
+        project = project if isinstance(project, dict) else {}
+        mode, name = str(project.get("mode") or "none").strip().lower(), str(project.get("name") or "").strip()
+        if mode not in ("new", "continue") or not name or not self.tool_context:
+            self.trace("project", mode="none")
+            return plan
+        volume = SandboxVolume(self.tool_context["user_id"], self.tool_context["contact_id"])
+        wanted = volume.project_name(name)
+        if mode == "continue" and wanted in [folder for folder, _ in known or []]:
+            folder, line = wanted, prompts.PROJECT_CONTINUE_PART
+        else:
+            try:
+                folder, line = volume.reserve_project(wanted), prompts.PROJECT_NEW_PART
+            except Exception as e:
+                logger.error(f"controller {self.job_id}: no project folder for {wanted} {repr(e)}")
+                self.trace("project", ok=False, mode=mode, wanted=name, error=repr(e))
+                return plan
+        self._project_line = line.format(path=f"{MOUNT_PATH}/{PROJECTS}/{folder}")
+        self._renaming = (wanted, folder) if folder != wanted else None
+        logger.info(f"controller {self.job_id}: project {mode} {name!r} -> {folder}")
+        self.trace("project", mode=mode, wanted=name, folder=folder, new=line == prompts.PROJECT_NEW_PART)
+        return self._renamed(plan)
+
+    def _renamed(self, plan: List[List[Dict[str, str]]]) -> List[List[Dict[str, str]]]:
+        """the plan with the project folder the planner named (~/projects/<name>, MOUNT_PATH/projects/<name>) replaced by
+        the one the job got (_project), as it is when they are the same"""
+        if not self._renaming:
+            return plan
+        wanted, folder = self._renaming
+        named = re.compile(rf"((?:~|{re.escape(MOUNT_PATH)})/{re.escape(PROJECTS)}/){re.escape(wanted)}(?![\w.-])")
+        return [[{**task, "prompt": named.sub(rf"\g<1>{folder}", task["prompt"])} for task in step] for step in plan]
 
     @staticmethod
     def _valid_plan(plan) -> Optional[List[List[Dict[str, str]]]]:
@@ -283,6 +342,17 @@ class Controller(AgentJob):
                     held.pop(key, None)
                     held[key] = item
         return list(held.values())
+
+    def _warnings(self) -> List[str]:
+        """what the finished steps' workers could not check because the sandbox can't do it (AgentJob UNSUPPORTED), in
+        their order, once each"""
+        return list(dict.fromkeys(f"{role}: {result['unsupported']}" for step in self.done_steps for role, result in step
+                                  if result.get("unsupported")))
+
+    def partial_attachments(self) -> List[Dict[str, Any]]:
+        """the files the workers of the finished steps held (done or unsupported, _attachments): a failed job's report
+        attaches them as unfinished. none of a failed or unfinished worker, nor of the failed step's other workers"""
+        return self._attachments()
 
     def _merge(self) -> Dict[str, Any]:
         """one worker: its result as it is. more: one llm call merges them, on a bad reply

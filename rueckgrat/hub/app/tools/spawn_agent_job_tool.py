@@ -10,6 +10,7 @@ from app.agent_jobs.protocol import Protocol, ProtocolStore
 from app.agent_jobs.job_monitor import JobMonitor, RunningJob
 
 from app.common import get_logger, Utils, MessageQueue
+from app.utils.db import JOB_DONE_WITH_WARNINGS
 from app.utils.trace import Trace
 from app.utils.message_shape import MessageShape
 logger = get_logger()
@@ -93,7 +94,7 @@ class SpawnAgentJobTool(Tool):
         self.add_result({"tool": self.name(), "job_id": job_id, "text": prompts.SPAWN_JOB_STARTED_PART})
 
     def _run(self, job_id: str, prompt: str):
-        failure = None
+        failure, attachments = None, None
         try:
             self.db.set_job(job_id, "running")
             try:
@@ -104,10 +105,12 @@ class SpawnAgentJobTool(Tool):
             if not self.cancelled:
                 if not result or "error" in result:
                     raise RuntimeError(f"agent failed: {result}")
-                if not self.db.set_job(job_id, "done", result):
+                # done with warnings: steps its sandbox could not check (Controller._warnings), its own status
+                status = JOB_DONE_WITH_WARNINGS if result.get("warnings") else "done"
+                if not self.db.set_job(job_id, status, result):
                     raise RuntimeError("result not saved")
-                logger.info(f"job {job_id} done")
-                self._end("done")
+                logger.info(f"job {job_id} {status}")
+                self._end(status)
         except Exception as e:
             if not self.cancelled:     # a cancel can also end in an error, e.g. of a stopped worker
                 logger.error(f"job {job_id} failed {repr(e)}")
@@ -117,7 +120,12 @@ class SpawnAgentJobTool(Tool):
         if failure is not None:     # the contact tells the user, like a done or cancelled job
             name = self.controller.name
             reason = failure if len(failure) <= FAIL_REASON_CHARS else failure[:FAIL_REASON_CHARS - 1] + "…"
-            task, fallback = prompts.SPAWN_JOB_FAILED_PROMPT.format(prompt=prompt, name=name, reason=reason), f'The background job "{name}" failed: {reason}'
+            # the files its workers made so far go with the report, as unfinished and not checked
+            attachments = self._partial_attachments()
+            names = "\n".join(f"- {held['name']}" for held in attachments)
+            task = prompts.SPAWN_JOB_FAILED_PROMPT.format(prompt=prompt, name=name, reason=reason,
+                                                          attachments=prompts.SPAWN_JOB_PARTIAL_PART.format(names=names) if attachments else "")
+            fallback = f'The background job "{name}" failed: {reason}'
         elif self.cancelled:
             logger.info(f"job {job_id} cancelled by the user")
             self.db.set_job(job_id, "cancelled", {"error": "cancelled", "details": "cancelled by the user"})
@@ -127,13 +135,23 @@ class SpawnAgentJobTool(Tool):
         else:
             attachments = result.get("attachments") or []
             names = "\n".join(f"- {held['name']}" for held in attachments)
+            warnings = "\n".join(f"- {warning}" for warning in result.get("warnings") or [])
             task = prompts.SPAWN_JOB_REPORT_PROMPT.format(prompt=prompt, summary=result["summary"], details=result["details"],
-                                        attachments=prompts.SPAWN_JOB_ATTACHMENTS_PART.format(names=names) if attachments else "")
-            fallback = f"The background job is done: {result['summary']}"
+                                        attachments=prompts.SPAWN_JOB_ATTACHMENTS_PART.format(names=names) if attachments else "",
+                                        warnings=prompts.SPAWN_JOB_WARNINGS_PART.format(warnings=warnings) if warnings else "")
+            fallback = f"The background job is done: {result['summary']}" + (f" Not tested: {'; '.join(result['warnings'])}" if warnings else "")
         try:
-            self._report(task, fallback, result.get("attachments") if failure is None and not self.cancelled else None)
+            self._report(task, fallback, attachments or None)
         except Exception as e:
             logger.error(f"job {job_id}: report failed {repr(e)}")
+
+    def _partial_attachments(self) -> list:
+        """the files a failed job's workers held (Controller.partial_attachments), [] when they can't be read"""
+        try:
+            return self.controller.partial_attachments()
+        except Exception as e:
+            logger.error(f"job {self.job_id}: files of the failed job not found {repr(e)}")
+            return []
 
     def _message_id(self):
         """the conversation's last user message when the job starts (it is stored before the tools run), None if not found"""
@@ -149,8 +167,10 @@ class SpawnAgentJobTool(Tool):
         Trace.write(self.get_conversation_id(), f"job {self.job_id} {status}", error=error, result=getattr(self.controller, "result", None))
         controller = self.controller
         try:
-            controller.trace("job_finished", ok=status == "done", status=status, name=controller.name,
-                             **controller.protocol.counts(controller.job_id), error=error)
+            done = status in ("done", JOB_DONE_WITH_WARNINGS)
+            warnings = len((getattr(controller, "result", None) or {}).get("warnings") or []) if done else 0
+            controller.trace("job_finished", ok=done, status=status, name=controller.name,
+                             **controller.protocol.counts(controller.job_id), error=error, **({"warnings": warnings} if warnings else {}))
             controller.protocol.rename(controller.name)     # a review may have renamed the job
             JobMonitor().finish(self.job_id, status)
         except Exception as e:
@@ -196,7 +216,7 @@ class SpawnAgentJobTool(Tool):
     def _report(self, task: str, fallback: str, attachments=None):
         """the contact tells the user what the job found, that it failed or was cancelled (task: prompts.SPAWN_JOB_REPORT_PROMPT / SPAWN_JOB_FAILED_PROMPT / SPAWN_JOB_CANCELLED_PROMPT):
         a new assistant message, stored and pushed like a companion message (AgentJob.post_message). attachments: the files
-        the workers' tools held (write_file, generate_image), attached to that message"""
+        the workers' tools held (write_file, generate_image), attached to that message, also a failed job's (unverified)"""
         contact = self.db.get_contact_by_id(self.contact_id)
         name = Utils.get_nested_value(contact, ["identity", "name"], "")
         messages = AgentJob.persona_messages(contact, self.db.get_conversation(self.get_conversation_id()), AgentJob.user_name(self.db, self.get_user_id()), task)
