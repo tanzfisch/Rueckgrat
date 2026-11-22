@@ -1,0 +1,346 @@
+# Agents
+
+This document describes how agents work in the hub: what an agent is, how a background job is started and run, how the tools of a job are chosen, how results get back to the user, the lifecycle and state of a job, the user's tasks and the companion passes, and how agents use files and memory.
+
+It follows what the code actually does (`rueckgrat/hub/app/agent_jobs/`, `rueckgrat/hub/app/companion/`, the `spawn_job` and `task` tools, and the tool detection and execution tasks). How the Backroom frames travel over the websocket is in `communication.md`.
+
+# What an agent is
+
+In the hub an agent is an `AgentJob` (`agent_jobs/agent_job.py`): something that runs on its own thread with its own time limit, does its work in LLM calls and with the hub's tools, and writes what it decides into a protocol. Nobody waits for it while it runs. When it has something for the user, it writes a normal assistant message into a conversation.
+
+There are three kinds:
+
+| Kind (protocol and Backroom) | Class | Started by | What it does |
+| --- | --- | --- | --- |
+| `job` | `Controller` with `AgentJob` workers | the `spawn_job` tool in a chat turn (or in a task pass) | Plans a piece of work in steps and runs workers for it, then reports |
+| `task` | `TaskJob` | `CompanionScheduler`, when a task of the user is due | Does a task the user asked for at a set time and writes the result |
+| `companion` | `CompanionJob` | `CompanionScheduler`, when a row of a companion's calendar is due | One pass of a proactive companion: plans its day, maybe writes first |
+
+```mermaid
+flowchart LR
+  chat["Chat turn<br/>MetaTask"]
+  spawn["spawn_job tool"]
+  taskTool["task tool"]
+  sched["CompanionScheduler<br/>one thread"]
+  ctrl["Controller<br/>(job)"]
+  workers["Workers<br/>AgentJob"]
+  taskJob["TaskJob<br/>(task)"]
+  compJob["CompanionJob<br/>(companion)"]
+  conv["Conversation<br/>assistant message"]
+  monitor["JobMonitor<br/>Backroom"]
+
+  chat --> spawn --> ctrl --> workers
+  chat --> taskTool -->|"calendar row"| sched
+  sched --> taskJob
+  sched --> compJob
+  taskJob -->|"may call spawn_job"| spawn
+  ctrl -->|"report"| conv
+  taskJob --> conv
+  compJob -->|"held, then posted"| conv
+  ctrl -.-> monitor
+  taskJob -.-> monitor
+  compJob -.-> monitor
+```
+
+## Contacts
+
+Agents do not have personas of their own. A contact (an AI character such as Alexandra) is a row of the `contacts` table: `name`, `gender`, `role`, `personality` and a JSON `profile`. `ChatDB.get_contact_by_id` returns it as `{"identity": {name, gender, role, personality}, "profile": {...}}`. A contact is a companion when its profile has `"companion": 1`.
+
+Every agent belongs to one contact and one conversation (its `tool_context`: tool registry, db, user, contact, conversation and the user's name). When an agent talks to the user, it uses the contact's persona: `AgentJob.persona_messages` builds the same system prompt as a chat reply (`PromptCompiler` with the contact and the conversation) and adds the agent's own task as the user message. The workers of a job do not use the persona. They get a neutral worker prompt.
+
+## The AgentJob base
+
+`AgentJob` gives every agent the same frame:
+
+- `start()` runs `run()` on a daemon thread named `agent-<role>-<id>`. `run()` calls `step()` until it returns `True`, the agent is stopped, or the time limit has passed (`result = {"error": "timed_out", ...}`).
+- An exception in `run()` becomes `result = {"error": repr(e)}` and a `failed` protocol line.
+- `chat()` is one LLM call with `JOB_LLM_TIMEOUT` (1800 s) and `max_new_tokens` from `Infrastructure.long_reply_tokens()` (a share of the LLM slot's context). Every call is written to the conversation's trace with the name of its caller.
+- `run_tools()` detects and runs the tools for a text, the same way a chat turn does (see below).
+- `post_message()` stores a text as the contact's assistant message, then pushes it as a `{"chat": ...}` frame if the user has a `/ws` open. A task with its alarm on adds `"alarm": true`.
+- `trace()` writes one line into the agent's protocol.
+
+The hub wires the class at startup (`main.py`): `AgentJob.set_turns(...)` so agents can wait while a reply is being made in the same conversation, and `AgentJob.connections` (open `/ws` connections per user) so a message is only pushed to a connected user. It is in the database either way.
+
+# Starting a job: spawn_job
+
+A job starts when the tool setup of a chat turn calls `spawn_job` with a `prompt`. `SpawnAgentJobTool.execute` (`tools/spawn_agent_job_tool.py`):
+
+1. Checks that no job runs in this conversation yet. There is at most one job per conversation. If one runs, the tool returns `SPAWN_JOB_RUNNING_PART` with the running job's id. The user's message has already gone into that job's inbox (see below).
+2. Saves a `jobs` row with a new uuid4 id (`status = 'initializing'`).
+3. Creates the protocol (`job_protocols`, kind `job`) with the conversation and the user message that started the job.
+4. Creates the `Controller` and registers the job in `SpawnAgentJobTool.running` and in the `JobMonitor`.
+5. Starts the job on a thread named `job-<id>` and returns `SPAWN_JOB_STARTED_PART` at once. The chat reply then tells the user that the job runs.
+
+```mermaid
+sequenceDiagram
+  participant Chat
+  participant Hub as Hub (MetaTask)
+  participant Spawn as spawn_job
+  participant Ctrl as Controller
+  participant W as Workers
+  participant LLM
+
+  Chat->>Hub: {"chat": ...}
+  Hub->>Hub: tool detection, tool setup rounds
+  Hub->>Spawn: spawn_job {prompt}
+  Spawn->>Ctrl: start (thread job-<id>)
+  Spawn-->>Hub: "a background job was started"
+  Hub-->>Chat: the reply (the job runs)
+  Ctrl->>LLM: PLAN_PROMPT
+  loop each step
+    Ctrl->>W: spawn the step's tasks (parallel)
+    W->>W: run_tools, then WORKER_PROMPT
+    W-->>Ctrl: results
+    Ctrl->>LLM: REVIEW_PROMPT (if needed)
+  end
+  Ctrl->>LLM: MERGE_PROMPT (more than one result)
+  Ctrl->>LLM: SPAWN_JOB_REPORT_PROMPT in the contact's persona
+  Ctrl-->>Chat: {"chat": report}, files attached
+```
+
+`spawn_job` is not offered to workers or companion passes (`WORKER_EXCLUDED_TOOLS`). A `TaskJob` may use it (`TaskJob.ALLOWED_TOOLS`). A worker can never start another `Controller`: `Controller.spawn` refuses one, so the tree of agents is one level deep.
+
+# Choosing tools
+
+Chat turns, workers, task passes and companion passes all choose their tools the same way: a `ToolDetectionTask` decides which tools are mandatory and which are recommended, then a `ToolExecutionTask` runs tool setup rounds, where the LLM writes the tool calls. The rules for the two priority tools, `task` and `spawn_job`, are part of this path.
+
+## Detection
+
+`ToolDetectionTask` (`tasks/tool_detection_task.py`) scores every candidate tool. The candidates are the registered tools that can be used now, minus the excluded ones and minus the optional ones (`PROMPT_TOOLS` and companions like `share_file`, which are offered without a detection). The source of the decision is recorded (`source()`):
+
+| Source | When | How the scores come about |
+| --- | --- | --- |
+| `short` | the message has fewer than 4 words | only the tools' `text_score` |
+| `laya` | Laya answers | one Laya question per tool question (`Tool.question`, or one made from the description). A `whole_message` tool (`spawn_job`) is also judged on the whole message. The best answer is the tool's score; the text scores are max'd in |
+| `llm` | Laya is down (`decide_whole` returns `None`) and the LLM picks | one LLM call (`TOOL_PICK_PROMPT`, temperature 0, a JSON schema of the candidate names). A picked tool gets its recommended threshold, a picked `PRIORITY_TOOLS` tool its mandatory threshold; the text scores are max'd in |
+| `text` | Laya is down and the LLM pick failed | only the text scores |
+
+A tool is mandatory when its score reaches its mandatory threshold and recommended when it reaches its recommended threshold. The defaults are 0.7 and 0.5. Tools can set their own (`Tool.thresholds`): `spawn_job` uses (0.7, 0.75), `task` uses (0.65, 0.7).
+
+A few text scores matter for agents:
+
+- `spawn_job` scores its recommended threshold (0.7) when `MessageShape(prompt).complexity()` is at least 0.4 (a message of several steps). A text score never makes it mandatory.
+- `fetch_url` scores 1.0 for a link, so it is mandatory.
+
+In a chat turn the detection also gets the contact's `SandboxVolume`. Then it also asks Laya the `PROJECT_QUESTIONS` (a bug report, or a fix or change to something made earlier). If that score reaches 0.5 and the contact's files hold a project (`SandboxVolume.has_project`), the `PROJECT_TOOLS` (`spawn_job`, `bash`, `write_file`) get that score.
+
+## Bands
+
+`ToolRegistry.bands(mandatory, recommended)` turns the scores into the final bands. This is the one place where the priority rules for a detection live, whatever its source:
+
+- `PRIORITY_TOOLS = ("task", "spawn_job")`, highest first.
+- A mandatory priority tool becomes the only mandatory tool. Of the recommended tools only the ones that outrank it stay (`task` over `spawn_job`).
+- Otherwise a tool that another one overrides (`Tool.overrides`) is dropped: by a mandatory tool from both bands, by a recommended one only from the recommended band.
+
+`ToolExecutionTask` then adds the `PROMPT_TOOLS` (`remember`, `search_memory`, `take_photo`, `find_tools`) to the mandatory band, drops the excluded tools, and adds the companions of the offered tools to the mandatory band (`share_file` with `bash` or `run_code`). The setup prompt offers those as optional.
+
+## Rounds
+
+`ToolRegistry.rounds(mandatory, recommended)` groups the tools into setup rounds in `TOOL_ORDER`:
+
+```
+1  spawn_job, current_time, task
+2  date_calc
+3  search_memory, find_tools, wikipedia, websearch, fetch_url, weather, price_finder
+4  convert
+5  calculate, run_code, bash, share_file
+6  show_map, poll, write_file, generate_image, take_photo, remember
+7  text_to_speech
+8  join_files
+```
+
+A recommended priority tool gets a round of its own. It comes first when it outranks every sure tool. A sure tool is a mandatory tool that is not optional, so the `PROMPT_TOOLS` and companions never count. Otherwise it comes last, so an uncertain priority tool does not take over from a sure tool. A mandatory priority tool is alone in its band anyway (see Bands).
+
+Each round is one LLM call (temperature 0) that writes the calls for that round's tools. The calls of a round run together. A recommended tool's call whose values do not come from the message or the results so far is dropped (`ToolRegistry.grounded`). After each round `ToolRegistry.ends_setup` looks at the calls: if a priority tool was called, nothing runs after that round. So when `spawn_job` is called, the turn does not also write files or run commands.
+
+`find_tools` calls start a new detection on the task they name. Newly found tools get extra rounds, at most twice in a row (`FIND_TOOLS_STEPS`).
+
+The detached tools (`DETACHED_TOOLS`: `show_map`, `poll`, `write_file`, `generate_image`, `take_photo`, `remember`, `text_to_speech`) can go on in the background of a chat turn. Calls made for an agent are marked `background` (`Tool.background`): nobody waits for them.
+
+# The Controller
+
+`Controller` (`agent_jobs/controller.py`) is the first agent of a job. Its `step()` goes through the job like this:
+
+```mermaid
+flowchart TD
+  plan["make_plan<br/>PLAN_PROMPT"]
+  start["start the step<br/>one worker per task"]
+  wait["wait for the step's workers"]
+  failed{"a worker failed?"}
+  retry["_retry: RETRY_PROMPT<br/>a new worker, without the failed tools"]
+  fail["stop the other workers<br/>the job fails"]
+  review["_review: REVIEW_PROMPT<br/>continue, replan or restart"]
+  more{"steps left?"}
+  merge["_merge: MERGE_PROMPT<br/>or the one result as it is"]
+  deliver["_delivered: files asked for and made?"]
+
+  plan --> start --> wait --> failed
+  failed -->|"yes, first attempt"| retry --> wait
+  failed -->|"yes, after the retry"| fail
+  failed -->|"no, all done"| review --> more
+  more -->|"yes"| start
+  more -->|"no"| merge --> deliver
+```
+
+- Plan: one LLM call (`PLAN_PROMPT`, temperature 0.2) returns `{"name", "steps": [[{role, prompt}, ...], ...]}`. Steps run one after the other, the tasks inside a step run in parallel. At most `MAX_STEPS` (6) steps and `MAX_WORKERS_PER_STEP` (4) tasks per step. The JSON is parsed strictly, without repair. A missing, cut off, invalid or too large plan becomes one step with one worker that does the whole job. The prompt asks for a software project in `~/projects/<name>/` with a `PROJECT.md`, one file per part of a multi-part work, and a last tester step for code that runs.
+- Steps: each task becomes a worker (`spawn`) on its own thread, with the role from the plan and the controller's time limit. The results of the finished steps are appended to the task after `RESULTS_MARKER_PART` (at most `MAX_CONTEXT_CHARS`, 12000 characters, the newest part kept).
+- Retry: a worker with no result or an `error` gets one retry (`MAX_TASK_RETRIES` = 1). One LLM call (`RETRY_PROMPT`) rewrites the task with the reason. The new worker does not get the tools that failed before (`excluded_tools`). The other workers of the step go on. If the retry fails too, the controller stops the step's other workers and the job fails.
+- Review: after each step one LLM call (`REVIEW_PROMPT`) reads the results, the remaining steps and the user's messages since the start, and decides `continue`, `replan` (the finished steps stay) or `restart` (start over with a new plan). It can also rename the job. No review runs after the last step when the user said nothing new, and none after `MAX_REPLANS` (3) changes. A reply that cannot be used keeps the plan.
+- Merge: one result is used as it is. More results are merged into `{summary, details}` by one LLM call (`MERGE_PROMPT`). If that fails, the summaries of the last step are joined and all results become the details.
+- Files: the files the workers' tools hold for the user are collected (a later file with the same tool and name replaces an earlier one). If the job or one of its tasks asks for files (`AgentJob.file_task`: a path, or a file name with a known extension, outside links) but no worker saved or holds one, the summary starts with `NOT_DELIVERED_PART` and the result gets `"delivered": false`.
+
+## User messages while a job runs
+
+Every chat message the user sends to a conversation is also handed to its running job (`SpawnAgentJobTool.add_message`, called in `main.py` before the chat turn starts). The controller puts it in its inbox, and the next review reads it. The chat turn itself still runs normally. If that turn calls `spawn_job` again, it gets `SPAWN_JOB_RUNNING_PART` instead of a second job.
+
+# Workers
+
+A worker is a plain `AgentJob`. Its `step()` is a single pass:
+
+1. Tools (`_use_tools`): `run_tools` on the worker's own task only, not on the earlier results, whose links would select `fetch_url` every time. It excludes `WORKER_EXCLUDED_TOOLS` (`spawn_job`, `remember`, `poll`, `show_map`, `task`), `take_photo`, and a retry's failed tools.
+   - `websearch` (`WORKER_TOOLS`) always runs, unless the detection found one of the `BUILD_TOOLS` (`bash`, `run_code`, `write_file`, `text_to_speech`, `join_files`). Then it only runs if the detection itself made it mandatory. For an LLM-picked detection the recommended tools count as found here too (`agent_job.py`, `run_tools`).
+   - The worker's setup has up to 3 fix rounds (`WORKER_FIX_ROUNDS`). While calls of the fixable tools fail, are cut off, or a mandatory `bash`/`run_code` was not called, those tools get another pass with what went wrong. A `checks` result tells the worker the final state.
+2. Checks in code, without an LLM call:
+   - stuck: a mandatory file tool (`FILE_TOOLS`: `text_to_speech`, `write_file`, `run_code`, `join_files`) still fails after the fix rounds. The worker fails.
+   - idle: the task makes or uses files or runs commands, but none of the `MAKE_TOOLS` was called and no file was saved or held. The worker fails, with the tools it was offered and called.
+3. The answer: one LLM call with `WORKER_PROMPT` (temperature 0.3): the role, the task and the `TOOL_RESULTS` block. The block notes when no web search was done, when it found nothing, and which tools failed. A reply that is empty or has a line starting with `FAILED:` fails the worker. Otherwise its result is `{summary, details, attachments?, saved?, tools}`.
+
+`AgentJob.result_text` is how a result is passed to the next step, the reviews and the merge. It lists the tools that were really called and the files that were really saved (with full paths) or held, so a later worker can tell what a reply only claims.
+
+# Results back to the user
+
+When the controller has finished, `SpawnAgentJobTool._run` saves the result and reports:
+
+- done: `jobs.status = 'done'` with the result JSON. The report task is `SPAWN_JOB_REPORT_PROMPT` with the summary, details and names of the attached files.
+- failed: `jobs.status = 'failed'`. The report task is `SPAWN_JOB_FAILED_PROMPT` with the reason (cut to 300 characters).
+- cancelled: `jobs.status = 'cancelled'`. The report task is `SPAWN_JOB_CANCELLED_PROMPT`.
+
+The report is one LLM call in the contact's persona (temperature 0.7). Without a reply, a fixed sentence is used instead. The report waits while a reply is being made in the conversation (`Turns.busy`). Then it is posted with `AgentJob.post_message` as the contact's assistant message, so later replies see it in the history. The files the workers held are attached to that message (`ToolRegistry.attach_held`). The `JobMonitor` links the message to the job ("open protocol" under it).
+
+At the end of the job a `"done"` status goes to the user, if they are connected and no reply is being made, so the spinner of the workers' tool status messages stops.
+
+# Lifecycle and state
+
+## The jobs table
+
+`jobs` holds one row per `spawn_job` job:
+
+| Status | Set by |
+| --- | --- |
+| `initializing` | `add_job`, when the tool starts the job |
+| `running` | the job thread, before the controller runs |
+| `done` | the job thread, with the result (`{summary, details, ...}`) |
+| `failed` | the job thread, on an error, or at hub start for a job that was still `initializing` or `running` (`fail_stale_jobs`: `{"error": "interrupted", "details": "hub restarted"}`) |
+| `cancelled` | the job thread, after a cancel |
+
+A job that did not deliver its files still ends as `done`, with the `NOTHING WAS DELIVERED` summary.
+
+## Protocols
+
+Every job, task pass and companion pass has a protocol (`agent_jobs/protocol.py`), written to the database as it happens:
+
+- `job_protocols`: one row (kind `job`, `task` or `companion`, the contact, the conversation, the user message that started it, the report message, the calendar row of a pass, the current plan, the time limit, `status`). A protocol is `running` until it ends as `done`, `failed` or `cancelled`. At hub start, protocols still `running` become `interrupted`, and protocols older than 24 hours (`PROTOCOL_RETENTION_HOURS`) are deleted.
+- `protocol_lines`: one line per action (`job_started`, `plan`, `step_started`, `spawned`, `tools`, `done`, `retry`, `review`, `user_message`, `merged`, `cancelled`, `timed_out`, `job_finished`, `pass_started`, `pass_finished`, ...), with agent, step and task. Text values longer than 80 characters are moved to the protocol's outputs.
+- The tool calls of each worker, with arguments, success, error and duration.
+
+A write that fails is logged and never fails the job.
+
+## Time limits
+
+| What | Limit |
+| --- | --- |
+| A `spawn_job` controller | `DEFAULT_TIME_LIMIT`, 28800 s (8 hours) |
+| Each of its workers | the controller's limit, from the moment the worker starts |
+| One LLM call of an agent | `JOB_LLM_TIMEOUT`, 1800 s |
+| A task pass or a companion pass | 5400 s |
+
+A controller that times out stops its workers as well.
+
+## Cancel
+
+The Backroom's cancel sends `{"cancel_job": {"job_id"}}`. `JobMonitor.cancel` only acts on a running job of the same user that has a cancel callback, which only `spawn_job` jobs have. `SpawnAgentJobTool._cancel` marks the job cancelled and stops the controller and its workers. The job thread then saves it as cancelled, and the contact reports it.
+
+## The Backroom
+
+`JobMonitor` (`agent_jobs/job_monitor.py`) is the live view of all running jobs and passes, one per hub. The controller's progress counts the planning as one part of the job: step i of n is `i / (n + 1)` done. The frames (`jobs`, `job_update`, `protocol_lines`, `protocol_output`) are described in `communication.md`. In the chat client this is `backroom_page.py`.
+
+# The user's tasks
+
+The `task` tool (`tools/task_tool.py`) manages things the user wants a contact to do at a set time, once or repeating: `create`, `list`, `edit`, `cancel`. A task is a row of `companion_calendar` with kind `task` (`UserTasks`, also behind the `/tasks` routes). Its prompt lists the contact's open tasks with their ids. A tool note tells the setup that `spawn_job` is for work now and `task` for anything later or repeating.
+
+When a task is due, `CompanionScheduler` runs a `TaskJob` (`companion/task_job.py`) on its own thread:
+
+1. It picks the conversation the task was asked in, or opens a new one if that was deleted (the contact's other tasks without a conversation move there too).
+2. `run_tools` on the task text (it may use `spawn_job`, `poll` and `show_map`).
+3. One LLM call in the contact's persona (`user_task_prompt`, temperature 0.7) writes the message. A task that only reports a change and finds none answers `TASK_SILENT`, and nothing is posted. Without a reply, the message is the task text with ⏰.
+4. It waits for a reply being made in the conversation, at most 120 s, then posts the message (with the alarm if the task has it) and the files, poll or map the tools held.
+
+Tasks fire whatever the companion's chattiness or quiet hours. A one-off task that was due while the hub was down runs late and says so. A repeating task skips the runs it missed then and re-arms.
+
+# Companion passes
+
+A contact with `profile.companion = 1` has a calendar (`companion_calendar`). `CompanionScheduler` (`companion/scheduler.py`) is one thread that sleeps until the next due row (at most 60 s), then runs the passes one by one on that thread. No `TaskQueue` worker is held, so chats are never starved by companions.
+
+- A new companion gets a daily `planning` row at 00:05 local time and a first planning right away.
+- A due row fires once if its occurrence is at or after the cutoff (the last local midnight, or the companion's last run if that is later). Older rows are marked `missed`. Daily rows re-arm to their next future occurrence.
+
+A `CompanionJob` (`companion/companion_job.py`) is one pass:
+
+1. Lookups with `run_tools` on the pass's intent. A `news` pass always gets `websearch`. A pass may take a photo (if the contact's settings allow photos) and show a poll or map. It may not make images, files or audio.
+2. One LLM call in the contact's persona with the local time, the day's calendar, the last reflection, the last 10 messages, the conversation summary and the lookups. It answers in JSON: `calendar` (new rows of kind `event`, `check_in`, `news` or `reflection`, later today or tomorrow, at most 36 h ahead), `message` and `thoughts`.
+3. New rows are checked and capped by the contact's chattiness. A message is only sent if `CompanionSettings.may_message` allows it (limits per day, the gap between messages, quiet hours, a user who wrote within the last 30 minutes), no reply is being made, and the contact is still a companion.
+4. A message is held as two versions (`Outreach`): `surprise` is posted when the user opens the contact, `reach_out` when the reach window passes (one hour by default).
+
+What each pass decided is kept in `companion_log`.
+
+# Files
+
+Each contact has persistent sandbox files: a Docker named volume (`SandboxVolume`, `utils/sandbox_volume.py`). It is mounted at `/home` into the `bash` and `run_code` sandboxes of all the contact's conversations, so projects outlive a conversation. The hub starts these sandboxes through the host's Docker socket. Its layout:
+
+```
+projects/<name>/        one folder per project, with its PROJECT.md
+workdir/<conversation>/ where bash and run_code start in a conversation
+data/documents/<hash>/  the files write_file writes (<hash> of the content)
+data/images/            generated images
+data/tts/               generated speech files
+.cache/rueckgrat/shell/<conversation>/  the bash terminal of a conversation
+```
+
+The workers of a job write into this same volume. A worker's saved paths are passed on to the next steps, so later workers use those files instead of making them again. The files a worker's tools hold for the user (`write_file`, `share_file`, `generate_image`, ...) end up attached to the job's report.
+
+The user can open these folders as a network drive (`FileShare`, `utils/file_share.py`). `HUB_FILE_SHARE` picks `webdav` (served by the hub) or `smb` (the hub manages the SMB service's users and shares), or none. There is one folder per contact, named `<name> (<id>)`, with the hub login. The app's network settings show each folder's address. Names in `HUB_FILE_SHARE_EXCLUDE` (virtual environments, caches, installed packages) are not shared. The user sees the files while the AI works on them.
+
+The volume is removed with the contact, or by the maintenance task after 30 days without a message in any of the contact's conversations.
+
+# Memory and conversation
+
+- An agent's messages (job reports, task results, companion messages) are normal assistant messages of the contact. Later chat replies see them in the history.
+- `search_memory` and `find_tools` are prompt tools that every tool setup offers, workers' setups included. `remember` is not offered to workers or passes (`WORKER_EXCLUDED_TOOLS`), and a chat reply calls it itself at its end (`REPLY_TOOLS`).
+- Inside a job, the steps share results through the controller (`RESULTS_MARKER_PART`), not through the conversation. The workers see neither the chat history nor the contact's persona.
+- A companion pass reads the conversation's last messages and summary. A task pass and a job report use the contact's persona with the conversation (`PromptCompiler`).
+- After a chat turn, `UpdateContextTask` updates the conversation's context. Agent messages do not start one.
+
+# Limits at a glance
+
+| Constant | Where | Value |
+| --- | --- | --- |
+| `MAX_STEPS` | `controller.py` | 6 steps per plan |
+| `MAX_WORKERS_PER_STEP` | `controller.py` | 4 parallel tasks |
+| `MAX_CONTEXT_CHARS` | `controller.py` | 12000 characters of earlier results |
+| `MAX_REPLANS` | `controller.py` | 3 plan changes per job |
+| `MAX_TASK_RETRIES` | `controller.py` | 1 retry per task |
+| `WORKER_FIX_ROUNDS` | `agent_job.py` | 3 fix rounds per worker |
+| `MAX_TOOL_CHARS` | `agent_job.py` | 12000 characters of tool results for a worker |
+| `DEFAULT_TIME_LIMIT` | `agent_job.py` | 28800 s |
+| `JOB_LLM_TIMEOUT` | `agent_job.py` | 1800 s |
+| `JOB_COMPLEXITY` | `spawn_agent_job_tool.py` | 0.4 |
+| `MIN_DETECTION_WORDS` | `tool_detection_task.py` | 4 |
+| `PROTOCOL_RETENTION_HOURS` | `db.py` | 24 |
+
+# What the code leaves open
+
+- One job per conversation. A second `spawn_job` in the same conversation does not queue: the running job gets the message and may replan at its next review.
+- Jobs do not survive a hub restart. Their threads end, the job is set to `failed` and its protocol to `interrupted`. Nothing resumes it.
+- Only `spawn_job` jobs can be cancelled. Task and companion passes have no cancel.
+- A job's report waits with no time limit while a reply is being made in its conversation. A task pass waits at most 120 s.
+- Whether the plan fits the job, whether a worker really did its task and whether files really exist is checked in code only as far as described above (stuck, idle, `FAILED:`, not delivered). The rest relies on the LLM's replies.
