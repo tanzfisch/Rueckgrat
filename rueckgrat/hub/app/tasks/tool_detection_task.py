@@ -164,15 +164,16 @@ class ToolDetectionTask(Task):
         return self._bands(probabilities)
 
     def _without_laya(self, text_scores: Dict[str, float]) -> Tuple[Optional[List[str]], List[str]]:
-        """laya is down: the tools the llm picks (_pick) are recommended, never mandatory (the model decides), the text
-        scores count as with laya. no llm pick: the text scores alone (a link: fetch_url), without any (None, [])"""
+        """laya is down: the tools the llm picks (_pick) are recommended (the model decides), a PRIORITY_TOOLS one mandatory
+        as when laya is sure of it (ToolRegistry.bands: it runs alone), the text scores count as with laya. no llm pick:
+        the text scores alone (a link: fetch_url), without any (None, [])"""
         picked = self._pick()
         if picked is None:
             self._source = SOURCE_TEXT if text_scores else None
             logger.info(f"tool detection without laya and llm pick: {'the text scores' if text_scores else 'nothing decided'}")
             return self._bands(text_scores) if text_scores else (None, [])
         self._source = SOURCE_LLM
-        probabilities = {name: self.thresholds(name)[0] for name in picked}
+        probabilities = {name: self.thresholds(name)[1 if name in self.tool_registry.PRIORITY_TOOLS else 0] for name in picked}
         for name in picked:
             self.scores[f"{name}{LLM_SUFFIX}"] = (probabilities[name], "llm pick without laya")
         for name, score in text_scores.items():

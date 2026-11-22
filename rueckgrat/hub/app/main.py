@@ -30,6 +30,10 @@ from app.tasks import TaskQueue, MetaTask, AssistantImageTask, ContactGeneratorT
 from app.tasks.transcript_tasks import TranscriptSummaryTask, TranscriptEnhanceTask, enhanceable
 from app.tasks.turns import Turns
 from app.utils.tts_stream import TtsStreams
+from app.utils.sandbox_volume import SandboxVolume
+from app.utils.file_share import FileShare
+from app.utils.sandbox_dav import SandboxDav
+from app.utils.sandbox_smb import SandboxSmb
 from app.companion import CompanionScheduler
 from app.companion.outreach import Outreach
 from app.companion.user_tasks import UserTasks, TaskError, TaskNotFound
@@ -98,6 +102,12 @@ async def lifespan(app: FastAPI):
     app.state.tasks = UserTasks(app.state.db, wake=app.state.companion.wake)
     TaskTool.tasks = app.state.tasks
 
+    # #193 #225 the contacts' files as a network drive (HUB_FILE_SHARE)
+    if file_share is not None:
+        file_share.configure(app.state.db, verified_user_id)
+        file_share.start()
+        logger.info(f"the contacts' files are shared over {FileShare.kind()}")
+
     # nightly maintenance in each user's quiet hours (HUB_MAINTENANCE_START/END), waits while a reply is being made
     app.state.maintenance = MaintenanceSweeper(app.state.db, app.state.task_queue, maintenance_tasks(app.state.db, app.state.infrastructure),
                                                is_busy=lambda: app.state.turns.any_busy() or not app.state.task_queue.queue.empty())
@@ -122,6 +132,8 @@ async def lifespan(app: FastAPI):
 
     app.state.companion.stop()
     app.state.maintenance.stop()
+    if file_share is not None:
+        file_share.stop()
     app.state.rates.stop()
     JobMonitor().stop()
     app.state.task_queue.stop()
@@ -134,6 +146,11 @@ async def lifespan(app: FastAPI):
 _docs = os.environ.get("HUB_DOCS", "").lower() in ("1", "true", "yes")
 app = FastAPI(lifespan=lifespan, **({} if _docs else {"docs_url": None, "redoc_url": None, "openapi_url": None}))
 security = HTTPBearer(auto_error=False)
+# #193 #225 the contacts' files as a network drive, the hub's users log in with their passwords: HUB_FILE_SHARE webdav (the
+# hub serves it) or smb (the smb service, the hub keeps its users and shares), off otherwise
+file_share = {"webdav": SandboxDav, "smb": SandboxSmb}.get(FileShare.kind(), lambda: None)()
+if file_share is not None:
+    file_share.mount(app)
 
 ########### user handling
 # signs every access and refresh token. set HUB_SECRET_KEY in rueckgrat/.env (e.g. openssl rand -hex 32).
@@ -178,6 +195,18 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
     except InvalidHashError:
         return False
+
+def verified_user_id(username: str, password: str) -> int | None:
+    """the id of the user when the password is theirs, else None (WebDAV's login)"""
+    user = app.state.db.get_user(username or "")
+    return user["id"] if user and verify_password(password or "", user["password"]) else None
+
+def password_given(username: str, password: str):
+    """the user signed up, logged in or set a new password with this one: the file share takes it (SMB's login)"""
+    if file_share is not None:
+        user = app.state.db.get_user(username)
+        if user:
+            file_share.remember(user, password)
 
 def create_access_token(username: str):
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -302,6 +331,7 @@ def create_user(user: UserCreate):
         if user_id:
             with logger_context(user_id):
                 add_default_contact(user_id)
+                password_given(user.user_name, user.user_passwd)
         return {"user_id": user_id}
 
     if not user.invite_token:
@@ -317,6 +347,7 @@ def create_user(user: UserCreate):
         raise HTTPException(status_code=403, detail=INVITE_ERRORS.get(reason, "invite not accepted"))
 
     add_default_contact(user_id)
+    password_given(user.user_name, user.user_passwd)
     return {"user_id": user_id}
 
 @app.get("/signup-mode")
@@ -344,6 +375,7 @@ def login(data: LoginRequest):
         raise HTTPException(status_code=401)
 
     remember_device_timezone(user["id"], data.timezone)
+    password_given(user["username"], data.user_passwd or "")
     return session_response(user)
 
 def session_response(user: dict, refresh_token: str | None = None) -> dict:
@@ -411,6 +443,7 @@ def change_password(request: ChangePasswordRequest, username: str = Depends(get_
     if not app.state.db.update_password(user["id"], hash_password(request.new_passwd)):
         raise HTTPException(status_code=500, detail="failed to change password")
     app.state.db.delete_refresh_tokens(user["id"])
+    password_given(user["username"], request.new_passwd)
     return {"status": "ok", **session_response(user)}
 
 # the email is optional and only informational, so just a format check: no verification, not unique
@@ -736,11 +769,22 @@ def delete_contact(contact_id: int, username: str = Depends(get_current_user)):
         image_keys = app.state.db.get_contact_image_keys(contact_id)
         if app.state.db.delete_contact(contact_id):
             released_images = app.state.image_store.release(image_keys, drop_conversation_images=False)
-            from app.utils.sandbox_volume import SandboxVolume
             SandboxVolume(user_id, contact_id).remove()
             return {"status": "ok", "released_images": released_images}
         else:
             return {"status": "failed to delete contact"}
+
+@app.get("/file_share")
+def get_file_share(request: Request, username: str = Depends(get_current_user)):
+    """how the logged in user mounts their contacts' files on a computer (FileShare.connect, the app's network settings), None
+    without a file share. the host the app reached the hub with goes into the addresses"""
+    user = app.state.db.get_user(username)
+    if not user:
+        raise HTTPException(status_code=401)
+    with logger_context(user["id"]):
+        if file_share is None:
+            return {"file_share": None}
+        return {"file_share": file_share.connect(user, app.state.db.get_contacts(user["id"]), request.headers.get("host", ""))}
 
 @app.get("/contacts/{contact_id}/memories")
 def get_contact_memories(contact_id: int, username: str = Depends(get_current_user)):
@@ -1355,7 +1399,6 @@ def conversation_files(username: str, conversation_id: int, read):
     """read(volume) on the volume of the logged in user's conversation's contact: 404 for a conversation not theirs or
     a path that isn't there, 400 for a path leaving the files, 503 without docker"""
     from docker.errors import DockerException
-    from app.utils.sandbox_volume import SandboxVolume
     user_id = app.state.db.get_user_id(username)
     with logger_context(user_id):
         if not app.state.db.owns_conversation(user_id, conversation_id):

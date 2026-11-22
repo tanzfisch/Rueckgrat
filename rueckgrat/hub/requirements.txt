@@ -24,3 +24,5 @@ pmtiles
 mapbox-vector-tile
 Pillow
 fonttools
+wsgidav
+a2wsgi

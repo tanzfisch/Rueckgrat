@@ -1,6 +1,14 @@
 Changelog
 =========
 
+0.31.0
+------
+
+- #193 webdav for colaborative access to the files an AI is working on
+- #225 SMB for colaborative access to the files an AI is working on
+- #226 allow companions to share files
+- #227 fixing error handling in agent jobs
+
 0.30.0
 ------
 

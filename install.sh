@@ -584,7 +584,7 @@ lan_subnets() {
 ip_to_int() {
     local a b c d
     IFS=. read -r a b c d <<< "$1"
-    echo $(( (a << 24) | (b << 16) | (c << 8) | d ))
+    echo $(( ((a * 256 + b) * 256 + c) * 256 + d ))
 }
 
 int_to_ip() {
@@ -595,8 +595,8 @@ int_to_ip() {
 # Usage: lan_subnet_range 192.168.2.39/24   -> 192.168.2.0/24
 lan_subnet_range() {
     local addr="${1%/*}" prefix="${1#*/}" size
-    (( (1 << (32 - prefix)) > LAN_SCAN_MAX_HOSTS )) && prefix=24
-    size=$(( 1 << (32 - prefix) ))
+    (( 2 ** (32 - prefix) > LAN_SCAN_MAX_HOSTS )) && prefix=24
+    size=$(( 2 ** (32 - prefix) ))
     echo "$(int_to_ip $(( $(ip_to_int "$addr") & ~(size - 1) & 0xFFFFFFFF )))/$prefix"
 }
 
@@ -607,7 +607,7 @@ lan_subnet_hosts() {
     range=$(lan_subnet_range "$1")
     prefix="${range#*/}"
     (( prefix >= 31 )) && return 0
-    size=$(( 1 << (32 - prefix) ))
+    size=$(( 2 ** (32 - prefix) ))
     base=$(ip_to_int "${range%/*}")
     for (( n = base + 1; n < base + size - 1; n++ )); do
         int_to_ip "$n"
@@ -861,13 +861,18 @@ setup() {
             # hub.secret_key signs the hub's login tokens, saved here like cloudflare.token (empty = not saved)
             host_json=$(jq --arg port "$HUB_PORT" --arg signup_mode "$SIGNUP_MODE" --arg secret_key "$HUB_SECRET_KEY" \
                 --arg fetch_allow "${HUB_FETCH_ALLOW:-}" --arg nomad_url "${HUB_NOMAD_URL:-}" \
+                --arg file_share "${HUB_FILE_SHARE:-$HUB_FILE_SHARE_DEFAULT}" --arg share_exclude "${HUB_FILE_SHARE_EXCLUDE:-}" \
+                --arg smb_port "${HUB_SMB_PORT:-}" \
                 --arg m_start "$HUB_MAINTENANCE_START" --arg m_end "$HUB_MAINTENANCE_END" --arg m_batch "$HUB_MAINTENANCE_BATCH" \
                 --arg m_interval "$HUB_MAINTENANCE_INTERVAL" --arg m_small "$HUB_MAINTENANCE_SMALL_BATCH" \
                 --arg t_max "$HUB_TASKS_MAX" --arg t_interval "$HUB_TASKS_MIN_INTERVAL" \
                 '. + {hub: ({port: ($port | tonumber), signup_mode: $signup_mode,
                              maintenance: {start: $m_start, end: $m_end, batch: ($m_batch | tonumber),
                                            interval: ($m_interval | tonumber), small_batch: ($m_small | tonumber)},
-                             tasks: {max: ($t_max | tonumber), min_interval: ($t_interval | tonumber)}}
+                             tasks: {max: ($t_max | tonumber), min_interval: ($t_interval | tonumber)},
+                             file_share: ({kind: $file_share}
+                                          + (if $share_exclude == "" then {} else {exclude: $share_exclude} end)
+                                          + (if $file_share != "smb" or $smb_port == "" then {} else {port: ($smb_port | tonumber)} end))}
                             + (if $secret_key == "" then {} else {secret_key: $secret_key} end)
                             + (if $fetch_allow == "" then {} else {fetch_allow: $fetch_allow} end)
                             + (if $nomad_url == "" then {} else {nomad_url: $nomad_url} end))}' <<< "$host_json")
@@ -1045,6 +1050,36 @@ select_nomad() {
     fi
 }
 
+# select_file_share - Ask whether and how the hub shares the AI's files as a network drive: none (the default), webdav
+# (served by the hub) or smb (the smb service next to it) and, if shared, which file and folder names it leaves out
+# (HUB_FILE_SHARE_EXCLUDE_DEFAULT offered). Saved in the hub host's config as "hub.file_share" -> HUB_FILE_SHARE and
+# HUB_FILE_SHARE_EXCLUDE in .env. smb: also its port on this machine (HUB_SMB_PORT_DEFAULT offered) -> HUB_SMB_PORT
+# Usage: select_file_share
+# Sets: HUB_FILE_SHARE (none, webdav or smb), HUB_FILE_SHARE_EXCLUDE (comma separated, "" when none),
+#       HUB_SMB_PORT ("" unless smb)
+select_file_share() {
+    HUB_FILE_SHARE_EXCLUDE=""
+    HUB_SMB_PORT=""
+    service_hint "     " file_share
+    while true; do
+        read_tty "Share the AI's files as a network drive, none, webdav or smb? [$HUB_FILE_SHARE_DEFAULT]: " "$HUB_FILE_SHARE_DEFAULT" $YES
+        REPLY=$(tr '[:upper:]' '[:lower:]' <<< "$REPLY")
+        [[ "$REPLY" == none || "$REPLY" == webdav || "$REPLY" == smb ]] && break
+        echo -e "\e[1A\e[K     ⚠️ please answer none, webdav or smb"
+    done
+    HUB_FILE_SHARE=$REPLY
+    echo -e "\e[1A\e[K     Network drive: $HUB_FILE_SHARE"
+    [[ "$HUB_FILE_SHARE" != none ]] || return 0
+    # .env and sed safe names, no paths, separated by commas
+    read_setting "Names not shared (comma separated)?" "$HUB_FILE_SHARE_EXCLUDE_DEFAULT" '^ *[A-Za-z0-9._~+-]+( *, *[A-Za-z0-9._~+-]+)* *,? *$'
+    HUB_FILE_SHARE_EXCLUDE=$(sed -E 's/ *, */,/g; s/^ +//; s/[ ,]+$//' <<< "$REPLY")
+    echo -e "\e[1A\e[K     Not shared: $HUB_FILE_SHARE_EXCLUDE"
+    [[ "$HUB_FILE_SHARE" == smb ]] || return 0
+    read_setting "SMB port?" "$HUB_SMB_PORT_DEFAULT" '^([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$'
+    HUB_SMB_PORT=$REPLY
+    echo -e "\e[1A\e[K     SMB port: $HUB_SMB_PORT"
+}
+
 # select_maintenance - the hub's maintenance (conversation summaries): a nightly window with a big batch,
 # and small batches during the day. times are each user's local time
 # Sets: HUB_MAINTENANCE_START, HUB_MAINTENANCE_END, HUB_MAINTENANCE_BATCH, HUB_MAINTENANCE_INTERVAL, HUB_MAINTENANCE_SMALL_BATCH
@@ -1080,7 +1115,7 @@ select_tasks() {
 }
 
 # service_hint - One or two short lines before a component's question
-# Usage: service_hint <indent> <key>   (chat, hub, node, llm, image, tts, stt, embedding, decision, cloudflare, nomad)
+# Usage: service_hint <indent> <key>   (chat, hub, node, llm, image, tts, stt, embedding, decision, cloudflare, nomad, file_share)
 SERVICE_HINTS_SHOWN=" "
 service_hint() {
     local indent="$1" key="$2" line lead="💡" lines=()
@@ -1096,8 +1131,11 @@ service_hint() {
         stt)        lines=("Speak into the chat with the mic, record in the transcribe app. Without: typing only.") ;;
         embedding)  lines=("Long-term memory: contacts remember facts and find them and earlier conversations again. Without: no memories.") ;;
         decision)   lines=("Laya picks the tools for each message, fast and accurate, and filters earlier conversations for memory search."
-                           "Without: the LLM picks the tools, about 5 s more per message.") ;;
+                           "Without: the LLM picks the tools, this will be significantly slower.") ;;
         cloudflare) lines=("Reach the hub from outside your network through a Cloudflare tunnel, requires no open ports.") ;;
+        file_share) lines=("Mount the AI's files (one folder per contact) as a network drive on your computers, log in with your hub user."
+                           "webdav: through the hub's address, also from outside. smb: faster, your computers' own network drive, this network only (port 445 unless changed)."
+                           "Without: the files only through the chat.") ;;
         nomad)      lines=("Use project NOMAD if it is available in your network: offline library and map so Web search, Wikipedia and the map keep working without internet."
                            "Without: those need the internet.") ;;
         *)          return 0 ;;
@@ -1145,6 +1183,9 @@ select_components() {
     INSTALL_DECISION=false
     HUB_SECRET_KEY=""
     HUB_NOMAD_URL=""
+    HUB_FILE_SHARE="$HUB_FILE_SHARE_DEFAULT"
+    HUB_FILE_SHARE_EXCLUDE=""
+    HUB_SMB_PORT=""
     REGISTRY_JSON="${REGISTRY_JSON:-$WORKING_DIR/rueckgrat/node/data/registry.json}"
 
     echo "Select components:"
@@ -1174,6 +1215,7 @@ select_components() {
         select_tasks
         select_hub_secret
         select_nomad
+        select_file_share
     fi
 
     service_hint " " node
@@ -1266,7 +1308,8 @@ _format_host_jq='
   "  "+(if $h.chat then "[✅]" else "[⚫]" end)+" Native Chat Client",
   "  "+(if $h.hub then "[✅]" else "[⚫]" end)+" Hub"+(if $h.hub.signup_mode then " (signup: \($h.hub.signup_mode))" else "" end)
       +(if $h.hub and (($h.hub.secret_key // "") == "") then " ⚠️ no secret key, default token key" else "" end)
-      +(if $h.hub.maintenance then " (maintenance \($h.hub.maintenance.start)-\($h.hub.maintenance.end))" else "" end),
+      +(if $h.hub.maintenance then " (maintenance \($h.hub.maintenance.start)-\($h.hub.maintenance.end))" else "" end)
+      +({"webdav": " (WebDAV)", "smb": " (SMB)"}[$h.hub.file_share.kind // "none"] // ""),
   "  "+(if $h.node then "[✅]" else "[⚫]" end)+" Node",
   "  "+($h.node.services[]? | "    [✅] \(.name)" + (if .name == "tts" then " (\(.model // "chatterbox"))" else "" end) + (if .workers then " (\(.workers) workers)" else "" end)),
   "  "+($h.node.modules[]? | "    [✅] \(.name)")
@@ -1347,6 +1390,25 @@ deploy_hub() {
         set_env_value NOMAD_URL "$HUB_NOMAD_URL"
         echo "   nomad        $HUB_NOMAD_URL"
     fi
+    # the file share (none unless the config picks webdav or smb) and the names it leaves out (the default without any
+    # in the config). smb: the smb service too, with docker's volumes folder of this machine (the contacts' volumes)
+    # and its port here (the default without one in the config)
+    local file_share="${HUB_FILE_SHARE:-$HUB_FILE_SHARE_DEFAULT}" services=(hub caddy) profile=() docker_root=""
+    set_env_value HUB_FILE_SHARE "$file_share"
+    set_env_value HUB_FILE_SHARE_EXCLUDE "${HUB_FILE_SHARE_EXCLUDE:-$HUB_FILE_SHARE_EXCLUDE_DEFAULT}"
+    if [[ "$file_share" == smb ]]; then
+        services+=(smb)
+        profile=(--profile smb)
+        set_env_value HUB_SMB_PORT "${HUB_SMB_PORT:-$HUB_SMB_PORT_DEFAULT}"
+        docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null) || docker_root=""
+        if [[ -n "$docker_root" ]]; then
+            set_env_value HUB_SMB_VOLUMES "$docker_root/volumes"
+        fi
+    fi
+    echo "   file share   $( [[ "$file_share" != none ]] && echo "$file_share (not shared: ${HUB_FILE_SHARE_EXCLUDE:-$HUB_FILE_SHARE_EXCLUDE_DEFAULT})" || echo none )"
+    if [[ "$file_share" == smb ]]; then
+        echo "   smb port     ${HUB_SMB_PORT:-$HUB_SMB_PORT_DEFAULT}"
+    fi
 
     set_env_value HUB_MAINTENANCE_START "${HUB_MAINTENANCE_START:-$HUB_MAINTENANCE_START_DEFAULT}"
     set_env_value HUB_MAINTENANCE_END "${HUB_MAINTENANCE_END:-$HUB_MAINTENANCE_END_DEFAULT}"
@@ -1365,9 +1427,17 @@ deploy_hub() {
     echo "   secret key   $( [[ -n "${HUB_SECRET_KEY:-}" ]] && echo "from config (${#HUB_SECRET_KEY} characters)" || echo "not in config" )"
 
     pushd rueckgrat > /dev/null
-    docker compose stop hub caddy 2>/dev/null || true
-    docker compose build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} hub caddy || { echo "❌ Error: Docker compose build of hub & cdaddy failed."; popd; exit 1; }
-    docker compose up -d hub caddy || { echo "❌ Error: Docker compose up of hub & cdaddy failed."; popd; exit 1; }
+    docker compose --profile smb stop hub caddy smb 2>/dev/null || true
+    # no smb any more: its container goes
+    if [[ "$file_share" != smb ]]; then
+        docker compose --profile smb rm -f smb >/dev/null 2>&1 || true
+    fi
+    # the image of the contacts' bash sandboxes and the hub's reader containers (rueckgrat/sandbox): part of the hub, so
+    # always built with it (no question). built only, the hub starts its containers itself. before the hub: it needs the
+    # image from its start
+    docker compose --profile sandbox build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} sandbox || { echo "❌ Error: Docker compose build of the sandbox image failed."; popd; exit 1; }
+    docker compose "${profile[@]}" build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} "${services[@]}" || { echo "❌ Error: Docker compose build of hub & caddy failed."; popd; exit 1; }
+    docker compose "${profile[@]}" up -d "${services[@]}" || { echo "❌ Error: Docker compose up of hub & caddy failed."; popd; exit 1; }
     popd > /dev/null
 
     seed_default_users
@@ -1828,6 +1898,9 @@ parse_host_config() {
     HUB_SECRET_KEY=""
     HUB_FETCH_ALLOW=""
     HUB_NOMAD_URL=""
+    HUB_FILE_SHARE="$HUB_FILE_SHARE_DEFAULT"
+    HUB_FILE_SHARE_EXCLUDE=""
+    HUB_SMB_PORT=""
     HUB_MAINTENANCE_START=""
     HUB_MAINTENANCE_END=""
     HUB_MAINTENANCE_BATCH=""
@@ -1853,6 +1926,12 @@ parse_host_config() {
         HUB_SECRET_KEY=$(echo "$host_config" | jq -r '.hub.secret_key // empty')
         HUB_FETCH_ALLOW=$(echo "$host_config" | jq -r '.hub.fetch_allow // empty')
         HUB_NOMAD_URL=$(echo "$host_config" | jq -r '.hub.nomad_url // empty')
+        HUB_FILE_SHARE=$(echo "$host_config" | jq -r --arg none "$HUB_FILE_SHARE_DEFAULT" \
+            '.hub.file_share.kind // $none | if IN("webdav", "smb") then . else $none end')
+        HUB_FILE_SHARE_EXCLUDE=$(echo "$host_config" | jq -r '.hub.file_share.exclude // empty')
+        HUB_FILE_SHARE_EXCLUDE="${HUB_FILE_SHARE_EXCLUDE:-$HUB_FILE_SHARE_EXCLUDE_DEFAULT}"
+        HUB_SMB_PORT=$(echo "$host_config" | jq -r '.hub.file_share.port // empty')
+        HUB_SMB_PORT="${HUB_SMB_PORT:-$HUB_SMB_PORT_DEFAULT}"
         # configs from before these options have no "maintenance" -> the defaults
         HUB_MAINTENANCE_START=$(echo "$host_config" | jq -r '.hub.maintenance.start // empty')
         HUB_MAINTENANCE_END=$(echo "$host_config" | jq -r '.hub.maintenance.end // empty')
@@ -2487,6 +2566,9 @@ readonly HUB_TASKS_MAX_DEFAULT=20                # open tasks per user (#170 tas
 readonly HUB_TASKS_MIN_INTERVAL_DEFAULT=15       # minutes, the shortest repeat of a task
 readonly STT_WORKERS_DEFAULT=4                   # parallel speech to text transcriptions
 readonly HOST_MODELS_DIR_DEFAULT="/var/lib/Rueckgrat/models"
+readonly HUB_FILE_SHARE_DEFAULT="none"            # the AI's files as a network drive: none, webdav or smb
+readonly HUB_SMB_PORT_DEFAULT=445                  # the smb service's port on the hub's machine (in its container always 445)
+readonly HUB_FILE_SHARE_EXCLUDE_DEFAULT=".venv,venv,__pycache__,node_modules,.mypy_cache,.pytest_cache,.ruff_cache,.tox,.nox,.gradle,.cache"   # names (any depth) the file share leaves out: machine-local
 
 readonly LLAMA_SERVER_MAX_CONTEXT_DEFAULT=4096
 readonly LLAMA_SERVER_GPU_LAYERS_DEFAULT=-1       # -1 means all layers run on GPU
@@ -2520,10 +2602,10 @@ main() {
     IN_PLACE=false
     NO_SCAN=false
     APK_ONLY=false
-    HOST_MODELS_DIR=HOST_MODELS_DIR_DEFAULT
-    NODE_PORT=NODE_PORT_DEFAULT
-    HUB_PORT=HUB_PORT_DEFAULT
-    LLAMA_SERVER_PORT=LLAMA_SERVER_PORT_DEFAULT
+    HOST_MODELS_DIR=$HOST_MODELS_DIR_DEFAULT
+    NODE_PORT=$NODE_PORT_DEFAULT
+    HUB_PORT=$HUB_PORT_DEFAULT
+    LLAMA_SERVER_PORT=$LLAMA_SERVER_PORT_DEFAULT
 
     # cleanup also on errors and Ctrl-C
     trap on_exit EXIT

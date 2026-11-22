@@ -3,7 +3,8 @@ sandboxes of all the contact's conversations, so projects outlive a conversation
 the sandboxes are started through the host's docker.sock, a bind path would be a host path. removed with the contact,
 or by the maintenance (ConversationVolumeMaintenanceTask) when the contact is gone or after STALE_DAYS without a message
 in any of its conversations. the user browses and downloads them through a short lived reader container
-(SandboxVolume.entries, read_file, write_zip, files): the hub has no volume mounted.
+(SandboxVolume.entries, read_file, write_zip, files): the hub has no volume mounted. the user's own changes (the
+WebDAV share, sandbox_dav) go through reader containers too (upload, make_folder, delete, move, copy).
 
 the layout (LAYOUT, made at every sandbox start):
   projects/<name>/        one folder per project, its PROJECT.md says what it is, its status and how to run it
@@ -15,12 +16,14 @@ the layout (LAYOUT, made at every sandbox start):
 import hashlib
 import io
 import posixpath
+import re
 import tarfile
+import tempfile
 import time
 import zipfile
 from contextlib import contextmanager, ExitStack
 from contextvars import ContextVar
-from typing import BinaryIO, Iterator, Optional
+from typing import BinaryIO, Iterable, Iterator, Optional
 
 from app.common import get_logger
 from app.utils.text_files import sanitize_relative_path
@@ -40,10 +43,16 @@ TTS = "data/tts"
 LAYOUT = (PROJECTS, WORKDIR, DOCUMENTS, IMAGES, TTS)
 SHELL_STATE = ".cache/rueckgrat/shell"
 HASH_CHARS = 12         # of the sha256 of a document's (or audio file's) content, its folder in DOCUMENTS (TTS)
-# the image of the reader container: the python sandbox, in the image cache already (keep_template), it has find
-READER_IMAGE = "ghcr.io/vndee/sandbox-python-311-bullseye"
+# the image of the bash sandbox and the reader containers (rueckgrat/sandbox/Dockerfile, built by compose): the python
+# sandbox with C and C++ builds (cmake, ninja), it has find
+SANDBOX_IMAGE = "rueckgrat-sandbox:latest"
+MAX_PROJECT_NAME = 40   # characters of a project's folder name (project_name)
+MAX_PROJECT_TRIES = 99  # a new project's folder: its name, then name_2 up to name_<this> (reserve_project)
 READER_TIMEOUT = 30     # seconds for listing a folder
 CHUNK = 64 * 1024
+SPOOL_BYTES = 32 * 1024 * 1024     # an upload's tar is kept in memory up to this size, on disk beyond
+# a find -printf line of entries and info, \0 ends it: a name may hold tabs and newlines
+FIND_FORMAT = "%y\\t%s\\t%T@\\t%f\\0"
 # left out of a zip on request: version control, caches and installed packages, not the user's work
 EXCLUDED = frozenset({".git", ".cache", ".local", ".npm", "__pycache__", "node_modules", ".venv", "venv"})
 # the open sandboxes of a sharing() block: {"stack": ExitStack, "sessions": {key: (its ExitStack, session)}}
@@ -221,7 +230,7 @@ class SandboxVolume:
     def _reader(self, command: list[str] | None = None, read_only: bool = True):
         """a created (not started) container with the volume at MOUNT_PATH (read only unless read_only False), no network,
         removed when the block ends. get_archive and put_archive work on it as it is, a command (find) needs start()"""
-        container = _client().containers.create(READER_IMAGE, command, mounts=[self._mount(read_only=read_only)],
+        container = _client().containers.create(SANDBOX_IMAGE, command, mounts=[self._mount(read_only=read_only)],
                                                 user=SANDBOX_USER, network_disabled=True, mem_limit="128m",
                                                 labels={LABEL: "reader"})
         try:
@@ -229,11 +238,21 @@ class SandboxVolume:
         finally:
             container.remove(force=True)
 
-    def _output(self, command: list[str]) -> bytes | None:
-        """the stdout of command in a reader container, None when it failed. no volume: None"""
-        if not self.exists():
+    def _run(self, command: list[str]) -> None:
+        """command in a reader container with the volume writable (made on first use), as SANDBOX_USER.
+        OSError with its error output when it fails"""
+        with self._reader(command, read_only=False) as container:
+            container.start()
+            status = container.wait(timeout=READER_TIMEOUT)
+            if status.get("StatusCode"):
+                error = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace").strip()
+                raise OSError(error or f"{command[0]} failed")
+
+    def _output(self, command: list[str], read_only: bool = True) -> bytes | None:
+        """the stdout of command in a reader container, None when it failed. read only without a volume: None"""
+        if read_only and not self.exists():
             return None
-        with self._reader(command) as container:
+        with self._reader(command, read_only=read_only) as container:
             container.start()
             status = container.wait(timeout=READER_TIMEOUT)
             output = container.logs(stdout=True, stderr=False)
@@ -248,20 +267,34 @@ class SandboxVolume:
                 raise FileNotFoundError(path)
             return []
         folder = posixpath.join(MOUNT_PATH, path) if path else MOUNT_PATH
-        # \0 ends a line: a name may hold tabs and newlines. -P (the default): links are listed, never followed
-        output = self._output(["find", folder, "-mindepth", "1", "-maxdepth", "1", "-printf", "%y\\t%s\\t%T@\\t%f\\0"])
+        # -P (the default): links are listed, never followed
+        output = self._output(["find", folder, "-mindepth", "1", "-maxdepth", "1", "-printf", FIND_FORMAT])
         if output is None:
             raise FileNotFoundError(path)
+        return sorted(self._parse_entries(output, path), key=lambda entry: (entry["type"] != "dir", entry["name"].lower()))
+
+    def info(self, path: str) -> Optional[dict]:
+        """the entry of path like the ones of entries, the root is a folder. None when nothing is there"""
+        path = self.clean_path(path)
+        if not path:
+            return {"name": "", "path": "", "type": "dir", "size": 0, "modified": 0}
+        output = self._output(["find", posixpath.join(MOUNT_PATH, path), "-maxdepth", "0", "-printf", FIND_FORMAT])
+        entries = self._parse_entries(output or b"", posixpath.dirname(path))
+        return entries[0] if entries else None
+
+    @staticmethod
+    def _parse_entries(output: bytes, folder: str) -> list[dict]:
+        """the entries of find's FIND_FORMAT lines of the files in folder (a clean_path)"""
         kinds = {"d": "dir", "f": "file", "l": "link"}
         entries = []
         for line in output.decode("utf-8", errors="replace").split("\0"):
             if line.count("\t") < 3:
                 continue
             kind, size, modified, name = line.split("\t", 3)
-            entries.append({"name": name, "path": posixpath.join(path, name) if path else name,
+            entries.append({"name": name, "path": posixpath.join(folder, name) if folder else name,
                             "type": kinds.get(kind, "other"), "size": int(size) if kind != "d" else 0,
                             "modified": int(float(modified))})
-        return sorted(entries, key=lambda entry: (entry["type"] != "dir", entry["name"].lower()))
+        return entries
 
     def has_project(self) -> bool:
         """whether the files hold the user's work: anything not hidden in PROJECTS or WORKDIR (of any conversation).
@@ -277,6 +310,28 @@ class SandboxVolume:
         output = self._output(["sh", "-c", script]) or b""
         projects = [tuple(line.split("\t", 1)) for line in output.decode("utf-8", errors="replace").split("\0") if "\t" in line]
         return sorted(((name, first.strip().lstrip("#").strip()) for name, first in projects), key=lambda p: p[0].lower())
+
+    @staticmethod
+    def project_name(text: str) -> str:
+        """a project's folder name from text (a name or a path, its last part): short, lowercase, letters, digits and _"""
+        name = re.sub(r"[^a-z0-9]+", "_", str(text or "").strip().rstrip("/").rsplit("/", 1)[-1].lower()).strip("_")
+        return name[:MAX_PROJECT_NAME].rstrip("_") or "project"
+
+    def reserve_project(self, name: str) -> str:
+        """a new project's folder in PROJECTS, made now so no other job takes it: project_name(name), on a clash name_2,
+        name_3 ... (mkdir without -p, an existing folder is never reused). returns the folder's name. no volume yet: no
+        project can clash, the name as it is (the first sandbox makes the files, a reader can't write a new volume's
+        root). OSError when no folder could be made"""
+        name = self.project_name(name)
+        if not self.exists():
+            return name
+        candidates = [name] + [f"{name}_{i}" for i in range(2, MAX_PROJECT_TRIES + 1)]
+        script = (f'mkdir -p {MOUNT_PATH}/{PROJECTS} && cd {MOUNT_PATH}/{PROJECTS} && '
+                  'for n in "$@"; do mkdir -- "$n" 2>/dev/null && { printf %s "$n"; exit 0; }; done; exit 1')
+        output = self._output(["sh", "-c", script, "sh", *candidates], read_only=False)
+        if not output:
+            raise OSError(f"no free project folder for {name}")
+        return output.decode("utf-8", errors="replace").strip()
 
     def read_file(self, path: str) -> tuple[str, int, Iterator[bytes]]:
         """(name, size, chunks) of one regular file, the reader container stays until the chunks are read (or closed).
@@ -306,29 +361,68 @@ class SandboxVolume:
                     yield data
         return posixpath.basename(path), int(stat["size"]), chunks()
 
+    def open_file(self, path: str) -> BinaryIO:
+        """one regular file to read like read_file, closing it removes its reader container"""
+        _, _, chunks = self.read_file(path)
+        return io.BufferedReader(_ChunkReader(chunks), CHUNK)
+
     def write_file(self, path: str, data: bytes) -> str:
-        """writes data as the file path (a clean_path, its folders made), owned by SANDBOX_USER, through a reader
-        container with the volume writable. an existing file is replaced. returns path"""
+        """an AI tool's write of data (upload). returns path"""
+        return self.upload(path, io.BytesIO(data), len(data))
+
+    def upload(self, path: str, source: BinaryIO, size: int) -> str:
+        """writes size bytes of source as the file path (a clean_path, its folders made), owned by SANDBOX_USER, through
+        a reader container with the volume writable. an existing file is replaced. returns path"""
         path = self.clean_path(path)
         if not path:
             raise ValueError("no file name")
-        archive = io.BytesIO()
         now = time.time()
-        with tarfile.open(fileobj=archive, mode="w") as tar:
-            parts = path.split("/")
-            for depth in range(1, len(parts)):
-                folder = tarfile.TarInfo("/".join(parts[:depth]))
-                folder.type, folder.mode, folder.mtime = tarfile.DIRTYPE, 0o755, now
-                folder.uid = folder.gid = SANDBOX_UID
-                tar.addfile(folder)
-            member = tarfile.TarInfo(path)
-            member.size, member.mode, member.mtime = len(data), 0o644, now
-            member.uid = member.gid = SANDBOX_UID
-            tar.addfile(member, io.BytesIO(data))
-        with self._reader(read_only=False) as container:
-            if not container.put_archive(MOUNT_PATH, archive.getvalue()):
-                raise OSError(f"{path} could not be written")
+        with tempfile.SpooledTemporaryFile(max_size=SPOOL_BYTES) as archive:
+            with tarfile.open(fileobj=archive, mode="w") as tar:
+                parts = path.split("/")
+                for depth in range(1, len(parts)):
+                    folder = tarfile.TarInfo("/".join(parts[:depth]))
+                    folder.type, folder.mode, folder.mtime = tarfile.DIRTYPE, 0o755, now
+                    folder.uid = folder.gid = SANDBOX_UID
+                    tar.addfile(folder)
+                member = tarfile.TarInfo(path)
+                member.size, member.mode, member.mtime = size, 0o644, now
+                member.uid = member.gid = SANDBOX_UID
+                tar.addfile(member, source)
+            archive.seek(0)
+            with self._reader(read_only=False) as container:
+                if not container.put_archive(MOUNT_PATH, archive):
+                    raise OSError(f"{path} could not be written")
         return path
+
+    @classmethod
+    def _at(cls, path: str) -> str:
+        """the absolute path of path (a clean_path) in a container, ValueError for the root"""
+        path = cls.clean_path(path)
+        if not path:
+            raise ValueError("not the root of the files")
+        return posixpath.join(MOUNT_PATH, path)
+
+    def make_folder(self, path: str) -> None:
+        """a new folder at path, its parent must be there. OSError when it can't be made"""
+        self._run(["mkdir", "--", self._at(path)])
+
+    def delete(self, path: str) -> None:
+        """the file or folder at path with everything in it, the user's own change. never the root"""
+        self._run(["rm", "-rf", "--", self._at(path)])
+
+    def move(self, source: str, target: str) -> None:
+        """source to target, what is at target replaced. never the root"""
+        self._run(["sh", "-c", 'rm -rf -- "$2" && mv -T -- "$1" "$2"', "sh", self._at(source), self._at(target)])
+
+    def copy(self, source: str, target: str, skip: Iterable[str] = ()) -> None:
+        """source to target with everything in it (times and modes kept), what is at target replaced. never the root.
+        skip: names of files and folders in a copied folder that are left out, at any depth"""
+        script = ('src=$1 dst=$2; shift 2; rm -rf -- "$dst" || exit 1; '
+                  'if [ -d "$src" ] && [ ! -L "$src" ]; then '
+                  'mkdir -- "$dst" && tar -C "$src" -cf - --no-wildcards "$@" . | tar -C "$dst" -xpf -; '
+                  'else cp -a -T -- "$src" "$dst"; fi')
+        self._run(["sh", "-c", script, "sh", self._at(source), self._at(target), *(f"--exclude={name}" for name in skip)])
 
     def _walk(self, path: str, exclude: bool) -> Iterator[tuple[list[str], tarfile.TarInfo, tarfile.TarFile]]:
         """(parts below path, member, its tar) of the folders and regular files at path (a clean_path), read from a
@@ -478,3 +572,9 @@ class _ChunkReader(io.RawIOBase):
         n = min(len(buffer), len(self._rest))
         buffer[:n], self._rest = self._rest[:n], self._rest[n:]
         return n
+
+    def close(self) -> None:
+        """a generator of chunks is closed too: its reader container goes (read_file)"""
+        if not self.closed and hasattr(self._chunks, "close"):
+            self._chunks.close()
+        super().close()

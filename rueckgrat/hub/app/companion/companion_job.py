@@ -36,8 +36,9 @@ class CompanionJob(AgentJob):
     """one pass of a companion as an agent job: a calendar row fired. its one step: the lookups on the workers' tool path
     (run_tools), one decision call with their results, then the answer is applied: calendar rows, maybe a message.
     the scheduler runs it on its own thread (run()) and re-arms or closes the row"""
-    # it may take a photo (sent with its message), not make pictures, audio or files: those are for jobs the user asked for
-    EXCLUDED_TOOLS = ("generate_image", "write_file", "share_file", "text_to_speech", "join_files")
+    # it may take a photo and offer files of the contact's sandbox files (sent with its message), not make pictures, audio
+    # or files: those are for jobs the user asked for
+    EXCLUDED_TOOLS = ("generate_image", "write_file", "text_to_speech", "join_files")
     ALLOWED_TOOLS = ("poll", "show_map")     # its message shows the poll or map (ToolRegistry.show_held)
 
     def __init__(self, row: dict, db, infrastructure, tool_registry, tz, now: datetime):
@@ -154,7 +155,7 @@ class CompanionJob(AgentJob):
         self.tool_calls = len(calls)
         results = execution.get_result()
         found = execution.results_prompt(results, failed=False).strip()
-        # a photo it took, attached when it sends its message (_maybe_message)
+        # a photo it took or files it offered, attached when it sends its message (_maybe_message)
         self.attachments = [held for result in results.values() if isinstance(result, dict) for held in result.get("attachments") or []]
         self.held_data = self.tool_registry.held_data(results)
         if calls:

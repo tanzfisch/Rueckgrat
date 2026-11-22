@@ -14,7 +14,9 @@ logger = get_logger()
 # a different model with another size needs this changed and SCHEMA_VERSION bumped
 MEMORY_EMBEDDING_DIM = 384
 # PRAGMA user_version of a db made by this hub. bump it on every schema change: until 1.0 an older db is wiped, never migrated
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12     # 12: #227 done_with_warnings in jobs.status and job_protocols.status
+# #227 an agent job that is done with warnings (steps its sandbox could not check): its own status in jobs and job_protocols
+JOB_DONE_WITH_WARNINGS = "done_with_warnings"
 # #174 finished job protocols older than this are deleted (at the end of a job and at hub start), they are for looking into recent jobs
 PROTOCOL_RETENTION_HOURS = 24
 
@@ -306,7 +308,7 @@ class ChatDB:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
             id TEXT PRIMARY KEY,
-            status TEXT NOT NULL DEFAULT 'initializing' CHECK (status IN ('initializing', 'running', 'done', 'failed', 'cancelled')),
+            status TEXT NOT NULL DEFAULT 'initializing' CHECK (status IN ('initializing', 'running', 'done', 'done_with_warnings', 'failed', 'cancelled')),
             prompt TEXT NOT NULL,
             result TEXT DEFAULT NULL CHECK (result IS NULL OR json_valid(result)),
             conversation_id INTEGER DEFAULT NULL,
@@ -335,7 +337,7 @@ class ChatDB:
             report_message_id INTEGER DEFAULT NULL,
             source_id INTEGER DEFAULT NULL,
             name TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'done', 'failed', 'cancelled', 'interrupted')),
+            status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'done', 'done_with_warnings', 'failed', 'cancelled', 'interrupted')),
             plan TEXT DEFAULT NULL CHECK (plan IS NULL OR json_valid(plan)),
             time_limit INTEGER DEFAULT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -726,7 +728,7 @@ class ChatDB:
 
     def set_job(self, job_id: str, status: str, result: dict | None = None) -> bool:
         """running, or done / failed / cancelled (sets finished_at). result: the report {"summary", "details"}, stored as json"""
-        finished_at = "CURRENT_TIMESTAMP" if status in ("done", "failed", "cancelled") else "NULL"
+        finished_at = "CURRENT_TIMESTAMP" if status in ("done", JOB_DONE_WITH_WARNINGS, "failed", "cancelled") else "NULL"
         with self.get_connection() as conn:
             try:
                 conn.execute(f"UPDATE jobs SET status = ?, result = ?, finished_at = {finished_at} WHERE id = ?",
@@ -793,7 +795,7 @@ class ChatDB:
             conn.commit()
 
     def finish_protocol(self, protocol_id: int, status: str, name: str = None):
-        """the end of a job or pass: done, failed or cancelled. prunes the old ones"""
+        """the end of a job or pass: done, done_with_warnings, failed or cancelled. prunes the old ones"""
         with self.get_connection() as conn:
             conn.execute("UPDATE job_protocols SET status = ?, name = COALESCE(?, name), finished_at = CURRENT_TIMESTAMP WHERE id = ?",
                          (status, name or None, protocol_id))

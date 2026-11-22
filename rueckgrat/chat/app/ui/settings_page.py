@@ -5,7 +5,7 @@ import flet as ft
 from app.ui import theme
 
 from app.ui import BasePage
-from app.ui.widgets import RowSelector, Header, MessageBox, ProfileImageView, VoiceSelector
+from app.ui.widgets import RowSelector, Header, MessageBox, ProfileImageView, VoiceSelector, CopyButton
 from app.utils import RueckgratConfig, Hub, Capabilities
 from app.audio import Text_To_Speech
 
@@ -50,8 +50,25 @@ def _section(title: str, *controls) -> ft.Column:
     return ft.Column([heading, *controls], spacing=10, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
 
 
+def _file_share(share: dict) -> ft.Column:
+    """the network drive (the hub's file share, Hub.get_file_share): what the user must do first, then each shared
+    contact's name and address to copy"""
+    contacts = [ft.Column([ft.Text(contact["name"], weight=ft.FontWeight.BOLD),
+                           ft.Row([ft.Text(contact["address"], no_wrap=False, selectable=True, expand=True),
+                                   CopyButton(contact["address"])], vertical_alignment=ft.CrossAxisAlignment.CENTER)],
+                          spacing=0, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+                for contact in share["contacts"]]
+    return _section(
+        f"Network drive ({share['title']})",
+        ft.Text("your contacts' files on your computer, log in with your hub user and password", color=theme.TEXT_DIM, size=12),
+        *[ft.Text(note, color=theme.TEXT_DIM, size=12, no_wrap=False) for note in share["notes"]],
+        *(contacts or [ft.Text("no shared files yet", color=theme.TEXT_DIM, size=12)]),
+    )
+
+
 class NetworkSettingsPage(ft.Column):
-    def __init__(self):
+    def __init__(self, share: dict | None = None):
+        """share: the hub's file share (logged in, Hub.get_file_share), its section below the hub connection"""
         # same layout as the profile tab: scrolls, fields and buttons share the width
         super().__init__(expand=True, spacing=28, scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
         self.on_ok = None
@@ -68,6 +85,7 @@ class NetworkSettingsPage(ft.Column):
                 self.port_input,
                 ft.Button("Save", on_click=self._ok, style=theme.STYLES["button"]["style"]),
             ),
+            *([_file_share(share)] if share else []),
         ]
 
     def _ok(self, e=None):
@@ -351,7 +369,8 @@ class SettingsPage(BasePage):
 
         logged_in = bool(Hub.access_token)
         # before login only the hub connection can be set
-        self.pages = {"Network": NetworkSettingsPage()}
+        # the hub's file share once logged in (none: no section)
+        self.pages = {"Network": NetworkSettingsPage(Hub.get_file_share() if logged_in else None)}
         if logged_in:
             self.pages = {
                 "Profile": ProfileSettingsPage(self.navigator),

@@ -12,47 +12,6 @@
 
 Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client. Quality of the experience depends on the models you run which is limited by the hardware you have available.
 
-- Tools available to the AI
-    - **bash** — run bash commands in a sandbox
-    - **calculate** — calculate given expression
-    - **run_code** — write a small program and run it in a fresh sandbox container (Python, JavaScript, C++, Java, Go)
-    - **convert** — conversion between numerous units and currencies (exchange rates are saved once a day, so currencies still convert without internet)
-    - **current_time** — current time for given location
-    - **date_calc** — date calculations
-    - **fetch_url** — fetch content for given URL
-    - **find_tools** — helps the AI to find tools it needs
-    - **generate_image** — generate an image on request or on its own
-    - **join_files** — join audio or text files from the sandbox into one file in the given order (e.g. audiobook chapters), used by agent jobs and tasks
-    - **show_map** — show a place on an OpenStreetMap map in the chat, tapping it opens the maps app
-    - **poll** — ask the user a question with options to pick from in the chat
-    - **price_finder** — looks for the best price of something and then shows you a ranked result in the chat
-    - **remember** — keep a short fact about the user, per contact
-    - **search_memory** — find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub)
-    - **spawn_job** — hand a bigger task to a background agent job that reports back when it is done
-    - **task** — do something at a set time, once or repeating (reminders, alarms, wake-up calls, daily news or a price check); also list, change and cancel these tasks
-    - **take_photo** — generate a photo of self, user, or both from current context
-    - **text_to_speech** — speak a short text or text files (e.g. the chapters of an audiobook) with the contact's voice, or the voice chosen in the preferences, into one audio file (WAV, MP3 or Ogg), downloadable by the user in chat
-    - **weather** — weather forcast for given location
-    - **websearch** — search the web when requested or needed
-    - **wikipedia** — search wikipedia when requested or needed
-    - **write_file** — write text or code files, downloadable by the user in chat
-    - **share_file** — attach files or folders already in the sandbox to the answer, downloadable by the user in chat
-
-    Some tools are only offered while the matching service is available: **generate_image** and **take_photo** need an image node, **text_to_speech** a TTS node, **remember** and **search_memory** a text-embeddings node, **weather** and **price_finder** need internet, and **websearch**, **wikipedia** and **show_map** need internet or [Project NOMAD](#offline-with-project-nomad). **fetch_url** is always there: without internet it still reads pages in your network.
-
-- agent jobs running in the background
-    - a controller plans the job in steps and delegates each step to up multiple sub agents working in parallel, each with its own role (e.g. researcher, analyst, writer)
-    - results of every step get reported back to the controller, a failed sub agent is retried once with a revised task
-    - messages from the user during the job can change the remaining plan
-    - the controller merges all results into the final answer, progress is shown in the chat
-    - agents work on projects in their own sandbox file system and can generate images
-
-- persistent companion
-    - opt-in per contact, the contact gets a life of its own between conversations and may write first
-    - every night it plans its day on a private calendar: events of its own life, news scans, an evening reflection and check-ins with the user, only what fits its character
-    - each planned entry runs as an agent job with the usual tools (e.g. websearch for the news) and may send the user a message, sometimes with a photo
-    - the evening reflection carries open threads into the next day's planning
-
 ## Backend
 
 - runs on Linux only
@@ -71,6 +30,71 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
     - text embeddings using fastembed
     - tool detection using Laya where possible
 - GPU: NVIDIA and AMD. Intel GPUs are not supported/tested.
+
+### Agent Jobs
+- a controller plans the job in steps and delegates each step to up multiple sub agents working in parallel, each with its own role (e.g. researcher, analyst, writer)
+- results of every step get reported back to the controller, a failed sub agent is retried once with a revised task
+- messages from the user during the job can change the remaining plan
+- the controller merges all results into the final answer, progress is shown in the chat
+- agents work on projects in their own sandbox file system and can generate images
+
+### Persistent Companion
+- opt-in per contact, the contact gets a life of its own between conversations and may write first
+- every night it plans its day on a private calendar: events of its own life, news scans, an evening reflection and check-ins with the user, only what fits its character
+- each planned entry runs as an agent job with the usual tools (e.g. websearch for the news) and may send the user a message, sometimes with a photo
+- the evening reflection carries open threads into the next day's planning
+
+### Offline with Project NOMAD
+
+If you run [Project NOMAD](https://www.projectnomad.us/) in your network you can register it with hub during installation. Then the will fall back on it for *websearch*, *wikipedia* and *show_map* in case the internet is down.
+
+### Access AI's files as a network drive
+
+The files the AI works with (bash, run_code, written documents, one folder per contact) can be mounted on your computer as a network drive, over WebDAV or SMB. Log in with your hub user name and password (make sure the user has a password). The app's settings, tab Network, list each contact's folder address with a copy button.
+
+**WebDAV** is served by the hub through its https address, so it also works from outside your network (Cloudflare tunnel):
+
+- **Linux**: in the file manager (Nautilus, Dolphin, Thunar) open `davs://rueckgrat.hub/dav/`, or `gio mount davs://rueckgrat.hub/dav/`, or with davfs2: `sudo mount -t davfs https://rueckgrat.hub/dav/ /mnt/rueckgrat`
+- **macOS**: Finder, Go, Connect to Server, `https://rueckgrat.hub/dav/`
+- **Windows**: Explorer, This PC, Map network drive, `https://rueckgrat.hub/dav/` (the hub's certificate must be trusted by Windows)
+
+**SMB** is the usual network drive of Windows, macOS and Linux, faster than WebDAV, in your local network only (port 445 of the hub's machine, or `HUB_SMB_PORT` in `rueckgrat/.env` when 445 is taken; the installer asks). Each contact is a share of its own, named `<name> (<id>)`; you see only your own contacts. Log in to the app once after SMB is turned on (or after your password changed elsewhere): SMB needs a form of the password the hub only gets when you type it. A contact's share shows up once the AI has used its files.
+
+- **Linux**: in the file manager open `smb://rueckgrat.hub/`, or `gio mount "smb://rueckgrat.hub/Lena (3)"`, or with cifs-utils: `sudo mount -t cifs "//rueckgrat.hub/Lena (3)" /mnt/lena -o username=<user>,uid=$(id -u),gid=$(id -g)` (add `,port=<n>` when `HUB_SMB_PORT` isn't 445)
+- **macOS**: Finder, Go, Connect to Server, `smb://rueckgrat.hub`
+- **Windows**: Explorer, `\\rueckgrat.hub`, then right-click a contact, Map network drive
+
+Use the hub machine's name or address in your network for `rueckgrat.hub`. On another port than 445: `smb://rueckgrat.hub:<port>/` for the file managers and Finder; Windows only connects to 445.
+
+Virtual environments, caches and installed packages are not shared, they only work where they were made: `.venv`, `venv`, `__pycache__`, `node_modules`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`, `.gradle` and `.cache`, at any depth. They don't show up on the drive and can't be created there; copying a folder leaves them out. The AI keeps them in its sandbox. The installer offers this comma separated list to configure it `HUB_FILE_SHARE_EXCLUDE` in `rueckgrat/.env`.
+
+### Tools available to the AI
+| Name | Discription |
+|-|-|
+| bash | run bash commands in a sandbox |
+| calculate | calculate given expression |
+| run_code | write a small program and run it in a fresh sandbox container (Python, JavaScript, C++, Java, Go) |
+| convert | conversion between numerous units and currencies (exchange rates are saved once a day, so currencies still convert without internet) |
+| current_time | current time for given location |
+| date_calc | date calculations |
+| fetch_url | fetch content for given URL |
+| find_tools | helps the AI to find tools it needs |
+| generate_image | generate an image on request or on its own |
+| join_files | join audio or text files from the sandbox into one file in the given order (e.g. audiobook chapters), used by agent jobs and tasks |
+| show_map | show a place on an OpenStreetMap map in the chat, tapping it opens the maps app |
+| poll | ask the user a question with options to pick from in the chat |
+| price_finder | looks for the best price of something and then shows you a ranked result in the chat |
+| remember | keep a short fact about the user, per contact |
+| search_memory | find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub) |
+| spawn_job | hand a bigger task to a background agent job that reports back when it is done |
+| task | do something at a set time, once or repeating (reminders, alarms, wake-up calls, daily news or a price check); also list, change and cancel these tasks |
+| take_photo | generate a photo of self, user, or both from current context |
+| text_to_speech | speak a short text or text files (e.g. the chapters of an audiobook) with the contact's voice, or the voice chosen in the preferences, into one audio file (WAV, MP3 or Ogg), downloadable by the user in chat |
+| weather | weather forcast for given location |
+| websearch | search the web when requested or needed |
+| wikipedia | search wikipedia when requested or needed |
+| write_file | write text or code files, downloadable by the user in chat |
+| share_file | attach files or folders already in the sandbox to the answer, downloadable by the user in chat |
 
 ## Frontend Tools
 
@@ -106,9 +130,7 @@ Some screenhots of the app ...
 
 <img src="docs/screenshots/contact_list.png" width="200" alt="contact list"> <img src="docs/screenshots/chat_image.png" width="200" alt="image gen in chat"> <img src="docs/screenshots/chat_foto.png" width="200" alt="self image in chat"> <img src="docs/screenshots/translate.png" width="200" alt="code in chat">
 
-generated promo video ...
-
-[![Rueckgrat promo](https://img.youtube.com/vi/uEq7prKKw6c/0.jpg)](https://www.youtube.com/shorts/uEq7prKKw6c)
+... [youtube](https://youtube.com/playlist?list=PLEiDLLdcvZI8&si=xLnlNBgkKbJ4BABX) playlist
 
 # Getting started
 
@@ -120,7 +142,7 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen, TTS, STT, text embeddings, Laya decisions), an optional Cloudflare tunnel, an optional [Project NOMAD](#offline-with-project-nomad) in your network and an optional Android APK of the chat client.
+The installer supports multi-host deploy, component selection (native chat, hub, node, llama-server, ImageGen, TTS, STT, text embeddings, Laya decisions), an optional Cloudflare tunnel, an optional [Project NOMAD](#offline-with-project-nomad) in your network, an optional [network drive](#access-ais-files-as-a-network-drive) (WebDAV or SMB) of the AI's files and an optional Android APK of the chat client.
 Before each component it says in a line or two what the component brings and what is missing without it. The LLM (llama-server on one node) is required, and the installer warns when no host runs one.
 
 Run chat natively:
@@ -236,21 +258,12 @@ docker exec -it rueckgrat_hub python -m app.hub_management stats
 docker exec -it rueckgrat_hub python -m app.hub_management offline status
 docker exec -it rueckgrat_hub python -m app.hub_management offline nomad [url | --clear | --reset]
 docker exec -it rueckgrat_hub python -m app.hub_management offline simulate [on | off]
+docker exec -it rueckgrat_hub python -m app.hub_management protocol list
 ```
 
 **Note: The invite token is printed only once, copy it immediately.**
 
 To let the AI read websites on your home network or on the hub machine, see [Local web pages](DEVELOPMENT.md#local-web-pages).
-
-## Offline with Project NOMAD
-
-[Project NOMAD](https://www.projectnomad.us/) keeps Wikipedia, other reference books and a world map in your own network. When the hub knows where NOMAD runs:
-
-- **websearch** always searches NOMAD's offline library next to the web, the best answers of both make the result, without internet only the library
-- **wikipedia** uses the offline library when there is no internet or Wikipedia does not answer
-- **show_map** without internet finds places through the offline Wikipedia and draws the map from NOMAD's map files, tapping the map opens NOMAD's map
-
-The installer asks for the NOMAD address (you can skip it). Set, change or remove it later with `offline nomad`, no restart needed. `offline status` shows what the hub found: the books of the library and the map files. With `offline simulate on` the hub acts as if there were no internet, to try the offline features, and `offline simulate off` ends that. The chat's status shows the library and the offline map like the other services.
 
 # Hardware requirements
 

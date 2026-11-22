@@ -18,6 +18,9 @@ JOB_LLM_TIMEOUT = 1800        # seconds per llm call, a setup round writing eigh
 MAX_TOOL_CHARS = 12000        
 WORKER_TOOLS = ["websearch"]   # always run for a worker, the controller's task sets its role and scope (not for a building worker, see BUILD_TOOLS)
 FAILED_LINE = re.compile(r"^\W*FAILED:", re.MULTILINE)    # a worker's reply with a line starting FAILED: failed, also mid-reply
+# a worker's reply with a line starting UNSUPPORTED: did what the sandbox can, a check it can't run (a missing system library,
+# no display, no root) is skipped with this reason: no failure, the job's result warns (Controller._warnings). FAILED wins
+UNSUPPORTED_LINE = re.compile(r"^\W*UNSUPPORTED:[ \t]*(.*)$", re.MULTILINE)
 WORKER_FIX_ROUNDS = 3          # a worker's extra passes of the fixable tools (Tool.fixable) while their calls fail (ToolExecutionTask._fix)
 # a task that makes or uses files or runs something: it names a path in the contact's files or a file by its name
 # (main.py, css/style.css, `app.js`). a plain ".js" only with a folder or in backticks, "Node.js" is a name too
@@ -36,7 +39,8 @@ class AgentJob:
     # forced on it (it searched for nothing useful, about a minute each), it still searches when its detection picks websearch
     BUILD_TOOLS = ("bash", "run_code", "write_file", "text_to_speech", "join_files")
     # a worker whose detection made one of these mandatory has to make its file: when it still fails after the fix rounds
-    # the worker fails in code (step), the llm can't report a file that is not there
+    # the worker fails in code (step), the llm can't report a file that is not there. only its UNSUPPORTED: line (the
+    # sandbox can't do the step) keeps it from failing
     FILE_TOOLS = ("text_to_speech", "write_file", "run_code", "join_files")
     # the tools that make, run or offer something: a worker whose task makes files or runs commands (FILE_TASK) and that
     # called none of them and holds no file fails in code (_idle), it can't have done its task
@@ -75,10 +79,11 @@ class AgentJob:
         self.held_data = {}     # {kind: value} a task's or companion pass's tools held for its message (ToolRegistry.show_held)
         self.excluded_tools = ()    # a retried task's worker: the tools that failed the attempts before (Controller._retry)
         self.failed_tools = []      # the tools that failed or found nothing in this worker's run, a failed result names them
-        self._stuck: List[str] = []     # the problems of its mandatory FILE_TOOLS left after the fix rounds (_use_tools)
+        self._stuck: List[str] = []     # the failed calls of its mandatory FILE_TOOLS left after the fix rounds (_use_tools)
         self._offered: List[str] = []   # the tools its tool setup offered (_use_tools), for _idle's reason
         self._called: List[str] = []    # the tools it called, in order (_use_tools)
         self._detected: List[str] = []  # the tools its detection made mandatory (_use_tools)
+        self._folder_line = ""  # the job's project folder line (Controller._project), "" without one: set_project
 
     def trace(self, action: str, ok=None, step=None, task=None, **data):
         """#174 one line of this agent in the job's protocol, by default in its own step and task"""
@@ -90,6 +95,16 @@ class AgentJob:
     @property
     def role(self) -> str:
         return self._role
+
+    def set_project(self, line: str) -> None:
+        """the job's project folder line (PROJECT_NEW_PART, PROJECT_CONTINUE_PART), its setup and reply get it after the task"""
+        self._folder_line = line
+
+    def _task_prompt(self) -> str:
+        """the prompt with the project folder line after its task, before the earlier results. the task alone (detection,
+        _idle, a retry's revision) stays without it"""
+        task, marker, earlier = self.prompt.partition(prompts.RESULTS_MARKER_PART)
+        return f"{task}{self._folder_line}{marker}{earlier}"
 
     def run(self) -> Optional[Dict[str, Any]]:
         deadline = time.monotonic() + self.time_limit
@@ -109,25 +124,61 @@ class AgentJob:
         """one pass of working out the current task. returns True when the agent is done.
         a worker runs the tools its task needs (like MetaTask), then does its task in one llm call with their results"""
         tools = self._use_tools() if self.tool_context else ""
-        if self._stuck:
-            self._fail_stuck()
-            return True
-        idle = self._idle() if self.tool_context else ""
+        idle = self._idle() if self.tool_context and not self._stuck else ""
         if idle:
             self._fail_idle(idle)
             return True
-        text = self.chat([{"role": "user", "content": prompts.WORKER_PROMPT.format(role=self.role, prompt=self.prompt, tools=tools)}], 0.3).strip()
-        if not text or FAILED_LINE.search(text):
+        content = prompts.WORKER_PROMPT.format(role=self.role, prompt=self._task_prompt(), tools=tools)
+        if self._stuck:     # its reply only decides whether the sandbox can't do it (UNSUPPORTED), else it fails in code
+            content += prompts.STUCK_VERDICT_PART.format(problems="; ".join(dict.fromkeys(self._stuck)))
+        text = self.chat([{"role": "user", "content": content}], 0.3).strip()
+        verdict, unsupported = self._verdict(text)
+        if self._stuck and verdict != "unsupported":
+            self._fail_stuck()
+            return True
+        if verdict == "failed":
             self.result = {"error": text or "no reply from the llm", **({"failed_tools": self.failed_tools} if self.failed_tools else {})}
         else:
             self.result = {"summary": text, "details": "", **({"attachments": self.attachments} if self.attachments else {}),
                            **({"saved": self._saved} if self._saved else {}),
-                           **({"tools": list(dict.fromkeys(self._called))} if self.tool_context else {})}
-        self.trace("done", ok="error" not in self.result, **({"error": text or "no reply"} if "error" in self.result else {"summary": text}))
+                           **({"tools": list(dict.fromkeys(self._called))} if self.tool_context else {}),
+                           **({"unsupported": unsupported} if verdict == "unsupported" else {})}
+        if verdict == "unsupported":
+            logger.info(f"agent {self.role} {self.job_id}: not checked, the sandbox can't do it: {unsupported[:300]}")
+        self.trace("done", ok="error" not in self.result, **({"error": text or "no reply"} if "error" in self.result else {"summary": text}),
+                   **({"unsupported": unsupported} if verdict == "unsupported" else {}))
         return True
 
+    def _verdict(self, text: str) -> tuple:
+        """the worker's verdict of its reply: ("failed", "") without a reply or with a FAILED: line (it wins),
+        ("unsupported", reason) with an UNSUPPORTED: line when there are files (_has_files), else ("done", "").
+        files made are the least a step the sandbox can't finish needs (its build need not work): an UNSUPPORTED: line
+        without any file fails the worker"""
+        if not text or FAILED_LINE.search(text):
+            return "failed", ""
+        match = UNSUPPORTED_LINE.search(text)
+        if not match:
+            return "done", ""
+        if not self._has_files():
+            logger.warning(f"agent {self.role} {self.job_id}: UNSUPPORTED without any file of the task, failed")
+            return "failed", ""
+        return "unsupported", " ".join(match.group(1).split()).strip("*_` ") or prompts.UNSUPPORTED_NO_REASON_PART
+
+    def _has_files(self) -> bool:
+        """the task's files are there: its tools saved or hold one, a step before saved or holds one (its results' lines),
+        or the job continues an existing project (PROJECT_CONTINUE_PART). a tester makes no file of its own"""
+        earlier = self.prompt.partition(prompts.RESULTS_MARKER_PART)[2]
+        before = (prompts.SAVED_FILES_PART.partition("{")[0], prompts.ATTACHED_FILES_PART.partition("{")[0])
+        project = prompts.PROJECT_CONTINUE_PART.partition("}")[2]     # its text after the path, a new project's differs
+        return bool(self._saved or self.attachments or any(mark in earlier for mark in before) or (project and project in self._folder_line))
+
+    def _did_something(self) -> bool:
+        """its tools saved or hold a file, or it called one of the MAKE_TOOLS"""
+        return bool(self._saved or self.attachments or any(name in self.MAKE_TOOLS for name in self._called))
+
     def _fail_stuck(self) -> None:
-        """the worker's failed result when a mandatory FILE_TOOLS tool still fails after the fix rounds, no llm call.
+        """the worker's failed result when a mandatory FILE_TOOLS tool still fails after the fix rounds and its reply did
+        not say that the sandbox can't do it (UNSUPPORTED, step): what it claims besides does not count.
         its failed_tools leave the FILE_TOOLS out: the retry needs them to make the file (Controller._retry)"""
         error = prompts.FILE_TOOLS_STUCK_PART.format(problems="; ".join(dict.fromkeys(self._stuck)))
         failed = [name for name in self.failed_tools if name not in self.FILE_TOOLS]
@@ -142,7 +193,7 @@ class AgentJob:
         task = self.prompt.partition(prompts.RESULTS_MARKER_PART)[0]
         if not (self.file_task(task) or any(name in self.BUILD_TOOLS for name in self._detected)):
             return ""
-        if self._saved or self.attachments or any(name in self.MAKE_TOOLS for name in self._called):
+        if self._did_something():
             return ""
         return prompts.IDLE_WORKER_PART.format(offered=", ".join(self._offered) or "none", called=", ".join(self._called) or "none")
 
@@ -161,12 +212,14 @@ class AgentJob:
     def result_text(result: Dict[str, Any]) -> str:
         """a worker's result as text for the steps after it, the reviews and the merge: its summary, details, the tools it
         called, the files its tools wrote with their full paths (so a later worker uses them instead of making them again)
-        and the files it holds for the user. what a reply only claims shows as no tool and no file"""
+        and the files it holds for the user, and what it could not check (UNSUPPORTED). what a reply only claims shows as no
+        tool and no file"""
         saved = prompts.SAVED_FILES_PART.format(paths=", ".join(result["saved"])) if result.get("saved") else ""
         names = [str(held.get("name")) for held in result.get("attachments") or [] if held.get("name")]
         held = prompts.ATTACHED_FILES_PART.format(names=", ".join(names)) if names else ""
         used = prompts.TOOLS_USED_PART.format(tools=", ".join(result["tools"]) or "none") if "tools" in result else ""
-        return "\n".join(part for part in (result.get("summary") or "", result.get("details") or "", used, saved, held) if part).strip()
+        unchecked = prompts.UNSUPPORTED_PART.format(reason=result["unsupported"]) if result.get("unsupported") else ""
+        return "\n".join(part for part in (result.get("summary") or "", result.get("details") or "", used, saved, held, unchecked) if part).strip()
 
     def _use_tools(self) -> str:
         """a worker's tools (run_tools) and their results as the TOOL_RESULTS block. a failed tool or a search that found
@@ -174,7 +227,7 @@ class AgentJob:
         (else it replies FAILED, its result names the failed tools for the retry, see Controller._retry)"""
         task, _, earlier = self.prompt.partition(prompts.RESULTS_MARKER_PART)
         # the worker's own task only: the links in the earlier results would select fetch_url every time
-        execution = self.run_tools(task, self.prompt, WORKER_TOOLS, optional_when=self.BUILD_TOOLS)
+        execution = self.run_tools(task, self._task_prompt(), WORKER_TOOLS, optional_when=self.BUILD_TOOLS)
         results = execution.get_result()
         self.attachments = [held for result in results.values() if isinstance(result, dict) for held in result.get("attachments") or []]
         self._saved = list(dict.fromkeys(path for result in results.values() if isinstance(result, dict) for path in result.get("saved") or []))
@@ -188,6 +241,7 @@ class AgentJob:
             logger.info(f"agent {self.role} {self.job_id}: websearch found nothing, the worker goes on without it")
         if failed:
             logger.warning(f"agent {self.role} {self.job_id}: tools failed {'; '.join(failed)}")
+        # a run tool with no call (ToolRegistry.NOT_CALLED) is no tool's problem: the checks tell the worker, its reply and _idle decide
         self._stuck = [text for name, text in execution.failing() if name in self.FILE_TOOLS and name in execution.tool_names]
         self._offered = list(dict.fromkeys(execution.tool_names + execution.recommended))
         self._called = [entry["call"].get("tool") for entry in execution.executed]
@@ -216,7 +270,7 @@ class AgentJob:
         detected = decided or []
         recommended = detection_result.get("recommended") or []
         self._detected = list(detected)
-        # the llm's pick without laya only recommends: a build tool it picked counts as found here too
+        # the llm's pick without laya recommends (but a PRIORITY_TOOLS one): a build tool it picked counts as found here too
         found = detected + (recommended if detection.source() == SOURCE_LLM else [])
         if any(name in found for name in optional_when):
             always = [name for name in always if name in detected]

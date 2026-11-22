@@ -28,6 +28,7 @@ services:
       - hub_images:/hub/images
       - hub_voices:/hub/voices
       - hub_files:/hub/files
+      - hub_smb:/hub/smb
       - ../characters:/hub/characters:ro
       - ./config:/hub/config
       - ./chat/app/common:/hub/app/common
@@ -40,6 +41,9 @@ services:
       HUB_PORT: ${HUB_PORT}
       HUB_SECRET_KEY: ${HUB_SECRET_KEY:-}
       HUB_DOCS: ${HUB_DOCS:-false}
+      HUB_FILE_SHARE: ${HUB_FILE_SHARE:-none}
+      HUB_FILE_SHARE_EXCLUDE: ${HUB_FILE_SHARE_EXCLUDE:-}
+      HUB_SMB_PORT: ${HUB_SMB_PORT:-445}
       HUB_FETCH_ALLOW: ${HUB_FETCH_ALLOW:-}
       NOMAD_URL: ${NOMAD_URL:-}
       HUB_MAINTENANCE_START: ${HUB_MAINTENANCE_START:-02:00}
@@ -55,6 +59,34 @@ services:
     restart: unless-stopped
     stdin_open: true
     tty: true
+
+  # #225 the contacts' files as SMB shares (HUB_FILE_SHARE=smb): the hub keeps its users and shares in hub_smb (writable:
+  # samba sets its smbpasswd to 0600 at each read). docker's volumes folder (the contacts' volumes in it), the local
+  # network only (smb.conf), IPv4, on HUB_SMB_PORT (445 unless taken)
+  smb:
+    container_name: rueckgrat_smb
+    build:
+      context: ./smb
+      dockerfile: Dockerfile
+    profiles: ["smb"]
+    ports:
+      - "0.0.0.0:${HUB_SMB_PORT:-445}:445"
+    volumes:
+      - hub_smb:/state
+      - ${HUB_SMB_VOLUMES:-/var/lib/docker/volumes}:/volumes
+    depends_on:
+      - hub
+    restart: unless-stopped
+
+  # #227 the image of the contacts' bash sandboxes and of the hub's reader containers (SandboxVolume.SANDBOX_IMAGE): llm
+  # sandbox's python image with cmake and ninja. built only (docker compose --profile sandbox build sandbox), the hub
+  # starts its containers itself, nothing runs this service
+  sandbox:
+    image: rueckgrat-sandbox:latest
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile
+    profiles: ["sandbox"]
 
   cloudflared:
     container_name: rueckgrat_cloudflared
@@ -134,4 +166,5 @@ volumes:
   hub_images:
   hub_voices:
   hub_files:
+  hub_smb:
   chat_cache:

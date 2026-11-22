@@ -1,11 +1,11 @@
 import re
 import shlex
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 from .tool import Tool
 from .code_tool import RUNTIME_CONFIGS, clip
 from . import prompts
-from app.utils.sandbox_volume import SandboxVolume, MOUNT_PATH, SANDBOX_USER, PROJECTS, DOCUMENTS, IMAGES
+from app.utils.sandbox_volume import SandboxVolume, MOUNT_PATH, SANDBOX_USER, SANDBOX_IMAGE, PROJECTS, DOCUMENTS, IMAGES
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -31,7 +31,7 @@ ENVIRONMENT = {
 
 
 class BashTool(Tool):
-    """runs one bash command in a sandbox container (python image: git, curl, python), as SANDBOX_USER, with network,
+    """runs one bash command in a sandbox container (SANDBOX_IMAGE: git, curl, python, C and C++ builds), as SANDBOX_USER, with network,
     in the contact's persistent files (SandboxVolume, shared by all its conversations). the calls of one round share one
     container (sharing), each with its own timeout and result, a failing command does not stop the next. the files carry
     over, and like an open terminal per conversation the folder, exported variables and functions (RESTORE), running
@@ -88,8 +88,8 @@ class BashTool(Tool):
         try:
             restore = RESTORE.format(state=SandboxVolume.shell_state(self.get_conversation_id()),
                                      workdir=SandboxVolume.workdir(self.get_conversation_id()))
-            with SandboxVolume(self.get_user_id(), self.contact_id).session(configs, lang="python",
-                                                                      skip_environment_setup=True) as session:
+            volume = SandboxVolume(self.get_user_id(), self.contact_id)
+            with volume.session(configs, lang="python", image=SANDBOX_IMAGE, skip_environment_setup=True) as session:
                 started = time.monotonic()
                 result = session.execute_command(f"timeout {COMMAND_TIMEOUT} bash -c {shlex.quote(restore + command)}",
                                                  workdir=MOUNT_PATH)
@@ -127,9 +127,16 @@ class BashTool(Tool):
         first line of its PROJECT.md each"""
         try:
             projects = SandboxVolume(user_id, contact_id).projects()
-            listed = "\n".join(prompts.BASH_PROJECT_LINE.format(name=name, summary=summary or "no PROJECT.md")
-                                for name, summary in projects) or prompts.BASH_NO_PROJECTS_PART
         except Exception as e:
             logger.warning(f"projects of contact {contact_id} not listed {repr(e)}")
-            listed = prompts.BASH_PROJECTS_UNKNOWN_PART
-        return cls.prompt(SandboxVolume.workdir(conversation_id), listed)
+            projects = None
+        return cls.prompt(SandboxVolume.workdir(conversation_id), cls.projects_text(projects))
+
+    @staticmethod
+    def projects_text(projects: Optional[List[Tuple[str, str]]]) -> str:
+        """the projects (SandboxVolume.projects) one line each: folder and the first line of its PROJECT.md. None: they
+        could not be read"""
+        if projects is None:
+            return prompts.BASH_PROJECTS_UNKNOWN_PART
+        return "\n".join(prompts.BASH_PROJECT_LINE.format(name=name, summary=summary or "no PROJECT.md")
+                         for name, summary in projects) or prompts.BASH_NO_PROJECTS_PART

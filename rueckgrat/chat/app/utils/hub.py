@@ -814,6 +814,24 @@ class Hub:
         return {} 
 
     @classmethod
+    def get_file_share(cls) -> dict | None:
+        """how to mount the user's contacts' files on a computer: {title, notes, contacts: [{name, address}]}. None without
+        a file share on the hub or when it could not be asked"""
+        try:
+            response = requests.get(
+                f"{cls.url}/file_share",
+                headers={"Authorization": f"Bearer {cls.access_token}"},
+                timeout=10,
+                verify=cls.server_cert,
+            )
+            if response.status_code == 200:
+                return response.json().get("file_share")
+            logger.error(f"get file share - {response.status_code} {response.reason}")
+        except Exception as e:
+            logger.error(f"failed to get_file_share {repr(e)}")
+        return None
+
+    @classmethod
     def get_contact_memories(cls, contact_id: int) -> list | None:
         """what the contact remembered of this user, newest first, [{id, text, created_at}]. None if the hub could not be asked"""
         try:

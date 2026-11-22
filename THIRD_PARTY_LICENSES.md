@@ -54,6 +54,8 @@ Downloaded by `playwright install --with-deps --only-shell chromium` while the i
 | ffmpeg (Playwright build) | build 1013 | LGPL (unverified, see below) | https://github.com/microsoft/playwright |
 | System libraries and fonts from apt (`--with-deps`) | Debian | mixed (GPL, LGPL, MIT, font licenses) | https://www.debian.org/ |
 | LLM Sandbox images `ghcr.io/vndee/sandbox-*` (run_code, pulled on first use, not in the hub image) | python 3.11, node 22, cpp 11, java 11, go 1.23 on Debian bullseye | Debian and language runtimes, mixed (unverified) | https://github.com/vndee/llm-sandbox |
+| CMake from PyPI (`cmake`, in the `rueckgrat-sandbox` image built from `rueckgrat/sandbox/Dockerfile`, the bash sandbox) | >=3.31,<4 | BSD-3-Clause (CMake), Apache-2.0 (PyPI packaging) | https://cmake.org/ |
+| Ninja from PyPI (`ninja`, same image) | >=1.11,<2 | Apache-2.0 | https://ninja-build.org/ |
 
 ## Node (`rueckgrat/node`)
 

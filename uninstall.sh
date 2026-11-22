@@ -34,8 +34,10 @@ containers="" running="" images="" volumes="" networks="" workdirs=""
 if [ -n "$d" ]; then
     containers=$($d ps -aq --filter "$p")
     running=$($d ps -q --filter "$p")
-    # built by the compose project, and the pulled ones its containers run (llama.cpp, cloudflared)
-    images=$( { $d images -q --no-trunc --filter "$p"; [ -z "$containers" ] || $d inspect --format '{{.Image}}' $containers; } | sort -u)
+    # built by the compose project, the pulled ones its containers run (llama.cpp, cloudflared) and the hub's sandbox image
+    # (rueckgrat/sandbox, built only, no compose container runs it: the hub starts its containers)
+    images=$( { $d images -q --no-trunc --filter "$p"; $d images -q --no-trunc rueckgrat-sandbox:latest
+                [ -z "$containers" ] || $d inspect --format '{{.Image}}' $containers; } | sort -u)
     volumes=$($d volume ls -q --filter "$p")
     networks=$($d network ls -q --filter "$p")
     [ -z "$containers" ] || workdirs=$($d inspect --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' $containers | sort -u)
