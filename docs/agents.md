@@ -237,10 +237,10 @@ A contact with `profile.companion = 1` has a calendar (`companion_calendar`). `C
 
 A `CompanionJob` (`companion/companion_job.py`) is one pass:
 
-1. Lookups with `run_tools` on the pass's intent. A `news` pass always gets `websearch`. A pass may take a photo (if the contact's settings allow photos) and show a poll or map. It may not make images, files or audio.
+1. Lookups with `run_tools` on the pass's intent. A `news` pass always gets `websearch`. A pass may take a photo (if the contact's settings allow photos), offer files of the contact's sandbox files (`share_file`) and show a poll or map. It may not make images, files or audio.
 2. One LLM call in the contact's persona with the local time, the day's calendar, the last reflection, the last 10 messages, the conversation summary and the lookups. It answers in JSON: `calendar` (new rows of kind `event`, `check_in`, `news` or `reflection`, later today or tomorrow, at most 36 h ahead), `message` and `thoughts`.
 3. New rows are checked and capped by the contact's chattiness. A message is only sent if `CompanionSettings.may_message` allows it (limits per day, the gap between messages, quiet hours, a user who wrote within the last 30 minutes), no reply is being made, and the contact is still a companion.
-4. A message is held as two versions (`Outreach`): `surprise` is posted when the user opens the contact, `reach_out` when the reach window passes (one hour by default).
+4. A message is held as two versions (`Outreach`): `surprise` is posted when the user opens the contact, `reach_out` when the reach window passes (one hour by default). The photo, files, poll or map the tools held are kept with it and posted with whichever version is sent; an offered file is read from the sandbox files only then.
 
 What each pass decided is kept in `companion_log`.
 

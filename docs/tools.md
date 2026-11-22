@@ -89,7 +89,7 @@ Without Laya, an LLM pick makes a picked tool recommended, a picked `task` or `s
 | `run_code` | ✓ | ✓ | ✓ | ✓ |
 | `bash` | ✓ | ✓ | ✓ | ✓ |
 | `write_file` | ✓ | ✓ | ✓ |  |
-| `share_file` | ✓ | ✓ | ✓ |  |
+| `share_file` | ✓ | ✓ | ✓ | ✓ |
 | `find_tools` | ✓ | ✓ | ✓ | ✓ |
 | `task` | ✓ |  |  |  |
 | `text_to_speech` | ✓ | ✓ | ✓ |  |
@@ -293,7 +293,7 @@ Writes one text file (`path`, `content`) into the contact's files and offers it 
 
 ## share_file
 
-Offers files that are already in the contact's files to the user as download cards, without writing anything. A `path` (or a list) is a file or a folder: all its files up to 50, without `.git`, caches and packages. Relative paths start at the conversation's bash folder. It has no question of its own: it is offered whenever `bash` or `run_code` is, and runs after their calls in the same round.
+Offers files that are already in the contact's files to the user as download cards, without writing anything. A `path` (or a list) is a file or a folder: all its files up to 50, without `.git`, caches and packages. Relative paths start at the conversation's bash folder. It has no question of its own: it is offered whenever `bash` or `run_code` is, and runs after their calls in the same round. For a job, a task pass or a companion pass the files are held and attached to the message the agent posts later.
 
 ## find_tools
 

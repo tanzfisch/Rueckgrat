@@ -16,7 +16,8 @@ class ShareFileTool(Tool):
     """offers files of the contact's sandbox files (SandboxVolume) to the user: attached to the assistant message as
     download cards, writes nothing. a path is a file or a folder (all its files, .git, caches and packages left out),
     relative to the conversation's current bash folder or absolute under MOUNT_PATH. without a message (an agent job's
-    worker) the files are held in the result's "attachments", the job attaches them to its report (attach_held).
+    worker, a companion pass) the files are held in the result's "attachments", attached to the message the job posts
+    (attach_held).
     offering is shared with the tools that write a file (WriteFileTool, TextToSpeechTool, JoinFilesTool: _offered, _kept,
     attach_held, merge), and so is writing it without replacing a file unless the call says overwrite (_write)"""
     description = prompts.SHARE_FILE_DESCRIPTION
