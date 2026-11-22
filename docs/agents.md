@@ -1,8 +1,8 @@
 # Agents
 
-This document describes how agents work in the hub: what an agent is, how a background job is started and run, how the tools of a job are chosen, how results get back to the user, the lifecycle and state of a job, the user's tasks and the companion passes, and how agents use files and memory.
+This document describes how agents work in the hub: what an agent is, how a background job is started and run, how agents use the tools, how results get back to the user, the lifecycle and state of a job, the user's tasks and the companion passes, and how agents use files and memory.
 
-It follows what the code actually does (`rueckgrat/hub/app/agent_jobs/`, `rueckgrat/hub/app/companion/`, the `spawn_job` and `task` tools, and the tool detection and execution tasks). How the Backroom frames travel over the websocket is in `communication.md`.
+It follows what the code actually does (`rueckgrat/hub/app/agent_jobs/`, `rueckgrat/hub/app/companion/`, the `spawn_job` and `task` tools). How the tools are chosen and what each tool does is in `tools.md`. How the Backroom frames travel over the websocket is in `communication.md`.
 
 # What an agent is
 
@@ -44,8 +44,6 @@ flowchart LR
 
 ## Contacts
 
-Agents do not have personas of their own. A contact (an AI character such as Alexandra) is a row of the `contacts` table: `name`, `gender`, `role`, `personality` and a JSON `profile`. `ChatDB.get_contact_by_id` returns it as `{"identity": {name, gender, role, personality}, "profile": {...}}`. A contact is a companion when its profile has `"companion": 1`.
-
 Every agent belongs to one contact and one conversation (its `tool_context`: tool registry, db, user, contact, conversation and the user's name). When an agent talks to the user, it uses the contact's persona: `AgentJob.persona_messages` builds the same system prompt as a chat reply (`PromptCompiler` with the contact and the conversation) and adds the agent's own task as the user message. The workers of a job do not use the persona. They get a neutral worker prompt.
 
 ## The AgentJob base
@@ -55,7 +53,7 @@ Every agent belongs to one contact and one conversation (its `tool_context`: too
 - `start()` runs `run()` on a daemon thread named `agent-<role>-<id>`. `run()` calls `step()` until it returns `True`, the agent is stopped, or the time limit has passed (`result = {"error": "timed_out", ...}`).
 - An exception in `run()` becomes `result = {"error": repr(e)}` and a `failed` protocol line.
 - `chat()` is one LLM call with `JOB_LLM_TIMEOUT` (1800 s) and `max_new_tokens` from `Infrastructure.long_reply_tokens()` (a share of the LLM slot's context). Every call is written to the conversation's trace with the name of its caller.
-- `run_tools()` detects and runs the tools for a text, the same way a chat turn does (see below).
+- `run_tools()` detects and runs the tools for a text, the same way a chat turn does (see Tools below and `tools.md`).
 - `post_message()` stores a text as the contact's assistant message, then pushes it as a `{"chat": ...}` frame if the user has a `/ws` open. A task with its alarm on adds `"alarm": true`.
 - `trace()` writes one line into the agent's protocol.
 
@@ -100,62 +98,15 @@ sequenceDiagram
 
 `spawn_job` is not offered to workers or companion passes (`WORKER_EXCLUDED_TOOLS`). A `TaskJob` may use it (`TaskJob.ALLOWED_TOOLS`). A worker can never start another `Controller`: `Controller.spawn` refuses one, so the tree of agents is one level deep.
 
-# Choosing tools
+# Tools
 
-Chat turns, workers, task passes and companion passes all choose their tools the same way: a `ToolDetectionTask` decides which tools are mandatory and which are recommended, then a `ToolExecutionTask` runs tool setup rounds, where the LLM writes the tool calls. The rules for the two priority tools, `task` and `spawn_job`, are part of this path.
+Agents choose and run their tools the same way a chat turn does: a `ToolDetectionTask` decides which tools are mandatory and which are recommended, then a `ToolExecutionTask` runs tool setup rounds in which the LLM writes the calls. `tools.md` describes this path (detection with or without Laya, bands, rounds), the table of all tools and what each tool does. It applies the same rules whether Laya is available or not.
 
-## Detection
+A few of its rules matter most for agents:
 
-`ToolDetectionTask` (`tasks/tool_detection_task.py`) scores every candidate tool. The candidates are the registered tools that can be used now, minus the excluded ones and minus the optional ones (`PROMPT_TOOLS` and companions like `share_file`, which are offered without a detection). The source of the decision is recorded (`source()`):
-
-| Source | When | How the scores come about |
-| --- | --- | --- |
-| `short` | the message has fewer than 4 words | only the tools' `text_score` |
-| `laya` | Laya answers | one Laya question per tool question (`Tool.question`, or one made from the description). A `whole_message` tool (`spawn_job`) is also judged on the whole message. The best answer is the tool's score; the text scores are max'd in |
-| `llm` | Laya is down (`decide_whole` returns `None`) and the LLM picks | one LLM call (`TOOL_PICK_PROMPT`, temperature 0, a JSON schema of the candidate names). A picked tool gets its recommended threshold, a picked `PRIORITY_TOOLS` tool its mandatory threshold; the text scores are max'd in |
-| `text` | Laya is down and the LLM pick failed | only the text scores |
-
-A tool is mandatory when its score reaches its mandatory threshold and recommended when it reaches its recommended threshold. The defaults are 0.7 and 0.5. Tools can set their own (`Tool.thresholds`): `spawn_job` uses (0.7, 0.75), `task` uses (0.65, 0.7).
-
-A few text scores matter for agents:
-
-- `spawn_job` scores its recommended threshold (0.7) when `MessageShape(prompt).complexity()` is at least 0.4 (a message of several steps). A text score never makes it mandatory.
-- `fetch_url` scores 1.0 for a link, so it is mandatory.
-
-In a chat turn the detection also gets the contact's `SandboxVolume`. Then it also asks Laya the `PROJECT_QUESTIONS` (a bug report, or a fix or change to something made earlier). If that score reaches 0.5 and the contact's files hold a project (`SandboxVolume.has_project`), the `PROJECT_TOOLS` (`spawn_job`, `bash`, `write_file`) get that score.
-
-## Bands
-
-`ToolRegistry.bands(mandatory, recommended)` turns the scores into the final bands. This is the one place where the priority rules for a detection live, whatever its source:
-
-- `PRIORITY_TOOLS = ("task", "spawn_job")`, highest first.
-- A mandatory priority tool becomes the only mandatory tool. Of the recommended tools only the ones that outrank it stay (`task` over `spawn_job`).
-- Otherwise a tool that another one overrides (`Tool.overrides`) is dropped: by a mandatory tool from both bands, by a recommended one only from the recommended band.
-
-`ToolExecutionTask` then adds the `PROMPT_TOOLS` (`remember`, `search_memory`, `take_photo`, `find_tools`) to the mandatory band, drops the excluded tools, and adds the companions of the offered tools to the mandatory band (`share_file` with `bash` or `run_code`). The setup prompt offers those as optional.
-
-## Rounds
-
-`ToolRegistry.rounds(mandatory, recommended)` groups the tools into setup rounds in `TOOL_ORDER`:
-
-```
-1  spawn_job, current_time, task
-2  date_calc
-3  search_memory, find_tools, wikipedia, websearch, fetch_url, weather, price_finder
-4  convert
-5  calculate, run_code, bash, share_file
-6  show_map, poll, write_file, generate_image, take_photo, remember
-7  text_to_speech
-8  join_files
-```
-
-A recommended priority tool gets a round of its own. It comes first when it outranks every sure tool. A sure tool is a mandatory tool that is not optional, so the `PROMPT_TOOLS` and companions never count. Otherwise it comes last, so an uncertain priority tool does not take over from a sure tool. A mandatory priority tool is alone in its band anyway (see Bands).
-
-Each round is one LLM call (temperature 0) that writes the calls for that round's tools. The calls of a round run together. A recommended tool's call whose values do not come from the message or the results so far is dropped (`ToolRegistry.grounded`). After each round `ToolRegistry.ends_setup` looks at the calls: if a priority tool was called, nothing runs after that round. So when `spawn_job` is called, the turn does not also write files or run commands.
-
-`find_tools` calls start a new detection on the task they name. Newly found tools get extra rounds, at most twice in a row (`FIND_TOOLS_STEPS`).
-
-The detached tools (`DETACHED_TOOLS`: `show_map`, `poll`, `write_file`, `generate_image`, `take_photo`, `remember`, `text_to_speech`) can go on in the background of a chat turn. Calls made for an agent are marked `background` (`Tool.background`): nobody waits for them.
+- The priority tools are `task` and `spawn_job`. A sure priority tool is the only mandatory tool of its setup (only `task` can still be offered next to a sure `spawn_job`), and after a round in which one was called nothing else runs. So a chat turn that starts a job does not also write files or run commands.
+- Calls made for an agent are background calls. With no stored message to attach to, tools hold their files and data in the result, and the agent attaches them to the message it posts.
+- Each kind of agent has its own excluded tools: workers cannot start jobs, set tasks, remember, poll, show maps or take photos; task and companion passes have their own lists (see "Who can use which tool" in `tools.md`).
 
 # The Controller
 
@@ -197,9 +148,9 @@ Every chat message the user sends to a conversation is also handed to its runnin
 
 A worker is a plain `AgentJob`. Its `step()` is a single pass:
 
-1. Tools (`_use_tools`): `run_tools` on the worker's own task only, not on the earlier results, whose links would select `fetch_url` every time. It excludes `WORKER_EXCLUDED_TOOLS` (`spawn_job`, `remember`, `poll`, `show_map`, `task`), `take_photo`, and a retry's failed tools.
+1. Tools (`_use_tools`): `run_tools` on the worker's own task only, not on the earlier results, whose links would select `fetch_url` every time. It excludes `WORKER_EXCLUDED_TOOLS` (`spawn_job`, `remember`, `poll`, `show_map`, `task`), `take_photo`, and a retry's failed tools (the full lists are in `tools.md`).
    - `websearch` (`WORKER_TOOLS`) always runs, unless the detection found one of the `BUILD_TOOLS` (`bash`, `run_code`, `write_file`, `text_to_speech`, `join_files`). Then it only runs if the detection itself made it mandatory. For an LLM-picked detection the recommended tools count as found here too (`agent_job.py`, `run_tools`).
-   - The worker's setup has up to 3 fix rounds (`WORKER_FIX_ROUNDS`). While calls of the fixable tools fail, are cut off, or a mandatory `bash`/`run_code` was not called, those tools get another pass with what went wrong. A `checks` result tells the worker the final state.
+   - The worker's setup has up to 3 fix rounds (`WORKER_FIX_ROUNDS`) for the tools that make files or run code (see Fix rounds in `tools.md`).
 2. Checks in code, without an LLM call:
    - stuck: a mandatory file tool (`FILE_TOOLS`: `text_to_speech`, `write_file`, `run_code`, `join_files`) still fails after the fix rounds. The worker fails.
    - idle: the task makes or uses files or runs commands, but none of the `MAKE_TOOLS` was called and no file was saved or held. The worker fails, with the tools it was offered and called.
@@ -333,8 +284,6 @@ The volume is removed with the contact, or by the maintenance task after 30 days
 | `MAX_TOOL_CHARS` | `agent_job.py` | 12000 characters of tool results for a worker |
 | `DEFAULT_TIME_LIMIT` | `agent_job.py` | 28800 s |
 | `JOB_LLM_TIMEOUT` | `agent_job.py` | 1800 s |
-| `JOB_COMPLEXITY` | `spawn_agent_job_tool.py` | 0.4 |
-| `MIN_DETECTION_WORDS` | `tool_detection_task.py` | 4 |
 | `PROTOCOL_RETENTION_HOURS` | `db.py` | 24 |
 
 # What the code leaves open
