@@ -6,6 +6,7 @@ Changelog
 
 - #193 webdav for colaborative access to the files an AI is working on
 - #225 SMB for colaborative access to the files an AI is working on
+- #226 allow companions to share files
 
 0.30.0
 ------

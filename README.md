@@ -258,6 +258,7 @@ docker exec -it rueckgrat_hub python -m app.hub_management stats
 docker exec -it rueckgrat_hub python -m app.hub_management offline status
 docker exec -it rueckgrat_hub python -m app.hub_management offline nomad [url | --clear | --reset]
 docker exec -it rueckgrat_hub python -m app.hub_management offline simulate [on | off]
+docker exec -it rueckgrat_hub python -m app.hub_management protocol list
 ```
 
 **Note: The invite token is printed only once, copy it immediately.**
