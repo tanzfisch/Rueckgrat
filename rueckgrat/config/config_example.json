@@ -51,6 +51,10 @@
             "type": "text_to_speech",
             "name": "tts",
             "model": "chatterbox_multilingual"
+          },
+          {
+            "type": "text_to_decision",
+            "name": "decision"
           }
         ]
       }
@@ -70,11 +74,11 @@
     }
   ],
   "cloudflare": {
-    "enabled": true,
+    "enabled": false,
     "addr": "192.168.2.177",
     "hub_addr": "192.168.2.39",
     "hub_port": 14223,
-    "token": "123...456"
+    "token": "1234"
   },
   "users": [
     {
@@ -89,5 +93,6 @@
       "name": "user3",
       "email": null
     }
-  ]
+  ],
+  "chat_apk": true
 }
