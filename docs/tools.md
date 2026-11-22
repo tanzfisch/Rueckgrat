@@ -179,7 +179,7 @@ Then:
 
 ## Fix rounds
 
-Only a job's workers have fix rounds (`fix_rounds`, 3 for a worker, 0 for a chat turn). While calls of the fixable tools (`bash`, `run_code`, `share_file`, `write_file`, `text_to_speech`, `join_files`) failed, were cut off, or a mandatory `bash` or `run_code` got no call, those tools get another pass with the results so far and what went wrong. Afterwards a `checks` result tells the worker whether everything was fixed or what still fails.
+Only a job's workers have fix rounds (`fix_rounds`, 3 for a worker, 0 for a chat turn). While calls of the fixable tools (`bash`, `run_code`, `share_file`, `write_file`, `text_to_speech`, `join_files`) failed, were cut off, or a mandatory `bash` or `run_code` got no call (`RUN_TOOLS`: a call of either one counts for both), those tools get another pass with the results so far and what went wrong. Afterwards a `checks` result tells the worker whether everything was fixed or what still fails. The fix round's prompt (`FIX_ROUND_PART`) says that what the sandbox does not have (a system package that is not installed, no root or `apt-get`, no display) can't be fixed there and is not installed again: the worker reports it as not checked (`UNSUPPORTED:`, see `agents.md`).
 
 ## Running the calls
 
@@ -285,7 +285,7 @@ Writes a one-file program for a `task` in its own LLM call (it sees the latest m
 
 ## bash
 
-Runs one `command` in a sandbox container (a Python image with git and curl) with network, in the contact's persistent files, as the sandbox user. The calls of one round share one container, each with its own timeout (120 s) and result; a failing command does not stop the next. Like an open terminal per conversation, the folder, exported variables and functions carry over between calls, running processes do not. This is where projects are made and changed.
+Runs one `command` in a sandbox container (`rueckgrat-sandbox`: Python, git, curl, and gcc, g++, make, cmake and ninja for C and C++) with network, in the contact's persistent files, as the sandbox user. The calls of one round share one container, each with its own timeout (120 s) and result; a failing command does not stop the next. Like an open terminal per conversation, the folder, exported variables and functions carry over between calls, running processes do not. This is where projects are made and changed.
 
 ## write_file
 

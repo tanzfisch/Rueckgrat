@@ -52,7 +52,10 @@ class ToolRegistry:
 
     TOOL_RANK = {name: rank for rank, entry in enumerate(TOOL_ORDER) for name in ((entry,) if isinstance(entry, str) else entry)}
     PROMPT_TOOLS = ["remember", "search_memory", "take_photo", "find_tools"]   # find_tools shares search_memory's round, no extra setup call
-    RUN_TOOLS = ("run_code", "bash")    # a worker's mandatory one with no call is a problem for its fix rounds (not_called)
+    # each does the others' job (build, install, run, test): a worker's mandatory one is done when one of them got a call,
+    # else that is a problem for its fix rounds (not_called), not a failure of the worker
+    RUN_TOOLS = ("run_code", "bash")
+    NOT_CALLED = "not called"   # the name of not_called's problem: no tool's, nothing fails a worker for it (AgentJob._use_tools)
     PRIORITY_TOOLS = ("task", "spawn_job")   # highest first: one overrides all other tools and the ones after it here
     WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "poll", "show_map", "task")   # AgentJob.ALLOWED_TOOLS: a task's pass may spawn a job, task and companion passes show polls and maps
     DETACHED_TOOLS = ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember", "text_to_speech")
@@ -391,10 +394,18 @@ class ToolRegistry:
             return {name: {"tool": name, "text": prompts.TOOL_LENGTH_PART.format(name=name)}}
         return None
 
-    def not_called(self, mandatory: List[str], calls: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
-        """the problems (tool name, text) of the mandatory RUN_TOOLS that got no call (a tester that only listed the files)"""
+    def called(self, calls: List[Dict[str, Any]]) -> set:
+        """the tools of calls, with NOT_CALLED when one of the RUN_TOOLS is among them: the problems they fix (ToolExecutionTask._fix)"""
         called = {call.get("tool") for call in calls}
-        return [(name, prompts.TOOL_NOT_CALLED_PART.format(name=name)) for name in mandatory if name in self.RUN_TOOLS and name not in called]
+        return called | ({self.NOT_CALLED} if called & set(self.RUN_TOOLS) else set())
+
+    def not_called(self, mandatory: List[str], calls: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
+        """the problem (NOT_CALLED, text) when mandatory has RUN_TOOLS and none of the RUN_TOOLS got a call (a tester that
+        only listed the files), [] else"""
+        missing = [name for name in mandatory if name in self.RUN_TOOLS]
+        if not missing or self.NOT_CALLED in self.called(calls):
+            return []
+        return [(self.NOT_CALLED, prompts.TOOL_NOT_CALLED_PART.format(names=" or ".join(missing)))]
 
     def problems(self, results: Optional[Mapping[str, Any]]) -> List[Tuple[str, str]]:
         """what went wrong in {tool name: result} that a fix round could repair, (tool name, text) per problem of each

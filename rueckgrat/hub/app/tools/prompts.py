@@ -10,7 +10,7 @@ templates, filled with str.format (literal braces doubled):
   TOOL_CUT_OFF_PART                           name: the tool whose last call was cut off
   TOOL_LENGTH_PART                            name: the tool of the last call of a setup reply that hit its token limit
   FIX_ROUND_PART                              fix, total: the fix round and how many there are, problems: "- " lines
-  TOOL_NOT_CALLED_PART                        name: a mandatory tool of a worker that got no call
+  TOOL_NOT_CALLED_PART                        names: a worker's mandatory RUN_TOOLS when none of them got a call, " or " separated
   CHECKS_FIXED_PART, CHECKS_FAILED_PART       rounds: fix rounds run, problems (failed only): "; " separated
   TOOLS_RECOMMENDED_PART, TOOLS_REPLY_PART,
   TOOLS_OPTIONAL_PART, TOOLS_MANDATORY_PART   tools: the instructions of the offered tools (ToolRegistry.get_tools_prompt)
@@ -48,10 +48,13 @@ templates, filled with str.format (literal braces doubled):
                                               BASH_PROJECTS_UNKNOWN_PART
   BASH_PROJECT_LINE                           name: a project's folder, summary: the first line of its PROJECT.md
   SEARCH_MEMORY_CONVERSATION_QUESTION_PART    summary: the start of an earlier conversation's summary
-  SPAWN_JOB_REPORT_PROMPT                     prompt, summary, details, attachments: SPAWN_JOB_ATTACHMENTS_PART or ""
+  SPAWN_JOB_REPORT_PROMPT                     prompt, summary, details, attachments: SPAWN_JOB_ATTACHMENTS_PART or "",
+                                              warnings: SPAWN_JOB_WARNINGS_PART or ""
   SPAWN_JOB_ATTACHMENTS_PART                  names: one "- name" line per held file
+  SPAWN_JOB_WARNINGS_PART                     warnings: one "- role: what was not checked" line each (Controller._warnings)
   SPAWN_JOB_CANCELLED_PROMPT                  prompt, name: the job's name
-  SPAWN_JOB_FAILED_PROMPT                     prompt, name, reason
+  SPAWN_JOB_FAILED_PROMPT                     prompt, name, reason, attachments: SPAWN_JOB_PARTIAL_PART or ""
+  SPAWN_JOB_PARTIAL_PART                      names: one "- name" line per file the failed job's workers held
   FIND_TOOLS_PART                             task: what the find_tools call asked a tool for
   FIND_TOOLS_FOUND_PART, FIND_TOOLS_NONE_PART,
   FIND_TOOLS_OFFERED_PART                     task, tools (not for none): the tools found, comma separated
@@ -99,10 +102,12 @@ FIX ROUND {fix} OF {total}: these calls of the earlier rounds did not work:
 {problems}
 The earlier results show what happened (the commands, exit codes and errors). Fix only what failed, in order: repair the
 code or write the missing files, then run the failed command again (e.g. the build or the test), so its result shows
-whether it works now. Do not redo what already worked. Attach a file again only when it is new or changed. A file of
+whether it works now. Do not redo what already worked. What the sandbox does not have (a system package that is not
+installed, no root or apt-get, no display) can not be fixed here: do not try to install it again, leave that step out
+(e.g. it compiles but does not link for a missing library: the files and the compile are the result, report how far it got). Attach a file again only when it is new or changed. A file of
 this task that is there already (made by an earlier call) is replaced with "overwrite": true."""
-TOOL_NOT_CALLED_PART = ("{name}: the task needs it, but it was not called. Call it now for what the task asks "
-                        "(build, install, run, test), all calls at once")
+TOOL_NOT_CALLED_PART = ("{names}: not called, so nothing was built, installed, run or tested yet. Call it now for what the "
+                        "task asks (build, install, run, test), all calls at once")
 CHECKS_FIXED_PART = "the calls that did not work were fixed in {rounds} fix round(s), the last calls all worked."
 CHECKS_FAILED_PART = ("still not working after {rounds} fix round(s): {problems}. Tell the user what does not work, "
                       "do not claim it works.")
@@ -231,7 +236,7 @@ Use to work with your files, shared by all your conversations with the user: cre
   - {images}/: generated images.
 - The projects so far (folder: first line of its PROJECT.md):
 {projects}
-- Available: bash, coreutils, git, python3 with pip and venv, curl, wget, unzip. git commit works, an author is set. There is no display: GUI programs run without a window.
+- Available: bash, coreutils, git, python3 with pip and venv, curl, wget, unzip, and for C and C++ gcc, g++, make, cmake, ninja and pkg-config (no apt-get: you are not root). git commit works, an author is set. There is no display: GUI programs run without a window.
 - Python packages go in a venv in the project folder: python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
 - The command must finish within {timeout} seconds. A program that keeps running (a game, a GUI, a server) runs with a time limit: timeout 10 python3 main.py, exit code 124 then means it ran 10 seconds without crashing. Keep the output short: use head, tail, grep or wc instead of printing big files whole.
 - {files} is your own filesystem: create every project and its files here. Nothing loose at the top of {files}.
@@ -518,7 +523,7 @@ JOB_PROMPT:
 JOB_RESULT:
 {summary}
 {details}
-{attachments}
+{attachments}{warnings}
 Tell the user in one or two short sentences that the job is done and what it found. If JOB_RESULT says something failed, does not work or was not tested, tell the user that too and do not call it ready. Reply with the message only.
 """
 
@@ -526,6 +531,12 @@ SPAWN_JOB_ATTACHMENTS_PART = """
 ATTACHED (already with your message, files as download buttons, images shown):
 {names}
 Do NOT write their code or content into your message, only say what they are.
+"""
+
+SPAWN_JOB_WARNINGS_PART = """
+NOT TESTED (the job's sandbox can't do it, these steps were skipped; each says how far it got, what is missing and how to run the rest):
+{warnings}
+Say plainly how far it got and that the rest was not tested, never call it tested or working, and tell the user how to run it on their own machine.
 """
 
 SPAWN_JOB_CANCELLED_PROMPT = """The user cancelled a background job you started for them, it was stopped before it finished.
@@ -543,8 +554,14 @@ JOB_PROMPT:
 
 WHY IT FAILED:
 {reason}
-
+{attachments}
 Tell the user in one or two short sentences that the job "{name}" failed and why, in plain words. Reply with the message only.
+"""
+
+SPAWN_JOB_PARTIAL_PART = """
+ATTACHED (already with your message, files as download buttons): what the job made before it failed:
+{names}
+They are unfinished and not checked: say so, never call them ready or working. Do NOT write their code or content into your message.
 """
 
 # the reply that starts a job only says so: the job does the work, its report comes as a new message later

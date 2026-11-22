@@ -16,6 +16,7 @@ the layout (LAYOUT, made at every sandbox start):
 import hashlib
 import io
 import posixpath
+import re
 import tarfile
 import tempfile
 import time
@@ -42,8 +43,11 @@ TTS = "data/tts"
 LAYOUT = (PROJECTS, WORKDIR, DOCUMENTS, IMAGES, TTS)
 SHELL_STATE = ".cache/rueckgrat/shell"
 HASH_CHARS = 12         # of the sha256 of a document's (or audio file's) content, its folder in DOCUMENTS (TTS)
-# the image of the reader container: the python sandbox, in the image cache already (keep_template), it has find
-READER_IMAGE = "ghcr.io/vndee/sandbox-python-311-bullseye"
+# the image of the bash sandbox and the reader containers (rueckgrat/sandbox/Dockerfile, built by compose): the python
+# sandbox with C and C++ builds (cmake, ninja), it has find
+SANDBOX_IMAGE = "rueckgrat-sandbox:latest"
+MAX_PROJECT_NAME = 40   # characters of a project's folder name (project_name)
+MAX_PROJECT_TRIES = 99  # a new project's folder: its name, then name_2 up to name_<this> (reserve_project)
 READER_TIMEOUT = 30     # seconds for listing a folder
 CHUNK = 64 * 1024
 SPOOL_BYTES = 32 * 1024 * 1024     # an upload's tar is kept in memory up to this size, on disk beyond
@@ -226,7 +230,7 @@ class SandboxVolume:
     def _reader(self, command: list[str] | None = None, read_only: bool = True):
         """a created (not started) container with the volume at MOUNT_PATH (read only unless read_only False), no network,
         removed when the block ends. get_archive and put_archive work on it as it is, a command (find) needs start()"""
-        container = _client().containers.create(READER_IMAGE, command, mounts=[self._mount(read_only=read_only)],
+        container = _client().containers.create(SANDBOX_IMAGE, command, mounts=[self._mount(read_only=read_only)],
                                                 user=SANDBOX_USER, network_disabled=True, mem_limit="128m",
                                                 labels={LABEL: "reader"})
         try:
@@ -244,11 +248,11 @@ class SandboxVolume:
                 error = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace").strip()
                 raise OSError(error or f"{command[0]} failed")
 
-    def _output(self, command: list[str]) -> bytes | None:
-        """the stdout of command in a reader container, None when it failed. no volume: None"""
-        if not self.exists():
+    def _output(self, command: list[str], read_only: bool = True) -> bytes | None:
+        """the stdout of command in a reader container, None when it failed. read only without a volume: None"""
+        if read_only and not self.exists():
             return None
-        with self._reader(command) as container:
+        with self._reader(command, read_only=read_only) as container:
             container.start()
             status = container.wait(timeout=READER_TIMEOUT)
             output = container.logs(stdout=True, stderr=False)
@@ -306,6 +310,28 @@ class SandboxVolume:
         output = self._output(["sh", "-c", script]) or b""
         projects = [tuple(line.split("\t", 1)) for line in output.decode("utf-8", errors="replace").split("\0") if "\t" in line]
         return sorted(((name, first.strip().lstrip("#").strip()) for name, first in projects), key=lambda p: p[0].lower())
+
+    @staticmethod
+    def project_name(text: str) -> str:
+        """a project's folder name from text (a name or a path, its last part): short, lowercase, letters, digits and _"""
+        name = re.sub(r"[^a-z0-9]+", "_", str(text or "").strip().rstrip("/").rsplit("/", 1)[-1].lower()).strip("_")
+        return name[:MAX_PROJECT_NAME].rstrip("_") or "project"
+
+    def reserve_project(self, name: str) -> str:
+        """a new project's folder in PROJECTS, made now so no other job takes it: project_name(name), on a clash name_2,
+        name_3 ... (mkdir without -p, an existing folder is never reused). returns the folder's name. no volume yet: no
+        project can clash, the name as it is (the first sandbox makes the files, a reader can't write a new volume's
+        root). OSError when no folder could be made"""
+        name = self.project_name(name)
+        if not self.exists():
+            return name
+        candidates = [name] + [f"{name}_{i}" for i in range(2, MAX_PROJECT_TRIES + 1)]
+        script = (f'mkdir -p {MOUNT_PATH}/{PROJECTS} && cd {MOUNT_PATH}/{PROJECTS} && '
+                  'for n in "$@"; do mkdir -- "$n" 2>/dev/null && { printf %s "$n"; exit 0; }; done; exit 1')
+        output = self._output(["sh", "-c", script, "sh", *candidates], read_only=False)
+        if not output:
+            raise OSError(f"no free project folder for {name}")
+        return output.decode("utf-8", errors="replace").strip()
 
     def read_file(self, path: str) -> tuple[str, int, Iterator[bytes]]:
         """(name, size, chunks) of one regular file, the reader container stays until the chunks are read (or closed).

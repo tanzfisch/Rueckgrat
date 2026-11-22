@@ -78,6 +78,16 @@ services:
       - hub
     restart: unless-stopped
 
+  # #227 the image of the contacts' bash sandboxes and of the hub's reader containers (SandboxVolume.SANDBOX_IMAGE): llm
+  # sandbox's python image with cmake and ninja. built only (docker compose --profile sandbox build sandbox), the hub
+  # starts its containers itself, nothing runs this service
+  sandbox:
+    image: rueckgrat-sandbox:latest
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile
+    profiles: ["sandbox"]
+
   cloudflared:
     container_name: rueckgrat_cloudflared
     image: cloudflare/cloudflared:latest

@@ -1432,6 +1432,10 @@ deploy_hub() {
     if [[ "$file_share" != smb ]]; then
         docker compose --profile smb rm -f smb >/dev/null 2>&1 || true
     fi
+    # the image of the contacts' bash sandboxes and the hub's reader containers (rueckgrat/sandbox): part of the hub, so
+    # always built with it (no question). built only, the hub starts its containers itself. before the hub: it needs the
+    # image from its start
+    docker compose --profile sandbox build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} sandbox || { echo "❌ Error: Docker compose build of the sandbox image failed."; popd; exit 1; }
     docker compose "${profile[@]}" build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} "${services[@]}" || { echo "❌ Error: Docker compose build of hub & caddy failed."; popd; exit 1; }
     docker compose "${profile[@]}" up -d "${services[@]}" || { echo "❌ Error: Docker compose up of hub & caddy failed."; popd; exit 1; }
     popd > /dev/null

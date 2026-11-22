@@ -234,7 +234,7 @@ class ToolExecutionTask(Task):
             called = set()
             for group in self.tool_registry.ranked_groups(tools):    # in TOOL_ORDER: bash, run_code and share_file before write_file
                 calls, group_problems = self._round(f"fix {fix}/{self.fix_rounds}", group, group, prompt)
-                called |= {call.get("tool") for call in calls}
+                called |= self.tool_registry.called(calls)
                 found += group_problems
             problems = [problem for problem in problems if problem[0] not in called] + found
         texts = list(dict.fromkeys(text for _, text in problems))

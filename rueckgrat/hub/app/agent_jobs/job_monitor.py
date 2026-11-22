@@ -3,6 +3,7 @@ import time
 from datetime import datetime, timezone
 
 from app.common import get_logger, MessageQueue
+from app.utils.db import JOB_DONE_WITH_WARNINGS
 logger = get_logger()
 
 UPDATE_INTERVAL = 1.0   # seconds: a job's job_update at most this often, a state, step or plan change goes out at once
@@ -11,6 +12,7 @@ LINES_BATCH = 200       # lines per protocol_lines at most, the rest follow in t
 TICK = 0.1              # seconds between the flusher's rounds
 IMMEDIATE = ("job_started", "step_started", "plan", "review", "retry", "cancelled", "timed_out", "job_finished", "pass_started", "pass_finished")
 WORKER_END = {"done", "timed_out", "failed"}
+DONE_STATES = ("done", JOB_DONE_WITH_WARNINGS)     # a job that finished its work, the second with warnings (#227)
 
 
 def utc_now() -> str:
@@ -116,11 +118,11 @@ class RunningJob:
     def finish(self, state: str):
         self._state = state
         self._finished_at = utc_now()
-        if state == "done":
+        if state in DONE_STATES:
             self._percent = 100
         for entry in self._current.values():
             if entry["state"] == "running":
-                entry["state"] = state
+                entry["state"] = "done" if state in DONE_STATES else state
 
     def payload(self) -> dict:
         """the job_update"""
@@ -211,7 +213,7 @@ class JobMonitor:
                 self._dirty.add(job_id)
 
     def finish(self, job_id: str, state: str):
-        """the end of a job or pass (done, failed, cancelled): its protocol gets the state, the update goes out at once"""
+        """the end of a job or pass (done, done_with_warnings, failed, cancelled): its protocol gets the state, the update goes out at once"""
         with self._lock:
             job = self._jobs.get(job_id)
         if job is None:
@@ -366,7 +368,7 @@ class JobMonitor:
         return {"job_id": row["job_id"], "kind": row["kind"], "name": row["name"], "state": row["status"],
                 "contact_id": row["contact_id"], "contact_name": row["contact_name"], "conversation_id": row["conversation_id"],
                 "report_message_id": row["report_message_id"], "source_id": row["source_id"],
-                "step": None, "total": None, "percent": 100 if row["status"] == "done" else None, "current": [],
+                "step": None, "total": None, "percent": 100 if row["status"] in DONE_STATES else None, "current": [],
                 "started_at": row["started_at"], "finished_at": row["finished_at"],
                 "elapsed": seconds_between(row["started_at"], row["finished_at"]), "time_limit": row["time_limit"],
                 "last_action": "", "cancellable": False, "seq": row["seq"]}

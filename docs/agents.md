@@ -134,11 +134,13 @@ flowchart TD
 ```
 
 - Plan: one LLM call (`PLAN_PROMPT`, temperature 0.2) returns `{"name", "steps": [[{role, prompt}, ...], ...]}`. Steps run one after the other, the tasks inside a step run in parallel. At most `MAX_STEPS` (6) steps and `MAX_WORKERS_PER_STEP` (4) tasks per step. The JSON is parsed strictly, without repair. A missing, cut off, invalid or too large plan becomes one step with one worker that does the whole job. The prompt asks for a software project in `~/projects/<name>/` with a `PROJECT.md`, one file per part of a multi-part work, and a last tester step for code that runs.
+- Project: the plan prompt lists the contact's projects (folder and the first line of its `PROJECT.md`, `SandboxVolume.projects`), and the plan says `"project": {"mode": "new" | "continue" | "none", "name"}` (`Controller._project`). `continue` with a listed folder works in it. `new`, or `continue` with a folder that is not listed, reserves a new folder in code (`SandboxVolume.reserve_project`: `mkdir` without `-p`, on a clash `<name>_2`, `<name>_3`, ...), so a job never builds on top of another project; where the planner's tasks name another folder, they get the reserved one. Every worker, retries included, gets a line with the folder after its task (`PROJECT_NEW_PART`, `PROJECT_CONTINUE_PART`).
 - Steps: each task becomes a worker (`spawn`) on its own thread, with the role from the plan and the controller's time limit. The results of the finished steps are appended to the task after `RESULTS_MARKER_PART` (at most `MAX_CONTEXT_CHARS`, 12000 characters, the newest part kept).
-- Retry: a worker with no result or an `error` gets one retry (`MAX_TASK_RETRIES` = 1). One LLM call (`RETRY_PROMPT`) rewrites the task with the reason. The new worker does not get the tools that failed before (`excluded_tools`). The other workers of the step go on. If the retry fails too, the controller stops the step's other workers and the job fails.
+- Retry: a worker with no result or an `error` gets one retry (`MAX_TASK_RETRIES` = 1). One LLM call (`RETRY_PROMPT`) rewrites the task with the reason. The new worker does not get the tools that failed before (`excluded_tools`). The other workers of the step go on. If the retry fails too, the controller stops the step's other workers and the job fails. A worker that reports a step the sandbox can't check (`unsupported`, see Workers) did not fail: it gets no retry, the same sandbox could not do it either.
 - Review: after each step one LLM call (`REVIEW_PROMPT`) reads the results, the remaining steps and the user's messages since the start, and decides `continue`, `replan` (the finished steps stay) or `restart` (start over with a new plan). It can also rename the job. No review runs after the last step when the user said nothing new, and none after `MAX_REPLANS` (3) changes. A reply that cannot be used keeps the plan.
 - Merge: one result is used as it is. More results are merged into `{summary, details}` by one LLM call (`MERGE_PROMPT`). If that fails, the summaries of the last step are joined and all results become the details.
 - Files: the files the workers' tools hold for the user are collected (a later file with the same tool and name replaces an earlier one). If the job or one of its tasks asks for files (`AgentJob.file_task`: a path, or a file name with a known extension, outside links) but no worker saved or holds one, the summary starts with `NOT_DELIVERED_PART` and the result gets `"delivered": false`.
+- Warnings: what the workers could not check (`unsupported`) goes into the result as `warnings`, one `role: reason` line each (`_warnings`), and into the protocol (`warnings`).
 
 ## User messages while a job runs
 
@@ -152,21 +154,21 @@ A worker is a plain `AgentJob`. Its `step()` is a single pass:
    - `websearch` (`WORKER_TOOLS`) always runs, unless the detection found one of the `BUILD_TOOLS` (`bash`, `run_code`, `write_file`, `text_to_speech`, `join_files`). Then it only runs if the detection itself made it mandatory. For an LLM-picked detection the recommended tools count as found here too (`agent_job.py`, `run_tools`).
    - The worker's setup has up to 3 fix rounds (`WORKER_FIX_ROUNDS`) for the tools that make files or run code (see Fix rounds in `tools.md`).
 2. Checks in code, without an LLM call:
-   - stuck: a mandatory file tool (`FILE_TOOLS`: `text_to_speech`, `write_file`, `run_code`, `join_files`) still fails after the fix rounds. The worker fails.
+   - stuck: a mandatory file tool (`FILE_TOOLS`: `text_to_speech`, `write_file`, `run_code`, `join_files`) still fails after the fix rounds. The worker still gets its answer call (`STUCK_VERDICT_PART` after its prompt), but only an `UNSUPPORTED:` line keeps it from failing: whatever else it replies, it fails in code. A mandatory `run_code` or `bash` that was never called is not a failure: the checks tell the worker, its reply and the idle check decide.
    - idle: the task makes or uses files or runs commands, but none of the `MAKE_TOOLS` was called and no file was saved or held. The worker fails, with the tools it was offered and called.
-3. The answer: one LLM call with `WORKER_PROMPT` (temperature 0.3): the role, the task and the `TOOL_RESULTS` block. The block notes when no web search was done, when it found nothing, and which tools failed. A reply that is empty or has a line starting with `FAILED:` fails the worker. Otherwise its result is `{summary, details, attachments?, saved?, tools}`.
+3. The answer: one LLM call with `WORKER_PROMPT` (temperature 0.3): the role, the task and the `TOOL_RESULTS` block. The block notes when no web search was done, when it found nothing, and which tools failed. A reply that is empty or has a line starting with `FAILED:` fails the worker. A line starting with `UNSUPPORTED:` says that a step can't run in this sandbox (a system library that is not installed and can't be, no root or `apt-get`, no display, sound or hardware), as `how far it got - what is missing - how the user runs the rest`. `WORKER_PROMPT` gives the ladder, best first: everything works (no `UNSUPPORTED:` line); built, but the tests or the program not run; compiled, not linked; files made, not compiled. All of these are acceptable. The worker goes as far as the sandbox can. Errors in the project's own code, failing tests, crashes and missing files of the task are `FAILED`, and `FAILED:` wins over `UNSUPPORTED:`. Files are the least that is needed (`_has_files`): the worker's own saved or held files, files that an earlier step saved or holds (its results' lines), or the existing project a job continues. An `UNSUPPORTED:` line without any of these fails the worker. A build that works is not required. Otherwise its result is `{summary, details, attachments?, saved?, tools, unsupported?}`, and the protocol's `done` line gets `unsupported`.
 
-`AgentJob.result_text` is how a result is passed to the next step, the reviews and the merge. It lists the tools that were really called and the files that were really saved (with full paths) or held, so a later worker can tell what a reply only claims.
+`AgentJob.result_text` is how a result is passed to the next step, the reviews and the merge. It lists the tools that were really called and the files that were really saved (with full paths) or held, so a later worker can tell what a reply only claims. What it could not check shows as a `not checked (the sandbox can't do it): ...` line (`UNSUPPORTED_PART`), the merge keeps it as not tested.
 
 # Results back to the user
 
 When the controller has finished, `SpawnAgentJobTool._run` saves the result and reports:
 
-- done: `jobs.status = 'done'` with the result JSON. The report task is `SPAWN_JOB_REPORT_PROMPT` with the summary, details and names of the attached files.
-- failed: `jobs.status = 'failed'`. The report task is `SPAWN_JOB_FAILED_PROMPT` with the reason (cut to 300 characters).
+- done: `jobs.status = 'done'` (`'done_with_warnings'` with warnings) with the result JSON. The report task is `SPAWN_JOB_REPORT_PROMPT` with the summary, details and names of the attached files, and the result's warnings (`SPAWN_JOB_WARNINGS_PART`): the report says plainly that those steps were not tested and how the user runs them on their own machine. The protocol's `job_finished` line counts them (`warnings`). A job with warnings ends as `done_with_warnings` (`JOB_DONE_WITH_WARNINGS`): in `jobs.status`, in its protocol and in the Backroom.
+- failed: `jobs.status = 'failed'`. The report task is `SPAWN_JOB_FAILED_PROMPT` with the reason (cut to 300 characters). The files of the steps that finished (done or unsupported) are attached anyway (`Controller.partial_attachments`), and the report calls them unfinished and not checked (`SPAWN_JOB_PARTIAL_PART`). Files held by failed or unfinished workers are not sent, and neither are those of the failed step's other workers.
 - cancelled: `jobs.status = 'cancelled'`. The report task is `SPAWN_JOB_CANCELLED_PROMPT`.
 
-The report is one LLM call in the contact's persona (temperature 0.7). Without a reply, a fixed sentence is used instead. The report waits while a reply is being made in the conversation (`Turns.busy`). Then it is posted with `AgentJob.post_message` as the contact's assistant message, so later replies see it in the history. The files the workers held are attached to that message (`ToolRegistry.attach_held`). The `JobMonitor` links the message to the job ("open protocol" under it).
+The report is one LLM call in the contact's persona (temperature 0.7). Without a reply, a fixed sentence is used instead. The report waits while a reply is being made in the conversation (`Turns.busy`). Then it is posted with `AgentJob.post_message` as the contact's assistant message, so later replies see it in the history. The files the workers held are attached to that message (`ToolRegistry.attach_held`), for a done or a failed job, not for a cancelled one. The `JobMonitor` links the message to the job ("open protocol" under it).
 
 At the end of the job a `"done"` status goes to the user, if they are connected and no reply is being made, so the spinner of the workers' tool status messages stops.
 
@@ -181,6 +183,7 @@ At the end of the job a `"done"` status goes to the user, if they are connected 
 | `initializing` | `add_job`, when the tool starts the job |
 | `running` | the job thread, before the controller runs |
 | `done` | the job thread, with the result (`{summary, details, ...}`) |
+| `done_with_warnings` | the job thread, like `done`, when the result has `warnings` (steps the sandbox could not check) |
 | `failed` | the job thread, on an error, or at hub start for a job that was still `initializing` or `running` (`fail_stale_jobs`: `{"error": "interrupted", "details": "hub restarted"}`) |
 | `cancelled` | the job thread, after a cancel |
 
@@ -190,8 +193,8 @@ A job that did not deliver its files still ends as `done`, with the `NOTHING WAS
 
 Every job, task pass and companion pass has a protocol (`agent_jobs/protocol.py`), written to the database as it happens:
 
-- `job_protocols`: one row (kind `job`, `task` or `companion`, the contact, the conversation, the user message that started it, the report message, the calendar row of a pass, the current plan, the time limit, `status`). A protocol is `running` until it ends as `done`, `failed` or `cancelled`. At hub start, protocols still `running` become `interrupted`, and protocols older than 24 hours (`PROTOCOL_RETENTION_HOURS`) are deleted.
-- `protocol_lines`: one line per action (`job_started`, `plan`, `step_started`, `spawned`, `tools`, `done`, `retry`, `review`, `user_message`, `merged`, `cancelled`, `timed_out`, `job_finished`, `pass_started`, `pass_finished`, ...), with agent, step and task. Text values longer than 80 characters are moved to the protocol's outputs.
+- `job_protocols`: one row (kind `job`, `task` or `companion`, the contact, the conversation, the user message that started it, the report message, the calendar row of a pass, the current plan, the time limit, `status`). A protocol is `running` until it ends as `done`, `done_with_warnings`, `failed` or `cancelled`. At hub start, protocols still `running` become `interrupted`, and protocols older than 24 hours (`PROTOCOL_RETENTION_HOURS`) are deleted.
+- `protocol_lines`: one line per action (`job_started`, `plan`, `step_started`, `spawned`, `tools`, `done`, `retry`, `review`, `user_message`, `merged`, `warnings`, `cancelled`, `timed_out`, `job_finished`, `pass_started`, `pass_finished`, ...), with agent, step and task. Text values longer than 80 characters are moved to the protocol's outputs.
 - The tool calls of each worker, with arguments, success, error and duration.
 
 A write that fails is logged and never fails the job.
@@ -213,7 +216,7 @@ The Backroom's cancel sends `{"cancel_job": {"job_id"}}`. `JobMonitor.cancel` on
 
 ## The Backroom
 
-`JobMonitor` (`agent_jobs/job_monitor.py`) is the live view of all running jobs and passes, one per hub. The controller's progress counts the planning as one part of the job: step i of n is `i / (n + 1)` done. The frames (`jobs`, `job_update`, `protocol_lines`, `protocol_output`) are described in `communication.md`. In the chat client this is `backroom_page.py`.
+`JobMonitor` (`agent_jobs/job_monitor.py`) is the live view of all running jobs and passes, one per hub. The controller's progress counts the planning as one part of the job: step i of n is `i / (n + 1)` done. The frames (`jobs`, `job_update`, `protocol_lines`, `protocol_output`) are described in `communication.md`. In the chat client this is `backroom_page.py`. A job card shows `done_with_warnings` as "done with warnings", in the warning color (`backroom_job_card.py`).
 
 # The user's tasks
 
@@ -257,6 +260,8 @@ data/tts/               generated speech files
 .cache/rueckgrat/shell/<conversation>/  the bash terminal of a conversation
 ```
 
+The `bash` sandboxes and the reader containers use the image `rueckgrat-sandbox` (`SANDBOX_IMAGE`, `rueckgrat/sandbox/Dockerfile`): LLM Sandbox's Python image with gcc, g++, make, pkg-config, cmake and ninja. The sandbox user cannot install system packages.
+
 The workers of a job write into this same volume. A worker's saved paths are passed on to the next steps, so later workers use those files instead of making them again. The files a worker's tools hold for the user (`write_file`, `share_file`, `generate_image`, ...) end up attached to the job's report.
 
 The user can open these folders as a network drive (`FileShare`, `utils/file_share.py`). `HUB_FILE_SHARE` picks `webdav` (served by the hub) or `smb` (the hub manages the SMB service's users and shares), or none. There is one folder per contact, named `<name> (<id>)`, with the hub login. The app's network settings show each folder's address. Names in `HUB_FILE_SHARE_EXCLUDE` (virtual environments, caches, installed packages) are not shared. The user sees the files while the AI works on them.
@@ -292,4 +297,4 @@ The volume is removed with the contact, or by the maintenance task after 30 days
 - Jobs do not survive a hub restart. Their threads end, the job is set to `failed` and its protocol to `interrupted`. Nothing resumes it.
 - Only `spawn_job` jobs can be cancelled. Task and companion passes have no cancel.
 - A job's report waits with no time limit while a reply is being made in its conversation. A task pass waits at most 120 s.
-- Whether the plan fits the job, whether a worker really did its task and whether files really exist is checked in code only as far as described above (stuck, idle, `FAILED:`, not delivered). The rest relies on the LLM's replies.
+- Whether the plan fits the job, whether a worker really did its task and whether files really exist is checked in code only as far as described above (stuck, idle, `FAILED:`, not delivered). The rest relies on the LLM's replies, also whether a step really can't run in the sandbox (`UNSUPPORTED:`): code only checks that the worker did something.

@@ -4,6 +4,7 @@ from app.utils import Backroom, duration_text
 
 KIND_TEXT = {"job": "agent job", "task": "task", "companion": "companion"}
 WORKER_MARKS = {"running": "…", "done": "✓", "failed": "✗", "cancelled": "✗", "timed_out": "✗"}
+STATE_TEXT = {"done_with_warnings": "done with warnings"}   # #227 a job done, some steps its sandbox could not check
 
 
 def _update(control: ft.Control):
@@ -77,9 +78,11 @@ class BackroomJobCard(ft.Container):
         job = self._job
         running = job.get("state") == "running"
         self._title.value = job.get("name") or "?"
-        parts = [job.get("contact_name") or "", KIND_TEXT.get(job.get("kind"), job.get("kind") or ""), job.get("state") or ""]
+        state = job.get("state") or ""
+        parts = [job.get("contact_name") or "", KIND_TEXT.get(job.get("kind"), job.get("kind") or ""), STATE_TEXT.get(state, state)]
         self._subtitle.value = "  ·  ".join(part for part in parts if part)
-        self._subtitle.color = {"running": theme.ACCENT, "failed": theme.ERROR, "interrupted": theme.ERROR}.get(job.get("state"), theme.TEXT_DIM)
+        self._subtitle.color = {"running": theme.ACCENT, "failed": theme.ERROR, "interrupted": theme.ERROR,
+                                "done_with_warnings": theme.WARNING}.get(state, theme.TEXT_DIM)
         details = []
         if running and job.get("total"):
             details.append(f"step {job.get('step') or 0} of {job['total']}")
