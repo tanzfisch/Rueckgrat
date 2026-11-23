@@ -99,7 +99,7 @@ class FilesPanel(ft.Container):
             self.listing.controls = []
         else:
             self._set_status("" if entries else
-                             "No files yet. What the AI writes with bash or run_code shows up here." if not path else
+                             "No files yet. What the AI writes with bash or in its jobs shows up here." if not path else
                              "This folder is empty.")
             self.listing.controls = [self._row(entry) for entry in entries]
         self.update()

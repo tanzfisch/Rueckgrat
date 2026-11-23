@@ -1,4 +1,4 @@
-"""the sandbox files of one contact: one volume for all its conversations, what the AI wrote with bash, run_code,
+"""the sandbox files of one contact: one volume for all its conversations, what the AI wrote with bash,
 write_file or text_to_speech. the hub serves them by a conversation of the contact (/conversations/{id}/files), any of
 its conversations shows the same files"""
 from .hub import Hub

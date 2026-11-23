@@ -1,5 +1,4 @@
 import posixpath
-import re
 from typing import Dict, Any, List, Tuple
 from .tool import Tool
 from . import prompts
@@ -21,11 +20,10 @@ class ShareFileTool(Tool):
     offering is shared with the tools that write a file (WriteFileTool, TextToSpeechTool, JoinFilesTool: _offered, _kept,
     attach_held, merge), and so is writing it without replacing a file unless the call says overwrite (_write)"""
     description = prompts.SHARE_FILE_DESCRIPTION
-    sequential = True           # runs after the round's bash and run_code calls that make the files
-    offered_with = ("bash", "run_code")     # no laya question: offered (optional) whenever a tool that makes files is
+    sequential = True           # runs after the round's bash calls that make the files
+    offered_with = ("bash",)   # no laya question: offered (optional) whenever a tool that makes files is
     # the largest file it attaches. every file of a shared folder is read into memory at once, so not more by default
     max_attach_bytes = MAX_ATTACH_BYTES
-    fixable = True
 
     @classmethod
     def name(cls) -> str:
@@ -129,16 +127,6 @@ class ShareFileTool(Tool):
         return result
 
     @classmethod
-    def problems(cls, result: Dict[str, Any]) -> List[str]:
-        """the files that could not be offered (WRITE_FILE_NOT_ATTACHED_PART) or a file that failed"""
-        if "error" in result:
-            return [f"{cls.name()}: {result['error']}"]
-        text = result.get("text") or ""
-        found = re.findall(r"Not attached: (.*?)\. Tell the user", text, re.S)
-        return [f"{cls.name()} did not attach: {problem}" for problem in found] + \
-               [line for line in text.splitlines() if line.startswith("failed to write ")]
-
-    @classmethod
     def attach_held(cls, db, user_id: int, conversation_id: int, message_id: int, held: Dict[str, Any], push: bool) -> None:
         """held: {"tool", "name" (the name the user sees), "path" (in the sandbox files, the name when missing),
         "sandbox": True}, the file read now (as it is when the report is made). ValueError when it is gone or too large"""
@@ -171,7 +159,7 @@ class ShareFileTool(Tool):
     @classmethod
     def merge(cls, known: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         """one line for all files of a message. a failed file keeps its own text. a file attached again (a worker's
-        fix round) is named once, its later held entry kept"""
+        later turn) is named once, its later held entry kept"""
         if not known.get("file_names") or not result.get("file_names"):
             return super().merge(known, result)
         file_names = list(dict.fromkeys(known["file_names"] + result["file_names"]))

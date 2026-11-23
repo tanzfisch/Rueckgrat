@@ -1,7 +1,7 @@
-import json
 from datetime import datetime, timedelta
 
 from app.agent_jobs.agent_job import AgentJob
+from app.agent_jobs.worker import lookup
 from . import prompts
 from .outreach import Outreach
 from .settings import CompanionSettings
@@ -10,9 +10,10 @@ from app.utils.clock import to_db, from_db, local_day, at_local, parse_hhmm
 from app.common import get_logger, Utils
 logger = get_logger()
 
-# the tools a pass of this kind always has in its tool directing, besides the detected ones and PROMPT_TOOLS (like
-# WORKER_TOOLS): laya's websearch questions are about chat messages, a news scan needs its websearch
-ALWAYS_TOOLS = {"news": ["websearch"]}
+# the tools a pass's lookup always has, besides the detected ones: what the user told it before and a photo (when the
+# settings allow photos). of this kind too: laya's websearch questions are about chat messages, a news scan needs its websearch
+ALWAYS_TOOLS = ("search_memory", "take_photo")
+KIND_TOOLS = {"news": ("websearch",)}
 
 # the guardrails (message limits, quiet hours, rows per pass) come from the contact's settings: CompanionSettings
 ROW_KINDS = ("event", "check_in", "news", "reflection")   # what a pass may put on the calendar, all one-off
@@ -33,12 +34,12 @@ def since_text(minutes: float | None) -> str:
     return f"{int(minutes // (24 * 60))} days ago"
 
 class CompanionJob(AgentJob):
-    """one pass of a companion as an agent job: a calendar row fired. its one step: the lookups on the workers' tool path
-    (run_tools), one decision call with their results, then the answer is applied: calendar rows, maybe a message.
+    """one pass of a companion as an agent job: a calendar row fired. its one step: a Worker loop looks up what the pass
+    needs (lookup), one decision call with what it found, then the answer is applied: calendar rows, maybe a message.
     the scheduler runs it on its own thread (run()) and re-arms or closes the row"""
     # it may take a photo and offer files of the contact's sandbox files (sent with its message), not make pictures, audio
-    # or files: those are for jobs the user asked for
-    EXCLUDED_TOOLS = ("generate_image", "write_file", "text_to_speech", "join_files")
+    # or files: those are for jobs the user asked for. nor reset the sandbox: no one asked for it
+    EXCLUDED_TOOLS = ("generate_image", "write_file", "edit_file", "text_to_speech", "join_files", "reset_sandbox")
     ALLOWED_TOOLS = ("poll", "show_map")     # its message shows the poll or map (ToolRegistry.show_held)
 
     def __init__(self, row: dict, db, infrastructure, tool_registry, tz, now: datetime):
@@ -49,7 +50,6 @@ class CompanionJob(AgentJob):
         self.tool_registry = tool_registry
         self.tz = tz
         self.now = now
-        self.tool_calls = 0
         self.outcome = None
         self.settings = None    # CompanionSettings of the contact, read at the start of the pass
         self.log = {}   # what this pass decided, short texts. the scheduler keeps it in companion_log (hub management)
@@ -69,7 +69,6 @@ class CompanionJob(AgentJob):
 
         contact = self.db.get_contact_by_id(contact_id)
         self.settings = CompanionSettings(contact)
-        self.excluded_tools = self.settings.excluded_tools
         name = Utils.get_nested_value(contact, ["identity", "name"], "")
         user_name = self.user_name(self.db, user_id)
         conversation = self._conversation(user_id, contact_id)
@@ -147,20 +146,12 @@ class CompanionJob(AgentJob):
         return "\n".join(lines)
 
     def _lookup(self, kind: str, values: dict) -> str:
-        """the pass's tools like a worker's (run_tools: detection and execution on the pass's intent, no spawn_job,
-        images or memory writes), their results in MetaTask's format. "" without results, failed tools are left out"""
-        query = prompts.intent(kind, values)
-        execution = self.run_tools(query, query, ALWAYS_TOOLS.get(kind, []))
-        calls = [entry["call"] for entry in execution.executed]
-        self.tool_calls = len(calls)
-        results = execution.get_result()
-        found = execution.results_prompt(results, failed=False).strip()
-        # a photo it took or files it offered, attached when it sends its message (_maybe_message)
-        self.attachments = [held for result in results.values() if isinstance(result, dict) for held in result.get("attachments") or []]
-        self.held_data = self.tool_registry.held_data(results)
-        if calls:
-            done = "; ".join(f"{c['tool']} {short(json.dumps({k: v for k, v in c.items() if k != 'tool'}, ensure_ascii=False), 150)}" for c in calls)
-            self.log["lookup"] = f"{done} -> {len(found)} chars"
+        """what the pass's lookup (worker.lookup on its intent: no jobs, images or memory writes) found, "" when it
+        failed. a photo it took or files it offered are attached when it sends its message (_maybe_message)"""
+        found, worker = lookup(self, prompts.intent(kind, values), ALWAYS_TOOLS + KIND_TOOLS.get(kind, ()), self.ALLOWED_TOOLS,
+                               self.EXCLUDED_TOOLS + self.settings.excluded_tools, failed=False)
+        if worker.calls:
+            self.log["lookup"] = f"{', '.join(worker.called()) or 'no tools'} in {worker.calls} calls -> {short(found)}"
         return found
 
     def _add_calendar(self, items, contact_id: int) -> list[int]:

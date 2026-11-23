@@ -30,13 +30,18 @@ if command -v docker >/dev/null 2>&1; then
     d=docker; docker info >/dev/null 2>&1 || d="sudo -n docker"
 fi
 p=label=com.docker.compose.project=rueckgrat
-containers="" running="" images="" volumes="" networks="" workdirs=""
+# the hub's own containers (the contacts' sandboxes, readers, backups) and the contacts' backup volumes carry this label
+s=label=rueckgrat.contact_files
+containers="" running="" images="" volumes="" networks="" workdirs="" sandboxes="" backups=""
 if [ -n "$d" ]; then
     containers=$($d ps -aq --filter "$p")
+    sandboxes=$($d ps -aq --filter "$s")
+    backups=$($d volume ls -q --filter "$s=backup")
     running=$($d ps -q --filter "$p")
     # built by the compose project, the pulled ones its containers run (llama.cpp, cloudflared) and the hub's sandbox image
     # (rueckgrat/sandbox, built only, no compose container runs it: the hub starts its containers)
     images=$( { $d images -q --no-trunc --filter "$p"; $d images -q --no-trunc rueckgrat-sandbox:latest
+                [ -z "$sandboxes" ] || $d inspect --format '{{.Image}}' $sandboxes
                 [ -z "$containers" ] || $d inspect --format '{{.Image}}' $containers; } | sort -u)
     volumes=$($d volume ls -q --filter "$p")
     networks=$($d network ls -q --filter "$p")
@@ -59,7 +64,8 @@ if [ "$ACTION" = status ]; then
     exit 0
 fi
 if [ "$ACTION" = stop ]; then
-    if [ -z "$running" ]; then say "   nothing running"; exit 0; fi
+    running="$running $($d ps -q --filter "$s")"
+    if [ -z "${running## }" ]; then say "   nothing running"; exit 0; fi
     run $d stop $running || failed=1
     exit $failed
 fi
@@ -95,9 +101,11 @@ cert="$HOME/.ssh/rueckgrat-caddy.cert"
 if [ "$ACTION" = list ]; then
     found=false
     if [ -n "$containers" ]; then found=true; list_containers; fi
+    if [ -n "$sandboxes" ]; then found=true; say "   sandboxes:   $($d ps -a --filter "$s" --format '{{.Names}}' | tr '\n' ' ')"; fi
     if [ -n "$images" ]; then found=true; say "   images:      $($d image inspect --format '{{join .RepoTags " "}}' $images | tr '\n' ' ')"; fi
     if [ -n "$networks" ]; then found=true; say "   network:     $($d network ls --filter "$p" --format '{{.Name}}' | tr '\n' ' ')"; fi
     if [ -n "$volumes" ]; then found=true; say "   data volumes (database, images, voices, files, caddy): $(echo $volumes)"; fi
+    if [ -n "$backups" ]; then found=true; say "   backups of the contacts' files: $(echo $backups)"; fi
     for dir in $remove_dirs; do found=true; say "   folder:      $dir"; done
     for dir in $keep_dirs; do say "   kept:        $dir (your own checkout, not made by the installer)"; done
     for m in $models_ok; do say "   models:      $m ($(du -sh "$m" 2>/dev/null | cut -f1))"; done
@@ -110,6 +118,7 @@ fi
 
 # remove: containers first (rm -f stops them), then what they used
 if [ -n "$containers" ]; then run $d rm -f $containers || failed=1; fi
+if [ -n "$sandboxes" ]; then run $d rm -f $sandboxes || failed=1; fi
 if [ -n "$networks" ]; then run $d network rm $networks || failed=1; fi
 for i in $images; do
     # by tag, without -f: an image another container still uses stays
@@ -119,6 +128,7 @@ for i in $images; do
     done
 done
 if [ "$PURGE_VOLUMES" = true ] && [ -n "$volumes" ]; then run $d volume rm $volumes || failed=1; fi
+if [ "$PURGE_VOLUMES" = true ] && [ -n "$backups" ]; then run $d volume rm $backups || failed=1; fi
 cd /
 for dir in $remove_dirs; do
     run rm -rf "$dir" 2>/dev/null || run sudo -n rm -rf "$dir" || failed=1

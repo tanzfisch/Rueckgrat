@@ -1,19 +1,27 @@
-"""the persistent sandbox files of one contact: a docker named volume, mounted at MOUNT_PATH into the bash and run_code
+"""the persistent sandbox files of one contact: a docker named volume, mounted at MOUNT_PATH into the bash
 sandboxes of all the contact's conversations, so projects outlive a conversation. a named volume and not a hub folder:
-the sandboxes are started through the host's docker.sock, a bind path would be a host path. removed with the contact,
+the containers are started through the host's docker.sock, a bind path would be a host path. the contact's sandbox
+container (SandboxContainer) has it mounted for good, readers and backups for one call. removed with the contact,
 or by the maintenance (ConversationVolumeMaintenanceTask) when the contact is gone or after STALE_DAYS without a message
 in any of its conversations. the user browses and downloads them through a short lived reader container
 (SandboxVolume.entries, read_file, write_zip, files): the hub has no volume mounted. the user's own changes (the
 WebDAV share, sandbox_dav) go through reader containers too (upload, make_folder, delete, move, copy).
 
-the layout (LAYOUT, made at every sandbox start):
+the backup (snapshot, restore): a second volume of the contact the hub alone mounts, the agent never reaches it:
+  latest/ the files before the last agent job worker that changes files (snapshot), what a files reset brings back.
+          files of more than BACKUP_MAX_MB (HUB_SANDBOX_BACKUP_MAX_MB, 0 no limit) are not kept, the one before stays
+  safety/ the files a files reset replaced (restore)
+
+the layout (LAYOUT, made when the sandbox container is made):
   projects/<name>/        one folder per project, its PROJECT.md says what it is, its status and how to run it
-  workdir/<conversation>/ where bash and run_code of a conversation start, its scratch work
+  workdir/<conversation>/ where bash of a conversation starts, its scratch work
   data/documents/<hash>/  the files write_file writes, <hash> of the content: a write never overwrites another
   data/images/            generated images
   data/tts/               generated text to speach files
-  .cache/rueckgrat/shell/<conversation>/  the bash terminal of a conversation (its folder, variables, functions)"""
+  .cache/rueckgrat/shell/<conversation>/  the bash terminal of a conversation (its folder, variables, functions)
+  .cache/rueckgrat/apt-packages           the packages sudo apt installed in the sandbox container (the image writes it)"""
 import hashlib
+import os
 import io
 import posixpath
 import re
@@ -22,7 +30,6 @@ import tempfile
 import time
 import zipfile
 from contextlib import contextmanager, ExitStack
-from contextvars import ContextVar
 from typing import BinaryIO, Iterable, Iterator, Optional
 
 from app.common import get_logger
@@ -30,7 +37,7 @@ from app.utils.text_files import sanitize_relative_path
 logger = get_logger()
 
 MOUNT_PATH = "/home"
-SANDBOX_USER = "1000:1000"      # owns the files, the bash tool runs as it. run_code runs as root, the files are handed back after
+SANDBOX_USER = "1000:1000"      # owns the files, the bash tool runs as it
 SANDBOX_UID = 1000
 STALE_DAYS = 30
 LABEL = "rueckgrat.contact_files"
@@ -42,6 +49,7 @@ IMAGES = "data/images"
 TTS = "data/tts"
 LAYOUT = (PROJECTS, WORKDIR, DOCUMENTS, IMAGES, TTS)
 SHELL_STATE = ".cache/rueckgrat/shell"
+APT_PACKAGES = ".cache/rueckgrat/apt-packages"   # one package a line, apt's Post-Invoke writes it (rueckgrat/sandbox/Dockerfile)
 HASH_CHARS = 12         # of the sha256 of a document's (or audio file's) content, its folder in DOCUMENTS (TTS)
 # the image of the bash sandbox and the reader containers (rueckgrat/sandbox/Dockerfile, built by compose): the python
 # sandbox with C and C++ builds (cmake, ninja), it has find
@@ -49,19 +57,30 @@ SANDBOX_IMAGE = "rueckgrat-sandbox:latest"
 MAX_PROJECT_NAME = 40   # characters of a project's folder name (project_name)
 MAX_PROJECT_TRIES = 99  # a new project's folder: its name, then name_2 up to name_<this> (reserve_project)
 READER_TIMEOUT = 30     # seconds for listing a folder
+BACKUP_TIMEOUT = 600    # seconds for copying all files into or out of the backup
+BACKUP_LATEST = "/backup/latest"
+BACKUP_SAFETY = "/backup/safety"
+BACKUP_MAX_MB = int(os.environ.get("HUB_SANDBOX_BACKUP_MAX_MB") or 0)  # files larger are not kept (snapshot), 0 no limit
+# the copies of the backup's helper container (_backup): as root, ownership, modes and times kept
+SNAPSHOT_SCRIPT = (f"rm -rf /backup/next && mkdir -p /backup/next && cp -a {MOUNT_PATH}/. /backup/next/ "
+                   f"&& rm -rf {BACKUP_LATEST} && mv /backup/next {BACKUP_LATEST}")
+LIMIT_SCRIPT = (f"s=$(du -sm {MOUNT_PATH} | cut -f1); [ \"$s\" -le {{limit}} ] "
+                f"|| {{{{ echo \"the files are $s MB, more than the backup limit of {{limit}} MB\" >&2; exit 4; }}}}; ")
+NO_SNAPSHOT = 3         # the exit code of RESTORE_SCRIPT without a snapshot
+RESTORE_SCRIPT = (f"[ -d {BACKUP_LATEST} ] || exit {NO_SNAPSHOT}; rm -rf {BACKUP_SAFETY} && mkdir -p {BACKUP_SAFETY} "
+                  f"&& cp -a {MOUNT_PATH}/. {BACKUP_SAFETY}/ && find {MOUNT_PATH} -mindepth 1 -delete "
+                  f"&& cp -a {BACKUP_LATEST}/. {MOUNT_PATH}/")
 CHUNK = 64 * 1024
 SPOOL_BYTES = 32 * 1024 * 1024     # an upload's tar is kept in memory up to this size, on disk beyond
 # a find -printf line of entries and info, \0 ends it: a name may hold tabs and newlines
 FIND_FORMAT = "%y\\t%s\\t%T@\\t%f\\0"
 # left out of a zip on request: version control, caches and installed packages, not the user's work
 EXCLUDED = frozenset({".git", ".cache", ".local", ".npm", "__pycache__", "node_modules", ".venv", "venv"})
-# the open sandboxes of a sharing() block: {"stack": ExitStack, "sessions": {key: (its ExitStack, session)}}
-_SHARED: ContextVar[dict | None] = ContextVar("rueckgrat_shared_sessions", default=None)
 # the type bits of go's os.FileMode in get_archive's stat: dir, symlink, device, named pipe, socket, char device, irregular
 _NOT_A_FILE = (1 << 31) | (1 << 27) | (1 << 26) | (1 << 25) | (1 << 24) | (1 << 21) | (1 << 19)
 
 
-def _client():
+def docker_client():
     import docker   # only needed here, the hub runs without docker access too
     return docker.from_env()
 
@@ -95,7 +114,7 @@ class SandboxVolume:
 
     @staticmethod
     def workdir(conversation_id: int) -> str:
-        """the folder a conversation's bash and run_code start in, absolute"""
+        """the folder a conversation's bash starts in, absolute"""
         return f"{MOUNT_PATH}/{WORKDIR}/{int(conversation_id)}"
 
     @staticmethod
@@ -206,7 +225,7 @@ class SandboxVolume:
     def exists(self) -> bool:
         from docker.errors import NotFound
         try:
-            _client().volumes.get(self.name)
+            docker_client().volumes.get(self.name)
             return True
         except NotFound:
             return False
@@ -214,15 +233,19 @@ class SandboxVolume:
     @classmethod
     def all(cls, user_id: int | None = None) -> list["SandboxVolume"]:
         """the volumes there are, of one user (None = all users)"""
-        filters = {"label": [LABEL] + ([f"user_id={int(user_id)}"] if user_id is not None else [])}
+        filters = {"label": [f"{LABEL}=1"] + ([f"user_id={int(user_id)}"] if user_id is not None else [])}
         return [cls(volume.attrs["Labels"]["user_id"], volume.attrs["Labels"]["contact_id"])
-                for volume in _client().volumes.list(filters=filters)]
+                for volume in docker_client().volumes.list(filters=filters)]
 
-    def _mount(self, read_only: bool = False):
+    @property
+    def backup_name(self) -> str:
+        return f"rueckgrat-backup-contact-{self.contact_id}"
+
+    def mount(self, read_only: bool = False):
         """the mount of the volume, created with its labels on first use. read only: never created, check exists() first"""
         from docker.types import Mount
         if not read_only and not self.exists():
-            _client().volumes.create(self.name, labels={LABEL: "1", "user_id": str(self.user_id),
+            docker_client().volumes.create(self.name, labels={LABEL: "1", "user_id": str(self.user_id),
                                                         "contact_id": str(self.contact_id)})
         return Mount(target=MOUNT_PATH, source=self.name, type="volume", read_only=read_only)
 
@@ -230,7 +253,7 @@ class SandboxVolume:
     def _reader(self, command: list[str] | None = None, read_only: bool = True):
         """a created (not started) container with the volume at MOUNT_PATH (read only unless read_only False), no network,
         removed when the block ends. get_archive and put_archive work on it as it is, a command (find) needs start()"""
-        container = _client().containers.create(SANDBOX_IMAGE, command, mounts=[self._mount(read_only=read_only)],
+        container = docker_client().containers.create(SANDBOX_IMAGE, command, mounts=[self.mount(read_only=read_only)],
                                                 user=SANDBOX_USER, network_disabled=True, mem_limit="128m",
                                                 labels={LABEL: "reader"})
         try:
@@ -475,73 +498,76 @@ class SandboxVolume:
                 data = tar.extractfile(member).read() if max_bytes is None or member.size <= max_bytes else None
                 yield "/".join([part for part in (path, *parts) if part]), member.size, data
 
-    def _own(self, container, layout: bool = False) -> None:
-        """hands every file to SANDBOX_USER: a new volume belongs to root, and so do the files a root run_code wrote.
-        layout: the LAYOUT folders are made first"""
+    def stats(self, path: str = "") -> dict[str, tuple[int, int]]:
+        """{path below MOUNT_PATH: (size, mtime)} of every file below the folder path (or of the file), without their
+        bytes: what an agent job's worker changed (Worker._changed). exclude, links, no volume, FileNotFoundError: like files"""
+        path = self.clean_path(path)
+        return {"/".join([part for part in (path, *parts) if part]): (member.size, int(member.mtime))
+                for parts, member, _ in self._walk(path, True) if member.isfile()}
+
+    def own(self, container) -> None:
+        """makes the LAYOUT folders and hands every file to SANDBOX_USER, in a just made container (SandboxContainer): a
+        new volume belongs to root, and so may files of an older hub"""
         folders = " ".join(f"{MOUNT_PATH}/{folder}" for folder in LAYOUT)
-        container.exec_run(["sh", "-c", (f"mkdir -p {folders} && " if layout else "") + f"chown -R {SANDBOX_USER} {MOUNT_PATH}"],
-                           user="root")
+        container.exec_run(["sh", "-c", f"mkdir -p {folders} && chown -R {SANDBOX_USER} {MOUNT_PATH}"], user="root")
 
-    @classmethod
-    @contextmanager
-    def sharing(cls):
-        """within the block session() hands out one sandbox per volume and settings, started on first use and removed
-        when the block ends: the calls of one round pay the container start once. nested blocks share the outer one"""
-        if _SHARED.get() is not None:
-            yield
-            return
-        with ExitStack() as stack:
-            token = _SHARED.set({"stack": stack, "sessions": {}})
-            try:
-                yield
-            finally:
-                _SHARED.reset(token)
+    def snapshot(self) -> None:
+        """copies the files into the backup (BACKUP_LATEST, the one before goes). no volume: nothing to keep.
+        OSError when the copy fails or the files are larger than BACKUP_MAX_MB (the one before stays)"""
+        if self.exists():
+            self._backup((LIMIT_SCRIPT.format(limit=BACKUP_MAX_MB) if BACKUP_MAX_MB > 0 else "") + SNAPSHOT_SCRIPT)
+            logger.info(f"files of contact {self.contact_id} kept in the backup")
 
-    @contextmanager
-    def session(self, runtime_configs: dict, **kwargs):
-        """a llm sandbox container with the volume at MOUNT_PATH: a fresh one removed when the block ends, inside a
-        sharing() block the block's one for these settings. a call that fails drops a shared sandbox, the next call
-        starts a fresh one. kwargs go to SandboxSession (lang, skip_environment_setup, ...)"""
-        shared = _SHARED.get()
-        if shared is None:
-            with self._session(runtime_configs, **kwargs) as session:
-                yield session
-            return
-        key = (self.name, repr(sorted(runtime_configs.items())), repr(sorted(kwargs.items())))
-        if key not in shared["sessions"]:
-            own = ExitStack()   # its own stack: a broken sandbox is removed alone
-            shared["sessions"][key] = (own, own.enter_context(self._session(runtime_configs, **kwargs)))
-            shared["stack"].callback(own.close)
-        own, session = shared["sessions"][key]
+    def restore(self) -> None:
+        """replaces the files with the backup's (BACKUP_LATEST), the replaced ones kept in BACKUP_SAFETY. the files must
+        not change meanwhile: SandboxContainer.stop_processes first. FileNotFoundError without a backup, OSError when the
+        copy fails"""
+        from docker.errors import NotFound
         try:
-            yield session
-        except BaseException:
-            shared["sessions"].pop(key, None)
-            own.close()
-            raise
+            docker_client().volumes.get(self.backup_name)
+        except NotFound:
+            raise FileNotFoundError("no backup of the files")
+        self._backup(RESTORE_SCRIPT)
+        logger.info(f"files of contact {self.contact_id} restored from the backup")
 
-    @contextmanager
-    def _session(self, runtime_configs: dict, **kwargs):
-        """a fresh llm sandbox container with the volume at MOUNT_PATH, removed when the block ends.
-        keep_template: the language image stays, no pull per run"""
-        from llm_sandbox import SandboxSession
-        configs = {**runtime_configs, "mounts": [*runtime_configs.get("mounts", []), self._mount()]}
-        with SandboxSession(keep_template=True, runtime_configs=configs, encoding_errors="replace", **kwargs) as session:
-            self._own(session.container, layout=True)
-            try:
-                yield session
-            finally:
-                self._own(session.container)
+    def _backup(self, script: str) -> None:
+        """script as root in a helper container with the volume at MOUNT_PATH and the backup volume (made on first use)
+        at /backup, no network, the capabilities a copy that keeps owners needs. FileNotFoundError for NO_SNAPSHOT,
+        OSError with its error output when it fails otherwise"""
+        from docker.errors import NotFound
+        from docker.types import Mount
+        client = docker_client()
+        try:
+            client.volumes.get(self.backup_name)
+        except NotFound:
+            client.volumes.create(self.backup_name, labels={LABEL: "backup", "user_id": str(self.user_id),
+                                                            "contact_id": str(self.contact_id)})
+        container = client.containers.create(SANDBOX_IMAGE, ["sh", "-c", script], user="root", network_disabled=True,
+                                             mounts=[self.mount(), Mount(target="/backup", source=self.backup_name, type="volume")],
+                                             cap_drop=["ALL"], cap_add=["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID"],
+                                             labels={LABEL: "backup"})
+        try:
+            container.start()
+            code = container.wait(timeout=BACKUP_TIMEOUT).get("StatusCode")
+            if code == NO_SNAPSHOT:
+                raise FileNotFoundError("no backup of the files")
+            if code:
+                raise OSError(container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace").strip() or "copy failed")
+        finally:
+            container.remove(force=True)
 
     def remove(self) -> None:
-        """the volume and its files. a volume that isn't there, or no docker, is nothing to remove"""
+        """the files, their backup and the contact's sandbox container. what isn't there, or no docker, is nothing to remove"""
+        from app.utils.sandbox_container import SandboxContainer
         try:
             from docker.errors import NotFound
-            try:
-                _client().volumes.get(self.name).remove(force=True)
-                logger.info(f"files of contact {self.contact_id} removed")
-            except NotFound:
-                pass
+            SandboxContainer(self).remove()
+            for name in (self.name, self.backup_name):
+                try:
+                    docker_client().volumes.get(name).remove(force=True)
+                except NotFound:
+                    pass
+            logger.info(f"files of contact {self.contact_id} removed")
         except Exception as e:
             logger.error(f"files of contact {self.contact_id} not removed {repr(e)}")
 

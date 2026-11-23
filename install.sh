@@ -471,6 +471,78 @@ install_nvidia_toolkit() {
     fi
 }
 
+# install_gvisor - gVisor (runsc) as a Docker runtime: the hub runs the contacts' sandbox containers in it
+# (HUB_SANDBOX_RUNTIME), so root in a sandbox (sudo) stays away from the host's kernel. from gVisor's apt repository
+# (https://gvisor.dev/docs/user_guide/install/), registered with Docker with GVISOR_ARGS (register_gvisor). without it the
+# hub runs the sandboxes with runc and says so in its log
+# Usage: install_gvisor
+# No arguments
+install_gvisor() {
+    if gvisor_registered; then
+        echo "✅ gVisor (runsc) is registered with Docker"
+        return 0
+    fi
+    if command -v runsc &> /dev/null; then
+        register_gvisor
+        return 0
+    fi
+    print_section
+    echo "📦 the contacts' sandboxes run in gVisor (runsc), it is not installed"
+    case "$DISTRO" in
+        *debian*|*ubuntu*) ;;
+        *) echo "⚠️ Warning: gVisor comes from an apt repository, install it by hand (https://gvisor.dev/docs/user_guide/install/), until then the sandboxes run with runc"
+           return 0 ;;
+    esac
+    read_tty "Install gVisor? (Y/n): " "Y" $YES
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "⚠️ Warning: no gVisor, the sandboxes run with runc"
+        return 0
+    fi
+
+    local keyring=/usr/share/keyrings/gvisor-archive-keyring.gpg
+    local list=/etc/apt/sources.list.d/gvisor.list
+    local tmp
+    tmp="$(mktemp -d)"
+    install_pkg ca-certificates curl gnupg
+    curl -fsSL https://gvisor.dev/archive.key -o "$tmp/key.asc"
+    gpg --batch --yes --dearmor -o "$tmp/keyring.gpg" "$tmp/key.asc"
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=$keyring] https://storage.googleapis.com/gvisor/releases release main" > "$tmp/list"
+    sudo mkdir -p /usr/share/keyrings
+    sudo cp "$tmp/keyring.gpg" "$keyring"
+    sudo cp "$tmp/list" "$list"
+    sudo chmod 644 "$keyring" "$list"
+    rm -rf "$tmp"
+
+    install_pkg runsc
+    register_gvisor
+}
+
+# the arguments Docker gives runsc: sudo in a sandbox needs its setuid bit, which gVisor ignores without --allow-suid
+GVISOR_ARGS="--allow-suid"
+
+# gvisor_registered - Docker has the runsc runtime with GVISOR_ARGS
+# Usage: gvisor_registered
+# No arguments
+gvisor_registered() {
+    docker info --format '{{json .Runtimes.runsc}}' 2>/dev/null | grep -q -- "\"$GVISOR_ARGS\""
+}
+
+# register_gvisor - (re)registers the installed runsc with Docker with GVISOR_ARGS: "runsc install" writes the runtime
+# to /etc/docker/daemon.json (its runtimeArgs replaced, the rest kept), a reload of Docker reads it, running containers
+# keep running
+# Usage: register_gvisor
+# No arguments
+register_gvisor() {
+    echo "📦 registering gVisor (runsc $GVISOR_ARGS) with Docker"
+    sudo runsc install -- $GVISOR_ARGS
+    sudo systemctl reload docker || sudo systemctl restart docker
+    if gvisor_registered; then
+        echo "✅ gVisor registered with Docker"
+    else
+        echo "⚠️ Warning: Docker has no runsc runtime with $GVISOR_ARGS, the sandboxes run with runc or without sudo"
+    fi
+}
+
 # safe_rm_rf - Safely remove file/dir, using sudo only if needed
 # Usage: safe_rm_rf <path>
 # Args:
@@ -1432,9 +1504,9 @@ deploy_hub() {
     if [[ "$file_share" != smb ]]; then
         docker compose --profile smb rm -f smb >/dev/null 2>&1 || true
     fi
-    # the image of the contacts' bash sandboxes and the hub's reader containers (rueckgrat/sandbox): part of the hub, so
-    # always built with it (no question). built only, the hub starts its containers itself. before the hub: it needs the
-    # image from its start
+    # the image of the contacts' sandbox containers and the hub's reader and backup containers (rueckgrat/sandbox): part
+    # of the hub, so always built with it (no question). built only, the hub starts its containers itself. before the hub:
+    # it needs the image from its start, and makes the sandbox containers of an older image again
     docker compose --profile sandbox build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} sandbox || { echo "❌ Error: Docker compose build of the sandbox image failed."; popd; exit 1; }
     docker compose "${profile[@]}" build ${DOCKER_QUIET_BUILD:-} ${NO_CACHE:-} "${services[@]}" || { echo "❌ Error: Docker compose build of hub & caddy failed."; popd; exit 1; }
     docker compose "${profile[@]}" up -d "${services[@]}" || { echo "❌ Error: Docker compose up of hub & caddy failed."; popd; exit 1; }
@@ -2101,6 +2173,7 @@ deploy_components() {
     echo "deploy..."
 
     if $INSTALL_HUB; then
+        install_gvisor
         deploy_hub
     fi
 

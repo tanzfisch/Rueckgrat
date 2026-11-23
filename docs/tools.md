@@ -22,17 +22,16 @@ A tool class describes itself with a few attributes:
 | `requires`, `requires_any` | capabilities it needs (all of `requires`, one of `requires_any`). Without them it is not detected, offered, listed or run |
 | `overrides` | tools it makes needless when both are detected |
 | `sequential` | its calls in one round run one after another, in their order |
-| `fixable` | it is offered again in a worker's fix rounds |
 
 `ToolRegistry` (`tools/tool_registry.py`) registers the tools at hub start and holds the rules for using them. `ToolRegistry.tools` only returns the tools whose capabilities are available right now (`Infrastructure.available`), so a tool disappears while its node or the internet is down.
 
 # All tools
 
-There are 24 tools, registered in this order in `ToolRegistry.__init__`.
+There are 25 tools, registered in this order in `ToolRegistry.__init__`.
 
 | Tool | With Laya | Without Laya | Priority | Kind | Needs |
 | --- | --- | --- | --- | --- | --- |
-| `websearch` | Laya; always run for a worker without a build tool, and for a companion `news` pass | LLM pick; the same always-runs | | detected | internet or library |
+| `websearch` | Laya; always offered to a job's worker and a companion `news` pass's lookup | LLM pick; the same always-runs | | detected | internet or library |
 | `generate_image` | Laya | LLM pick | | detected, detached | image |
 | `take_photo` | not detected: a prompt tool; in a chat turn a reply tool | the same | | optional, detached | image |
 | `convert` | Laya | LLM pick | | detected | |
@@ -48,27 +47,29 @@ There are 24 tools, registered in this order in `ToolRegistry.__init__`.
 | `poll` | Laya | LLM pick | | detected, detached | |
 | `show_map` | Laya; text score for a short "where is ..." | LLM pick; the text score | | detected, detached | internet or offline map |
 | `price_finder` | Laya | LLM pick | | detected, overrides `websearch` | internet |
-| `run_code` | Laya | LLM pick | | detected, sequential, fixable | |
-| `bash` | Laya; the project questions | LLM pick; no project questions | | detected, sequential, fixable | |
-| `write_file` | Laya; the project questions | LLM pick; no project questions | | detected, detached, fixable | |
-| `share_file` | not detected: a companion of `bash` and `run_code` | the same | | companion, sequential, fixable | |
+| `bash` | Laya; the project questions | LLM pick; no project questions | | detected, sequential | |
+| `read_file` | not detected: a worker's loop tool | the same | | loop, sequential | |
+| `edit_file` | not detected: a worker's loop tool | the same | | loop, sequential | |
+| `write_file` | Laya; the project questions | LLM pick; no project questions | | detected, detached | |
+| `share_file` | not detected: a companion of `bash` | the same | | companion, sequential | |
 | `find_tools` | not detected: a prompt tool | the same | | optional | |
 | `task` | Laya | LLM pick, sure when picked | yes, first; ends the setup | detected | |
-| `text_to_speech` | Laya | LLM pick | | detected, detached, fixable | tts |
-| `join_files` | Laya | LLM pick | | detected, fixable | |
+| `text_to_speech` | Laya | LLM pick | | detected, detached | tts |
+| `join_files` | Laya | LLM pick | | detected | |
 
 Without Laya, an LLM pick makes a picked tool recommended, a picked `task` or `spawn_job` sure; if the pick fails, only the text scores count. A message of fewer than 4 words always uses only the text scores (see Detection). The kinds:
 
 - detected: the detection decides whether it is mandatory, recommended or not offered.
 - optional: one of the `PROMPT_TOOLS` (`remember`, `search_memory`, `take_photo`, `find_tools`). Every tool setup offers them, and the model decides on its own whether to call them.
 - companion: offered as optional whenever one of its `offered_with` tools is offered.
+- loop: in `LOOP_TOOLS`. Only a job's worker has them, in its loop (see `agents.md`); no tool setup detects or offers them.
 - detached: in `DETACHED_TOOLS`. In a chat turn its calls can go on in the background (see Running the calls).
 
 ## Who can use which tool
 
-`MetaTask` is a chat turn, `AgentJob` a job's worker (the `Controller` itself runs no tools), `TaskJob` a task pass and `CompanionJob` a companion pass.
+`MetaTask` is a chat turn, `Worker` a job's worker (the `Controller` itself runs no tools), `TaskJob` a task pass and `CompanionJob` a companion pass: each pass's lookup is a `Worker` too (`lookup`). An agent's tools are fixed when its worker starts, see `agents.md`.
 
-| Tool | `MetaTask` | `AgentJob` | `TaskJob` | `CompanionJob` |
+| Tool | `MetaTask` | `Worker` | `TaskJob` | `CompanionJob` |
 | --- | :---: | :---: | :---: | :---: |
 | `websearch` | ✓ | ✓ | ✓ | ✓ |
 | `generate_image` | ✓ | ✓ | ✓ |  |
@@ -81,28 +82,31 @@ Without Laya, an LLM pick makes a picked tool recommended, a picked `task` or `s
 | `weather` | ✓ | ✓ | ✓ | ✓ |
 | `fetch_url` | ✓ | ✓ | ✓ | ✓ |
 | `remember` | ✓¹ |  |  |  |
-| `search_memory` | ✓ | ✓ | ✓ | ✓ |
+| `search_memory` | ✓ |  | ✓ | ✓ |
 | `spawn_job` | ✓ |  | ✓ |  |
 | `poll` | ✓ |  | ✓ | ✓ |
 | `show_map` | ✓ |  | ✓ | ✓ |
 | `price_finder` | ✓ | ✓ | ✓ | ✓ |
-| `run_code` | ✓ | ✓ | ✓ | ✓ |
-| `bash` | ✓ | ✓ | ✓ | ✓ |
+| `bash` | ✓ | ✓⁴ | ✓ | ✓ |
+| `read_file` |  | ✓⁴ | ✓³ | ✓³ |
+| `edit_file` |  | ✓⁴ | ✓³ |  |
 | `write_file` | ✓ | ✓ | ✓ |  |
-| `share_file` | ✓ | ✓ | ✓ | ✓ |
-| `find_tools` | ✓ | ✓ | ✓ | ✓ |
+| `share_file` | ✓ |  | ✓³ | ✓³ |
+| `find_tools` | ✓ |  |  |  |
 | `task` | ✓ |  |  |  |
 | `text_to_speech` | ✓ | ✓ | ✓ |  |
 | `join_files` |  | ✓ | ✓ |  |
 
 ¹ Not in the tool setup: the chat reply calls it itself at its end (`REPLY_TOOLS`).
 ² Only when the contact's settings allow photos.
+³ A pass's lookup gets them with a detected `bash` (`FILE_KIT`).
+⁴ A job's worker always has them (`JOB_TOOLS`, with `reset_sandbox` and `websearch`). It never offers files: the job delivers them (`JOB_EXCLUDED`).
 
-The exclusions come from `CHAT_EXCLUDED_TOOLS` and `REPLY_TOOLS` (`MetaTask`), `WORKER_EXCLUDED_TOOLS` with each agent's `ALLOWED_TOOLS` and `EXCLUDED_TOOLS`, and the companion settings. A retried worker also loses the tools that failed before, and every tool still needs its capabilities (Needs above).
+The exclusions come from `CHAT_EXCLUDED_TOOLS` and `REPLY_TOOLS` (`MetaTask`), `WORKER_EXCLUDED_TOOLS` with each worker's `allowed` and `excluded` (a pass's `ALLOWED_TOOLS` and `EXCLUDED_TOOLS`), and the companion settings. Both excluded lists hold the `LOOP_TOOLS`. What an agent's worker always has: `websearch` for a job's worker, `search_memory` for a pass's lookup, `take_photo` for a companion's, `websearch` for a `news` pass. Every tool still needs its capabilities (Needs above).
 
 # Choosing tools
 
-Chat turns, workers, task passes and companion passes all choose their tools the same way:
+Chat turns choose their tools this way. Agents (a job's workers, the lookups of task and companion passes) run one detection when they start and then call their tools in a loop, see Workers in `agents.md`:
 
 1. A `ToolDetectionTask` scores the candidate tools and puts them into a mandatory and a recommended band.
 2. A `ToolExecutionTask` runs tool setup rounds: in each round the LLM writes the calls for that round's tools, and the calls run.
@@ -135,10 +139,11 @@ In a chat turn the detection also gets the contact's `SandboxVolume`, and Laya i
 `ToolRegistry.bands(mandatory, recommended)` turns the scores into the final bands. This is the one place where the priority rules for a detection live, whatever its source:
 
 - `PRIORITY_TOOLS = ("task", "spawn_job")`, highest first.
+- Before that a priority tool that would outrank a mandatory priority tool but does not take over for this message (`Tool.takes_over`) is dropped from both bands (`ToolRegistry.yielding`, called by `ToolDetectionTask._bands`): `task` takes over from `spawn_job` only when the message says when to act (`user_tasks.SCHEDULE`: in 2 hours, every morning, daily, tomorrow, at 7pm, on Friday, a date). A build request that ends with "tell me when it works" or "share it with me" is a job, not a task.
 - A mandatory priority tool becomes the only mandatory tool. Of the recommended tools only the ones that outrank it stay (`task` over `spawn_job`).
 - Otherwise a tool that another one overrides (`Tool.overrides`, only `price_finder` over `websearch`) is dropped: by a mandatory tool from both bands, by a recommended one only from the recommended band.
 
-`ToolExecutionTask` then adds the `PROMPT_TOOLS` to the mandatory band, drops the excluded tools and the ones that cannot be used now, and adds the companions of the offered tools to the mandatory band (`share_file` with `bash` or `run_code`). The setup prompt lists three kinds of tools (`split_tools`): mandatory (detected, must be called), recommended (the model decides), and optional (prompt tools and companions).
+`ToolExecutionTask` then adds the `PROMPT_TOOLS` to the mandatory band, drops the excluded tools and the ones that cannot be used now, and adds the companions of the offered tools to the mandatory band (`share_file` with `bash`). The setup prompt lists three kinds of tools (`split_tools`): mandatory (detected, must be called), recommended (the model decides), and optional (prompt tools and companions).
 
 ## Rounds
 
@@ -149,7 +154,7 @@ In a chat turn the detection also gets the contact's `SandboxVolume`, and Laya i
 2  date_calc
 3  search_memory, find_tools, wikipedia, websearch, fetch_url, weather, price_finder
 4  convert
-5  calculate, run_code, bash, share_file
+5  calculate, bash, read_file, edit_file, share_file
 6  show_map, poll, write_file, generate_image, take_photo, remember
 7  text_to_speech
 8  join_files
@@ -177,17 +182,13 @@ Then:
 
 `find_tools` calls start a new detection on the task they name. Newly found tools that were not offered yet get extra rounds, with `find_tools` offered again, at most twice in a row (`FIND_TOOLS_STEPS`).
 
-## Fix rounds
-
-Only a job's workers have fix rounds (`fix_rounds`, 3 for a worker, 0 for a chat turn). While calls of the fixable tools (`bash`, `run_code`, `share_file`, `write_file`, `text_to_speech`, `join_files`) failed, were cut off, or a mandatory `bash` or `run_code` got no call (`RUN_TOOLS`: a call of either one counts for both), those tools get another pass with the results so far and what went wrong. Afterwards a `checks` result tells the worker whether everything was fixed or what still fails. The fix round's prompt (`FIX_ROUND_PART`) says that what the sandbox does not have (a system package that is not installed, no root or `apt-get`, no display) can't be fixed there and is not installed again: the worker reports it as not checked (`UNSUPPORTED:`, see `agents.md`).
-
 ## Running the calls
 
-`ToolRegistry.execute` runs the calls of a round together, each on its own thread (not on the task queue's workers, so they cannot block each other). The calls of `sequential` tools (`bash`, `run_code`, `share_file`) share one lane and run one after another in their order, because they work on the same files. The `bash` calls of a round share one sandbox container. Calls of excluded tools are dropped, also when the LLM wrote them without being offered the tool.
+`ToolRegistry.execute` runs the calls of a round together, each on its own thread (not on the task queue's workers, so they cannot block each other). The calls of `sequential` tools (`bash`, `read_file`, `edit_file`, `share_file`, `reset_sandbox`) share one lane and run one after another in their order, because they work on the same files. Calls of excluded tools are dropped, also when the LLM wrote them without being offered the tool.
 
 Detached calls: in a chat turn, a call of a `DETACHED_TOOLS` tool (`show_map`, `poll`, `write_file`, `generate_image`, `take_photo`, `remember`, `text_to_speech`) for a stored message starts in the background and is not waited for. The reply gets the tool's planned result instead (made from the call alone), and the tool attaches its file or data to the message when it is done. If the turn is already gone, those calls are dropped.
 
-Background calls: calls made for an agent job, a task or a companion pass are marked `background` (`Tool.background`). Nobody waits for them. These calls have no stored message, so tools that would attach a file or show data hold it in their result instead (`attachments`, `held_data`). Whoever posts the agent's message attaches or shows it there (`ToolRegistry.attach_held`, `show_held`).
+Background calls: the calls of an agent's `Worker` (a job's worker, a pass's lookup) are marked `background` (`Tool.background`), with `JOB_LLM_TIMEOUT` for tools that call the LLM (`Worker._run`). A chat turn's setup drops both keys from the calls the LLM writes (`ToolExecutionTask._call`). Nobody waits for them. These calls have no stored message, so tools that would attach a file or show data hold it in their result instead (`attachments`, `held_data`). Whoever posts the agent's message attaches or shows it there (`ToolRegistry.attach_held`, `show_held`).
 
 ## Results
 
@@ -265,7 +266,7 @@ Searches what the user told the contact before, for a `query`: the 5 nearest mem
 
 ## spawn_job
 
-Hands a `prompt` to a background job: a Controller plans it and runs worker agents, then the contact reports in a new message. There is at most one job per conversation. It is the second priority tool: when it is called, nothing runs after its round. See `agents.md`.
+Hands a `prompt` to a background job: a Controller plans it and runs worker agents, then the contact reports in a new message. It is also how code is run: a program to write and run, or code from the user's message to run (word for word), becomes a job whose worker writes and runs it in the sandbox with `bash`. There is at most one job per conversation. It is the second priority tool: when it is called, nothing runs after its round. See `agents.md`.
 
 ## poll
 
@@ -279,13 +280,21 @@ Shows a map bubble of an `address` with a `label`. The address is geocoded onlin
 
 Searches shops on the web for a product (`query`, with "price" added) and ranks the finds by price or by how well they match (`rank`). It reads up to 10 pages, 5 at a time. One LLM call per page reads its offers (`FindOfferTask`), and only offers whose price is really on the page are kept. The best three are shown on a podium under the answer, with more finds in a list (the message's `prices` data). When it is detected, `websearch` is dropped (`overrides`).
 
-## run_code
-
-Writes a one-file program for a `task` in its own LLM call (it sees the latest messages), or runs the code from the user's message, and runs it once in a fresh sandbox container with the contact's files. Languages: Python, JavaScript, C++, Java, Go, with up to 10 libraries. The program has 60 s (180 s to install), 512 MB memory and one CPU. The model gets up to 4000 characters of its output.
-
 ## bash
 
-Runs one `command` in a sandbox container (`rueckgrat-sandbox`: Python, git, curl, and gcc, g++, make, cmake and ninja for C and C++) with network, in the contact's persistent files, as the sandbox user. The calls of one round share one container, each with its own timeout (120 s) and result; a failing command does not stop the next. Like an open terminal per conversation, the folder, exported variables and functions carry over between calls, running processes do not. This is where projects are made and changed.
+Runs one `command` in the contact's sandbox container (`SandboxContainer`, image `rueckgrat-sandbox`: Debian with Python and numpy, pandas, matplotlib, scipy, scikit-learn, scikit-image, seaborn, pillow and plotly, git, curl, gcc, g++, make, cmake, ninja and SDL2) with network, in the contact's persistent files, as the sandbox user with sudo (`sudo apt-get install` works, the installs stay while the container lives). Each call has its own timeout (120 s) and result; a failing command does not stop the next, what it left running is killed. Like an open terminal per conversation, the folder, exported variables and functions carry over between calls, running processes do not. The prompt names the container's CPUs and memory. This is where projects are made and changed. A job's worker gets its loop rules instead of the one-turn rules of a tool setup (`BASH_LOOP_PART`, `BASH_ONE_TURN_PART`).
+
+## reset_sandbox
+
+Starts the contact's sandbox over (`what`, `system` by default): a fresh container from the clean image, when the agent broke the system or the user asks for a clean one (installs, their record and processes go, nothing is installed again, the files stay). Only when the user explicitly asks: `files` brings the files back to the backup made before the last worker that changed them (the replaced files are kept in the backup's safety copy, the agent cannot bring them back), `all` both. It has no question of its own: it is offered whenever `bash` is, and a job's worker always has it (`JOB_TOOLS`), a lookup with `bash` (`FILE_KIT`). Companion passes never get it.
+
+## read_file
+
+A worker's loop tool. Reads a text file of the contact's files (`path`, up to 1 MB) from line `start`, `lines` lines (200, at most 400), numbered, long lines cut at 500 characters.
+
+## edit_file
+
+A worker's loop tool. Changes a text file of the contact's files: `old` (must be in the file exactly once) becomes `new`. An empty `old` writes the whole file with `new`. The result names the saved file.
 
 ## write_file
 
@@ -293,7 +302,7 @@ Writes one text file (`path`, `content`) into the contact's files and offers it 
 
 ## share_file
 
-Offers files that are already in the contact's files to the user as download cards, without writing anything. A `path` (or a list) is a file or a folder: all its files up to 50, without `.git`, caches and packages. Relative paths start at the conversation's bash folder. It has no question of its own: it is offered whenever `bash` or `run_code` is, and runs after their calls in the same round. For a job, a task pass or a companion pass the files are held and attached to the message the agent posts later.
+Offers files that are already in the contact's files to the user as download cards, without writing anything. A `path` (or a list) is a file or a folder: all its files up to 50, without `.git`, caches and packages. Relative paths start at the conversation's bash folder. It has no question of its own: it is offered whenever `bash` is, and runs after their calls in the same round. For a job, a task pass or a companion pass the files are held and attached to the message the agent posts later.
 
 ## find_tools
 
@@ -301,7 +310,7 @@ Asks for the tools of a `task` that the offered tools cannot do (for example the
 
 ## task
 
-Manages the user's tasks with this contact: `create` (`task`, `when`, `repeat`, `alarm`), `list`, `edit` and `cancel` (by `id`). Its prompt lists the contact's open tasks with their ids. It is the first priority tool: it outranks `spawn_job`, and nothing runs after its round. When a task is due, `CompanionScheduler` runs it as a `TaskJob`. See `agents.md`.
+Manages the user's tasks with this contact: `create` (`task`, `when`, `repeat`, `alarm`), `list`, `edit` and `cancel` (by `id`). Its prompt lists the contact's open tasks with their ids. It is the first priority tool: it outranks `spawn_job` when the message says when to act (`TaskTool.takes_over`, see Bands), and nothing runs after its round. When a task is due, `CompanionScheduler` runs it as a `TaskJob`. See `agents.md`.
 
 ## text_to_speech
 
