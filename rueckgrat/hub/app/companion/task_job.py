@@ -1,8 +1,9 @@
-import json
 import time
 from datetime import datetime, timedelta
 
 from app.agent_jobs.agent_job import AgentJob
+from app.agent_jobs.job_monitor import JobMonitor
+from app.agent_jobs.worker import lookup
 from . import prompts
 from .companion_job import short
 
@@ -13,14 +14,18 @@ LATE_MINUTES = 5        # a one-off task this late (the hub was down) says so in
 BUSY_WAIT_SECONDS = 120     # at most this long its message waits for a reply being made in the conversation
 TITLE_LENGTH = 60           # the title of a conversation a task opens: its text, cut
 TIME_LIMIT = 5400           # seconds for one pass, not an agent job's DEFAULT_TIME_LIMIT: it runs on the scheduler's thread, a long piece of work is a background job (spawn_job)
+JOB_LINES = 5               # the contact's newest background jobs a pass sees (_jobs)
 
 
 class TaskJob(AgentJob):
     """#170 a task of the user is due: one pass as an agent job, run by CompanionScheduler on its thread like a CompanionJob.
-    it does the task: the tools on the workers' tool path (run_tools, it may start a background job with spawn_job), then
-    one call in the contact's persona with their results makes the message. it is posted in the conversation the task
+    it does the task: a Worker loop on the task looks up or does what it needs (lookup, it may start a background job),
+    then one call in the contact's persona with what it found makes the message. it is posted in the conversation the task
     was asked in (a new one if that was deleted), whatever the companion's chattiness and quiet hours; with the task's
-    alarm the app rings. a task that only reports a change and found none stays silent (prompts.TASK_SILENT)"""
+    alarm the app rings. a task that only reports a change and found none stays silent (prompts.TASK_SILENT). the pass
+    sees the real state of the contact's background jobs (_jobs): a task that checks one reads it there"""
+    # its lookup's tools besides the detected ones: what the user told the contact before
+    ALWAYS_TOOLS = ("search_memory",)
     ALLOWED_TOOLS = ("spawn_job", "poll", "show_map")    # its message shows the poll or map (ToolRegistry.show_held)
     EXCLUDED_TOOLS = ("take_photo",)
 
@@ -68,10 +73,11 @@ class TaskJob(AgentJob):
             "weekday": local.strftime("%A"),
             "timezone": str(self.tz),
             "late": prompts.TASK_LATE_PART.format(due_time=due_time) if self.late() else "",
+            "jobs": self._jobs(user_id, contact_id),
         }
         if self.late():
             self.log["late"] = f"was due at {due_time}"
-        found = self._lookup(row["note"]) if self.tool_registry else ""
+        found = self._lookup(row["note"] + values["jobs"]) if self.tool_registry else ""
         messages = self.persona_messages(contact, conversation, user_name, prompts.user_task_prompt(values, found))
         text = self.chat(messages, 0.7).strip()
         if text.strip(" .\"'").upper() == prompts.TASK_SILENT:
@@ -93,6 +99,20 @@ class TaskJob(AgentJob):
         logger.info(f"task {row['id']} contact {contact_id}: message {message_id}, conversation {conversation['id']}")
         return {"result": short(text, 2000), "message_id": message_id}
 
+    def _jobs(self, user_id: int, contact_id: int) -> str:
+        """the contact's JOB_LINES newest background jobs of the last day with their state (JobMonitor.snapshot) as
+        prompts.TASK_JOBS_PART, "" without any"""
+        items = [item for item in JobMonitor().snapshot(user_id) if item["kind"] == "job" and item["contact_id"] == contact_id]
+        lines = [prompts.TASK_JOB_LINE.format(
+            name=item["name"], state=item["state"], started=self._local(item["started_at"]),
+            finished=prompts.TASK_JOB_FINISHED_PART.format(finished=self._local(item["finished_at"])) if item["finished_at"] else "")
+            for item in items[:JOB_LINES]]
+        return prompts.TASK_JOBS_PART.format(jobs="\n".join(lines)) if lines else ""
+
+    def _local(self, stamp: str) -> str:
+        """a job's utc time (job_monitor.utc_now) as the user's local time"""
+        return datetime.fromisoformat(stamp).astimezone(self.tz).strftime("%a %H:%M")
+
     def _conversation(self, user_id: int, contact_id: int) -> dict:
         """the conversation the task was asked in, read now (an earlier task of this tick may have opened one). deleted
         (or there was none): a new one, the contact's other tasks without a conversation post there too"""
@@ -108,16 +128,10 @@ class TaskJob(AgentJob):
         return self.db.get_conversation(conversation_id)
 
     def _lookup(self, task: str) -> str:
-        """the task's tools like a worker's (run_tools), their results in MetaTask's format, "" without results"""
-        execution = self.run_tools(task, task, [])
-        calls = [entry["call"] for entry in execution.executed]
-        results = execution.get_result()
-        self.attachments = [held for result in results.values() if isinstance(result, dict) for held in result.get("attachments") or []]
-        self.held_data = self.tool_registry.held_data(results)     # the price ranking: shown under its message like in a reply
-        found = execution.results_prompt(results).strip()
-        if calls:
-            done = "; ".join(f"{c['tool']} {short(json.dumps({k: v for k, v in c.items() if k != 'tool'}, ensure_ascii=False), 150)}" for c in calls)
-            self.log["lookup"] = f"{done} -> {len(found)} chars"
+        """what the task's lookup (worker.lookup) found, a failed one says so: the message does not claim it worked.
+        the files and data it holds (the price ranking) go with the message"""
+        found, worker = lookup(self, task, self.ALWAYS_TOOLS, self.ALLOWED_TOOLS, self.EXCLUDED_TOOLS)
+        self.log["lookup"] = f"{', '.join(worker.called()) or 'no tools'} in {worker.calls} calls -> {short(found)}"
         return found
 
     def _wait_for_reply(self, conversation_id: int):

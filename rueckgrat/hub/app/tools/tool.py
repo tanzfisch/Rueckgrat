@@ -1,7 +1,6 @@
 from app.tasks.task_queue import Task
 from . import prompts
-from contextlib import nullcontext
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -17,7 +16,6 @@ class Tool(Task):
     requires = ()       # the capabilities it needs (Infrastructure.available: "image", "embedding", "internet" ...), without one it is not offered
     requires_any = ()   # of these capabilities at least one (an online and an offline way, e.g. "internet" or "library"), () no such need
     overrides = ()      # names of tools this one makes needless when both are detected (ToolRegistry.overridden), e.g. price_finder: websearch
-    fixable = False     # offered in a worker's fix rounds (ToolRegistry.fixable): a tool that makes or offers files, run again to fix a problem
     HELD_DATA = "held_data"     # result key: {kind: value} show_data held without a stored message (ToolRegistry.show_held)
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
@@ -34,6 +32,12 @@ class Tool(Task):
         """a score of the message from code (a pattern, its shape), on the scale of the laya scores: ToolDetectionTask takes
         the higher one. 0.0: none"""
         return 0.0
+
+    @classmethod
+    def takes_over(cls, prompt: str) -> bool:
+        """a PRIORITY_TOOLS one (ToolRegistry): it may take over from the detected ones after it there for this message
+        (ToolRegistry.yielding). True: always"""
+        return True
 
     def get_result(self) -> Dict[str, Any]:
         return dict(self._response)
@@ -68,11 +72,6 @@ class Tool(Task):
             MessageQueue().send_data({"data": {"conversation_id": conversation_id, "message_id": message_id, "kind": kind, "value": value}},
                                      user_id=user_id)
 
-    @classmethod
-    def sharing(cls):
-        """the context around a round's sequential calls of this tool (ToolRegistry._run_lane), e.g. one sandbox for all"""
-        return nullcontext()
-
     def background(self) -> bool:
         """the call runs for an agent job, a task or a companion pass: no one waits for it (ToolExecutionTask background)"""
         return self.tool_call.get("background") is True
@@ -101,12 +100,6 @@ class Tool(Task):
         return False
 
     @classmethod
-    def problems(cls, result: Dict[str, Any]) -> List[str]:
-        """what went wrong in one result of this tool that another try could fix (a worker's fix rounds, see
-        ToolExecutionTask). most tools have nothing to fix: []"""
-        return []
-
-    @classmethod
     def merge(cls, known: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         """combines two results of this tool from one message: the texts on separate lines, lists added up,
         every other key of the later result replaces the earlier one"""
@@ -127,9 +120,10 @@ class Tool(Task):
         raise NotImplementedError
 
     @classmethod
-    def prompt_for(cls, user_id: int, contact_id: int, conversation_id: int) -> str:
+    def prompt_for(cls, user_id: int, contact_id: int, conversation_id: int, loop: bool = False) -> str:
         """the prompt for one conversation's tool setup (ToolRegistry.get_tools_prompt with a scope), e.g. with what
-        the contact's files hold. most tools have one prompt for all: prompt()"""
+        the contact's files hold. loop: for an agent job's worker, which sees each result before its next call (Worker),
+        not for a setup that writes all its calls at once. most tools have one prompt for all: prompt()"""
         return cls.prompt()
 
     @classmethod

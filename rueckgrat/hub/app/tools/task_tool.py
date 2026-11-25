@@ -1,7 +1,7 @@
 from typing import Dict, Any
 from .tool import Tool
 from . import prompts
-from app.companion.user_tasks import UserTasks, TaskError, TaskNotFound
+from app.companion.user_tasks import UserTasks, TaskError, TaskNotFound, schedules
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -25,6 +25,12 @@ class TaskTool(Tool):
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
         super().__init__(db, infrastructure, user_id, contact_id, conversation_id, tool_call)
+
+    @classmethod
+    def takes_over(cls, prompt: str) -> bool:
+        """only a message that says when to act makes a task of work that a background job does now (a build that ends
+        with "tell me when it works" is a job, "check it every hour" a task)"""
+        return schedules(prompt)
 
     @classmethod
     def name(cls) -> str:

@@ -1,16 +1,16 @@
 import re
-import shlex
 import time
 from typing import Dict, Any, List, Optional, Tuple
 from .tool import Tool
-from .code_tool import RUNTIME_CONFIGS, clip
 from . import prompts
-from app.utils.sandbox_volume import SandboxVolume, MOUNT_PATH, SANDBOX_USER, SANDBOX_IMAGE, PROJECTS, DOCUMENTS, IMAGES
+from app.utils.sandbox_volume import SandboxVolume, MOUNT_PATH, PROJECTS, DOCUMENTS, IMAGES
+from app.utils.sandbox_container import SandboxContainer, CPUS, MEMORY_GB
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
 
 COMMAND_TIMEOUT = 120       # seconds, a git clone or pip install needs a while
+MAX_OUTPUT = 4000           # characters of stdout and of stderr for the model
 MAX_COMMAND_ECHO = 300      # characters of the command repeated in its result
 # the terminal stays open per conversation: the folder, the exported variables (an activated venv) and the shell
 # functions of the conversation's last command are restored before the next one, a new conversation starts in its
@@ -20,25 +20,25 @@ RESTORE = ('S={state}; mkdir -p "$S"\n'
            '{{ [ -s "$S/cwd" ] && cd "$(cat "$S/cwd")" 2>/dev/null; }} || {{ mkdir -p {workdir} && cd {workdir}; }}\n'
            'trap \'code=$?; pwd > "$S/cwd"; export -p | grep -v -E "^declare -x (PWD|OLDPWD|SHLVL|HOSTNAME|_)=" > "$S/env"; '
            'declare -p ${{!_OLD_VIRTUAL_*}} >> "$S/env" 2>/dev/null; declare -f > "$S/functions"; exit $code\' EXIT\n')
-# the files home: git config and pip install --user stay with the files. a fixed git author, git commit refuses without one
-ENVIRONMENT = {
-    "HOME": MOUNT_PATH,
-    "PATH": f"{MOUNT_PATH}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-    "PIP_NO_CACHE_DIR": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-    "GIT_AUTHOR_NAME": "Rueckgrat", "GIT_AUTHOR_EMAIL": "sandbox@rueckgrat.local",
-    "GIT_COMMITTER_NAME": "Rueckgrat", "GIT_COMMITTER_EMAIL": "sandbox@rueckgrat.local",
-}
+
+
+def clip(text: str, tail: bool = False) -> str:
+    """text up to MAX_OUTPUT characters: its start, or its end (tail, where the errors are)"""
+    text = (text or "").strip()
+    if len(text) <= MAX_OUTPUT:
+        return text
+    return f"[... {len(text) - MAX_OUTPUT} characters cut]\n{text[-MAX_OUTPUT:]}" if tail \
+        else f"{text[:MAX_OUTPUT]}\n[... {len(text) - MAX_OUTPUT} characters cut]"
 
 
 class BashTool(Tool):
-    """runs one bash command in a sandbox container (SANDBOX_IMAGE: git, curl, python, C and C++ builds), as SANDBOX_USER, with network,
-    in the contact's persistent files (SandboxVolume, shared by all its conversations). the calls of one round share one
-    container (sharing), each with its own timeout and result, a failing command does not stop the next. the files carry
-    over, and like an open terminal per conversation the folder, exported variables and functions (RESTORE), running
-    processes do not"""
+    """runs one bash command in the contact's sandbox container (SandboxContainer: git, curl, python, C and C++ builds,
+    sudo), as SANDBOX_USER, with network, in the contact's persistent files (SandboxVolume, shared by all its
+    conversations), each with its own timeout and result, a failing command does not stop the next. the files and
+    the container's installs carry over, and like an open terminal per conversation the folder, exported variables and
+    functions (RESTORE), running processes do not"""
     description = prompts.BASH_DESCRIPTION
     sequential = True
-    fixable = True
     thresholds = (0.6, 0.65)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the message ask to copy, move, rename, delete, list or unzip files or folders that already exist?",
@@ -55,10 +55,6 @@ class BashTool(Tool):
     def name(cls) -> str:
         return "bash"
 
-    @classmethod
-    def sharing(cls):
-        return SandboxVolume.sharing()
-
     # a plain listing: "ls -la", "ls .", "ls <workdir>", "cd <workdir> && ls -la", nothing chained, piped or substituted
     LISTING = re.compile(r"(?:cd\s+(?P<folder>[\w./~-]+)\s*&&\s*)?ls(?:\s+-[a-zA-Z]+)*(?:\s+(?P<path>[\w./~-]+))?")
 
@@ -72,38 +68,24 @@ class BashTool(Tool):
         workdir = SandboxVolume.workdir(conversation_id)
         return match["folder"] in (None, workdir, f"{workdir}/") and match["path"] in (None, ".", "./", workdir, f"{workdir}/")
 
-    @classmethod
-    def problems(cls, result: Dict[str, Any]) -> List[str]:
-        """each command of the result (merged results: one block per command, see run) that ended with an exit code other than 0"""
-        if "error" in result:
-            return [f"bash: {result['error']}"]
-        # 124 of a command's own timeout (not the tool's): a program that runs until it is stopped ran fine
-        return [f"bash `{command.splitlines()[0][:150]}` ended with exit code {code}"
-                for command, code, rest in re.findall(r"^\$ (.*?)\nexit code (-?\d+)([^\n]*)", result.get("text") or "", re.M | re.S)
-                if code != "0" and not (code == "124" and "stopped after" not in rest and "timeout " in command)]
-
     def run(self, command: str) -> Dict[str, Any]:
         """the tool result {"tool", "text"|"error"} of one command"""
-        configs = {**RUNTIME_CONFIGS, "user": SANDBOX_USER, "environment": dict(ENVIRONMENT)}
         try:
             restore = RESTORE.format(state=SandboxVolume.shell_state(self.get_conversation_id()),
                                      workdir=SandboxVolume.workdir(self.get_conversation_id()))
-            volume = SandboxVolume(self.get_user_id(), self.contact_id)
-            with volume.session(configs, lang="python", image=SANDBOX_IMAGE, skip_environment_setup=True) as session:
-                started = time.monotonic()
-                result = session.execute_command(f"timeout {COMMAND_TIMEOUT} bash -c {shlex.quote(restore + command)}",
-                                                 workdir=MOUNT_PATH)
-                stopped = time.monotonic() - started >= COMMAND_TIMEOUT - 1
+            started = time.monotonic()
+            code, stdout, stderr = SandboxContainer(SandboxVolume(self.get_user_id(), self.contact_id)).run(
+                restore + command, COMMAND_TIMEOUT)
+            stopped = time.monotonic() - started >= COMMAND_TIMEOUT - 1
         except Exception as e:
             logger.error(f"bash failed: {repr(e)}")
             return {"tool": self.name(), "error": f"the command could not be run: {type(e).__name__}: {str(e)[:300]}"}
         # the command leads: a later round (attaching the files) and the reply see what each call did
         echo = command if len(command) <= MAX_COMMAND_ECHO else f"{command[:MAX_COMMAND_ECHO]} [...]"
-        text = f"$ {echo}\nexit code {result.exit_code}" + \
-               (f" (stopped after {COMMAND_TIMEOUT} seconds)" if result.exit_code == 124 and stopped else "")
-        text += f"\nSTDOUT:\n{clip(result.stdout) or '(empty)'}"
-        if (result.stderr or "").strip():
-            text += f"\nSTDERR:\n{clip(result.stderr, tail=True)}"
+        text = f"$ {echo}\nexit code {code}" + (f" (stopped after {COMMAND_TIMEOUT} seconds)" if code == 124 and stopped else "")
+        text += f"\nSTDOUT:\n{clip(stdout) or '(empty)'}"
+        if stderr.strip():
+            text += f"\nSTDERR:\n{clip(stderr, tail=True)}"
         return {"tool": self.name(), "text": text}
 
     def execute(self) -> None:
@@ -116,13 +98,17 @@ class BashTool(Tool):
         self.add_result(self.run(command))
 
     @classmethod
-    def prompt(cls, workdir: str = f"{MOUNT_PATH}/workdir/<conversation>", projects: str = prompts.BASH_PROJECTS_UNKNOWN_PART) -> str:
+    def prompt(cls, workdir: str = f"{MOUNT_PATH}/workdir/<conversation>", projects: str = prompts.BASH_PROJECTS_UNKNOWN_PART,
+               loop: bool = False) -> str:
+        """loop: a worker's loop (Tool.prompt_for), else a setup that writes all its calls at once"""
         return prompts.BASH_PROMPT.format(files=MOUNT_PATH, timeout=COMMAND_TIMEOUT, workdir=workdir, projects=projects,
+                                          cpus=CPUS, memory=MEMORY_GB,
                                           project_dir=f"{MOUNT_PATH}/{PROJECTS}", documents=f"{MOUNT_PATH}/{DOCUMENTS}",
-                                          images=f"{MOUNT_PATH}/{IMAGES}")
+                                          images=f"{MOUNT_PATH}/{IMAGES}",
+                                          turns=prompts.BASH_LOOP_PART if loop else prompts.BASH_ONE_TURN_PART)
 
     @classmethod
-    def prompt_for(cls, user_id: int, contact_id: int, conversation_id: int) -> str:
+    def prompt_for(cls, user_id: int, contact_id: int, conversation_id: int, loop: bool = False) -> str:
         """the prompt with the conversation's workdir and the contact's projects (SandboxVolume.projects): name and the
         first line of its PROJECT.md each"""
         try:
@@ -130,7 +116,7 @@ class BashTool(Tool):
         except Exception as e:
             logger.warning(f"projects of contact {contact_id} not listed {repr(e)}")
             projects = None
-        return cls.prompt(SandboxVolume.workdir(conversation_id), cls.projects_text(projects))
+        return cls.prompt(SandboxVolume.workdir(conversation_id), cls.projects_text(projects), loop)
 
     @staticmethod
     def projects_text(projects: Optional[List[Tuple[str, str]]]) -> str:

@@ -113,11 +113,11 @@
 {"lang": "en", "text": "Create a quiz about world flags.", "labels": {"poll": "M"}}
 {"lang": "en", "text": "Run a poll on which movie we watch tonight.", "labels": {"poll": "M"}}
 {"lang": "en", "text": "Test my knowledge of Python with a few questions.", "labels": {"poll": "M"}}
-{"lang": "en", "text": "Run this: print(sum(range(100)))", "labels": {"run_code": "M"}}
-{"lang": "en", "text": "What does this output? for i in range(3): print(i * i)", "labels": {"run_code": "M"}}
-{"lang": "en", "text": "Execute this python: import math; print(math.factorial(20))", "labels": {"run_code": "M"}}
-{"lang": "en", "text": "Does this code work? print(sorted([3, 1, 2]))", "labels": {"run_code": "M"}}
-{"lang": "en", "text": "Run this snippet and tell me the result: x = [1, 2, 3]; print(x[::-1])", "labels": {"run_code": "M"}}
+{"lang": "en", "text": "Run this: print(sum(range(100)))", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "What does this output? for i in range(3): print(i * i)", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Execute this python: import math; print(math.factorial(20))", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Does this code work? print(sorted([3, 1, 2]))", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Run this snippet and tell me the result: x = [1, 2, 3]; print(x[::-1])", "labels": {"spawn_job": "M"}}
 {"lang": "en", "text": "Write a complete chess game with a GUI in python.", "labels": {"spawn_job": "M"}}
 {"lang": "en", "text": "Build me a REST API with user accounts and a database.", "labels": {"spawn_job": "M"}}
 {"lang": "en", "text": "Create a full web shop with a cart, checkout and admin page.", "labels": {"spawn_job": "M"}}
@@ -288,11 +288,11 @@
 {"lang": "en", "text": "Put the Sydney Opera House on a map.", "labels": {"show_map": "M"}}
 {"lang": "en", "text": "Show Lake Wanaka on a map.", "labels": {"show_map": "M"}}
 {"lang": "en", "text": "Where is the Great Wall of China?", "labels": {"show_map": "M"}}
-{"lang": "en", "text": "Run this Python: print([x**2 for x in range(10)])", "labels": {"run_code": "M"}}
-{"lang": "en", "text": "Does this work? import os; print(os.getcwd())", "labels": {"run_code": "M"}}
-{"lang": "en", "text": "Execute: print(sum(i for i in range(100) if i%3==0))", "labels": {"run_code": "M"}}
-{"lang": "en", "text": "What does this output? x=5; print(x*x if x>3 else 0)", "labels": {"run_code": "M"}}
-{"lang": "en", "text": "Run: import datetime; print(datetime.date.today())", "labels": {"run_code": "M"}}
+{"lang": "en", "text": "Run this Python: print([x**2 for x in range(10)])", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Does this work? import os; print(os.getcwd())", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Execute: print(sum(i for i in range(100) if i%3==0))", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "What does this output? x=5; print(x*x if x>3 else 0)", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Run: import datetime; print(datetime.date.today())", "labels": {"spawn_job": "M"}}
 {"lang": "en", "text": "Check Bitcoin every hour and ping me if under 55k.", "labels": {"task": "M"}}
 {"lang": "en", "text": "Watch NZD/USD daily and alert on 5% drop.", "labels": {"task": "M"}}
 {"lang": "en", "text": "Monitor my GitHub repo for new issues and notify.", "labels": {"task": "M"}}
@@ -432,7 +432,7 @@
 {"lang": "en", "text": "Show me where the Eifel Tower is on a map.", "labels": {"show_map": "M", "wikipedia": "r"}}
 {"lang": "en", "text": "Draw a cat wearing a space helmit.", "labels": {"generate_image": "M"}}
 {"lang": "en", "text": "List all the files in the current directry.", "labels": {"bash": "M"}}
-{"lang": "en", "text": "Run this: print(sum(range(100)) )", "labels": {"run_code": "M"}}
+{"lang": "en", "text": "Run this: print(sum(range(100)) )", "labels": {"spawn_job": "M"}}
 {"lang": "en", "text": "Check the bitcoin price every hour and tell me when it drops below 50k.", "labels": {"task": "M"}}
 {"lang": "en", "text": "Please rember that my sister's name is Anna.", "labels": {}}
 {"lang": "en", "text": "What's the weater like in Wellington today?", "labels": {"weather": "M"}}
@@ -534,3 +534,16 @@
 {"comment": "t495: a writer task of an audiobook job, it writes the text, text_to_speech must not be picked", "lang": "en", "text": "Write eight distinct chapters for an audiobook about the Younger Dryas impact hypothesis, using the research in research_notes.txt. Write each chapter to its own text file, chapter_01.txt to chapter_08.txt, engaging and suitable for narration. Do not mention audio, narration, or the audiobook format in the text itself.", "labels": {"write_file": "M"}}
 {"lang": "en", "text": "where is the pyramid of giza?", "labels": {"show_map": "M", "wikipedia": "r"}}
 {"lang": "en", "text": "Where's Wellington", "labels": {"show_map": "M"}}
+
+{"comment": "a build or work request that ends with tell me or share it with me is a background job, not a task (t847 sandbox test)", "lang": "en", "text": "Hi Kai! Could you build me a small project in your sandbox? A C++17 command line tool called \"wordstat\" with a CMake build: it reads a text file (path as argument) and prints the number of lines, words and characters, plus the 5 most frequent words (case-insensitive) with their counts. Please build it, run it on a small sample text file you create, and add a check (ctest) that verifies the counts for that sample. Tell me when it works and how to run it.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Nice, it works! A few changes to wordstat please:\n1. The character count should match `wc -c` exactly (a file without a trailing newline currently counts one too many).\n2. Words with an apostrophe like \"don't\" or \"it's\" should count as one word, not be cut off.\n3. Add an option `--top N` (default 5) for how many top words to show, and `--json` to print the result as JSON.\n4. Move the counting into a small library (wordstat_lib) and add a unit test executable with several ctest cases: empty file, file without trailing newline, apostrophes, ties in the top list (sorted alphabetically), and --top 2.\nRun all tests and compare the counts against wc for a couple of files.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Great work, thanks! Next step: a graphical variant. Please add a second executable `wordstat_chart` to the same project that uses SDL2 to render a bar chart of the top N words into a BMP file (no window: it has to work headless, e.g. with an offscreen/software renderer, the sandbox has no display). Use SDL2_gfx for the bars (install libsdl2-gfx-dev with apt) and SDL2_ttf with the DejaVu Sans font (fonts-dejavu-core, also via apt) for the word labels and counts. Usage: `wordstat_chart input.txt chart.bmp [--top N]`. Add a ctest that renders a chart for the sample and checks that the BMP exists, has the expected width/height and is not just one solid color. Share the rendered chart.bmp with me when it works.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "No worries, let's try again. Some hints so you don't lose time: sudo doesn't work in your sandbox right now, so don't try apt at all. You already built SDL2_gfx from source into /home/.local (headers in /home/.local/include/SDL2, lib + pkgconfig in /home/.local/lib) - just use that from CMake (e.g. find_path/find_library with /home/.local as a hint, or PKG_CONFIG_PATH). The DejaVu font is already there: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf. SDL2 and SDL2_ttf are installed. Render with SDL_CreateRGBSurface + SDL_CreateSoftwareRenderer so no display is needed, then SDL_SaveBMP. Same goal as before: wordstat_chart input.txt chart.bmp [--top N], a ctest that checks the BMP size and that it isn't one solid color, and share chart.bmp with me.", "labels": {"spawn_job": "r"}}
+{"lang": "en", "text": "I don't need a reminder - please start the build job now with the hints from my last message: build wordstat_chart (SDL2_gfx from /home/.local, font /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf, software renderer, no apt/sudo), add the ctest, and share chart.bmp.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Kai, nothing is running - you only changed the reminder. Please delete reminder #1, and then build the chart yourself in your sandbox as a new background project job on wordstat: write src/chart.cpp, hook it into CMakeLists.txt (SDL2_gfx from /home/.local, font /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf, software renderer, no sudo/apt), add the BMP ctest, run it and share chart.bmp.", "labels": {"spawn_job": "M", "task": "r"}}
+{"lang": "en", "text": "The chart looks great, thanks! Some changes:\n1. Please make the usage exactly as I asked: `wordstat_chart input.txt chart.bmp [--top N]` (the output path is the 2nd argument; right now it is ignored and always writes ./chart.bmp). Exit with a usage message and code 1 on bad arguments, also for --top with a non-number.\n2. The project must build on a fresh machine: right now it needs SDL2_gfx from /home/.local, which isn't part of the project. Put the SDL2_gfx 1.0.4 sources into the project (e.g. third_party/SDL2_gfx, only the .c/.h files you need) and build them as a static library from CMake, so no ~/.local is needed. Remove the POST_BUILD step that copies a BMP into the source folder.\n3. Then do a clean build in a fresh copy of the project folder (e.g. cp -r to /tmp, without ~/.local in any search path), run all tests there, render chart.bmp for the sample with --top 3, and share that chart.bmp with me.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Kai, again nothing is running - you only set reminder #6. Please start it as a background project job on wordstat right now, with the three changes from my last message.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Close! The last build failed only at the link step: undefined references to TTF_Init, TTF_OpenFont etc. - SDL2_ttf is not linked to wordstat_chart anymore (add it via pkg-config SDL2_ttf or find_library(SDL2_ttf) and target_link_libraries). Please start a background project job on wordstat now that fixes the link, builds clean in a fresh copy in /tmp, runs all tests, renders chart.bmp for the sample with --top 3 and shares it with me. The other changes (vendored SDL2_gfx in third_party, positional output argument) are already in.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Kai, that only set a reminder again, nothing is running. Please start the background project job on wordstat now with the link fix from my last message.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Works perfectly now, thank you! One more small change and a quick experiment:\n1. Add an option `--color RRGGBB` (hex, default 2a7ad9) to wordstat_chart for the bar color, reject invalid values with the usage message and exit code 1, and add a ctest that renders with --color ff0000 and checks that red pixels are in the BMP.\n2. Experiment: in one command start `python3 -m http.server 8765` in the background (with &), then in a separate later command check with curl whether it still answers. Also run `sleep 200; echo finished` as its own command. Tell me exactly what happened in both cases.\nPlease attach the red chart.bmp to your final message.", "labels": {"spawn_job": "M"}}
+{"lang": "en", "text": "Kai, that was only a reminder again, nothing is running. Please start the background project job on wordstat now for the --color option and the experiment from my last message.", "labels": {"spawn_job": "M"}}

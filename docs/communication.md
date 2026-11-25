@@ -288,7 +288,7 @@ The client never talks to a node for files. Everything goes through the hub, wit
 
 - Images: `GET /downloads/{file_path}` serves only `/hub/images`, and only images of the logged-in user. If the file is not there yet (still being generated), the hub tries to finish it first.
 - Files attached to a message (text, code, spoken audio from the TTS tool): `GET /messages/{message_id}/files/{stored_name}`.
-- The sandbox of `bash` and `run_code` (one volume per contact): `GET /conversations/{conversation_id}/files` lists a folder, `/files/download` streams one file, `/files/zip` returns a zip.
+- The sandbox of `bash` (one volume per contact): `GET /conversations/{conversation_id}/files` lists a folder, `/files/download` streams one file, `/files/zip` returns a zip.
 - Map bubbles: `GET /map/tiles/{z}/{x}/{y}`. The hub fetches the OpenStreetMap tile itself and caches it, so the client talks to no one but the hub.
 - Generated images: the hub asks the image node (`POST /image`), then pulls the file from the node's `GET /downloads/...` into `/hub/images`.
 

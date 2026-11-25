@@ -1,6 +1,32 @@
 Changelog
 =========
 
+0.32.0
+------
+
+- #230 rethinking agents
+-     redesigned the agent job worker loop, tasks and companion passes use the same worker framework as agent jobs
+-     removed the run_code tool, code runs through spawn_job and bash
+-     simple job loop: goal, check and folder decided at the start, one worker per step, only the step's check decides (run in a clean shell in the job's folder), a failed check gets one retry told what failed, then the job fails
+-     own sandbox layer instead of llm-sandbox (removed, docker SDK added as hub dependency)
+-     one long-lived sandbox container per contact on python:3.11-trixie, with passwordless sudo: sudo apt-get install works and stays while the container lives
+-     sandboxes run in gVisor (runsc, HUB_SANDBOX_RUNTIME), the installer installs and registers it with Docker, without it the hub falls back to runc with a warning
+-     gVisor is registered with --allow-suid so sudo works in the sandboxes, the installer adds it to an existing runsc registration, the hub warns when it is missing
+-     packages installed with sudo apt are recorded and installed again when a container is made for a new image
+-     the contact's files are backed up before every agent job worker that changes files, size limit HUB_SANDBOX_BACKUP_MAX_MB (default no limit)
+-     new reset_sandbox tool: a fresh container from the clean image with the files kept, on request the files back to the last backup
+-     idle sandbox containers are stopped after 24 hours (HUB_SANDBOX_IDLE_MINUTES), the next command starts them again
+-     limits of 2 CPUs, 2 GB memory and 256 processes, the uninstall script removes sandboxes and backups
+-     the task tool only takes over from spawn_job when the message says when to act (in 2 hours, every day, tomorrow, at 7pm), a build request with "tell me when it works" starts a job
+-     task passes see the real state of the contact's background jobs and do not start a job just to check one
+-     laya dataset: build requests from a sandbox test that must start a job
+-     job workers get 40 calls (HUB_JOB_WORKER_CALLS) and end on finish or when their calls or time are used up, the check decides the rest
+-     one folder per job, chosen at the start: a new project, a listed project the job names, for work on files the conversation's project, else the conversation's workdir, workers start in it
+-     the job delivers the files (those it names, else the changed files without build output), a failed job sends what it made, reports never claim files that are not attached
+-     a failed job's report says which step failed and why (the check and its output) and never promises to retry
+-     workers know how long a reply can be (from the llm's context), short worker, plan and report prompts, no review, merge or retry llm calls
+-     job workers always get the shell and file tools, the user's messages during a job go to its next step
+
 0.31.0
 ------
 

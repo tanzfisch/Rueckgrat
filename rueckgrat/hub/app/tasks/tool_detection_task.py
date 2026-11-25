@@ -121,11 +121,12 @@ class ToolDetectionTask(Task):
         return {name: score for name, score in scores.items() if score > 0}
 
     def _bands(self, probabilities: Dict[str, float]) -> Tuple[List[str], List[str]]:
-        """(mandatory, recommended) of the tools by their scores and thresholds, ranked by the ToolRegistry"""
+        """(mandatory, recommended) of the tools by their scores and thresholds, ranked by the ToolRegistry, without a
+        priority tool that does not take over for this message (ToolRegistry.yielding)"""
         self._tool_scores = dict(probabilities)
         mandatory = [name for name, p in probabilities.items() if p >= self.thresholds(name)[1]]
         recommended = [name for name, p in probabilities.items() if self.thresholds(name)[0] <= p < self.thresholds(name)[1]]
-        return self.tool_registry.bands(mandatory, recommended)
+        return self.tool_registry.bands(*self.tool_registry.yielding(mandatory, recommended, self.prompt))
 
     def _detect(self) -> Tuple[Optional[List[str]], List[str]]:
         text_scores = self._text_scores()

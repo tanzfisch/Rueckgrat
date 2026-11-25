@@ -140,17 +140,6 @@ class Protocol:
         self._notify("plan", plan)
         return removed, added
 
-    def rename(self, name: str):
-        """the job's new name (a review renamed it) into the plan"""
-        with self._lock:
-            if self._plan is None or self._plan["name"] == name:
-                return
-            self._plan["name"] = name
-            plan = self._copy_plan()
-            if self._store is not None:
-                self._store.plan(plan, {})
-        self._notify("plan", plan)
-
     def finish(self, status: str, name: str):
         """the end of the job: its status (done, failed, cancelled) and name into the store"""
         if self._store is not None:
