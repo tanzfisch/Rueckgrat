@@ -281,7 +281,7 @@ class MapTiles:
 class MapTool(Tool):
     description = prompts.MAP_DESCRIPTION
     requires_any = ("internet", "offline_map")  # geocoding and tiles online, else NOMAD's map and its library's coordinates
-    thresholds = (0.45, 0.5)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.45, 0.6)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask how to get to a place?",
         "Does the user want to see a map?",

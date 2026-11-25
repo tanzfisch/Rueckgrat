@@ -31,6 +31,7 @@ from app.tasks.transcript_tasks import TranscriptSummaryTask, TranscriptEnhanceT
 from app.tasks.turns import Turns
 from app.utils.tts_stream import TtsStreams
 from app.utils.sandbox_volume import SandboxVolume
+from app.utils.contact_model import Contact
 from app.utils.sandbox_container import SandboxReaper
 from app.utils.file_share import FileShare
 from app.utils.sandbox_dav import SandboxDav
@@ -47,7 +48,7 @@ from jose import jwt
 from datetime import datetime, timedelta, timezone
 
 from app.common import get_logger, logger_context, set_log_level, Utils, ChatRequest, GetMessagesRequest, MessageQueue, GetModelURLResponse, HubTTSRequest
-from app.common.transcript_commands import parse_command, next_bookmark_label, BOOKMARK, HEADING
+from app.common.transcript_command import TranscriptCommand
 logger = get_logger()
 
 DB_PATH = "/hub/db/chat.db"
@@ -311,13 +312,13 @@ def add_default_contact(user_id: int):
     """imports DEFAULT_CHARACTER the way the client's import does and queues its profile image. the image file is
     named after the hash of its generation request, which only depends on the character, so all users share one file"""
     try:
-        character = json.loads((CHARACTERS_DIR / DEFAULT_CHARACTER).read_text())
+        character = Contact.model_validate_json((CHARACTERS_DIR / DEFAULT_CHARACTER).read_text())
     except Exception as e:
         logger.error(f"failed loading default character {DEFAULT_CHARACTER}: {repr(e)}")
         return
 
-    resolve_contact_voice(user_id, character)
-    contact_id = app.state.db.create_contact(user_id, character["identity"]["name"])
+    character.resolve_voice(lambda voice_id: resolve_voice_id(user_id, voice_id))
+    contact_id = app.state.db.create_contact(user_id, character.identity.name)
     if contact_id > 0 and app.state.db.update_contact(user_id, contact_id, character):
         app.state.task_queue.add(AssistantImageTask(
             user_id = user_id,
@@ -588,7 +589,7 @@ def create_contact(username: str = Depends(get_current_user)):
         return {"contact_id": contact_id}
 
 class UpdateContactRequest(BaseModel):
-    contact_data: dict
+    contact_data: Contact
 
 @app.patch("/contacts/{contact_id}")
 def update_contact(contact_id: int, request: UpdateContactRequest, username: str = Depends(get_current_user)):
@@ -596,7 +597,7 @@ def update_contact(contact_id: int, request: UpdateContactRequest, username: str
     with logger_context(user_id):
         if not app.state.db.owns_contact(user_id, contact_id):
             raise HTTPException(status_code=404, detail="contact not found")
-        resolve_contact_voice(user_id, request.contact_data)
+        request.contact_data.resolve_voice(lambda voice_id: resolve_voice_id(user_id, voice_id))
 
         job = AssistantImageTask(
             user_id = user_id,
@@ -1056,12 +1057,6 @@ def own_voice(user_id: int, voice: str) -> str:
         logger.warning(f"user {user_id} asked for a voice not theirs: {voice}, using the default")
     return own or ""
 
-def resolve_contact_voice(user_id: int, contact_data: dict):
-    """resolves profile.tts_parameters.voice_id in place, so the db always holds the user's uuid"""
-    tts = contact_data.get("profile", {}).get("tts_parameters")
-    if isinstance(tts, dict) and "voice_id" in tts:
-        tts["voice_id"] = resolve_voice_id(user_id, tts["voice_id"])
-
 @app.get("/voices/predefined")
 def get_predefined_voices(username: str = Depends(get_current_user)):
     # only what the client needs to show a selection, the id is the key.
@@ -1304,7 +1299,7 @@ def split_transcript_segment(transcript_id: int, segment_id: int, request: Trans
         owned_transcript(user_id, transcript_id)
         parts = [{"start": p.start, "end": max(p.end, p.start),
                   "text": p.text.strip()[:SEGMENT_TEXT_MAX], "kind": p.kind} for p in request.parts]
-        if not 1 <= len(parts) <= 3 or any(not p["text"] or p["kind"] not in ("", HEADING) for p in parts):
+        if not 1 <= len(parts) <= 3 or any(not p["text"] or p["kind"] not in ("", TranscriptCommand.HEADING) for p in parts):
             raise HTTPException(status_code=400, detail="parts must be 1 to 3 with text, kind '' or 'heading'")
         ids = app.state.db.split_transcript_segment(transcript_id, segment_id, parts)
         if not ids:
@@ -1741,12 +1736,12 @@ async def audio_endpoint(websocket: WebSocket, username: str = Depends(get_curre
                 stored = {}
                 if kind == "final" and text and transcript_id:
                     stored["id"] = await asyncio.to_thread(app.state.db.add_transcript_segment, transcript_id, start, end, text)
-                    command = parse_command(text)
-                    if stored["id"] and command and command[0] == BOOKMARK:   # "bookmark <label>": stored like a tapped one
-                        label = command[1]
+                    command = TranscriptCommand.parse(text)
+                    if stored["id"] and command and command.get_kind() == TranscriptCommand.BOOKMARK:   # "bookmark <label>": stored like a tapped one
+                        label = command.get_argument()
                         if not label:       # "bookmark" alone: Bookmark n, like a tapped one
                             stored_transcript = await asyncio.to_thread(app.state.db.get_transcript, transcript_id)
-                            label = next_bookmark_label([b["label"] for b in (stored_transcript or {}).get("bookmarks", [])])
+                            label = TranscriptCommand.next_bookmark_label([b["label"] for b in (stored_transcript or {}).get("bookmarks", [])])
                         bookmark_id = await asyncio.to_thread(app.state.db.add_transcript_bookmark, transcript_id, start, label)
                         stored["bookmark"] = {"id": bookmark_id, "at": start, "label": label}
                 if text or (kind == "final" and text is not None):

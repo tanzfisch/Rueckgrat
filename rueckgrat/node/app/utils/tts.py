@@ -10,6 +10,7 @@ import soundfile as sf
 import torch
 
 from app.common import get_logger
+from app.common.languages import LANGUAGES
 from app.utils.speech_queue import SpeechQueue, CHAT
 from app.utils.voice_conds import VoiceConds
 logger = get_logger()
@@ -37,9 +38,8 @@ if TTS_MODEL not in TTS_MODELS:
 MODEL_FILES = TTS_MODELS[TTS_MODEL]["files"]
 MULTILINGUAL = TTS_MODELS[TTS_MODEL]["multilingual"]
 
-# languages ChatterboxMultilingualTTS accepts as language_id (chatterbox.mtl_tts.SUPPORTED_LANGUAGES)
-MULTILINGUAL_LANGUAGES = ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja",
-                          "ko", "ms", "nl", "no", "pl", "pt", "ru", "sv", "sw", "tr", "zh"]
+# languages ChatterboxMultilingualTTS accepts as language_id (chatterbox.mtl_tts.SUPPORTED_LANGUAGES): tts in app.common.languages
+MULTILINGUAL_LANGUAGES = [code for code, language in LANGUAGES.items() if language["tts"]]
 DEFAULT_LANGUAGE = "en"  # used when the text is too short or ambiguous to detect
 MIN_LANGUAGE_CONFIDENCE = 0.5  # langid probability 0..1, below this DEFAULT_LANGUAGE is used
 

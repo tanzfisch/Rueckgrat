@@ -24,7 +24,7 @@ class WriteFileTool(ShareFileTool):
     sequential = False
     offered_with = ()
     # laya, not a prompt tool: a file is only made when the message asks for one, not on every turn
-    thresholds = (0.45, 0.5)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.4, 0.6)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask to save, export or download something as a text, CSV, markdown or Word file?",
     ]

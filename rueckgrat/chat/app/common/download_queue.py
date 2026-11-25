@@ -21,7 +21,7 @@ class DownloadJob:
     server_cert: str = ""
     max_retry: int = 4
     force_download: bool = False
-    callbacks: list = field(default_factory=list, compare=False)   # not compared: jobs for the same file merge and keep all callbacks
+    callbacks: list = field(default_factory=list, compare=False)
 
     def __post_init__(self):
         if self.callbacks is None:

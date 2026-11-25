@@ -23,7 +23,7 @@ class JoinFilesTool(ShareFileTool):
     max_attach_bytes = MAX_AUDIO_BYTES  # one file, held in memory once while it is written and attached, a larger one stays in the files
     sequential = False
     offered_with = ()
-    thresholds = (0.65, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.65, 0.84)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask to join several existing files into one file?",
         "Does the user ask to join existing audio files (mp3, wav, ogg) into one audio file?",
@@ -35,7 +35,7 @@ class JoinFilesTool(ShareFileTool):
         return "join_files"
 
     def runs_detached(self) -> bool:
-        """only an agent job's workers and task passes use it (ToolRegistry.CHAT_EXCLUDED_TOOLS): they wait for it"""
+        """the setup waits for it (audio or text joins are short enough); an agent job's workers wait too"""
         return False
 
     def _checked(self) -> Tuple[str, str, bool, List[str]]:

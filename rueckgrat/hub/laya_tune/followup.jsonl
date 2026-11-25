@@ -1,0 +1,33 @@
+{"lang": "en", "text": "Tell me when the file is ready.", "followup": "M"}
+{"lang": "en", "text": "Yes, that one.", "followup": "M"}
+{"lang": "en", "text": "Remind me when it's done.", "followup": "M"}
+{"lang": "en", "text": "Use the first one.", "followup": "M"}
+{"lang": "en", "text": "And the other one too.", "followup": "r"}
+{"lang": "en", "text": "The second one, please.", "followup": "r"}
+{"lang": "en", "text": "When it's done, send it to me.", "followup": "r"}
+{"lang": "en", "text": "Send it when you have the numbers.", "followup": "r"}
+{"lang": "en", "text": "Do the same for Berlin.", "followup": "r"}
+{"lang": "en", "text": "Add tests for it.", "followup": "r"}
+{"lang": "en", "text": "Can you also put that on a map?", "followup": "r"}
+{"lang": "en", "text": "Go ahead and start it.", "followup": "r"}
+{"lang": "en", "text": "Yes please do that.", "followup": "r"}
+{"lang": "en", "text": "What about the other file?", "followup": "r"}
+{"lang": "en", "text": "The same again, please.", "followup": "r"}
+{"lang": "en", "text": "Please start a background job to build a fizzbuzz project with tests and tell me when the file is ready.", "followup": ""}
+{"lang": "en", "text": "Please start a background job to build a fizzbuzz project with tests.", "followup": ""}
+{"lang": "en", "text": "What's the weather in Berlin today?", "followup": ""}
+{"lang": "en", "text": "Quiz me on the capitals of Europe, one question at a time.", "followup": ""}
+{"lang": "en", "text": "Hello there. Amuse me.", "followup": ""}
+{"lang": "en", "text": "Write a Python script that prints hello world.", "followup": ""}
+{"lang": "en", "text": "Read this page: https://en.wikipedia.org/wiki/Penguin", "followup": ""}
+{"lang": "en", "text": "I'd like to start a new project but I don't know what it should be about. Please give me some ideas.", "followup": ""}
+{"lang": "en", "text": "Help me decide which laptop to buy by asking me a few questions.", "followup": ""}
+{"lang": "en", "text": "How do I bake sourdough bread?", "followup": ""}
+{"lang": "en", "text": "Search the web for the tallest mountain.", "followup": ""}
+{"lang": "en", "text": "Show me a map of Paris.", "followup": ""}
+{"lang": "en", "text": "Generate an image of a red sailboat at sunset.", "followup": ""}
+{"lang": "en", "text": "Let's talk about our day. I went sailing and it was wonderful.", "followup": ""}
+{"lang": "en", "text": "Are you currently working on anything?", "followup": "M"}
+{"lang": "en", "text": "please stop", "followup": "M"}
+{"lang": "en", "text": "Stop anything you are working on", "followup": "M"}
+{"lang": "en", "text": "I added test cases. Tune it once more", "followup": "r"}

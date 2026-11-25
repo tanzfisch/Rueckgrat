@@ -4,9 +4,10 @@ import json
 import random
 from typing import Dict, Any
 from .assistant_image_task import AssistantImageTask
-from ..utils.contact_image_prompt_compiler import ImageType, IMAGE_STYLES
+from ..utils.contact_image_prompt_compiler import ImageType
+from ..utils.contact_model import Contact
 
-from app.common import get_logger, Utils, DEFAULT_IMAGE_STYLE
+from app.common import get_logger, Utils, IMAGE_STYLES, DEFAULT_IMAGE_STYLE
 logger = get_logger()
 
 class ContactGeneratorTask(Task):
@@ -22,14 +23,13 @@ class ContactGeneratorTask(Task):
             if name == "":
                 raise ValueError("need contact name to create contact")
 
-            new_contact = self._generate_contact(self.user_input)
+            contact = Contact.model_validate(self._generate_contact(self.user_input))
 
             contact_id = self.db.create_contact(self.get_user_id(), name)
-            self.db.update_contact(self.get_user_id(), contact_id, new_contact)
+            self.db.update_contact(self.get_user_id(), contact_id, contact)
 
-            profile = new_contact["profile"]
-            persistent = profile["persistent"]
-            self.db.set_contact_companion(self.get_user_id(), contact_id, persistent)
+            if self.user_input["profile"].get("companion"):
+                self.db.set_contact_companion(self.get_user_id(), contact_id, True)
 
             assistant_image_task = AssistantImageTask(
                 user_id = self.get_user_id(),
@@ -67,7 +67,6 @@ class ContactGeneratorTask(Task):
             gender = profile_input.get("gender", "")
             backstory = profile_input.get("backstory", "")
             sfw_value = profile_input.get("sfw") or "SFW"
-            persistent = profile_input.get("persistent")
             image_style = str(profile_input.get("image_style") or "").strip().lower()
             if image_style not in IMAGE_STYLES:
                 logger.debug(f"unknown image style '{image_style}', using {DEFAULT_IMAGE_STYLE}")
@@ -109,7 +108,6 @@ class ContactGeneratorTask(Task):
             
         # take what the llm inferred, with a safe default if it left something out
         role = Utils.get_nested_value(reply, ["role"], "Assistant")
-        age = Utils.get_nested_value(reply, ["age"], "young adult")
         personality = Utils.get_nested_value(reply, ["personality"], "")
         objective = Utils.get_nested_value(reply, ["primary_objective"], "be helpful")        
 
@@ -119,7 +117,6 @@ class ContactGeneratorTask(Task):
                 "name": name,
                 "gender": gender,
                 "role": role,
-                "age": age,
                 "personality": personality
             },
 
@@ -129,7 +126,6 @@ class ContactGeneratorTask(Task):
                 "body_language": Utils.get_nested_value(reply, ["body_language"], ""),
                 "style": Utils.get_nested_value(reply, ["style"], ""),
                 "sfw": sfw_value,
-                "persistent": persistent,
 
                 "appearance": {
                     "image_style": image_style,

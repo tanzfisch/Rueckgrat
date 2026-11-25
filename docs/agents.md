@@ -96,17 +96,17 @@ sequenceDiagram
   Ctrl-->>Chat: {"chat": report}, files attached
 ```
 
-`spawn_job` is not offered to a job's workers or companion passes (`WORKER_EXCLUDED_TOOLS`). A `TaskJob`'s lookup may use it (`TaskJob.ALLOWED_TOOLS`, `Worker.allowed`). A worker can never start another `Controller`: `Controller.spawn` refuses one, so the tree of agents is one level deep.
+`spawn_job` is not on a job's worker or a companion pass (`JOB_TOOLS`, the companion's `ALWAYS_TOOLS`). A `TaskJob`'s lookup has it (`TaskJob.ALWAYS_TOOLS`). A worker can never start another `Controller`: `Controller.spawn` refuses one, so the tree of agents is one level deep.
 
 # Tools
 
-Agents use tools in one way: a `Worker` loop (see Workers). Its tools are fixed when it starts: a `ToolDetectionTask` on its goal (one detection), plus the tools its kind always has, without the excluded ones. A chat turn instead runs tool setup rounds (`ToolExecutionTask`): `tools.md` describes that path (detection with or without Laya, bands, rounds), the table of all tools and what each tool does.
+Agents use tools in one way: a `Worker` loop (see Workers). Its tools are fixed when it starts: the list of its kind (`JOB_TOOLS`, `TaskJob.ALWAYS_TOOLS`, the companion's `ALWAYS_TOOLS`), of the ones the registry can use now (a companion: also without the tools the user's settings exclude). A chat turn instead runs tool setup rounds (`ToolExecutionTask`): `tools.md` describes that path (detection with or without Laya, bands, rounds), the table of all tools and what each tool does.
 
 A few of the tool rules matter most for agents:
 
 - The priority tools are `task` and `spawn_job`. A sure priority tool is the only mandatory tool of its setup (only `task` can still be offered next to a sure `spawn_job`), and after a round in which one was called nothing else runs. So a chat turn that starts a job does not also write files or run commands.
 - Calls made for an agent are background calls. With no stored message to attach to, tools hold their files and data in the result, and the agent attaches them to the message it posts.
-- Each kind of agent has its own excluded tools: a job's workers cannot start jobs, set tasks, remember, poll, show maps, take photos or offer files (the job delivers them); the lookups of task and companion passes have their own lists (see "Who can use which tool" in `tools.md`). `read_file` and `edit_file` (`ToolRegistry.LOOP_TOOLS`) are only for a worker's loop: no tool setup detects or offers them.
+- Each kind of agent has its own list: a job's workers cannot start jobs, set tasks, remember, poll, show maps, take photos or offer files (the job delivers them); the lookups of task and companion passes have their own lists (see "Who can use which tool" in `tools.md`). `read_file` and `edit_file` (`ToolRegistry.LOOP_TOOLS`) are only for a job's worker: no tool setup detects or offers them.
 
 # The Controller
 
@@ -151,26 +151,27 @@ A worker (`Worker`, `agent_jobs/worker.py`, #230) reaches one goal in a loop: a 
 2. It replies with one LLM call (temperature 0.3): `{"note": "...", "calls": [...]}` with 1 to `CALLS_PER_TURN` (3) calls. With `HUB_JOB_WORKER_JSON` on (the default) the reply is held to that JSON by a schema (`turn_schema`, the node's grammar). Without it, `parse_turn` reads JSON, fenced JSON, `{"name", "arguments"}` and the XML that Qwen models write (`<tool_call><function=NAME><parameter=KEY>VALUE`). Nothing is dropped silently: what can't be read, a call of a tool the worker does not have, a reply without a call, calls over the turn's limit and a reply that was cut off each come back to the model in its next turn.
 3. The calls run one after another (`ToolRegistry.execute`, in the background, with `JOB_LLM_TIMEOUT` for tools that call the LLM). The model sees each result in its next turn, cut to 4000 characters (start and end). A bash call counts as failed when its exit code is not 0 or 124.
 
-The grammar and thinking: the node turns Qwen's thinking off on every call (`enable_thinking: false`) and keeps `reasoning_content` and `<think>` out of the content, so thinking never meets the grammar. The schema's `note` comes before the calls, so a model reasons there first. A reply that comes back empty with the grammar is asked once more without it (`_ask`). Without the grammar (`HUB_JOB_WORKER_JSON=false`) the model may think and write freely, at the cost of more replies that can't be read.
+The grammar and thinking: the node turns Qwen's thinking off on every call (`enable_thinking: false`) and keeps `reasoning_content` and `<think>` out of the content, so thinking never meets the grammar. The schema's `note` comes before the calls, so a model reasons there first. A reply that comes back empty from a node that answered is asked once more without the grammar (`_ask`); a node that did not answer (`Infrastructure.chat` returns `None` and names the reason in `info["error"]`, which `AgentJob.chat` keeps in `llm_error`) is not asked again. Without the grammar (`HUB_JOB_WORKER_JSON=false`) the model may think and write freely, at the cost of more replies that can't be read.
 
-Its tools are fixed when it starts, no detection per turn:
+Its tools are fixed when it starts, with no tool detection:
 
-- A job's worker: one detection on its goal, plus always `bash`, `read_file`, `edit_file`, `reset_sandbox` and `websearch` (`JOB_TOOLS`), never `take_photo` or `share_file` (`JOB_EXCLUDED`): the job delivers the files.
-- A pass's lookup: one detection, with `bash` also `read_file`, `edit_file`, `share_file` and `reset_sandbox` (`FILE_KIT`); the passes set their own (see below).
+- A job's worker: `JOB_TOOLS` (the shell and files, lookup, images and speech, `search_memory`), not `take_photo` or `share_file`: the job delivers the files.
+- A pass's lookup: its kind's list (`TaskJob.ALWAYS_TOOLS`, the companion's `ALWAYS_TOOLS`; a companion also drops the tools the user's settings exclude). See below.
 - A worker with `bash` or `edit_file` backs the contact's files up before it starts (`SandboxVolume.snapshot`, see Files): what a files reset brings back. A failed backup does not stop it.
 - A job's worker with `bash` starts in its folder: one uncounted `mkdir -p <folder> && cd <folder>` before its first turn (`_enter`), so a new project folder exists and its commands start there.
 
-The context stays small: the last `KEEP_TURNS` (4) turns are shown whole, older turns become one short line per call at the end of the first message, and long arguments of the turns shown again are cut.
+The context stays small: the last `KEEP_TURNS` (4) turns are shown whole, older turns become one short line per call at the end of the first message (`_earlier`), and long arguments of the turns shown again are cut. Turns that are the same several times in a row are one entry (`5-40 (the same 36 times):`). The lines get `EARLIER_SHARE` (10%) of the LLM slot's context in characters (`Infrastructure.slot_context()`, 8192 tokens when unknown); when a very long job has more, the oldest turns are left out and `WORKER_LEFT_OUT_PART` says how many.
 
 ## How a worker ends
 
-A worker ends in one of three ways, and each one is just "done": the controller's check decides the rest.
+A worker ends in one of four ways, and the first three are just "done": the controller's check decides the rest.
 
 - `finish(summary)`, as the last call of a turn when the goal is reached or it can get no further. Calls after it in the same turn are not run. It is not counted.
-- Its calls are used up: `HUB_JOB_WORKER_CALLS` (40) calls per worker (`PASS_CALLS`, 8, for a lookup). Its last note is the summary.
+- Its calls are used up: `HUB_JOB_WORKER_CALLS` (100) calls per worker (`PASS_CALLS`, 8, for a lookup). Its last note is the summary.
 - Its time is up: `HUB_JOB_WORKER_MINUTES` (30) minutes (`compose.yml`, the hub's environment). Its last note is the summary.
+- It is stuck: `MAX_FAILED_TURNS` (3) turns in a row without a call (a down LLM, a model that writes nothing it can use) end it with an `error`, with the LLM's reason when the node did not answer. A turn without a call counts as one call, and after a chat the node did not answer it waits `FAILED_CHAT_WAIT` (2 s). A lookup that fails this way is a failed lookup (`PASS_FAILED_PART`).
 
-A crash (an exception) is an `error`. The prompt says that facts come only from tool results and the goal, that one reply holds at most about `long_reply_tokens()` × 3 characters (`_reply_chars`), so a bigger file is written in parts, and that only the check decides whether the goal is reached.
+A crash (an exception) is an `error` too. The prompt says that facts come only from tool results and the goal, that one reply holds at most about `long_reply_tokens()` × 3 characters (`_reply_chars`), so a bigger file is written in parts, and that only the check decides whether the goal is reached.
 
 Its result is `{summary, details, tools, changed, saved?, attachments?}` or `{error, details}`. `Worker.result_text` is how a result is passed to the next step and into the job's result. It lists the tools that were really called and the files that were really changed or saved (with full paths) or held.
 
@@ -216,7 +217,7 @@ A write that fails is logged and never fails the job.
 | What | Limit |
 | --- | --- |
 | A `spawn_job` controller | `DEFAULT_TIME_LIMIT`, 28800 s (8 hours) |
-| Each of its workers | `HUB_JOB_WORKER_MINUTES` (30 min) and `HUB_JOB_WORKER_CALLS` (40 calls), at most the controller's limit, from the moment the worker starts |
+| Each of its workers | `HUB_JOB_WORKER_MINUTES` (30 min) and `HUB_JOB_WORKER_CALLS` (100 calls), at most the controller's limit, from the moment the worker starts |
 | One LLM call of an agent | `JOB_LLM_TIMEOUT`, 1800 s (a worker: at most what is left of its time) |
 | A task pass or a companion pass | 5400 s |
 
@@ -237,7 +238,7 @@ The `task` tool (`tools/task_tool.py`) manages things the user wants a contact t
 When a task is due, `CompanionScheduler` runs a `TaskJob` (`companion/task_job.py`) on its own thread:
 
 1. It picks the conversation the task was asked in, or opens a new one if that was deleted (the contact's other tasks without a conversation move there too). It reads the contact's background jobs of the last day with their real state from the `JobMonitor` (`_jobs`, the newest `JOB_LINES` (5)): they go into the lookup's goal and the message's prompt (`TASK_JOBS_PART`), so a task that checks a job reads its state there instead of starting a job to check it, and the message never says a failed or finished job is still running.
-2. Its lookup (`lookup`): a `Worker` loop on the task text (`PASS_GOAL_PART`), with `PASS_CALLS` (8) calls and what is left of the pass's time. Its tools: what the detection finds (it may use `spawn_job`, `poll` and `show_map`, not `take_photo`) and `search_memory`, with `bash` also the file tools. It finishes with what it found; a failed lookup says so in the message's prompt, so the message does not claim it worked.
+2. Its lookup (`lookup`): a `Worker` loop on the task text (`PASS_GOAL_PART`), with `PASS_CALLS` (8) calls and what is left of the pass's time. Its tools: `TaskJob.ALWAYS_TOOLS` (`search_memory`, `spawn_job`, a poll or a map, and lookup). It finishes with what it found; a failed lookup says so in the message's prompt, so the message does not claim it worked.
 3. One LLM call in the contact's persona (`user_task_prompt`, temperature 0.7) writes the message. A task that only reports a change and finds none answers `TASK_SILENT`, and nothing is posted. Without a reply, the message is the task text with ⏰.
 4. It waits for a reply being made in the conversation, at most 120 s, then posts the message (with the alarm if the task has it) and the files, poll or map the tools held.
 
@@ -252,7 +253,7 @@ A contact with `profile.companion = 1` has a calendar (`companion_calendar`). `C
 
 A `CompanionJob` (`companion/companion_job.py`) is one pass:
 
-1. Its lookup (`lookup`): a `Worker` loop on the pass's intent (`prompts.intent`), like a task's. Its tools: what the detection finds, `search_memory` and `take_photo` (if the contact's settings allow photos, `CompanionSettings.excluded_tools`), and a `news` pass `websearch` (`KIND_TOOLS`). It may offer files of the contact's sandbox files (`share_file`) and show a poll or map. It may not make images, files or audio or reset the sandbox (`CompanionJob.EXCLUDED_TOOLS`, `edit_file` and `reset_sandbox` included). A failed lookup is left out.
+1. Its lookup (`lookup`): a `Worker` loop on the pass's intent (`prompts.intent`), like a task's. Its tools: the companion's `ALWAYS_TOOLS` (`search_memory`, `take_photo` if the contact's settings allow photos, lookup, a poll or a map, and `share_file` for the contact's sandbox files). It may not make images, files or audio, start jobs or reset the sandbox. A failed lookup is left out.
 2. One LLM call in the contact's persona with the local time, the day's calendar, the last reflection, the last 10 messages, the conversation summary and the lookups. It answers in JSON: `calendar` (new rows of kind `event`, `check_in`, `news` or `reflection`, later today or tomorrow, at most 36 h ahead), `message` and `thoughts`.
 3. New rows are checked and capped by the contact's chattiness. A message is only sent if `CompanionSettings.may_message` allows it (limits per day, the gap between messages, quiet hours, a user who wrote within the last 30 minutes), no reply is being made, and the contact is still a companion.
 4. A message is held as two versions (`Outreach`): `surprise` is posted when the user opens the contact, `reach_out` when the reach window passes (one hour by default). The photo, files, poll or map the tools held are kept with it and posted with whichever version is sent; an offered file is read from the sandbox files only then.
@@ -287,7 +288,7 @@ The volume is removed with the contact, or by the maintenance task after 30 days
 # Memory and conversation
 
 - An agent's messages (job reports, task results, companion messages) are normal assistant messages of the contact. Later chat replies see them in the history.
-- `search_memory` and `find_tools` are prompt tools that every tool setup offers. Agents have no tool setup: the lookups of task and companion passes have `search_memory` always, a job's worker only when detected. `remember` is not offered to workers or passes (`WORKER_EXCLUDED_TOOLS`), and a chat reply calls it itself at its end (`REPLY_TOOLS`).
+- `search_memory` and `find_tools` are prompt tools that every tool setup offers. Agents have no tool setup: a job's worker and the lookups of task and companion passes have `search_memory`. `remember` is not offered to workers or passes, and a chat reply calls it itself at its end (`REPLY_TOOLS`).
 - Inside a job, the steps share results through the controller (`RESULTS_MARKER_PART`), not through the conversation. The workers see neither the chat history nor the contact's persona.
 - A companion pass reads the conversation's last messages and summary. A task pass and a job report use the contact's persona with the conversation (`PromptCompiler`).
 - After a chat turn, `UpdateContextTask` updates the conversation's context. Agent messages do not start one.

@@ -44,20 +44,8 @@ class ChatTask(Task):
             if self.tool_registry:
                 system_prompt += "\n\n" + self.tool_registry.reply_tools_prompt().strip()
 
-            messages = [{"role": "developer", "content": system_prompt}]
-
-            history = self.db.get_messages_by_conversation(self.request.conversation_id, self._history_size())
-            note = ""   # what the last answer used, put before the next user turn so the model does not copy it
-            for message in history:
-                content = message['content']
-                if not content:
-                    continue    # skip if empty to not confuse ai
-                if message["role"] == "assistant":
-                    note = (self._sources_line(message.get("sources")) + self._data_lines(message.get("data") or {})).strip()
-                elif message["role"] == "user" and note:
-                    content = f"{note}\n\n{content}"
-                    note = ""
-                messages.append({"role": message["role"], "content": content})
+            history, note = self.conversation_messages(self.db, self.request.conversation_id)
+            messages = [{"role": "developer", "content": system_prompt}] + history
 
             latest = [situation_prompt, note]
             if self.tool_execution_results:
@@ -77,12 +65,34 @@ class ChatTask(Task):
         except Exception as e:
             logger.error(f"failed to handle chat request {repr(e)}")
 
-    def _history_size(self) -> int:
+    @classmethod
+    def history_size(cls, db, conversation_id: int) -> int:
         """how many of the latest messages go into the chat, see MIN_HISTORY"""
-        total = self.db.get_message_count_by_conversation(self.request.conversation_id) or 0
-        if total <= self.MIN_HISTORY:
-            return self.MIN_HISTORY
-        return self.MIN_HISTORY + (total - self.MIN_HISTORY) % self.HISTORY_STEP
+        total = db.get_message_count_by_conversation(conversation_id) or 0
+        if total <= cls.MIN_HISTORY:
+            return cls.MIN_HISTORY
+        return cls.MIN_HISTORY + (total - cls.MIN_HISTORY) % cls.HISTORY_STEP
+
+    def _history_size(self) -> int:
+        return self.history_size(self.db, self.request.conversation_id)
+
+    @classmethod
+    def conversation_messages(cls, db, conversation_id: int) -> tuple:
+        """the user and assistant messages a reply sees, and the leftover note of a trailing assistant
+        answer (sources, a poll, a map, prices). same count and notes as execute, without the system
+        prompt, the situation prompt or the tool results. ToolDetectionTask._pick reuses this"""
+        messages, note = [], ""
+        for message in db.get_messages_by_conversation(conversation_id, cls.history_size(db, conversation_id)) or []:
+            content = message["content"]
+            if not content:
+                continue    # skip if empty to not confuse ai
+            if message["role"] == "assistant":
+                note = (cls._sources_line(message.get("sources")) + cls._data_lines(message.get("data") or {})).strip()
+            elif message["role"] == "user" and note:
+                content = f"{note}\n\n{content}"
+                note = ""
+            messages.append({"role": message["role"], "content": content})
+        return messages, note
 
     @staticmethod
     def _add_to_latest_user_message(messages: list, text: str):

@@ -5,7 +5,7 @@ import random
 from typing import Any, Dict, Optional
 
 from app.common import get_logger, Utils
-from app.common.transcript_commands import parse_command
+from app.common.transcript_command import TranscriptCommand
 from .task_queue import Task
 from . import prompts
 logger = get_logger()
@@ -121,7 +121,7 @@ class TranscriptEnhanceTask(Task):
 def enhanceable(segment: dict) -> Optional[str]:
     """the text of a stored segment (get_transcript) the enhanced copy cleans up: what was said as shown (the user's
     edit, else as recognised). None for headings, voice commands and utterances edited to nothing: copied as they are"""
-    if segment.get("kind") or parse_command(segment["text"]):
+    if segment.get("kind") or TranscriptCommand.parse(segment["text"]):
         return None
     text = segment["text"] if segment.get("edited") is None else segment["edited"]
     return text if text.strip() else None

@@ -11,7 +11,7 @@ MAX_OPTION_LENGTH = 80
 
 class PollTool(Tool):
     description = prompts.POLL_DESCRIPTION
-    thresholds = (0.7, 0.75)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.65, 0.84)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask you to make a poll or a vote?",
         "Does the user ask you to create a quiz or a questionnaire for them?",

@@ -1,8 +1,9 @@
-"""one audio file spoken from texts of any length (the text_to_speech tool): each text is cleaned as written text (text_chunks.
-written_speech_text: every word, the asides too, no markdown) and cut into sentence chunks like the chat's speech, every
+"""one audio file spoken from texts of any length (the text_to_speech tool): each text is cleaned as written text (SpeechText.
+written: every word, the asides too, no markdown) and cut into sentence chunks like the chat's speech, every
 chunk is spoken by the tts node and appended to an AudioFile (on the hub's disk, a pause between two texts), so neither the
 text nor the audio has to be held at once. the format: AudioFile.finish"""
-from app.common.text_chunks import split_into_chunks, written_speech_text, MIN_CHUNK_WORDS
+from app.common.text_chunker import TextChunker
+from app.common.speech_text import SpeechText
 from app.utils.audio_file import AudioFile, AudioFailed
 
 MAX_CHUNK_WORDS = 80        # a chunk without a sentence end is cut here, the tts model speaks about 40 s at once
@@ -33,8 +34,8 @@ class SpeechFile:
 
     @staticmethod
     def chunks(text: str) -> list[str]:
-        """what of text is spoken (written_speech_text), cut at sentence ends like the chat's speech"""
-        return split_into_chunks(written_speech_text(text), MIN_CHUNK_WORDS, MAX_CHUNK_WORDS)
+        """what of text is spoken (SpeechText.written), cut at sentence ends like the chat's speech"""
+        return TextChunker.split(SpeechText(text).written(), TextChunker.MIN_WORDS, MAX_CHUNK_WORDS)
 
     def speak(self, text: str) -> None:
         """appends the speech of text, after a pause when a text was spoken before. SpeechFailed when a chunk can't be spoken"""

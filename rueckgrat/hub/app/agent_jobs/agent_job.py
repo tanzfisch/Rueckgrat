@@ -50,6 +50,7 @@ class AgentJob:
         self.attachments = []   # the files its tools held (write_file, share_file, generate_image) for its result or message
         self.held_data = {}     # {kind: value} its tools held for a message (ToolRegistry.show_held): a pass's lookup
         self.deadline = None    # time.monotonic() when its time limit is up (run)
+        self.llm_error = ""     # why its last chat() got no reply: the node did not answer. "" when it answered, also empty
 
     def trace(self, action: str, ok=None, step=None, task=None, **data):
         """#174 one line of this agent in the job's protocol, by default in its own step and task"""
@@ -88,13 +89,15 @@ class AgentJob:
                                     error is None, error, ms, self.attempt if self.attempt > 1 else None)
 
     def chat(self, messages: list, temperature: float, json_schema: Optional[dict] = None, timeout: float = JOB_LLM_TIMEOUT) -> str:
-        """one llm call, "" without a reply. json_schema: the reply is json of that schema (the node's grammar)"""
+        """one llm call, "" without a reply (then llm_error says why when the node did not answer). json_schema: the reply
+        is json of that schema (the node's grammar)"""
         if self.infrastructure is None:
             raise RuntimeError(f"{self.role} agent has no llm (infrastructure)")
         started, info = time.monotonic(), {}
         reply = self.infrastructure.chat(messages=messages, temperature=temperature, seed=random.randint(0, 100000),
                                          max_new_tokens=self.infrastructure.long_reply_tokens(), timeout=timeout,
                                          json_schema=json_schema, info=info) or ""
+        self.llm_error = info.get("error", "")
         # the trace names the caller (make_plan, _ask: a worker's turn, _report)
         Trace.write((self.tool_context or {}).get("conversation_id"), f"llm {self.role} {sys._getframe(1).f_code.co_name}",
                     f"{Trace.messages(messages)}\n----- reply -----\n{reply}", agent=self.job_id, temperature=temperature,

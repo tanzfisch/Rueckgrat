@@ -12,7 +12,7 @@ logger = get_logger()
 
 
 class ContactWizardForm(ft.Column):
-    """the simple new character form: name, gender, voice, backstory, style, persistent and nsfw"""
+    """the simple new character form: name, gender, voice, backstory, style, companion and nsfw"""
 
     male_names = [
         "Kwesi", "Nnamdi", "Chidi", "Olumide", "Ayodele", "Segun", "Kunle", "Dayo",
@@ -109,7 +109,7 @@ class ContactWizardForm(ft.Column):
             content_padding=16,
         )
         self.nsfw_switch = ft.Switch(value=False, active_color=theme.ACCENT)
-        self.persistent_switch = ft.Switch(value=False, active_color=theme.ACCENT)
+        self.companion_switch = ft.Switch(value=False, active_color=theme.ACCENT)
         self.voice_selector = VoiceSelector(Hub.get_predefined_voices(), on_play_sample=Text_To_Speech.play_voice_sample)
 
         self.image_style = ft.Dropdown(
@@ -136,9 +136,9 @@ class ContactWizardForm(ft.Column):
             Capabilities.bind(wizard_row("Voice", self.voice_selector), "tts"),     # only while the hub can speak
             wizard_row("Backstory", self.backstory),
             wizard_row("Style", self.image_style),
-            wizard_row(label = "Persistent", 
-                       control = self.persistent_switch,
-                       description = "Runs as a persistent companion with its own schedule."),
+            wizard_row(label = "Companion", 
+                       control = self.companion_switch,
+                       description = "Plans its own day and may write first."),
         ]
         if Hub.nsfw_allowed:
             self.controls.append(
@@ -169,7 +169,7 @@ class ContactWizardForm(ft.Column):
             "gender": self.gender.get_selected(),
             "backstory": self.backstory.value or "A friendly, capable assistant who enjoys helping people get things done. Curious, patient and honest, they explain things clearly, admit when they don't know something, and keep the conversation focused on what the user needs.",
             "sfw": "NSFW" if self.nsfw_switch.value else "SFW",
-            "persistent": self.persistent_switch.value or False,
+            "companion": bool(self.companion_switch.value),
             "image_style": self.image_style.value or DEFAULT_IMAGE_STYLE,
         }
 

@@ -4,81 +4,13 @@ from enum import Enum
 
 from . import prompts
 
-from app.common import get_logger, Utils
+from app.common import get_logger, Utils, IMAGE_STYLES, DEFAULT_IMAGE_STYLE
 logger = get_logger()
 
 class ImageType(Enum):
     Portrait = 1
     UpperBody = 2
     FullBody = 3
-
-# image styles selectable per contact (profile.appearance.image_style), keep in sync with SELECT_OPTIONS in chat/app/ui/profile_page.py.
-# the style goes first in the prompt and stays short: sdxl's text encoder only sees about 75 tokens per chunk and
-# compel cuts off long prompts, so style words at the end of the prompt used to be dropped
-IMAGE_STYLES = {
-    "studio": {
-        "positive": "studio portrait photo, softbox lighting, seamless backdrop, even light, crisp focus, commercial look",
-        "negative": "outdoors, cluttered background, harsh sunlight, candid snapshot, film grain, motion blur, plastic skin, text, mirror, eye artifacts",
-    },
-    "natural": {
-        "positive": "candid photo, natural daylight, real-world surroundings, unposed, 35mm film look, natural skin texture",
-        "negative": "studio backdrop, softbox lighting, posed, glossy retouched skin, HDR, oversaturated, dramatic lighting, text, mirror, eye artifacts",
-    },
-    "cinematic": {
-        "positive": "cinematic film still, low-key lighting, rim light, anamorphic lens, shallow DOF, teal-orange grade, haze",
-        "negative": "flat lighting, plain backdrop, bright even light, snapshot, overexposed, washed out, cartoon, text, mirror, eye artifacts",
-    },
-    "golden_hour": {
-        "positive": "golden hour photo, warm low sun, backlit rim light, lens flare, soft haze, outdoor, dreamy warm tones",
-        "negative": "midday sun, overcast, cold tones, studio backdrop, flash, harsh shadows, indoor light, text, mirror, eye artifacts",
-    },
-    "noir": {
-        "positive": "B&W film noir photo, hard key light, deep shadows, venetian blind patterns, high contrast, smoky, 1940s mood",
-        "negative": "color, soft even lighting, bright cheerful, flat lighting, modern digital, pastel, text, mirror, eye artifacts",
-    },
-    "vintage_film": {
-        "positive": "1970s analog film photo, faded warm colors, heavy grain, light leaks, soft focus, Kodak Portra look",
-        "negative": "digital look, ultra sharp, HDR, crisp modern colors, studio backdrop, clean polished, text, mirror, eye artifacts",
-    },
-    "editorial": {
-        "positive": "high fashion editorial photo, solid color backdrop, hard flash, strong pose, graphic composition, magazine look",
-        "negative": "candid snapshot, cluttered background, natural environment, soft flat lighting, muted colors, film grain, text, mirror, eye artifacts",
-    },
-    "fantasy": {
-        "positive": "epic high fantasy painting, misty mountains, ancient forests, golden god rays, painterly brushwork, heroic atmosphere",
-        "negative": "modern clothing, city, cars, electronics, sci-fi, neon, photograph, studio backdrop, flat lighting, text, mirror, eye artifacts",
-    },
-    "sci_fi": {
-        "positive": "futuristic sci-fi art, neon city lights, holographic displays, high-tech armor, cyan-magenta lighting, cyberpunk",
-        "negative": "medieval, fantasy, rustic, nature only, vintage, sepia, daylight snapshot, plain backdrop, muted colors, text, mirror, eye artifacts",
-    },
-    "comics": {
-        "positive": "comic book illustration, bold black outlines, cel shading, flat vibrant colors, halftone texture, graphic novel style",
-        "negative": "photograph, photorealistic, soft gradients, blurry lines, 3D render, muted colors, film grain, text, eye artifacts",
-    },
-    "anime": {
-        "positive": "anime illustration, clean lineart, cel shading, vibrant colors, expressive eyes, detailed anime background",
-        "negative": "photograph, photorealistic, 3D render, western comic, rough sketch, nsfw, nudity, sexual, child, loli, chibi, deformed anatomy, text, eye artifacts",
-    },
-    "origami": {
-        "positive": "origami paper craft figure, folded paper, crisp creases, paper texture, soft studio light, papercraft diorama",
-        "negative": "photograph of a real person, skin texture, painting, cartoon, 3D render, plastic, glossy, text, eye artifacts",
-    },
-    "charcoal_sketch": {
-        "positive": "charcoal sketch portrait, expressive strokes, grainy shading, monochrome, textured paper, fine art drawing",
-        "negative": "color, photograph, photorealistic, digital art, clean lineart, cel shading, 3D render, glossy, text, eye artifacts",
-    },
-    "watercolor": {
-        "positive": "watercolor painting portrait, soft washes, bleeding pigments, visible paper grain, loose brushwork, light airy palette",
-        "negative": "photograph, photorealistic, hard outlines, cel shading, 3D render, digital art, oversaturated, glossy, text, eye artifacts",
-    },
-    "classic_oil_portrait": {
-        "positive": "classic oil painting portrait, old master style, rich chiaroscuro, visible brushstrokes, canvas texture, dark warm background",
-        "negative": "photograph, photorealistic, modern clothing, cartoon, anime, flat colors, 3D render, neon, text, eye artifacts",
-    },
-}
-
-DEFAULT_IMAGE_STYLE = IMAGE_STYLES["studio"]
 
 class ContactImagePromptCompiler:
     def __init__(self, contact: Dict[str, Any], user_data: Dict[str, Any], context: Dict[str, Any] = None, 
@@ -114,14 +46,6 @@ class ContactImagePromptCompiler:
                 return Utils.get_nested_value(self.profile, ["profile_picture_context", "topic"], "")
         except Exception as e:
             logger.error(f"failed to build topic {repr(e)}")
-
-    def age_to_text(self, age: int):
-        if age < 18: return ""
-        elif age < 22: return "young"
-        elif age < 27: return "young adult"
-        elif age < 45: return "mature"
-        elif age < 60: return "middle-aged"
-        else: return "senior"
 
     def _clothing(self, source: Dict[str, Any], path: list) -> str:
         def text(field: str) -> str:
@@ -233,7 +157,7 @@ class ContactImagePromptCompiler:
 
     def _image_style(self) -> Dict[str, str]:
         image_style = Utils.get_nested_value(self.profile, ["appearance", "image_style"], "")
-        return IMAGE_STYLES.get(image_style, DEFAULT_IMAGE_STYLE)
+        return IMAGE_STYLES.get(image_style, IMAGE_STYLES[DEFAULT_IMAGE_STYLE])
 
     def _build_positive_general(self) -> str:
         return self._image_style()["positive"]

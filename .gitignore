@@ -224,3 +224,4 @@ rueckgrat/chat/app/*.cert
 notes.txt
 # dart sources of a local flet extension (the lib/ rule above is meant for python builds)
 !rueckgrat/chat/extensions/**/lib/
+rueckgrat/hub/laya_tune/out

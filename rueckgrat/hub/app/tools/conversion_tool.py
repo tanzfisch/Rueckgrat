@@ -491,7 +491,7 @@ def convert(amount: Any, from_unit: str, to_unit: str, online: bool = True) -> D
 
 class ConversionTool(Tool):
     description = prompts.CONVERSION_DESCRIPTION
-    thresholds = (0.6, 0.65)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.65, 0.8)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask to convert a temperature, a length, a weight or money into another unit or currency?",
         "Does the user give a height, length or weight and want it in other units?",

@@ -46,7 +46,7 @@ Rückgrat is a backend (hub and nodes) plus a user-facing companion chat client.
 
 ### Offline with Project NOMAD
 
-If you run [Project NOMAD](https://www.projectnomad.us/) in your network you can register it with hub during installation. Then the will fall back on it for *websearch*, *wikipedia* and *show_map* in case the internet is down.
+If you run [Project NOMAD](https://www.projectnomad.us/) in your network you can register it with hub during installation. Then the will fall back on it for *websearch* and *show_map* in case the internet is down.
 
 ### Access AI's files as a network drive
 
@@ -90,8 +90,7 @@ Virtual environments, caches and installed packages are not shared, they only wo
 | take_photo | generate a photo of self, user, or both from current context |
 | text_to_speech | speak a short text or text files (e.g. the chapters of an audiobook) with the contact's voice, or the voice chosen in the preferences, into one audio file (WAV, MP3 or Ogg), downloadable by the user in chat |
 | weather | weather forcast for given location |
-| websearch | search the web when requested or needed |
-| wikipedia | search wikipedia when requested or needed |
+| websearch | search the web and the offline library when requested or needed; a Wikipedia article among the top hits includes its summary |
 | write_file | write text or code files, downloadable by the user in chat |
 | share_file | attach files or folders already in the sandbox to the answer, downloadable by the user in chat |
 | reset_sandbox | start the contact's sandbox over from the clean image (files kept), or on request bring its files back to the backup made before the last agent job |
@@ -178,10 +177,9 @@ The user should also be in the `docker` group, so it can run the containers. If 
 
 **Recommended: a separate user for Rueckgrat**
 
-The easiest way is a separate user just for Rueckgrat, with your ssh key and sudo without a password. Then the installer never asks for a password. `create_rueckgrat_user.sh` sets this up on all your machines in one go. It asks for your sudo password once per machine:
+The easiest way is a separate user just for Rueckgrat, with your ssh key and sudo without a password. Then the installer never asks for a password. Set it up as described in [Creating a Rückgrat user](#creating-a-rückgrat-user), then install with:
 
 ```bash
-./create_rueckgrat_user.sh rueckgrat localhost 192.168.2.10 192.168.2.11
 ./install.sh -u rueckgrat
 ```
 
@@ -192,6 +190,28 @@ Keep in mind that sudo without a password means anyone who gets your ssh key can
 **Picking the machines**
 
 The installer searches your LAN for machines it can install on (your ssh key works there, the user has sudo, `rsync` is installed) and lists them. Pick one by its number or type an IP, an empty answer ends the list. `--no-scan` skips the search.
+
+### Creating a Rückgrat user
+
+The installer logs in to every machine with ssh and needs sudo there to install Docker, packages and the containers. With your normal user it has to ask for your sudo password on each machine, and Rückgrat ends up mixed in with your own files. A separate user with your ssh key and sudo without a password lets the installer, and later reinstalls and updates, run on all machines without asking for anything, and keeps everything Rückgrat installs in that user's home folder, apart from your own account.
+
+Run this from the machine you install from, once for every machine (`HOST` as you reach it with ssh, `localhost` for this one). It asks for your sudo password on that machine:
+
+```bash
+HOST=localhost
+ssh -t $HOST 'sudo bash -c "
+  id rueckgrat >/dev/null 2>&1 || useradd -m -s /bin/bash rueckgrat
+  usermod -aG sudo rueckgrat 2>/dev/null || usermod -aG wheel rueckgrat
+  echo \"rueckgrat ALL=(ALL) NOPASSWD: ALL\" > /etc/sudoers.d/rueckgrat
+  chmod 0440 /etc/sudoers.d/rueckgrat
+  install -d -m 700 -o rueckgrat -g rueckgrat /home/rueckgrat/.ssh
+  getent group docker >/dev/null && usermod -aG docker rueckgrat || true
+"'
+ssh $HOST 'sudo tee -a /home/rueckgrat/.ssh/authorized_keys >/dev/null && sudo chown rueckgrat:rueckgrat /home/rueckgrat/.ssh/authorized_keys && sudo chmod 600 /home/rueckgrat/.ssh/authorized_keys' < ~/.ssh/id_ed25519.pub
+ssh rueckgrat@$HOST 'sudo -n true && echo OK'
+```
+
+The last line prints `OK` when the key login and sudo without a password work.
 
 ### Uninstall
 

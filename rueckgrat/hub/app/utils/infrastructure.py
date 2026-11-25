@@ -630,7 +630,17 @@ class Infrastructure:
         if node and node.is_connected():
             node.send_message(json.dumps({"cancel": stream_id}))
 
+    @staticmethod
+    def _chat_failed(reason: str, info: Optional[dict]) -> None:
+        """logs why a chat call got no reply and names it in info["error"], so a caller tells a node that did not answer
+        (it asks again later) from one that answered empty (it asks again at once, with other settings)"""
+        logger.error(reason)
+        if info is not None:
+            info["error"] = reason
+
     def chat(self, messages: list, temperature: float, seed: int, conversation_id: int = -1, stream: bool = False, callback = None, max_new_tokens: int = 1024, context_size: int=8192, timeout: Optional[float] = None, json_schema: Optional[dict] = None, info: Optional[dict] = None) -> str:
+        """the llm's reply (text), None when the node did not answer: info then has "error", else the node's
+        finish_reason, prompt_tokens and completion_tokens. stream: the stream id, the reply goes to callback"""
         try:
             chat_request = ChatRequestLlama(
                 messages=messages,
@@ -674,16 +684,14 @@ class Infrastructure:
                 if response.status_code == 200:
                     data = response.json()
                     if data.get("role") == "error":     # the node's llama call failed, content is the error, not a reply
-                        logger.error(f"chat failed on the node: {data.get('content')}")
-                        return None
+                        return self._chat_failed(f"chat failed on the node: {data.get('content')}", info)
                     if info is not None:    # an older node sends none of them
                         info.update({key: data[key] for key in ("finish_reason", "prompt_tokens", "completion_tokens") if data.get(key)})
                     return data.get("content", "")
+                return self._chat_failed(f"chat failed, the node answered {response.status_code}", info)
 
         except Exception as e:
-            logger.error(f"failed to get a chat response {repr(e)}")
-
-        return None
+            return self._chat_failed(f"failed to get a chat response {repr(e)}", info)
 
     def download(self, source_path: str, download_path: str, asynchronous: bool = True, callback=None, max_retry: int = 5, force_download: bool=False):
         node = self.node_by_type["text_to_image"] # not sure about this. how do we know from which node to download?

@@ -31,14 +31,3 @@ REACH_WINDOW_OPTIONS = {
     "4h": "4 hours, more independent",
 }
 DEFAULT_REACH_WINDOW = "1h"
-
-
-def put_companion_switch(data: dict, on: bool):
-    """the companion switch into an exported character file, as profile.companion_settings.companion"""
-    data.setdefault("profile", {}).setdefault("companion_settings", {})["companion"] = bool(on)
-
-
-def pop_companion_switch(data: dict) -> bool:
-    """takes the companion switch out of an imported character file, the hub only takes it through its own endpoint"""
-    settings = data.get("profile", {}).get("companion_settings")
-    return bool(settings.pop("companion", False)) if isinstance(settings, dict) else False

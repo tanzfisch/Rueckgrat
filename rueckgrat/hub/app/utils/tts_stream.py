@@ -6,7 +6,8 @@ from collections import deque
 
 from app.common import get_logger
 import time
-from app.common.text_chunks import split_into_chunks, chunk_words, without_code, speech_text
+from app.common.text_chunker import TextChunker
+from app.common.speech_text import SpeechText
 logger = get_logger()
 
 PIECE_SECONDS = 1          # audio goes to the client in pieces of this length, like the #112 mic buffer
@@ -143,7 +144,7 @@ class TtsStreams:
 
     @staticmethod
     def _generate(infrastructure, reply: TtsReply, voice: str, language: str):
-        """speaks every chunk as soon as it is complete (chunk_words). while the reply streams the last chunk may still
+        """speaks every chunk as soon as it is complete (TextChunker.words_for). while the reply streams the last chunk may still
         grow, it waits for more text"""
         index, spoken, version = 0, 0, -1   # spoken: the words of the text already spoken
         while not reply.dropped.is_set():
@@ -153,8 +154,8 @@ class TtsStreams:
                 final = True
             version = latest
             while not reply.dropped.is_set():
-                words = without_code(text, final).split()[spoken:]
-                chunks = split_into_chunks(" ".join(words), min_words=chunk_words(index))
+                words = SpeechText(text).without_code(final).split()[spoken:]
+                chunks = TextChunker.split(" ".join(words), min_words=TextChunker.words_for(index))
                 if not chunks or (len(chunks) == 1 and not final):
                     break   # nothing left, or the last chunk may not be complete yet
                 spoken += len(chunks[0].split())
@@ -171,7 +172,7 @@ class TtsStreams:
     @staticmethod
     def _speak_chunk(infrastructure, reply: TtsReply, chunk: str, index: int, voice: str, language: str) -> bool:
         """generates and queues the speech of one chunk. False if the reply was dropped"""
-        speech = speech_text(chunk)
+        speech = SpeechText(chunk).reply()
         if not speech:
             return True
         started = time.perf_counter()

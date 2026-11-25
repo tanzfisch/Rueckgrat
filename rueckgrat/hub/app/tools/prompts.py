@@ -679,13 +679,14 @@ Example:
 
 # ---------------------------------------------------------------- websearch
 
-WEBSEARCH_DESCRIPTION = ("searches the web and the offline library for current, factual or local information (news, events, "
-                         "prices, stocks, opening hours, how-tos)")
+WEBSEARCH_DESCRIPTION = ("searches the web and the offline library for current, factual or encyclopedic information (news, events, "
+                         "people, places, prices, stocks, opening hours, how-tos)")
 
 WEBSEARCH_PROMPT = """
 WEBSEARCH:
 Use for current, factual, real-time, or location-specific information, or when you need fresh ideas.
 It searches the web and the offline library (encyclopedias, manuals, Q&A sites) together, without internet only the library; each result says where it comes from.
+When a top result is a Wikipedia article, its encyclopedic summary is included.
 
 Parameters:
 - query (string, required): the search query
@@ -698,24 +699,6 @@ WEBSEARCH_FOUND_PART = ("web search for {query}, the answers the pages give, the
                         "Base what you say about it on these answers, do not add facts they do not give.")
 
 WEBSEARCH_ANSWER_LINE = "{source}: {answer} ({url})"
-
-# ---------------------------------------------------------------- wikipedia
-
-WIKIPEDIA_DESCRIPTION = ("encyclopedic summary of a well known person, place, thing, concept or historic event, from the web "
-                         "or the offline library")
-
-WIKIPEDIA_PROMPT = """
-WIKIPEDIA:
-Use for a quick encyclopedic summary of a well-known person, place, thing, or event. Not for news or current values.
-Without internet the summary comes from the offline library's copy of Wikipedia, which may be older.
-
-Parameters:
-- query (string, required): the topic
-- lang (string, optional): Wikipedia language code, default "en"
-
-Example:
-{"tool": "wikipedia", "query": "Eiffel Tower", "lang": "en"}
-"""
 
 # ---------------------------------------------------------------- write_file
 
