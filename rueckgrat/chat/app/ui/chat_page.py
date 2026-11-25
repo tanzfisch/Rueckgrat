@@ -741,7 +741,7 @@ class ChatPage(BasePage):
             if "chat" in message:
                 chat = message["chat"]
                 if chat["conversation_id"] == self.conversation_id:
-                    self.files_dock.refresh()     # the reply may have written files (bash, run_code). only when it is open
+                    self.files_dock.refresh()     # the reply may have written files (bash, write_file). only when it is open
                     message_id = chat.get("message_id", self._stream_message_id)   # read before the stream id is reset
                     if self._stream_message_id is not None:
                         self._finished_message_ids.add(self._stream_message_id)

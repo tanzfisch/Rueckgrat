@@ -7,8 +7,8 @@ a news scan or an evening reflection if they fit the persona, or nothing at all.
 a pass (one firing of a row of the companion's private calendar) sends:
   developer: the contact's persona (PromptCompiler, same as chat)
   user:      task_prompt(kind, values) = TASKS[kind] + STATE + CALENDAR_DECISION + SURFACE_DECISION + OUTPUT_FORMAT
-             (+ LOOKUP_RESULT when the pass looked something up before: the workers' tool path, laya and tool directing
-             on intent(kind, values), the first part of TASKS[kind] up to INSTRUCTIONS)
+             (+ LOOKUP_RESULT when the pass looked something up before: a Worker loop, worker.lookup, on
+             intent(kind, values), the first part of TASKS[kind] up to INSTRUCTIONS)
 
 placeholders, all plain strings (str.format, so literal JSON braces are doubled):
   name            the companion's name
@@ -183,7 +183,7 @@ def task_prompt(kind: str, values: dict, result: str = "") -> str:
 
 
 def intent(kind: str, values: dict) -> str:
-    """what the pass is about, without its instructions: the input of its tool detection and directing"""
+    """what the pass is about, without its instructions: the goal of its lookup"""
     return TASKS[kind].split("INSTRUCTIONS:")[0].format(**values).strip()
 
 
@@ -194,15 +194,24 @@ TASK_RUN_PROMPT = """
 You are {name}. {user_name} asked you to do this at {due_time}: {task}
 {late}
 NOW: {local_time} ({weekday}, {timezone})
-
+{jobs}
 INSTRUCTIONS:
 - do it now and write {user_name} the result as a chat message in your own voice
 - a reminder or a wake up call: remind {user_name} of it, short and warm
 - use what you looked up in LOOKUP_RESULT, never invent facts, prices or numbers that are not there. if nothing was found, say so
 - if a background job was started for it, say that it is working on it and will report back
+- the state of your background jobs is only what YOUR BACKGROUND JOBS says: never say one is still running when it failed or is done
 - if the task is to tell {user_name} only when something happens (a price drop, a change, a new item) and it did not happen, reply with exactly {silent}
 - reply with the message only, as long as the task needs it
 """
+
+# the contact's background jobs (TaskJob._jobs), in the task's prompt and its lookup's goal
+TASK_JOBS_PART = """
+YOUR BACKGROUND JOBS (their real state now, newest first; read a job's state here, never start a job only to check one):
+{jobs}
+"""
+TASK_JOB_LINE = "- {name}: {state}, started {started}{finished}"
+TASK_JOB_FINISHED_PART = ", finished {finished}"
 
 TASK_LATE_PART = "It was due at {due_time} but could not run then (the hub was down), it runs late now: mention that in a few words."
 

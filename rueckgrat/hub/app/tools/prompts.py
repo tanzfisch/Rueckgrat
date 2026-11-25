@@ -9,13 +9,8 @@ templates, filled with str.format (literal braces doubled):
   TOOL_PLANNED_PART                           name: the tool's name
   TOOL_CUT_OFF_PART                           name: the tool whose last call was cut off
   TOOL_LENGTH_PART                            name: the tool of the last call of a setup reply that hit its token limit
-  FIX_ROUND_PART                              fix, total: the fix round and how many there are, problems: "- " lines
-  TOOL_NOT_CALLED_PART                        names: a worker's mandatory RUN_TOOLS when none of them got a call, " or " separated
-  CHECKS_FIXED_PART, CHECKS_FAILED_PART       rounds: fix rounds run, problems (failed only): "; " separated
   TOOLS_RECOMMENDED_PART, TOOLS_REPLY_PART,
   TOOLS_OPTIONAL_PART, TOOLS_MANDATORY_PART   tools: the instructions of the offered tools (ToolRegistry.get_tools_prompt)
-  RUN_CODE_WRITER_PROMPT                      run_timeout: seconds the program may run, files: the sandbox files folder,
-                                              projects: its projects folder, workdir: the conversation's own folder
   MAP_LOOKING_UP_PART                         query: the address of the call
   MAP_SHOWN_PART                              name: the found place's display name
   POLL_SHOWN_PART                             question, options (joined by " | "), choices: POLL_ONE_CHOICE_PART or POLL_SEVERAL_CHOICES_PART
@@ -45,7 +40,17 @@ templates, filled with str.format (literal braces doubled):
   BASH_PROMPT                                 files: the sandbox files folder, timeout: seconds per command, workdir: the
                                               conversation's own folder, project_dir, documents, images: the folders of
                                               the layout, projects: BASH_PROJECT_LINE lines, BASH_NO_PROJECTS_PART or
-                                              BASH_PROJECTS_UNKNOWN_PART
+                                              BASH_PROJECTS_UNKNOWN_PART, turns: BASH_ONE_TURN_PART (a tool setup) or
+                                              BASH_LOOP_PART (an agent job's worker, Worker)
+  READ_FILE_PROMPT, EDIT_FILE_PROMPT          files: the sandbox files folder
+  READ_FILE_PART                              path: the full path, first, last: the lines shown, total: its lines, lines: the
+                                              numbered lines
+  EDIT_FILE_WRITTEN_PART                      path: the full path, lines: its lines now
+  EDIT_FILE_REPLACED_PART                     path, lines, old_lines, new_lines: the lines of the old and the new text
+  READ_FILE_EMPTY_PART, READ_FILE_BINARY_PART path: the full path
+  READ_FILE_TOO_LARGE_PART, EDIT_FILE_TOO_LARGE_PART  path, limit: MB
+  EDIT_FILE_NOT_FOUND_PART, EDIT_FILE_NO_FILE_PART    path
+  EDIT_FILE_MANY_PART                         path, count: how often the old text is in the file
   BASH_PROJECT_LINE                           name: a project's folder, summary: the first line of its PROJECT.md
   SEARCH_MEMORY_CONVERSATION_QUESTION_PART    summary: the start of an earlier conversation's summary
   SPAWN_JOB_REPORT_PROMPT                     prompt, summary, details, attachments: SPAWN_JOB_ATTACHMENTS_PART or "",
@@ -71,13 +76,11 @@ TOOL_NOTES_PART = """
 HOW THE TOOLS WORK TOGETHER
 {notes}
 """
-TOOL_NOTE_RUN_CODE_BASH = "run_code runs one program once. To create a project or files to keep, use bash: it works in the same files."
-TOOL_NOTE_RUN_CODE_CALCULATE = "Simple arithmetic goes to calculate, not to run_code."
+TOOL_NOTE_SPAWN_JOB_CALCULATE = "Simple arithmetic goes to calculate, not to spawn_job."
 TOOL_NOTE_BASH_WRITE_FILE = ("A software project or several files at once are made with bash in your sandbox files, not with write_file: "
                              "write_file writes one text file.")
 TOOL_NOTE_BASH_SHARE_FILE = ("The user does not see the files bash makes: give them files or a project folder with share_file afterwards. "
                              "share_file calls in the same answer as the bash calls that make the files run after them.")
-TOOL_NOTE_RUN_CODE_SHARE_FILE = "The user does not see the files run_code makes in your files: give them with share_file afterwards."
 TOOL_NOTE_CONVERT_WEBSEARCH = "Prefer convert over websearch for exchange rates and metal prices."
 TOOL_NOTE_WEATHER_WEBSEARCH = "Prefer weather over websearch for the weather."
 TOOL_NOTE_SPAWN_JOB_TASK = ("spawn_job is for work now, not for anything at a later time or repeating (reminders, alarms, every day, "
@@ -94,23 +97,6 @@ TOOL_CUT_OFF_PART = ("the last {name} call was cut off, the tool setup got too l
                      "Its work is missing: tell the user which part is not done")
 TOOL_LENGTH_PART = ("the tool setup hit its length limit after the last {name} call: the calls it did not write are missing, "
                     "tell the user which part is not done")
-
-# a worker's fix rounds (ToolExecutionTask): appended to its task when bash, run_code, share_file or write_file calls did not work
-FIX_ROUND_PART = """
-
-FIX ROUND {fix} OF {total}: these calls of the earlier rounds did not work:
-{problems}
-The earlier results show what happened (the commands, exit codes and errors). Fix only what failed, in order: repair the
-code or write the missing files, then run the failed command again (e.g. the build or the test), so its result shows
-whether it works now. Do not redo what already worked. What the sandbox does not have (a system package that is not
-installed, no root or apt-get, no display) can not be fixed here: do not try to install it again, leave that step out
-(e.g. it compiles but does not link for a missing library: the files and the compile are the result, report how far it got). Attach a file again only when it is new or changed. A file of
-this task that is there already (made by an earlier call) is replaced with "overwrite": true."""
-TOOL_NOT_CALLED_PART = ("{names}: not called, so nothing was built, installed, run or tested yet. Call it now for what the "
-                        "task asks (build, install, run, test), all calls at once")
-CHECKS_FIXED_PART = "the calls that did not work were fixed in {rounds} fix round(s), the last calls all worked."
-CHECKS_FAILED_PART = ("still not working after {rounds} fix round(s): {problems}. Tell the user what does not work, "
-                      "do not claim it works.")
 
 TOOLS_RECOMMENDED_PART = """
 These tools may be needed, the detection was not sure. YOU decide whether the user's latest message really asks for what a tool does.
@@ -175,60 +161,15 @@ Example:
 {"tool": "calculate", "expression": "0.15 * 84.50"}
 """
 
-# ---------------------------------------------------------------- run_code
-
-RUN_CODE_DESCRIPTION = "writes a small program and runs it in a sandbox container, returns its output"
-
-RUN_CODE_WRITER_PROMPT = """You write one complete program for the task below. It runs once in a fresh sandbox, what it prints comes back to you.
-
-Reply with ONLY the source code of the program as plain text: no JSON, no explanation, no markdown fences.
-
-Rules:
-- One single file. Print every result to stdout, the program gets no input.
-- Python, unless the task or the user asks for another language: javascript, cpp, java or go.
-- Header lines at the very top, only when needed, always with # (they are removed before the program runs):
-# language: cpp
-# requires: numpy, pandas
-- "language" when it is not python. "requires" lists packages to install first: pip for python, npm for javascript, apt for cpp, go modules for go. java can't install packages, use only its standard library.
-- When the user gave code to run, reply with that code unchanged (add header lines if it needs packages).
-- It must finish within {run_timeout} seconds. Keep the output short.
-- The folder {files} holds the user's files, they stay between runs: the projects in {projects}/<project-name>/, this conversation's own folder {workdir}, the files written for the user in {files}/data/documents/. Read and write there when the task is about these files. Files to keep go into the project's own folder, scratch files into {workdir}.
-- A task about a project: the program first changes into the project's folder {projects}/<project-name> (python: os.chdir to it and sys.path.insert(0, it)), then imports or runs the project's code from there, so its own imports and relative paths work."""
-
-RUN_CODE_NO_CODE_PART = ("the task was to run the code from the user's message, but the conversation has no code. Nothing ran. "
-                         "Describe what the program must do instead.")
-
-RUN_CODE_PROMPT = """
-RUN_CODE:
-Use when the user asks you to run or execute code, or to work something out with a program: exact results with big numbers, simulations, data processing, checking that code works. A separate step writes one program file for your task and runs it in a fresh sandbox, you get its output, errors and exit code back.
-You may also use it on your own when an exact check is better than guessing:
-- verify a calculation, a count or an idea (primes, digits, dates, regex matches)
-- debug: reproduce an error in isolation to find its cause
-- benchmark: compare snippets for speed or output
-- explore an unfamiliar function or library by trying it
-- validate math or logic before you rely on it in a longer plan
-- prototype a small piece to see if an approach works before using it
-Do not use it when the user only wants to see or discuss code, or for simple arithmetic.
-It runs one program once, the files it writes in your files stay.
-
-Parameters:
-- task (string, required): what the program must do and print, with all the values it needs. Only when the user's message has code to run, write "run the code from the user's message", do not copy the code here.
-- language (string, optional): "python" (default), "javascript", "cpp", "java" or "go"
-
-Examples:
-{"tool": "run_code", "task": "compute the 50th Fibonacci number and print it"}
-{"tool": "run_code", "task": "run the code from the user's message", "language": "javascript"}
-"""
-
 # ---------------------------------------------------------------- bash
 
-BASH_DESCRIPTION = ("runs a bash command in your own persistent sandbox files, shared by all your conversations with the user (git, python, curl, network): "
+BASH_DESCRIPTION = ("runs a bash command in your own persistent sandbox files, shared by all your conversations with the user (git, python, curl, sudo apt-get, network): "
                     "where you create and work on projects and files")
 
 BASH_PROMPT = """
 BASH:
-Use to work with your files, shared by all your conversations with the user: create, read, edit, list, move and delete files and folders, run command line tools and scripts, clone and work on git repositories, download files. Each call runs one bash command (pipes, &&, heredocs are fine) in a Linux container as a normal user (no sudo, no apt-get), with network.
-- $HOME is {files}, the files in it are kept (for a week after the last message to you). Like an open terminal, the next call of this conversation goes on in the folder its last one ended in, with its exported variables and an activated venv. A new conversation starts in {workdir}. Running processes do not carry over.
+Use to work with your files, shared by all your conversations with the user: create, read, edit, list, move and delete files and folders, run command line tools and scripts, clone and work on git repositories, download files. Each call runs one bash command (pipes, &&, heredocs are fine) in your own Linux container (Debian) as a normal user with sudo, with network.
+- $HOME is {files}, the files in it are kept (for a week after the last message to you). Like an open terminal, the next call of this conversation goes on in the folder its last one ended in, with its exported variables and an activated venv. A new conversation starts in {workdir}. What sudo apt-get installs stays while the container runs, until it is reset or the sandbox is updated. Running processes do not carry over: what a command starts in the background ends with it.
 - The folders, each for one purpose:
   - {project_dir}/<project-name>/: one folder per project (short, lowercase, e.g. fractal_explorer), all its files and subfolders inside. Each has a PROJECT.md: its first line says in one sentence what the project is, then its status and how to run it. Write it when you create the project, update it when the project changes.
   - {workdir}: this conversation's own folder: scratch work, quick scripts and downloads that belong to no project.
@@ -236,13 +177,13 @@ Use to work with your files, shared by all your conversations with the user: cre
   - {images}/: generated images.
 - The projects so far (folder: first line of its PROJECT.md):
 {projects}
-- Available: bash, coreutils, git, python3 with pip and venv, curl, wget, unzip, and for C and C++ gcc, g++, make, cmake, ninja and pkg-config (no apt-get: you are not root). git commit works, an author is set. There is no display: GUI programs run without a window.
+- Available: bash, coreutils, git, python3 with pip and venv (numpy, pandas, matplotlib, scipy, scikit-learn, scikit-image, seaborn, pillow and plotly are installed), curl, wget, unzip, and for C and C++ gcc, g++, make, cmake, ninja, pkg-config, the common -dev libraries and SDL2 (with image, ttf and mixer). A missing system package: sudo apt-get update && sudo apt-get install -y <package>. git commit works, an author is set. There is no display: GUI programs run without a window.
+- {cpus} CPU cores and {memory} GB of memory: builds run {cpus} jobs at once (make and cmake are set up for it, nproc shows more cores than you have).
 - Python packages go in a venv in the project folder: python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
 - The command must finish within {timeout} seconds. A program that keeps running (a game, a GUI, a server) runs with a time limit: timeout 10 python3 main.py, exit code 124 then means it ran 10 seconds without crashing. Keep the output short: use head, tail, grep or wc instead of printing big files whole.
 - {files} is your own filesystem: create every project and its files here. Nothing loose at the top of {files}.
 - Continue earlier work: an existing project is changed in its folder (cd into it first), not started again.
-- You write all calls of this step at once and get no second turn: write every command the task needs now, in order, nothing left for later. They run one after another, a later call sees what an earlier one made.
-- To create or change a project: one call per file with its whole content in a heredoc (mkdir -p in the first call). Every file the task asks for gets its call.
+{turns}
 - The user does not see these files.
 
 Parameters:
@@ -259,6 +200,83 @@ Examples:
 BASH_PROJECT_LINE = "  - {name}: {summary}"
 BASH_NO_PROJECTS_PART = "  none yet"
 BASH_PROJECTS_UNKNOWN_PART = "  (not listed here, ls ~/projects shows them)"
+
+BASH_ONE_TURN_PART = """- You write all calls of this step at once and get no second turn: write every command the task needs now, in order, nothing left for later. They run one after another, a later call sees what an earlier one made.
+- To create or change a project: one call per file with its whole content in a heredoc (mkdir -p in the first call). Every file the task asks for gets its call."""
+BASH_LOOP_PART = """- You see the result of each call before your next one: look first (ls, cat, grep), then change, then build and run what you changed to see that it works.
+- A failing command shows its exit code and output: read the error, fix its cause and run it again."""
+
+# ---------------------------------------------------------------- reset_sandbox
+
+RESET_SANDBOX_DESCRIPTION = "starts over with a fresh sandbox from the clean image, your files stay"
+
+RESET_SANDBOX_PROMPT = """
+RESET_SANDBOX:
+Starts over with a fresh sandbox, the Linux container your commands run in, made again from its clean image: what sudo apt-get installed, changed system settings and every running process go, your files in {files} stay. Use it when you broke the system (packages, settings, a hung process) and want to start over, or the user asks for a clean system. Install what you still need again afterwards.
+- what "files": only when the user explicitly asks for it, never on your own: your files in {files} go back to the backup made before the last background job that worked on them, everything changed since then is replaced. The system stays.
+- what "all": only when the user explicitly asks for it: a fresh sandbox and the files back to the backup.
+
+Parameters:
+- what (string, optional): "system" (the default), "files" or "all"
+
+Examples:
+{{"tool": "reset_sandbox"}}
+{{"tool": "reset_sandbox", "what": "files"}}
+"""
+
+RESET_SANDBOX_WHAT_PART = "what is {what}: it must be \"system\", \"files\" or \"all\""
+RESET_SANDBOX_NO_BACKUP_PART = "there is no backup of the files yet, nothing was changed"
+RESET_SANDBOX_DONE_PARTS = {
+    "system": "the sandbox is fresh from the clean image, installed packages are gone, the files in {files} are unchanged",
+    "files": "the files in {files} are back to the last backup",
+    "all": "the sandbox system is reset to the clean image and the files in {files} are back to the last backup",
+}
+
+# ---------------------------------------------------------------- read_file, edit_file (only an agent job's worker, Worker)
+
+READ_FILE_DESCRIPTION = "reads a text file of your sandbox files with line numbers, a part of a long one"
+READ_FILE_PROMPT = """
+READ_FILE:
+Use to read a text file in your files ({files}) with its line numbers, before you change it.
+- A long file is read in parts: start at a line and read up to 400 lines.
+
+Parameters:
+- path (string, required): the file's full path, e.g. {files}/projects/game/src/main.cpp
+- start (number, optional): the first line, 1 by default
+- lines (number, optional): how many lines, 200 by default, at most 400
+
+Examples:
+{{"tool": "read_file", "path": "{files}/projects/game/src/main.cpp"}}
+{{"tool": "read_file", "path": "{files}/projects/game/src/main.cpp", "start": 200, "lines": 100}}
+"""
+READ_FILE_PART = "{path}: lines {first} to {last} of {total}\n{lines}"
+READ_FILE_EMPTY_PART = "{path}: the file is empty"
+READ_FILE_BINARY_PART = "{path} is not a text file"
+READ_FILE_TOO_LARGE_PART = "{path} is larger than {limit} MB, look into it with commands instead"
+
+EDIT_FILE_DESCRIPTION = "changes a text file of your sandbox files: replaces one exact piece of its text, or writes the whole file"
+EDIT_FILE_PROMPT = """
+EDIT_FILE:
+Use to change a text file in your files ({files}) or to write a new one.
+- With "old": the exact text to replace (copied from the file, with its indentation, without the line numbers), it must be in the file exactly once: take a few lines around it to make it unique. "new" replaces it, "new": "" deletes it.
+- Without "old": "new" is the whole file, written new or replacing the file that is there. Use it for new files and short ones, change a long file piece by piece.
+- Its folders are made when they are not there.
+
+Parameters:
+- path (string, required): the file's full path, e.g. {files}/projects/game/src/main.cpp
+- old (string, optional): the exact text to replace, newlines written as \\n
+- new (string, required): the new text, newlines written as \\n
+
+Examples:
+{{"tool": "edit_file", "path": "{files}/projects/game/src/main.cpp", "old": "    int speed = 5;\\n", "new": "    int speed = 8;\\n"}}
+{{"tool": "edit_file", "path": "{files}/projects/game/README.md", "new": "# Game\\n\\nRun: ./build/game\\n"}}
+"""
+EDIT_FILE_WRITTEN_PART = "{path}: written, {lines} lines"
+EDIT_FILE_REPLACED_PART = "{path}: {old_lines} lines replaced by {new_lines}, {lines} lines now"
+EDIT_FILE_NOT_FOUND_PART = "{path}: the old text is not in the file, nothing changed. Read the file and copy the text exactly"
+EDIT_FILE_MANY_PART = "{path}: the old text is in the file {count} times, nothing changed. Take more lines around it so it is there once"
+EDIT_FILE_NO_FILE_PART = "{path} is not there: write it whole, without old"
+EDIT_FILE_TOO_LARGE_PART = "{path} is larger than {limit} MB, change it with commands instead"
 
 # ---------------------------------------------------------------- conversion
 
@@ -513,7 +531,7 @@ Example:
 
 # ---------------------------------------------------------------- spawn_job
 
-SPAWN_JOB_DESCRIPTION = "hands a task to a background job now: long or multi-step work, building a program, research with its own analysis, reporting back when it is done"
+SPAWN_JOB_DESCRIPTION = "hands a task to a background job now: long or multi-step work, building a program, running code, research with its own analysis, reporting back when it is done"
 
 SPAWN_JOB_REPORT_PROMPT = """A background job you started for the user has finished.
 
@@ -523,20 +541,14 @@ JOB_PROMPT:
 JOB_RESULT:
 {summary}
 {details}
-{attachments}{warnings}
-Tell the user in one or two short sentences that the job is done and what it found. If JOB_RESULT says something failed, does not work or was not tested, tell the user that too and do not call it ready. Reply with the message only.
+{attachments}
+Tell the user in one or two short sentences what the job did, using only what JOB_RESULT shows. Files come with your message only when ATTACHED lists them.
+Reply with the message only.
 """
 
 SPAWN_JOB_ATTACHMENTS_PART = """
-ATTACHED (already with your message, files as download buttons, images shown):
+ATTACHED (with your message as download buttons, images shown; do not write their content into your message):
 {names}
-Do NOT write their code or content into your message, only say what they are.
-"""
-
-SPAWN_JOB_WARNINGS_PART = """
-NOT TESTED (the job's sandbox can't do it, these steps were skipped; each says how far it got, what is missing and how to run the rest):
-{warnings}
-Say plainly how far it got and that the rest was not tested, never call it tested or working, and tell the user how to run it on their own machine.
 """
 
 SPAWN_JOB_CANCELLED_PROMPT = """The user cancelled a background job you started for them, it was stopped before it finished.
@@ -555,20 +567,20 @@ JOB_PROMPT:
 WHY IT FAILED:
 {reason}
 {attachments}
-Tell the user in one or two short sentences that the job "{name}" failed and why, in plain words. Reply with the message only.
+Tell the user in one or two short sentences that the job "{name}" failed and why, using only what WHY IT FAILED says. Do not promise to try again.
+Reply with the message only.
 """
 
 SPAWN_JOB_PARTIAL_PART = """
-ATTACHED (already with your message, files as download buttons): what the job made before it failed:
+ATTACHED (with your message as download buttons; do not write their content into your message), unfinished, what the job made before it failed:
 {names}
-They are unfinished and not checked: say so, never call them ready or working. Do NOT write their code or content into your message.
 """
 
 # the reply that starts a job only says so: the job does the work, its report comes as a new message later
 SPAWN_JOB_HANDED_OFF_PART = ("Do NOT do the task yourself in this reply: no code, no file contents, no research, no results, no lists, "
                         "no drafts and no plan. Only tell the user in one or two short sentences that you are on it and report back when it is done.")
 
-SPAWN_JOB_RUNNING_PART = "a background job is running in this conversation already, it got the user's message and adjusts its plan after its current step. " + SPAWN_JOB_HANDED_OFF_PART
+SPAWN_JOB_RUNNING_PART = "a background job is running in this conversation already, its next step gets the user's message. " + SPAWN_JOB_HANDED_OFF_PART
 
 SPAWN_JOB_STARTED_PART = "a background job was started and is doing the task now. " + SPAWN_JOB_HANDED_OFF_PART
 
@@ -576,16 +588,19 @@ SPAWN_JOB_PROMPT = """
 SPAWN_JOB:
 Use to hand a task to a background job, so the conversation can go on meanwhile.
 Use it for tasks that take long or have several steps, it starts right away and reports back when it is done.
+Use it also to run code: when the user asks to run or execute code, to check that code works, or to work something out with a program (exact results with big numbers, simulations, data processing). The job writes and runs the program in a sandbox and reports its output. Not for simple arithmetic, or when the user only wants to see or discuss code.
 Not for anything at a later time or repeating (reminders, alarms, every day, every hour, watching a price).
-A conversation has one job at a time: while it runs, the user's messages go to it and it adjusts its plan.
+A conversation has one job at a time: while it runs, the user's messages go to its next step.
 
 Parameters:
 - prompt (string, required): the full instructions for the job, in the user's own words. Keep every detail the user gave: what to do and what to report back. Never add names, numbers, tickers or places the user did not say. If the user says "these" or "my" without naming them, keep it like that and add: ask the user which ones.
+The job does not see the conversation: code the user gave to run goes into the prompt word for word, with what to report (the output, whether it works).
 To fix or change a program or project made earlier, say that it is in your files already and is changed there, not made again, name it if you know it, and keep what the user says is wrong or wants changed.
 
 Examples:
 {"tool": "spawn_job", "prompt": "find three reviews of the new Pixel phone and summarize them"}
 {"tool": "spawn_job", "prompt": "the snake game in your files crashes when space is pressed: fix it there, not made again, and test it"}
+{"tool": "spawn_job", "prompt": "write a python program that computes the 50th Fibonacci number, run it and report the output"}
 {"tool": "spawn_job", "prompt": "compare the prices of my two favourite games in three shops and tell me where they are cheapest (ask the user which games)"}
 """
 

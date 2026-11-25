@@ -53,6 +53,12 @@ services:
       HUB_MAINTENANCE_SMALL_BATCH: ${HUB_MAINTENANCE_SMALL_BATCH:-10}
       HUB_TASKS_MAX: ${HUB_TASKS_MAX:-20}
       HUB_TASKS_MIN_INTERVAL: ${HUB_TASKS_MIN_INTERVAL:-15}
+      HUB_JOB_WORKER_CALLS: ${HUB_JOB_WORKER_CALLS:-100}
+      HUB_JOB_WORKER_MINUTES: ${HUB_JOB_WORKER_MINUTES:-30}
+      HUB_JOB_WORKER_JSON: ${HUB_JOB_WORKER_JSON:-true}
+      HUB_SANDBOX_RUNTIME: ${HUB_SANDBOX_RUNTIME:-runsc}
+      HUB_SANDBOX_IDLE_MINUTES: ${HUB_SANDBOX_IDLE_MINUTES:-1440}
+      HUB_SANDBOX_BACKUP_MAX_MB: ${HUB_SANDBOX_BACKUP_MAX_MB:-0}
       LLAMA_SERVER_MAX_CONTEXT: ${LLAMA_SERVER_MAX_CONTEXT:-}
       LLAMA_SERVER_N_PARALLEL: ${LLAMA_SERVER_N_PARALLEL:-}
       RUECKGRAT_TRACE: ${RUECKGRAT_TRACE:-}
@@ -78,9 +84,10 @@ services:
       - hub
     restart: unless-stopped
 
-  # #227 the image of the contacts' bash sandboxes and of the hub's reader containers (SandboxVolume.SANDBOX_IMAGE): llm
-  # sandbox's python image with cmake and ninja. built only (docker compose --profile sandbox build sandbox), the hub
-  # starts its containers itself, nothing runs this service
+  # #227 the image of the contacts' sandbox containers and of the hub's reader and backup containers
+  # (SandboxVolume.SANDBOX_IMAGE): python 3.11 on debian trixie with SDL2, cmake, ninja, the python libraries and sudo.
+  # built only (docker compose --profile sandbox build sandbox), the hub starts its containers itself, nothing runs this
+  # service
   sandbox:
     image: rueckgrat-sandbox:latest
     build:

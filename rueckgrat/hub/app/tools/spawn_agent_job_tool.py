@@ -10,12 +10,11 @@ from app.agent_jobs.protocol import Protocol, ProtocolStore
 from app.agent_jobs.job_monitor import JobMonitor, RunningJob
 
 from app.common import get_logger, Utils, MessageQueue
-from app.utils.db import JOB_DONE_WITH_WARNINGS
 from app.utils.trace import Trace
 from app.utils.message_shape import MessageShape
 logger = get_logger()
 
-FAIL_REASON_CHARS = 300     # the failure as the contact gets it, the full one is in the protocol
+FAIL_REASON_CHARS = 1200    # the failure as the contact gets it, the full one is in the protocol
 JOB_COMPLEXITY = 0.4        # a message whose shape (MessageShape.complexity) reaches it recommends spawn_job. t463: jobs of
                             # several steps 0.31-1.0, long but simple messages (a story, an email, a long question) at most 0.31
 
@@ -33,6 +32,10 @@ class SpawnAgentJobTool(Tool):
         "Does the user ask you to program a whole game or app?",
         "Does the user ask you to do a long task in the background while they wait?",
         "Does the user ask you to research and compare several products using reviews from the web?",
+        # running code (#230, there is no tool of its own for it): a job writes and runs the program
+        "Does the user want to see the output of running code?",
+        "Does this message ask to verify, test, benchmark, reproduce or prototype something by running code?",
+        "Does this message ask to debug or reproduce an error by running code?",
     ]
 
     # set at hub start (main.py). the report waits while a reply is being made (AgentJob.get_turns())
@@ -105,12 +108,10 @@ class SpawnAgentJobTool(Tool):
             if not self.cancelled:
                 if not result or "error" in result:
                     raise RuntimeError(f"agent failed: {result}")
-                # done with warnings: steps its sandbox could not check (Controller._warnings), its own status
-                status = JOB_DONE_WITH_WARNINGS if result.get("warnings") else "done"
-                if not self.db.set_job(job_id, status, result):
+                if not self.db.set_job(job_id, "done", result):
                     raise RuntimeError("result not saved")
-                logger.info(f"job {job_id} {status}")
-                self._end(status)
+                logger.info(f"job {job_id} done")
+                self._end("done")
         except Exception as e:
             if not self.cancelled:     # a cancel can also end in an error, e.g. of a stopped worker
                 logger.error(f"job {job_id} failed {repr(e)}")
@@ -135,20 +136,18 @@ class SpawnAgentJobTool(Tool):
         else:
             attachments = result.get("attachments") or []
             names = "\n".join(f"- {held['name']}" for held in attachments)
-            warnings = "\n".join(f"- {warning}" for warning in result.get("warnings") or [])
             task = prompts.SPAWN_JOB_REPORT_PROMPT.format(prompt=prompt, summary=result["summary"], details=result["details"],
-                                        attachments=prompts.SPAWN_JOB_ATTACHMENTS_PART.format(names=names) if attachments else "",
-                                        warnings=prompts.SPAWN_JOB_WARNINGS_PART.format(warnings=warnings) if warnings else "")
-            fallback = f"The background job is done: {result['summary']}" + (f" Not tested: {'; '.join(result['warnings'])}" if warnings else "")
+                                        attachments=prompts.SPAWN_JOB_ATTACHMENTS_PART.format(names=names) if attachments else "")
+            fallback = f"The background job is done: {result['summary']}"
         try:
             self._report(task, fallback, attachments or None)
         except Exception as e:
             logger.error(f"job {job_id}: report failed {repr(e)}")
 
     def _partial_attachments(self) -> list:
-        """the files a failed job's workers held (Controller.partial_attachments), [] when they can't be read"""
+        """the files a failed job made so far (Controller.delivery), [] when they can't be read"""
         try:
-            return self.controller.partial_attachments()
+            return self.controller.delivery()
         except Exception as e:
             logger.error(f"job {self.job_id}: files of the failed job not found {repr(e)}")
             return []
@@ -167,11 +166,8 @@ class SpawnAgentJobTool(Tool):
         Trace.write(self.get_conversation_id(), f"job {self.job_id} {status}", error=error, result=getattr(self.controller, "result", None))
         controller = self.controller
         try:
-            done = status in ("done", JOB_DONE_WITH_WARNINGS)
-            warnings = len((getattr(controller, "result", None) or {}).get("warnings") or []) if done else 0
-            controller.trace("job_finished", ok=done, status=status, name=controller.name,
-                             **controller.protocol.counts(controller.job_id), error=error, **({"warnings": warnings} if warnings else {}))
-            controller.protocol.rename(controller.name)     # a review may have renamed the job
+            controller.trace("job_finished", ok=status == "done", status=status, name=controller.name,
+                             **controller.protocol.counts(controller.job_id), error=error)
             JobMonitor().finish(self.job_id, status)
         except Exception as e:
             logger.error(f"job {self.job_id}: protocol not finished {repr(e)}")
@@ -188,8 +184,8 @@ class SpawnAgentJobTool(Tool):
 
     @classmethod
     def add_message(cls, user_id: int, conversation_id: int, text: str) -> bool:
-        """a user message of the conversation goes to its running job too, the job's review after its current step decides
-        if it changes the plan. False: no job running there"""
+        """a user message of the conversation goes to its running job too, its next step gets it (Controller.add_message).
+        False: no job running there"""
         with cls.running_lock:
             tool = cls._running_in(user_id, conversation_id)
             if tool is not None:

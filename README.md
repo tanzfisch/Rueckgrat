@@ -50,7 +50,7 @@ If you run [Project NOMAD](https://www.projectnomad.us/) in your network you can
 
 ### Access AI's files as a network drive
 
-The files the AI works with (bash, run_code, written documents, one folder per contact) can be mounted on your computer as a network drive, over WebDAV or SMB. Log in with your hub user name and password (make sure the user has a password). The app's settings, tab Network, list each contact's folder address with a copy button.
+The files the AI works with (bash, written documents, one folder per contact) can be mounted on your computer as a network drive, over WebDAV or SMB. Log in with your hub user name and password (make sure the user has a password). The app's settings, tab Network, list each contact's folder address with a copy button.
 
 **WebDAV** is served by the hub through its https address, so it also works from outside your network (Cloudflare tunnel):
 
@@ -73,7 +73,6 @@ Virtual environments, caches and installed packages are not shared, they only wo
 |-|-|
 | bash | run bash commands in a sandbox |
 | calculate | calculate given expression |
-| run_code | write a small program and run it in a fresh sandbox container (Python, JavaScript, C++, Java, Go) |
 | convert | conversion between numerous units and currencies (exchange rates are saved once a day, so currencies still convert without internet) |
 | current_time | current time for given location |
 | date_calc | date calculations |
@@ -86,7 +85,7 @@ Virtual environments, caches and installed packages are not shared, they only wo
 | price_finder | looks for the best price of something and then shows you a ranked result in the chat |
 | remember | keep a short fact about the user, per contact |
 | search_memory | find saved facts by meaning (384-dimension vectors, sqlite-vec on the hub) |
-| spawn_job | hand a bigger task to a background agent job that reports back when it is done |
+| spawn_job | hand a bigger task to a background agent job that reports back when it is done; also how code is written and run (its workers use bash, read_file and edit_file in a loop until the goal's check passes) |
 | task | do something at a set time, once or repeating (reminders, alarms, wake-up calls, daily news or a price check); also list, change and cancel these tasks |
 | take_photo | generate a photo of self, user, or both from current context |
 | text_to_speech | speak a short text or text files (e.g. the chapters of an audiobook) with the contact's voice, or the voice chosen in the preferences, into one audio file (WAV, MP3 or Ogg), downloadable by the user in chat |
@@ -95,6 +94,7 @@ Virtual environments, caches and installed packages are not shared, they only wo
 | wikipedia | search wikipedia when requested or needed |
 | write_file | write text or code files, downloadable by the user in chat |
 | share_file | attach files or folders already in the sandbox to the answer, downloadable by the user in chat |
+| reset_sandbox | start the contact's sandbox over from the clean image (files kept), or on request bring its files back to the backup made before the last agent job |
 
 ## Frontend Tools
 

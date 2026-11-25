@@ -28,6 +28,18 @@ DURATION = re.compile(r"(\d+(?:\.\d+)?|an?|half an?|one)\s*(weeks?|w|days?|d|hou
 EVERY = re.compile(r"(?:every|each)\s+(\d+)?\s*(hours?|hrs?|h|minutes?|mins?|min|m)")
 TIME_OF_DAY = re.compile(r"\b(\d{1,2})(?::(\d{2}))?(?::\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?(?=\s|$)")
 ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})(?:[t\s]|$)")
+# a message that says when to act: in 2 hours, every morning, daily, tomorrow, at 7pm, at 8:30, on friday, a date (schedules)
+_UNITS = r"(?:minutes?|mins?|hours?|hrs?|days?|weeks?|months?)"
+_PARTS = r"(?:morning|afternoon|evening|night|weekday|workday|weekend)s?"
+_DAYS = "|".join(f"{day}s?" for day in WEEKDAYS)
+SCHEDULE = re.compile(rf"\b(?:in\s+(?:\d+|an?|half an?|one|a few|few|several)\s*{_UNITS}|(?:every|each)\s+(?:\d+\s*)?(?:{_UNITS}|{_PARTS}|{_DAYS})"
+                      rf"|hourly|daily|weekly|monthly|weekdays|tomorrow|tonight|later today|this {_PARTS}|{_DAYS}"
+                      r"|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)|at\s+\d{1,2}:\d{2}|at\s+(?:noon|midnight)|\d{4}-\d{2}-\d{2})(?=\W|$)", re.I)
+
+
+def schedules(text: str) -> bool:
+    """text says when to act (SCHEDULE): a time, a date, a repeat or a delay"""
+    return SCHEDULE.search(text or "") is not None
 
 
 class TaskError(ValueError):

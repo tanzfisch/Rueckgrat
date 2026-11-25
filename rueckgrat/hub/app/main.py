@@ -31,6 +31,7 @@ from app.tasks.transcript_tasks import TranscriptSummaryTask, TranscriptEnhanceT
 from app.tasks.turns import Turns
 from app.utils.tts_stream import TtsStreams
 from app.utils.sandbox_volume import SandboxVolume
+from app.utils.sandbox_container import SandboxReaper
 from app.utils.file_share import FileShare
 from app.utils.sandbox_dav import SandboxDav
 from app.utils.sandbox_smb import SandboxSmb
@@ -113,6 +114,10 @@ async def lifespan(app: FastAPI):
                                                is_busy=lambda: app.state.turns.any_busy() or not app.state.task_queue.queue.empty())
     app.state.maintenance.start()
 
+    # the contacts' sandbox containers: stopped when idle, those of an older sandbox image removed (made again on use)
+    app.state.sandboxes = SandboxReaper()
+    app.state.sandboxes.start()
+
     # the exchange rates for conversions without the internet: right away when none are saved (first start), then daily
     app.state.rates = RateRefresher(app.state.infrastructure)
     app.state.rates.start()
@@ -132,6 +137,7 @@ async def lifespan(app: FastAPI):
 
     app.state.companion.stop()
     app.state.maintenance.stop()
+    app.state.sandboxes.stop()
     if file_share is not None:
         file_share.stop()
     app.state.rates.stop()
@@ -1394,7 +1400,7 @@ def download_message_file(message_id: int, stored_name: str, username: str = Dep
         # streamed: an attached audio file is up to 100 MB (TextToSpeechTool.max_attach_bytes)
         return FileResponse(path, media_type=row["file_type"], headers=attachment_headers(download_name))
 
-########### conversation files (the sandbox volume of bash and run_code, shared by all conversations of the contact)
+########### conversation files (the sandbox volume of bash, shared by all conversations of the contact)
 def conversation_files(username: str, conversation_id: int, read):
     """read(volume) on the volume of the logged in user's conversation's contact: 404 for a conversation not theirs or
     a path that isn't there, 400 for a path leaving the files, 503 without docker"""

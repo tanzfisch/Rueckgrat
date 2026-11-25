@@ -4,8 +4,7 @@ import time
 import threading
 import contextvars
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
-from typing import Dict, List, Optional, Any, Mapping, Union, Callable, Tuple
+from typing import Dict, List, Optional, Any, Mapping, Union, Callable
 from .tool import Tool
 from . import prompts
 from app.utils.trace import Trace
@@ -25,10 +24,11 @@ from .spawn_agent_job_tool import SpawnAgentJobTool
 from .poll_tool import PollTool
 from .map_tool import MapTool
 from .price_finder_tool import PriceFinderTool
-from .code_tool import RunCodeTool
 from .bash_tool import BashTool
+from .file_tools import ReadFileTool, EditFileTool
 from .write_file_tool import WriteFileTool
 from .share_file_tool import ShareFileTool
+from .reset_sandbox_tool import ResetSandboxTool
 from .find_tools_tool import FindToolsTool
 from .task_tool import TaskTool
 from .text_to_speech_tool import TextToSpeechTool
@@ -44,7 +44,7 @@ class ToolRegistry:
         "date_calc",
         ("search_memory", "find_tools", "wikipedia", "websearch", "fetch_url", "weather", "price_finder"),
         "convert",
-        ("calculate", "run_code", "bash", "share_file"),    # share_file in bash's round: it runs after the calls that make the files
+        ("calculate", "reset_sandbox", "bash", "read_file", "edit_file", "share_file"),    # share_file in bash's round: it runs after the calls that make the files
         ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember"),
         "text_to_speech",   # after write_file and bash: it speaks the files they wrote
         "join_files",       # after text_to_speech: it joins the audio files it made
@@ -52,15 +52,14 @@ class ToolRegistry:
 
     TOOL_RANK = {name: rank for rank, entry in enumerate(TOOL_ORDER) for name in ((entry,) if isinstance(entry, str) else entry)}
     PROMPT_TOOLS = ["remember", "search_memory", "take_photo", "find_tools"]   # find_tools shares search_memory's round, no extra setup call
-    # each does the others' job (build, install, run, test): a worker's mandatory one is done when one of them got a call,
-    # else that is a problem for its fix rounds (not_called), not a failure of the worker
-    RUN_TOOLS = ("run_code", "bash")
-    NOT_CALLED = "not called"   # the name of not_called's problem: no tool's, nothing fails a worker for it (AgentJob._use_tools)
     PRIORITY_TOOLS = ("task", "spawn_job")   # highest first: one overrides all other tools and the ones after it here
-    WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "poll", "show_map", "task")   # AgentJob.ALLOWED_TOOLS: a task's pass may spawn a job, task and companion passes show polls and maps
+    # only an agent job's worker loop offers these (Worker), no tool setup detects or offers them: they read and change
+    # one file a step at a time, a setup writes all its calls at once
+    LOOP_TOOLS = ("read_file", "edit_file")
+    WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "poll", "show_map", "task") + LOOP_TOOLS   # Worker.allowed: a task's lookup may spawn a job, task and companion lookups show polls and maps
     DETACHED_TOOLS = ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember", "text_to_speech")
     REPLY_TOOLS = ("remember", "take_photo")    # a chat reply calls these itself at its end (MetaTask), not the tool setup
-    CHAT_EXCLUDED_TOOLS = ("join_files",)   # only an agent job's workers and task passes use these, a chat turn neither detects nor offers them (MetaTask)
+    CHAT_EXCLUDED_TOOLS = ("join_files",) + LOOP_TOOLS   # only an agent job's workers (and task passes: join_files) use these, a chat turn neither detects nor offers them (MetaTask)
     REPLY_CALL = re.compile(r'(?:^|\n)[ \t]*(?:```(?:json)?\s*)?\{\s*"tool"')   # where the calls at the end of a reply start
     PROJECT_QUESTIONS = [
         "Does the user report a bug in a program, like a crash, an error or wrong behaviour?",
@@ -70,11 +69,9 @@ class ToolRegistry:
     # how tools are used together (notes), the tools' own texts never name another tool. a note goes into a tool setup
     # when one of its tools is offered and all of them can be used there (notes)
     TOOL_NOTES = [
-        (("run_code", "bash"), prompts.TOOL_NOTE_RUN_CODE_BASH),
-        (("run_code", "calculate"), prompts.TOOL_NOTE_RUN_CODE_CALCULATE),
+        (("spawn_job", "calculate"), prompts.TOOL_NOTE_SPAWN_JOB_CALCULATE),
         (("bash", "write_file"), prompts.TOOL_NOTE_BASH_WRITE_FILE),
         (("bash", "share_file"), prompts.TOOL_NOTE_BASH_SHARE_FILE),
-        (("run_code", "share_file"), prompts.TOOL_NOTE_RUN_CODE_SHARE_FILE),
         (("convert", "websearch"), prompts.TOOL_NOTE_CONVERT_WEBSEARCH),
         (("weather", "websearch"), prompts.TOOL_NOTE_WEATHER_WEBSEARCH),
         (("spawn_job", "task"), prompts.TOOL_NOTE_SPAWN_JOB_TASK),
@@ -104,10 +101,12 @@ class ToolRegistry:
         self._register_tool(PollTool)
         self._register_tool(MapTool)
         self._register_tool(PriceFinderTool)
-        self._register_tool(RunCodeTool)
         self._register_tool(BashTool)
+        self._register_tool(ReadFileTool)
+        self._register_tool(EditFileTool)
         self._register_tool(WriteFileTool)
         self._register_tool(ShareFileTool)
+        self._register_tool(ResetSandboxTool)
         self._register_tool(FindToolsTool)
         self._register_tool(TaskTool)
         self._register_tool(TextToSpeechTool)
@@ -184,6 +183,15 @@ class ToolRegistry:
         tools = self.tools
         return {other for name in tool_names or [] if name in tools for other in tools[name].overrides}
 
+    def yielding(self, mandatory: List[str], recommended: List[str], prompt: str) -> tuple[List[str], List[str]]:
+        """(mandatory, recommended) without the PRIORITY_TOOLS ones that would outrank a mandatory one there but do not
+        take over for this message (Tool.takes_over): from both bands, a recommended one would get the first round (rounds)"""
+        tools = self.tools
+        sure = [name for name in mandatory or [] if name in self.PRIORITY_TOOLS]
+        yields = {name for name in list(mandatory or []) + list(recommended or []) if name in tools
+                  and any(self.outranks(name, other) for other in sure) and not tools[name].takes_over(prompt)}
+        return [name for name in mandatory or [] if name not in yields], [name for name in recommended or [] if name not in yields]
+
     def bands(self, mandatory: List[str], recommended: List[str]) -> tuple[List[str], List[str]]:
         """(mandatory, recommended) of a detection: a mandatory PRIORITY_TOOLS one is the only mandatory tool and keeps only
         the recommended ones that outrank it (task over spawn_job), a tool in both is mandatory. a tool another one overrides
@@ -247,11 +255,6 @@ class ToolRegistry:
             return (rank, sub)
 
         return sorted(unique, key=key)
-
-    def fixable(self, tool_names: List[str]) -> List[str]:
-        """the fixable tools (Tool.fixable) of tool_names that can be used now, in TOOL_ORDER: what a worker's fix rounds offer"""
-        tools = self.tools
-        return [name for name in self.ordered_names(tool_names or []) if name in tools and tools[name].fixable]
 
     def ranked_groups(self, tool_names: List[str]) -> List[List[str]]:
         tools = self.tools
@@ -353,11 +356,8 @@ class ToolRegistry:
         return merged or None
 
     def _run_lane(self, jobs: List[Tool]) -> Dict[int, Optional[Dict[str, Any]]]:
-        """runs the jobs one after another inside their tools' sharing() (the bash calls: one sandbox): {id(job): its result}"""
-        with ExitStack() as stack:
-            for tool in dict.fromkeys(type(job) for job in jobs):
-                stack.enter_context(tool.sharing())
-            return {id(job): self._run_job(job) for job in jobs}
+        """runs the jobs one after another: {id(job): its result}"""
+        return {id(job): self._run_job(job) for job in jobs}
 
     GROUND_WORD = re.compile(r"[^\W_]{3,}|\d+(?:[.,]\d+)?")    # the words and numbers grounded() compares
 
@@ -394,25 +394,6 @@ class ToolRegistry:
             return {name: {"tool": name, "text": prompts.TOOL_LENGTH_PART.format(name=name)}}
         return None
 
-    def called(self, calls: List[Dict[str, Any]]) -> set:
-        """the tools of calls, with NOT_CALLED when one of the RUN_TOOLS is among them: the problems they fix (ToolExecutionTask._fix)"""
-        called = {call.get("tool") for call in calls}
-        return called | ({self.NOT_CALLED} if called & set(self.RUN_TOOLS) else set())
-
-    def not_called(self, mandatory: List[str], calls: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
-        """the problem (NOT_CALLED, text) when mandatory has RUN_TOOLS and none of the RUN_TOOLS got a call (a tester that
-        only listed the files), [] else"""
-        missing = [name for name in mandatory if name in self.RUN_TOOLS]
-        if not missing or self.NOT_CALLED in self.called(calls):
-            return []
-        return [(self.NOT_CALLED, prompts.TOOL_NOT_CALLED_PART.format(names=" or ".join(missing)))]
-
-    def problems(self, results: Optional[Mapping[str, Any]]) -> List[Tuple[str, str]]:
-        """what went wrong in {tool name: result} that a fix round could repair, (tool name, text) per problem of each
-        tool's problems(): a problem stays its tool's until that tool runs again"""
-        return [(name, problem) for name, result in (results or {}).items() if isinstance(result, dict)
-                for problem in self._registered.get(name, Tool).problems(result)]
-
     def detachable(self, tool_job: Tool) -> bool:
         return tool_job.name() in self.DETACHED_TOOLS and tool_job.has_message() and tool_job.runs_detached()
 
@@ -425,7 +406,8 @@ class ToolRegistry:
         threading.Thread(target=contextvars.copy_context().run, args=(run,), name=f"detached-{tool_job.name()}", daemon=True).start()
 
     def get_tools_prompt(self, skill_names: Optional[List[str]] = None, scope: Optional[Dict[str, int]] = None) -> str:
-        """the instructions of the tools. scope: {user_id, contact_id, conversation_id} of the setup, the tools' prompt_for"""
+        """the instructions of the tools. scope: {user_id, contact_id, conversation_id} of the setup and maybe loop (a
+        worker's, Tool.prompt_for), the tools' prompt_for"""
         tools = self.tools
         if not skill_names:
             selected = tools.values()
@@ -503,7 +485,8 @@ class ToolRegistry:
                 text = text[:start]
         return text.rstrip(), []
 
-    def _json_objects(self, text: str):
+    @staticmethod
+    def _json_objects(text: str):
         """yields each top level json from given text"""
         i, n = 0, len(text or "")
         while i < n:

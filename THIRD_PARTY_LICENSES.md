@@ -40,9 +40,8 @@ Docker image based on `python:3.11-slim`. Files: `requirements.txt`, `requiremen
 | silero-vad[onnx-cpu] | 6.2.3 (installed) | MIT | https://github.com/snakers4/silero-vad |
 | ddgs | ==9.16.0 | MIT | https://github.com/deedy5/ddgs |
 | sqlite-vec | ==0.1.9 | MIT OR Apache-2.0 (dual) | https://github.com/asg017/sqlite-vec |
-| llm-sandbox[docker] | ==0.3.46 | MIT | https://github.com/vndee/llm-sandbox |
 | soundfile (text_to_speech tool: Ogg Opus and MP3 encoding) | not pinned (latest 0.14.0) | BSD-3-Clause; its wheel bundles libsndfile (LGPL-2.1+) with libogg, libopus, libvorbis, libFLAC (BSD-3-Clause) and libmp3lame, libmpg123 (LGPL-2.1), dynamically loaded, so AGPL compatible; the MP3 patents have expired (2017) | https://github.com/bastibe/python-soundfile |
-| docker (Docker SDK for Python, comes in through llm-sandbox) | 7.2.0 (latest) | Apache-2.0 | https://github.com/docker/docker-py |
+| docker (Docker SDK for Python: the contacts' sandbox, reader and backup containers) | ==7.2.0 | Apache-2.0 | https://github.com/docker/docker-py |
 | playwright | 1.64.1 (installed) | Apache-2.0 | https://github.com/microsoft/playwright-python |
 | certifi (used directly in code, comes in through requests) | 2026.10.23 (installed) | MPL-2.0 | https://github.com/certifi/python-certifi |
 
@@ -53,7 +52,9 @@ Downloaded by `playwright install --with-deps --only-shell chromium` while the i
 | Chromium headless shell | build 1248 | BSD-3-Clause, plus many bundled third-party licenses | https://www.chromium.org/ |
 | ffmpeg (Playwright build) | build 1013 | LGPL (unverified, see below) | https://github.com/microsoft/playwright |
 | System libraries and fonts from apt (`--with-deps`) | Debian | mixed (GPL, LGPL, MIT, font licenses) | https://www.debian.org/ |
-| LLM Sandbox images `ghcr.io/vndee/sandbox-*` (run_code, pulled on first use, not in the hub image) | python 3.11, node 22, cpp 11, java 11, go 1.23 on Debian bullseye | Debian and language runtimes, mixed (unverified) | https://github.com/vndee/llm-sandbox |
+| Python image `python:3.11-trixie` (the base of the `rueckgrat-sandbox` image, not in the hub image) | python 3.11 on Debian trixie (buildpack-deps) | PSF-2.0 (Python), Debian packages mixed (GPL, LGPL, MIT, BSD) | https://hub.docker.com/_/python |
+| Packages from Debian apt in the `rueckgrat-sandbox` image (sudo, pkg-config, SDL2 with image, ttf and mixer, libgl) | Debian trixie | sudo: ISC-style; SDL2: Zlib; others mixed (unverified) | https://www.debian.org/ |
+| Python libraries from PyPI in the `rueckgrat-sandbox` image (numpy, pandas, matplotlib, pillow, seaborn, scikit-learn, scipy, scikit-image, plotly) | not pinned (latest) | BSD-3-Clause (numpy, pandas, seaborn, scikit-learn, scipy, scikit-image), matplotlib license (PSF-based), MIT-CMU (pillow), MIT (plotly) | https://pypi.org/ |
 | CMake from PyPI (`cmake`, in the `rueckgrat-sandbox` image built from `rueckgrat/sandbox/Dockerfile`, the bash sandbox) | >=3.31,<4 | BSD-3-Clause (CMake), Apache-2.0 (PyPI packaging) | https://cmake.org/ |
 | Ninja from PyPI (`ninja`, same image) | >=1.11,<2 | Apache-2.0 | https://ninja-build.org/ |
 
