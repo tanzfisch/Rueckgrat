@@ -1,5 +1,6 @@
-"""a text file shown over the page to scroll through, with syntax colours by its extension. the bytes are fetched on
-each open and only kept by the overlay, nothing goes into the database or the cache"""
+"""a text file shown over the page to scroll through, with syntax colours by its extension, or as markdown when its
+name ends in .md. the bytes are fetched on each open and only kept by the overlay, nothing goes into the database or
+the cache"""
 import asyncio
 import posixpath
 import re
@@ -40,14 +41,13 @@ def decode(data: bytes) -> str | None:
 
 class TextPreview(ft.Container):
     def __init__(self, name: str, text: str):
-        # a fence longer than any backtick run in the text, so the text can not end the code block
-        fence = "`" * max(3, max((len(run) for run in re.findall(r"`+", text)), default=0) + 1)
-        body = ft.Markdown(
-            value=f"{fence}{language(name)}\n{text}\n{fence}",
-            selectable=True,
-            extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-            code_theme=theme.CODE_THEME,
-        )
+        body = self._body(name, text)
+        # markdown wraps; a code file's long lines scroll sideways, the file scrolls down
+        if self.is_markdown(name):
+            pane = ft.Column([body], scroll=ft.ScrollMode.AUTO, expand=True)
+        else:
+            pane = ft.Column([ft.Row([body], scroll=ft.ScrollMode.AUTO, wrap=False)],
+                             scroll=ft.ScrollMode.AUTO, expand=True)
         card = ft.Container(
             content=ft.Column([
                 ft.Row([
@@ -58,8 +58,7 @@ class TextPreview(ft.Container):
                     ft.IconButton(icon=ft.Icons.CLOSE, icon_size=20, icon_color=theme.TEXT, tooltip="Close",
                                   on_click=self._close),
                 ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                # long lines scroll sideways, the file scrolls down
-                ft.Column([ft.Row([body], scroll=ft.ScrollMode.AUTO, wrap=False)], scroll=ft.ScrollMode.AUTO, expand=True),
+                pane,
             ], spacing=4, expand=True),
             bgcolor=theme.BACKGROUND, border_radius=theme.RADIUS, border=ft.Border.all(1, theme.CODE_BORDER),
             padding=ft.Padding(left=12, top=4, right=4, bottom=12),
@@ -69,6 +68,37 @@ class TextPreview(ft.Container):
         # page.overlay gets no safe area from the view (see ImageOverlay)
         super().__init__(left=0, top=0, right=0, bottom=0, bgcolor=theme.SCRIM, on_click=self._close,
                          padding=16, content=ft.SafeArea(content=card))
+
+    @staticmethod
+    def is_markdown(name: str) -> bool:
+        """True when the file name ends in .md, any case"""
+        return posixpath.basename(name).lower().endswith(".md")
+
+    def _body(self, name: str, text: str) -> ft.Markdown:
+        """the file as rendered markdown (the same Markdown as a chat bubble), or as a syntax-coloured code block"""
+        if self.is_markdown(name):
+            return ft.Markdown(
+                value=text,
+                selectable=True,
+                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                code_theme=theme.CODE_THEME,
+                on_tap_link=self._open_link,
+                shrink_wrap=True,
+                md_style_sheet=theme.MARKDOWN_STYLE,
+            )
+        # a fence longer than any backtick run in the text, so the text can not end the code block
+        fence = "`" * max(3, max((len(run) for run in re.findall(r"`+", text)), default=0) + 1)
+        return ft.Markdown(
+            value=f"{fence}{language(name)}\n{text}\n{fence}",
+            selectable=True,
+            extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+            code_theme=theme.CODE_THEME,
+        )
+
+    async def _open_link(self, e):
+        url = e.data
+        if url:
+            await ft.UrlLauncher().launch_url(url)
 
     def _close(self, e=None):
         if self.page and self in self.page.overlay:
