@@ -2,23 +2,36 @@ from pathlib import Path
 from datetime import datetime
 import asyncio
 import mimetypes
+import os
+import posixpath
+import tempfile
 import flet as ft
 
 from app.ui import theme
+from .message_box import MessageBox
 
 from app.common import get_logger
 from app.utils import Paths
 logger = get_logger()
 
 TOOLS_HIDE_DELAY = 3  # seconds after the last interaction until save and share fade out
+MAX_SIZE = 20 * 1024 * 1024  # bigger fetched images are only shown after the user agreed
+# formats this overlay can show (ft.Image). not svg: the viewer is a raster image
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+
+
+def is_image(name: str) -> bool:
+    """an image file by its name, the overlay can show it"""
+    return posixpath.splitext(name.lower())[1] in IMAGE_EXTENSIONS
 
 
 class ImageOverlay(ft.Container):
-    def __init__(self, page: ft.Page, image_path: Path | str):
+    def __init__(self, page: ft.Page, image_path: Path | str, temporary: bool = False):
         self._future = None
         self._closed = False
         self._hide_task = None
         self._file_picker = None
+        self._temporary = temporary    # a fetched file written only for this overlay, removed when it closes
         self.image_path = Path(image_path)
         # not self.image: that is a Container property (background image)
         self.photo = ft.Image(
@@ -73,6 +86,11 @@ class ImageOverlay(ft.Container):
         if self.page and self in self.page.overlay:
             self.page.overlay.remove(self)
             self.page.update()
+        if self._temporary:
+            try:
+                self.image_path.unlink(missing_ok=True)
+            except OSError as ex:
+                logger.error(f"failed removing the temporary image {self.image_path}: {repr(ex)}")
         if self._future and not self._future.done():
             self._future.set_result(None)
 
@@ -164,9 +182,39 @@ class ImageOverlay(ft.Container):
         return False
 
     @classmethod
-    async def open(cls, page: ft.Page, image_path: Path | str):
-        overlay = cls(page, image_path)
+    async def open(cls, page: ft.Page, image_path: Path | str, temporary: bool = False):
+        overlay = cls(page, image_path, temporary=temporary)
         overlay._future = asyncio.get_running_loop().create_future()
         page.overlay.append(overlay)
         page.update()
         await overlay._future
+
+    @classmethod
+    async def open_fetched(cls, page: ft.Page, name: str, size: int, fetch) -> None:
+        """fetch(): the image bytes or None, run in a thread. shown in the same overlay as a generated image.
+        a file over MAX_SIZE asks first. the bytes go to a temp file that is removed when the overlay closes."""
+        if size > MAX_SIZE and not await MessageBox.open(
+                page, f"{posixpath.basename(name)} is {size / 1024 / 1024:.1f} MB. Loading it can take a while. Show it anyway?",
+                "Big file", "question"):
+            return
+        data = await asyncio.to_thread(fetch)
+        if data is None:
+            MessageBox.error(page, f"{posixpath.basename(name)} could not be fetched.")
+            return
+        suffix = posixpath.splitext(name.lower())[1]
+        if suffix not in IMAGE_EXTENSIONS:
+            suffix = ".png"
+        fd, path = tempfile.mkstemp(suffix=suffix, prefix="rueckgrat_")
+        os.close(fd)
+        try:
+            Path(path).write_bytes(data)
+        except OSError as ex:
+            logger.error(f"failed writing the temporary image {path}: {repr(ex)}")
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
+            MessageBox.error(page, f"{posixpath.basename(name)} could not be shown.")
+            return
+        cls.close_open(page)
+        await cls.open(page, path, temporary=True)

@@ -355,13 +355,14 @@ Example:
 
 # ---------------------------------------------------------------- image_gen
 
-IMAGE_GEN_DESCRIPTION = "generates a picture from a description when the user asks for an image"
+IMAGE_GEN_DESCRIPTION = "makes a new picture (art, a photo, an illustration) from a description"
 
 IMAGE_GEN_PLANNED_PART = "an image is being generated, it gets attached to your message"
 
 IMAGE_GEN_PROMPT = """
 IMAGE GENERATION:
-Use when the user asks you to generate, create, or visualize a picture.
+Use when the user asks you to paint, draw, or make a new picture from a description: art, a photo, an illustration, a logo, a poster or an icon.
+A picture a program is asked to write as a file is not this.
 Not for feedback on a program, an app or a game (an axis is flipped, a color is wrong in it): that is a fix of the program, not a picture.
 
 Parameters:
@@ -480,17 +481,18 @@ Example:
 
 # ---------------------------------------------------------------- find_tools
 
-FIND_TOOLS_DESCRIPTION = "asks for the tools of a task that the offered tools can not do, they are offered in an extra round"
+FIND_TOOLS_DESCRIPTION = ("asks for the tools of a task that the offered tools can not do, they are offered in an extra round; "
+                          "call it rather than claiming you will do the work")
 
 FIND_TOOLS_PROMPT = """
 FIND TOOLS:
-Rarely needed: most answers need no tool at all. Do not call it unless one of these is true:
-- something that runs with a tool goes on in this answer, as the conversation before shows: e.g. a quiz asked as polls
-  continues with its next poll, or a game that shows maps shows the next one
-- the user clearly asks for something that needs a tool, and no offered tool can do it
-Never call it to chat, to answer from what you know, to tell a story, to give an opinion, or because a tool might help.
-Never call it for what an offered tool can do. When in doubt, do not call it.
-The tools that fit the task are offered to you in an extra round.
+Call it when the user asks you to do something (run, execute, fetch, create a file, look up live data) and no offered
+tool can do it. Do not claim you will do that work in your reply: call this instead, the fitting tools are offered in
+an extra round.
+Also call it when something that runs with a tool goes on in this answer, as the conversation before shows: e.g. a quiz
+asked as polls continues with its next poll, or a game that shows maps shows the next one.
+Do not call it to chat, to answer from what you know, to tell a story, to give an opinion, or because a tool might help.
+Never call it for what an offered tool can do.
 
 Parameters:
 - task (string, required): one short sentence, written as the user would ask for it: what has to happen now, without

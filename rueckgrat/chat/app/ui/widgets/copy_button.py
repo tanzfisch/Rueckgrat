@@ -23,11 +23,24 @@ class CopyButton(ft.IconButton):
         super().__init__(icon=ft.Icons.CONTENT_COPY, icon_size=round(self.COMPACT_ICON * theme.SIZE_FACTOR) if compact else 16,
                          icon_color=theme.TEXT, tooltip=tooltip, on_click=self._on_click, **kwargs)
         self._text = text
+        self._mounted = False
 
     @classmethod
     def compact_size(cls) -> int:
         """px of the compact button with the active text size"""
         return round(cls.COMPACT * theme.SIZE_FACTOR)
+
+    def did_mount(self):
+        hook = getattr(super(), "did_mount", None)
+        if callable(hook):
+            hook()
+        self._mounted = True
+
+    def will_unmount(self):
+        self._mounted = False
+        hook = getattr(super(), "will_unmount", None)
+        if callable(hook):
+            hook()
 
     def text(self) -> str:
         """what a click copies"""
@@ -43,5 +56,7 @@ class CopyButton(ft.IconButton):
         self._show(ft.Icons.CONTENT_COPY)
 
     def _show(self, icon) -> None:
+        """sets the icon; update() only while the button is on the page (a streamed block may have been re-rendered)"""
         self.icon = icon
-        self.update()
+        if self._mounted:
+            self.update()

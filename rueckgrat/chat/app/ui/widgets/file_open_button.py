@@ -1,15 +1,17 @@
 """the preview or play button of a file chip (FileCard) and of a file in the files panel: audio opens in AudioPlayer
-(and toggles pause if that file is already open), anything else in TextPreview."""
+(and toggles pause if that file is already open), an image in ImageOverlay (the same viewer as a generated image),
+anything else in TextPreview."""
 import posixpath
 import flet as ft
 from app.ui import theme
 from .audio_player import AudioPlayer, is_audio
+from .image_overlay import ImageOverlay, is_image
 from .text_preview import TextPreview
 
 
 class FileOpenButton(ft.IconButton):
     def __init__(self, name: str, size: int, fetch, label: str | None = None):
-        """name: the path or file name used to detect audio and to identify the open player.
+        """name: the path or file name used to detect audio or an image and to identify the open player.
         label: shown in the tooltip, the basename of name if omitted.
         fetch(): the file's bytes or None, run in a thread when it is opened."""
         self._name = name
@@ -26,6 +28,10 @@ class FileOpenButton(ft.IconButton):
         """AudioPlayer can play this file (the name's or the label's extension)"""
         return is_audio(self._name) or is_audio(self._label)
 
+    def is_image(self) -> bool:
+        """ImageOverlay can show this file (the name's or the label's extension)"""
+        return is_image(self._name) or is_image(self._label)
+
     def get_name(self) -> str:
         return self._name
 
@@ -33,8 +39,11 @@ class FileOpenButton(ft.IconButton):
         return self._label
 
     async def open(self) -> None:
-        """plays an audio file (AudioPlayer.play: toggle if this file is already open), else previews it"""
+        """plays an audio file (AudioPlayer.play: toggle if this file is already open), shows an image in
+        ImageOverlay, else previews the text"""
         if self.is_audio():
             await AudioPlayer.play(self.page, self._name, self._size, self._fetch)
+        elif self.is_image():
+            await ImageOverlay.open_fetched(self.page, self._name, self._size, self._fetch)
         else:
             await TextPreview.open(self.page, self._name, self._size, self._fetch)

@@ -27,6 +27,7 @@ class ToolExecutionTask(Task):
         self.infrastructure = infrastructure
         self.tool_registry = tool_registry
         self.excluded_tools = tuple(excluded_tools)
+        self.optional_companions: List[str] = []    # undetected detection-candidate companions (share_file with bash)
         self.tool_names, self.recommended = self._bands(list(tool_names or []) + tool_registry.PROMPT_TOOLS, recommended_tools)
         self.message_id = message_id
         self.detach = detach    # ToolRegistry.execute: lets the DETACHED_TOOLS calls run in the background
@@ -37,11 +38,18 @@ class ToolExecutionTask(Task):
         self.executed: List[Dict[str, Any]] = []    # {"call", "ms"} per call that ran, in order. the calls of a round run together and share its time
 
     def _bands(self, mandatory: List[str], recommended: List[str]) -> tuple[List[str], List[str]]:
-        """(mandatory, recommended) of a detection, without the excluded tools (ToolRegistry.bands). the companions of
-        the offered tools (share_file with bash) join the mandatory ones, the setup offers them as optional (split_tools)"""
+        """(mandatory, recommended) of a detection, without the excluded tools (ToolRegistry.bands). companion-only
+        tools (reset_sandbox) join the mandatory ones and the setup offers them as optional (split_tools). a companion
+        that is also a detection candidate (share_file) joins only when it was not already picked, as optional_companions,
+        so it is not mandatory just because bash is"""
         mandatory, recommended = self.tool_registry.bands(self.tool_registry.available(mandatory, self.excluded_tools),
                                                           self.tool_registry.available(recommended, self.excluded_tools))
-        return mandatory + self.tool_registry.companions(mandatory + recommended, self.excluded_tools), recommended
+        extra = self.tool_registry.companions(mandatory + recommended, self.excluded_tools)
+        already = set(mandatory) | set(recommended) | set(self.optional_companions)
+        for name in extra:
+            if name not in already and not self.tool_registry.optional(name):
+                self.optional_companions.append(name)
+        return mandatory + [name for name in extra if self.tool_registry.optional(name)], recommended
 
     def get_result(self) -> Dict[str, Any]:
         return self.tool_response
@@ -102,7 +110,7 @@ class ToolExecutionTask(Task):
         """the rounds of a tool setup (ToolRegistry.rounds), also: optional tools offered in the last round (no round of
         their own). returns the find_tools calls, None when one of the PRIORITY_TOOLS was called: nothing runs after it
         (ToolRegistry.ends_setup)"""
-        ranked_groups = self.tool_registry.rounds(mandatory, recommended)
+        ranked_groups = self.tool_registry.rounds(mandatory, recommended, also=self.optional_companions)
         if ranked_groups and also:
             ranked_groups[-1] += [name for name in also if name not in ranked_groups[-1]]
         requests: List[Dict[str, Any]] = []
@@ -135,7 +143,7 @@ class ToolExecutionTask(Task):
             detection.trace(self.request.conversation_id, f"find_tools {step}/{self.FIND_TOOLS_STEPS}")
             # a tool offered already is not offered again: the poll would be asked twice
             detected = self._bands(detection.tool_names or [], detection.recommended or [])
-            offered = set(self.tool_names + self.recommended)
+            offered = set(self.tool_names + self.recommended + self.optional_companions)
             mandatory, recommended = ([name for name in band if name not in offered] for band in detected)
             found, detected = mandatory + recommended, detected[0] + detected[1]
             logger.info(f"find_tools {step}/{self.FIND_TOOLS_STEPS} ({detection.source() or 'nothing decided'}): {task[:200]} -> {detected or 'nothing'}, new: {found}")
@@ -159,7 +167,8 @@ class ToolExecutionTask(Task):
                                       history=self._history(),
                                       scope={"user_id": self.get_user_id(), "contact_id": self.request.contact_id,
                                              "conversation_id": self.request.conversation_id},
-                                      timezone=self._timezone(), excluded=self.excluded_tools)
+                                      timezone=self._timezone(), excluded=self.excluded_tools,
+                                      also=[name for name in self.optional_companions if name in tools])
         messages = []
         context_prompt = build_context(self.request.name, self.context) if self.context else ""
         if context_prompt:

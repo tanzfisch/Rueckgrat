@@ -12,10 +12,12 @@ class Tool(Task):
     whole_message = False   # its questions are also judged on the whole message, not only part by part (a plan of several steps)
     text_only = False   # no laya questions: text_score alone detects it (fetch_url: a link in the message)
     sequential = False  # the calls of sequential tools in one round run one after another in their order (they share the sandbox files)
-    offered_with = ()   # names of tools this one is offered with as an optional tool (ToolRegistry.companions), no laya question of its own
+    offered_with = ()   # names of tools this one is also offered with as an optional companion (ToolRegistry.companions).
+    # a companion with no questions of its own is not a detection candidate (reset_sandbox)
     requires = ()       # the capabilities it needs (Infrastructure.available: "image", "embedding", "internet" ...), without one it is not offered
     requires_any = ()   # of these capabilities at least one (an online and an offline way, e.g. "internet" or "library"), () no such need
     overrides = ()      # names of tools this one makes needless when both are detected (ToolRegistry.overridden), e.g. price_finder: websearch
+    caps = ()           # names this tool's text_score, once it reaches recommended, demotes to recommended (ToolDetectionTask._cap)
     HELD_DATA = "held_data"     # result key: {kind: value} show_data held without a stored message (ToolRegistry.show_held)
 
     def __init__(self, db, infrastructure, user_id: int, contact_id: int, conversation_id: int, tool_call: Dict[str, Any]):
