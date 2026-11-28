@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.35.0
+------
+
+- #238 display markdown files properly
+
 0.34.1
 ------
 
