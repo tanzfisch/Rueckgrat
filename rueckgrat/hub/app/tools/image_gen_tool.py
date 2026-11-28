@@ -11,7 +11,7 @@ class ImageGenTool(ImageTool):
     thresholds = (0.5, 0.66)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask you to paint, draw or generate a picture of something?",
-        "Does the user want a logo, a poster or an icon made as an image?",
+        "Does the user ask for a logo, a poster or an app icon as a designed graphic?",
         "Does the user ask you to design a poster, a flyer, a logo or an icon?",
     ]
 

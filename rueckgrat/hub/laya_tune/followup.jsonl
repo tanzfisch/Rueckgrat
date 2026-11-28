@@ -31,3 +31,5 @@
 {"lang": "en", "text": "please stop", "followup": "M"}
 {"lang": "en", "text": "Stop anything you are working on", "followup": "M"}
 {"lang": "en", "text": "I added test cases. Tune it once more", "followup": "r"}
+{"lang": "en", "text": "Can you show me the picture that was generated?", "followup": "r"}
+

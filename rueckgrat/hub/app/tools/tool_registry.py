@@ -212,13 +212,15 @@ class ToolRegistry:
         mandatory = [name for name in mandatory if name not in self.overridden(mandatory)]
         return mandatory, [name for name in recommended if name not in self.overridden(mandatory + recommended)]
 
-    def rounds(self, tool_names: List[str], recommended: List[str] = ()) -> List[List[str]]:
-        """the rounds of a tool setup (ranked_groups of all tools). a recommended PRIORITY_TOOLS one is a round on its own,
-        highest first: before the others when it outranks every sure tool (a mandatory one that is not optional: the
-        PROMPT_TOOLS and the companions like share_file always are there, they are no detection's), else after them, so an
-        uncertain one does not take over from a sure tool. ToolExecutionTask stops after a round that called one
-        (ends_setup). the same for every detection (laya, the llm's pick, the text scores): only the bands count"""
-        names = list(dict.fromkeys(list(tool_names or []) + list(recommended or [])))
+    def rounds(self, tool_names: List[str], recommended: List[str] = (), also: List[str] = ()) -> List[List[str]]:
+        """the rounds of a tool setup (ranked_groups of all tools). also: optional companions offered with a tool in the
+        bands (share_file with bash when the detection did not pick it), in their TOOL_ORDER group. a recommended
+        PRIORITY_TOOLS one is a round on its own, highest first: before the others when it outranks every sure tool (a
+        mandatory one that is not optional: the PROMPT_TOOLS and the companion-only tools always are there, they are no
+        detection's), else after them, so an uncertain one does not take over from a sure tool. ToolExecutionTask stops
+        after a round that called one (ends_setup). the same for every detection (laya, the llm's pick, the text scores):
+        only the bands count"""
+        names = list(dict.fromkeys(list(tool_names or []) + list(recommended or []) + list(also or [])))
         own = [name for name in self.PRIORITY_TOOLS if name in (recommended or []) and name not in (tool_names or [])]
         sure = [name for name in tool_names or [] if not self.optional(name)]
         rest = self.ranked_groups([name for name in names if name not in own])
@@ -240,8 +242,13 @@ class ToolRegistry:
                 and name not in (tool_names or []) and name not in excluded]
 
     def optional(self, name: str) -> bool:
-        """the model decides on its own whether to call it: the PROMPT_TOOLS and the companions (Tool.offered_with)"""
-        return name in self.PROMPT_TOOLS or bool(getattr(self.tools.get(name), "offered_with", ()))
+        """the model decides on its own whether to call it: the PROMPT_TOOLS, and companions that have no questions of
+        their own (reset_sandbox). a companion with questions (share_file) is a detection candidate; when it was not
+        detected it is still offered with its tools (companions) as optional in the setup (split_tools, also)"""
+        if name in self.PROMPT_TOOLS:
+            return True
+        cls = self.tools.get(name)
+        return bool(getattr(cls, "offered_with", ())) and not (getattr(cls, "question", None) or [])
 
     def project_tools(self, excluded: tuple = ()) -> List[str]:
         """the PROJECT_TOOLS a fix or change of an existing project selects, without the excluded ones"""
@@ -488,13 +495,17 @@ class ToolRegistry:
             target[name] = tool.merge(known, value)
         return target    
 
-    def split_tools(self, tool_names: List[str], recommended: List[str] = ()) -> tuple[List[str], List[str], List[str]]:
-        """(mandatory, recommended, optional): PROMPT_TOOLS and companions are optional (optional()), the recommended ones
-        the detection was not sure about, every other tool was detected and must be called"""
+    def split_tools(self, tool_names: List[str], recommended: List[str] = (),
+                    also: List[str] = ()) -> tuple[List[str], List[str], List[str]]:
+        """(mandatory, recommended, optional): PROMPT_TOOLS and companion-only tools are optional (optional()), so are
+        undetected companions in also (share_file with bash). a companion the detection picked stays recommended or
+        mandatory, the recommended ones the detection was not sure about, every other tool was detected and must be called"""
         names = list(tool_names or [])
-        return ([name for name in names if not self.optional(name) and name not in recommended],
-                [name for name in names if name in recommended and not self.optional(name)],
-                [name for name in names if self.optional(name)])
+        rec = set(recommended or [])
+        extra = set(also or [])
+        return ([name for name in names if not self.optional(name) and name not in rec and name not in extra],
+                [name for name in names if name in rec],
+                [name for name in names if (self.optional(name) or name in extra) and name not in rec])
 
     def get_tools_hydrated(self, tool_names: List[str], kind: str = "mandatory", scope: Optional[Dict[str, int]] = None) -> str:
         """the tools' instructions and how to call them. kind: "mandatory" (must be called), "recommended" (detected, but

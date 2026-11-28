@@ -34,13 +34,9 @@ GATE_CRITERIA = {
 FOLLOWUP_KEY = "followup"   # id followup__0, kept out of the tool probabilities like PROJECT_KEY
 FOLLOWUP_RECOMMENDED_THRESHOLD = 0.4
 FOLLOWUP_MANDATORY_THRESHOLD = 0.65
-# examples in the question so laya can judge from the latest message alone; a self-contained new task
-# (a project, an API, an app, a script) stays low, also when it ends with "tell me when the file is ready"
+# short: a long example list made Laya treat complete new tasks as follow-ups and miss short ones
 FOLLOWUP_QUESTION = (
-    "Does the user's latest message only make sense as a follow-up to an earlier turn "
-    "(for example 'that one', 'the file', 'it', 'the same', 'when it's ready', or 'yes, do that') "
-    "and not as a complete request on its own? A self-contained task is not a follow-up, even a long one "
-    "that starts a new project, API, app, or script."
+    "Is the user continuing, changing, or stopping something from an earlier turn, rather than starting a new task?"
 )
 
 
@@ -147,8 +143,8 @@ class ToolDetectionTask(Task):
         return self.tool_scores()
 
     def _candidates(self) -> Dict[str, Any]:
-        """name -> class of the tools a detection picks from. the optional ones (PROMPT_TOOLS, companions like share_file)
-        are offered without one, the excluded ones never"""
+        """name -> class of the tools a detection picks from. the optional ones (PROMPT_TOOLS, companions with no
+        questions of their own) are offered without one, the excluded ones never"""
         return {name: cls for name, cls in self.tool_registry.tools.items()
                 if not self.tool_registry.optional(name) and name not in self.excluded_tools}
 
@@ -217,11 +213,25 @@ class ToolDetectionTask(Task):
 
     def _bands(self, probabilities: Dict[str, float]) -> Tuple[List[str], List[str]]:
         """(mandatory, recommended) of the tools by their scores and thresholds, ranked by the ToolRegistry, without a
-        priority tool that does not take over for this message (ToolRegistry.yielding)"""
+        priority tool that does not take over for this message (ToolRegistry.yielding), then Tool.caps"""
         self._tool_scores = dict(probabilities)
         mandatory = [name for name, p in probabilities.items() if p >= self.thresholds(name)[1]]
         recommended = [name for name, p in probabilities.items() if self.thresholds(name)[0] <= p < self.thresholds(name)[1]]
-        return self.tool_registry.bands(*self.tool_registry.yielding(mandatory, recommended, self.prompt))
+        return self._cap(*self.tool_registry.bands(*self.tool_registry.yielding(mandatory, recommended, self.prompt)))
+
+    def _cap(self, mandatory: List[str], recommended: List[str]) -> Tuple[List[str], List[str]]:
+        """a tool whose text_score reaches recommended demotes the tools in its Tool.caps from mandatory to recommended"""
+        mandatory, recommended = list(mandatory or []), list(recommended or [])
+        for name, cls in self.tool_registry.tools.items():
+            others = getattr(cls, "caps", ())
+            if not others or cls.text_score(self.prompt or "") < self.thresholds(name)[0]:
+                continue
+            for other in others:
+                if other in mandatory:
+                    mandatory = [n for n in mandatory if n != other]
+                    if other not in recommended:
+                        recommended.append(other)
+        return mandatory, recommended
 
     def _gate_questions(self) -> dict:
         """the chat/scene/work choice once per option_order rotation, and the follow-up noul, all in one decide call.
