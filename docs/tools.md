@@ -260,7 +260,7 @@ Reads the web page of a `url` the user gave and returns a condensed summary, opt
 
 ## remember
 
-Saves one short fact (`text`, at least 2 words, at most 200 characters) as a memory of the contact, as an embedding. A fact that means nearly the same as one the contact already has is not saved again. A chat reply calls it itself at its end. Agents cannot use it.
+Saves one short lasting fact (`text`, at least 2 words, at most 200 characters) about the user, their life, the people around them, their preferences, or something they named or own, as a memory of the contact, as an embedding. A fact that means nearly the same as one the contact already has is not saved again, and neither is a record of what they asked for this turn. A chat reply calls it itself at its end. Agents cannot use it.
 
 ## search_memory
 

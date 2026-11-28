@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.34.1
+------
+
+- #239 improved remember prompt
+
 0.34.0
 ------
 
