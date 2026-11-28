@@ -46,6 +46,18 @@ class ToolExecutionTask(Task):
     def get_result(self) -> Dict[str, Any]:
         return self.tool_response
 
+    def get_executed(self) -> List[Dict[str, Any]]:
+        """the calls that ran (or were recorded), in order: {"call", "ms"} each"""
+        return list(self.executed)
+
+    def get_tool_names(self) -> List[str]:
+        """the mandatory tools of the last setup, after the prompt tools and the companions joined"""
+        return list(self.tool_names or [])
+
+    def get_recommended(self) -> List[str]:
+        """the recommended tools of the last setup"""
+        return list(self.recommended or [])
+
     def _history(self) -> str:
         """the last self.history messages before this turn's, with what the answers showed (a poll and its choice, a map):
         the setup sees that a quiz goes on when the user's message is only its answer. read once per task"""
@@ -116,6 +128,8 @@ class ToolExecutionTask(Task):
             task = "; ".join(dict.fromkeys(filter(None, (self.tool_registry.tools[self.FIND_TOOLS].task(call) for call in requests))))
             if not task:
                 break
+            # no db or conversation: the task string is what to detect, not a chat turn (the conversation would
+            # re-offer tools for the original message)
             detection = ToolDetectionTask(task, self.tool_registry, self.infrastructure, excluded_tools=self.excluded_tools)
             self.tool_registry.task_queue.run(detection)
             detection.trace(self.request.conversation_id, f"find_tools {step}/{self.FIND_TOOLS_STEPS}")

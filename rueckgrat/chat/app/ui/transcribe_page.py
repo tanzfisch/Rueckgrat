@@ -7,7 +7,7 @@ from app.ui.widgets.files_dock import WIDE_MIN_WIDTH
 from app.ui.widgets import Header, LanguagePicker, MessageBox, flag_text
 from app.utils import Hub, Capabilities
 from app.utils.transcript import Transcript, Bookmark, Segment, Item, clock, local_time
-from app.common.transcript_commands import PARAGRAPH, HEADING, BOOKMARK
+from app.common.transcript_command import TranscriptCommand
 from app.utils.transcript_recording import TranscriptRecording
 from app.common import get_logger
 from app.common.languages import language_name
@@ -342,9 +342,9 @@ class TranscribePage(BasePage):
             self.page.run_task(self._scroll_to_end)
 
     def _block_control(self, block) -> ft.Control:
-        if block.kind == BOOKMARK:
+        if block.kind == TranscriptCommand.BOOKMARK:
             return self._marker(block.bookmark)
-        if block.kind == HEADING:
+        if block.kind == TranscriptCommand.HEADING:
             return ft.Text(block.text, color=theme.TEXT, selectable=True, size=18, weight=ft.FontWeight.BOLD)
         return ft.Text(block.text, color=theme.TEXT, selectable=True)
 
@@ -379,7 +379,7 @@ class TranscribePage(BasePage):
             controls += [self._marker(b) for b in before.get(i, [])]
             if item is None:
                 break
-            if item.kind == PARAGRAPH:
+            if item.kind == TranscriptCommand.PARAGRAPH:
                 controls.append(ft.Divider(height=8, color=theme.SURFACE_3))
                 continue
             controls.append(ft.Row([self._field(item)]))    # a row: the field takes the whole width
@@ -397,8 +397,8 @@ class TranscribePage(BasePage):
                 min_lines=1,
                 max_lines=None,     # grows with its text, no scrolling inside
                 read_only=segment.id <= 0,      # the hub's id is missing (not reachable when it stopped)
-                text_size=18 if item.kind == HEADING else None,
-                text_style=ft.TextStyle(weight=ft.FontWeight.BOLD) if item.kind == HEADING else None,
+                text_size=18 if item.kind == TranscriptCommand.HEADING else None,
+                text_style=ft.TextStyle(weight=ft.FontWeight.BOLD) if item.kind == TranscriptCommand.HEADING else None,
                 border=ft.UnderlineInputBorder(),
                 on_focus=lambda e, s=segment: self._set_cursor(s, None),
                 on_selection_change=lambda e, s=segment: self._on_selection(s, e.selection),
@@ -474,7 +474,7 @@ class TranscribePage(BasePage):
         if not segment_id:
             MessageBox.error(self.page, "The heading could not be saved.")
             return
-        heading = transcript.add_segment(at, at, NEW_HEADING, segment_id, HEADING)
+        heading = transcript.add_segment(at, at, NEW_HEADING, segment_id, TranscriptCommand.HEADING)
         self._render()
         field = self._fields.get(id(heading))
         if field is None:

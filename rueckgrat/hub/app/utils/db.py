@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite_vec
 
 from app.common import get_logger
+from .contact_model import Contact
 logger = get_logger()
 
 # no embedding model yet: 384 fits the common small sentence embedders (all-MiniLM-L6-v2, bge-small, e5-small).
@@ -1078,47 +1079,16 @@ class ChatDB:
         
         return False
 
-    def update_contact(self, user_id: int, contact_id: int, contact_json: dict):
-
-        if not "identity" in contact_json:
-            logger.error(f"missing identity key")
-            return False
-
-        if not "profile" in contact_json:
-            logger.error(f"missing profile key")
-            return False
-
-        identity = contact_json["identity"]
-        profile = contact_json["profile"]
-
-        allowed_fields = [
-            "name", "gender", "role", "personality"
-        ]
-
+    def update_contact(self, user_id: int, contact_id: int, contact: Contact):
+        """the identity fields it gives and its whole profile (#232 Contact: only known fields)"""
+        columns = contact.columns()
         with self.get_connection() as conn:
-            updates = []
-            values = []
-
-            for key in allowed_fields:
-                if key in identity:
-                    value = identity[key]
-
-                    updates.append(f"{key} = ?")
-                    values.append(value)
-
             # the companion flag is only set by PUT /contacts/{id}/companion: a saved or imported profile keeps the stored one
-            value = json.dumps(profile)
+            value = json.dumps(contact.profile_json())
+            updates = [f"{key} = ?" for key in columns]
             updates.append("profile = CASE WHEN json_extract(profile, '$.companion') = 1 "
                            "THEN json_set(?, '$.companion', json('true')) ELSE json_remove(?, '$.companion') END")
-            values += [value, value]
-
-            # Nothing to update
-            if not updates:
-                return False
-
-            # Add WHERE clause parameters
-            values.append(contact_id)
-            values.append(user_id)
+            values = [*columns.values(), value, value, contact_id, user_id]
 
             set_clause = ", ".join(updates)
 

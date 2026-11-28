@@ -161,9 +161,9 @@ run_uninstall_cmd() {
 }
 
 # select_uninstall_hosts - menu of the machines with Rückgrat (lan_discover), pick numbers, a = all, or type an IP.
-# empty = done. fills UNINSTALL_HOSTS
+# empty or a = done. fills UNINSTALL_HOSTS
 select_uninstall_hosts() {
-    local token i addr verb=Remove
+    local token i addr all verb=Remove
     $STOP && verb=Stop
     $NO_SCAN || lan_discover uninstall
     while true; do
@@ -179,9 +179,11 @@ select_uninstall_hosts() {
             read_tty "$verb on host (IP, empty=done): " ""
         fi
         [[ -z "$REPLY" ]] && return 0
+        all=false
         for token in ${REPLY//,/ }; do
             if [[ "$token" == a && ${#LAN_ADDRS[@]} -gt 0 ]]; then
                 for addr in "${LAN_ADDRS[@]}"; do add_uninstall_host "$addr"; done
+                all=true
             elif [[ "$token" =~ ^[0-9]+$ ]] && (( token >= 1 && token <= ${#LAN_ADDRS[@]} )); then
                 add_uninstall_host "${LAN_ADDRS[token - 1]}"
             elif ( validate_ip "$token" ) >/dev/null; then
@@ -190,6 +192,7 @@ select_uninstall_hosts() {
                 echo "   ⚠️ $token: not a number from the list or an IP"
             fi
         done
+        $all && return 0
     done
 }
 

@@ -10,7 +10,7 @@ from .companion_job import short
 from app.common import get_logger, Utils
 logger = get_logger()
 
-LATE_MINUTES = 5        # a one-off task this late (the hub was down) says so in its message
+LATE_MINUTES = 5            # a one-off task this late (the hub was down) says so in its message
 BUSY_WAIT_SECONDS = 120     # at most this long its message waits for a reply being made in the conversation
 TITLE_LENGTH = 60           # the title of a conversation a task opens: its text, cut
 TIME_LIMIT = 5400           # seconds for one pass, not an agent job's DEFAULT_TIME_LIMIT: it runs on the scheduler's thread, a long piece of work is a background job (spawn_job)
@@ -18,16 +18,8 @@ JOB_LINES = 5               # the contact's newest background jobs a pass sees (
 
 
 class TaskJob(AgentJob):
-    """#170 a task of the user is due: one pass as an agent job, run by CompanionScheduler on its thread like a CompanionJob.
-    it does the task: a Worker loop on the task looks up or does what it needs (lookup, it may start a background job),
-    then one call in the contact's persona with what it found makes the message. it is posted in the conversation the task
-    was asked in (a new one if that was deleted), whatever the companion's chattiness and quiet hours; with the task's
-    alarm the app rings. a task that only reports a change and found none stays silent (prompts.TASK_SILENT). the pass
-    sees the real state of the contact's background jobs (_jobs): a task that checks one reads it there"""
-    # its lookup's tools besides the detected ones: what the user told the contact before
-    ALWAYS_TOOLS = ("search_memory",)
-    ALLOWED_TOOLS = ("spawn_job", "poll", "show_map")    # its message shows the poll or map (ToolRegistry.show_held)
-    EXCLUDED_TOOLS = ("take_photo",)
+    ALWAYS_TOOLS = ("search_memory", "spawn_job", "poll", "show_map", "websearch", "fetch_url", "weather",
+                    "current_time", "date_calc", "calculate", "convert", "price_finder")
 
     def __init__(self, row: dict, db, infrastructure, tool_registry, tz, now: datetime, occurrence: datetime):
         super().__init__("task", row["note"], time_limit=TIME_LIMIT, infrastructure=infrastructure)
@@ -130,7 +122,7 @@ class TaskJob(AgentJob):
     def _lookup(self, task: str) -> str:
         """what the task's lookup (worker.lookup) found, a failed one says so: the message does not claim it worked.
         the files and data it holds (the price ranking) go with the message"""
-        found, worker = lookup(self, task, self.ALWAYS_TOOLS, self.ALLOWED_TOOLS, self.EXCLUDED_TOOLS)
+        found, worker = lookup(self, task, self.ALWAYS_TOOLS)
         self.log["lookup"] = f"{', '.join(worker.called()) or 'no tools'} in {worker.calls} calls -> {short(found)}"
         return found
 

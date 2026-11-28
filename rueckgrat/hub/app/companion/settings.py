@@ -56,7 +56,7 @@ class CompanionSettings:
 
     @property
     def excluded_tools(self) -> tuple:
-        """the tools a pass's lookup is not offered on top of CompanionJob.EXCLUDED_TOOLS"""
+        """the tools a pass's lookup is not offered: take_photo when photos are not allowed"""
         return () if self.photos else ("take_photo",)
 
     def is_quiet(self, local: datetime) -> bool:

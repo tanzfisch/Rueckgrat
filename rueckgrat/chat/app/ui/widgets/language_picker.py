@@ -4,13 +4,13 @@ import flet as ft
 from app.common.languages import LANGUAGES
 
 
-def flag_text(code: str, size: int = 22) -> ft.Text:
+def flag_text(code: str, size: int = 22) -> ft.Control:
     """the flag emoji of a language, in the color emoji font like the EmojiPicker"""
     return ft.Text(LANGUAGES[code]["flag"], size=size, font_family="Noto Color Emoji")
 
 
 class LanguagePicker:
-    """dialog with the translator languages, open() returns the picked code or "" (dismissed).
+    """dialog with the translator languages (sorted by name, the native name below), open() returns the picked code or "" (dismissed).
     auto: a first entry, the globe "Auto-detect" (whisper detects the language), picking it returns AUTO, current "" selects it"""
     AUTO = "auto"
 
@@ -27,6 +27,7 @@ class LanguagePicker:
             ft.ListTile(
                 leading=flag_text(code),
                 title=ft.Text(language["name"]),
+                subtitle=ft.Text(language["native_name"]) if language["native_name"] != language["name"] else None,
                 selected=code == current,
                 on_click=lambda e, c=code: self._pick(c),
             )

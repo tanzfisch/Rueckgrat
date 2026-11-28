@@ -28,7 +28,7 @@ Please look up the latest in AI news. during your search have a look at  bild.de
 how many days until the year ends?
 ```
 
-### wikipedia, show_map
+### websearch, show_map
 
 ```
 where is the Eifel Tower?

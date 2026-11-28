@@ -15,7 +15,6 @@ from .conversion_tool import ConversionTool
 from .calculator_tool import CalculatorTool
 from .current_time_tool import CurrentTimeTool
 from .date_calc_tool import DateCalcTool
-from .wikipedia_tool import WikipediaTool
 from .weather_tool import WeatherTool
 from .fetch_url_tool import FetchUrlTool
 from .remember_tool import RememberTool
@@ -42,7 +41,7 @@ class ToolRegistry:
     TOOL_ORDER = [
         ("spawn_job", "current_time", "task"),
         "date_calc",
-        ("search_memory", "find_tools", "wikipedia", "websearch", "fetch_url", "weather", "price_finder"),
+        ("search_memory", "find_tools", "websearch", "fetch_url", "weather", "price_finder"),
         "convert",
         ("calculate", "reset_sandbox", "bash", "read_file", "edit_file", "share_file"),    # share_file in bash's round: it runs after the calls that make the files
         ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember"),
@@ -56,10 +55,9 @@ class ToolRegistry:
     # only an agent job's worker loop offers these (Worker), no tool setup detects or offers them: they read and change
     # one file a step at a time, a setup writes all its calls at once
     LOOP_TOOLS = ("read_file", "edit_file")
-    WORKER_EXCLUDED_TOOLS = ("spawn_job", "remember", "poll", "show_map", "task") + LOOP_TOOLS   # Worker.allowed: a task's lookup may spawn a job, task and companion lookups show polls and maps
     DETACHED_TOOLS = ("show_map", "poll", "write_file", "generate_image", "take_photo", "remember", "text_to_speech")
     REPLY_TOOLS = ("remember", "take_photo")    # a chat reply calls these itself at its end (MetaTask), not the tool setup
-    CHAT_EXCLUDED_TOOLS = ("join_files",) + LOOP_TOOLS   # only an agent job's workers (and task passes: join_files) use these, a chat turn neither detects nor offers them (MetaTask)
+    CHAT_EXCLUDED_TOOLS = LOOP_TOOLS    # read_file and edit_file: only an agent job's workers, a chat turn neither detects nor offers them (MetaTask)
     REPLY_CALL = re.compile(r'(?:^|\n)[ \t]*(?:```(?:json)?\s*)?\{\s*"tool"')   # where the calls at the end of a reply start
     PROJECT_QUESTIONS = [
         "Does the user report a bug in a program, like a crash, an error or wrong behaviour?",
@@ -79,10 +77,11 @@ class ToolRegistry:
         (("text_to_speech", "join_files"), prompts.TOOL_NOTE_TEXT_TO_SPEECH_JOIN_FILES),
     ]
 
-    def __init__(self, db, infrastructure, task_queue):
+    def __init__(self, db, infrastructure, task_queue, execute_tools: bool = True):
         self.db = db
         self.infrastructure = infrastructure     
         self.task_queue = task_queue
+        self._execute_tools = execute_tools    # False: execute() records the calls and does not run the tools (laya_tune)
 
         self._registered: Dict[str, type[Tool]] = {}    # every tool, self.tools the ones that can be used now
         self._register_tool(WebsearchTool)
@@ -92,7 +91,6 @@ class ToolRegistry:
         self._register_tool(CalculatorTool)
         self._register_tool(CurrentTimeTool)
         self._register_tool(DateCalcTool)
-        self._register_tool(WikipediaTool)
         self._register_tool(WeatherTool)
         self._register_tool(FetchUrlTool)
         self._register_tool(RememberTool)
@@ -131,6 +129,15 @@ class ToolRegistry:
             return True
         return all(self.infrastructure.available(name) for name in tool.requires) and \
             (not tool.requires_any or any(self.infrastructure.available(name) for name in tool.requires_any))
+
+    def get_execute_tools(self) -> bool:
+        """False: execute() records the calls and their arguments and does not run the tools (laya_tune's stack mode)"""
+        return self._execute_tools
+
+    def _recorded_result(self, call: Dict[str, Any]) -> Dict[str, Any]:
+        """a placeholder result for a call that was not executed (laya_tune's stack mode)"""
+        name = call.get("tool") or "unknown"
+        return {name: {"tool": name, "text": "recorded", "call": call}}
 
     def attach_held(self, db, user_id: int, conversation_id: int, message_id: int, attachments: List[Dict[str, Any]], push: bool = True) -> None:
         """attaches the files tools held without a message (their results' "attachments", each names its tool) to message_id,
@@ -325,6 +332,12 @@ class ToolRegistry:
                 logger.warning(f"excluded tool dropped: {call.get('tool')}")
         tool_calls = [call for call in tool_calls if call.get("tool") not in excluded]
 
+        if not self.get_execute_tools():
+            merged: Dict[str, Any] = {}
+            for call in tool_calls:
+                self.merge_results(merged, self._recorded_result(call))
+            return merged or None
+
         jobs = [job for job in (self._tool_job(user_id, contact_id, conversation_id, call, message_id) for call in tool_calls) if job]
         detached = [job for job in jobs if detach and self.detachable(job)]
         if detached and not detach():
@@ -360,20 +373,63 @@ class ToolRegistry:
         return {id(job): self._run_job(job) for job in jobs}
 
     GROUND_WORD = re.compile(r"[^\W_]{3,}|\d+(?:[.,]\d+)?")    # the words and numbers grounded() compares
+    # closed-class words: a 3-letter stem of these must not ground a call (the / theory)
+    GROUND_STOP = frozenset((
+        "the", "and", "for", "you", "are", "but", "not", "all", "can", "her", "was", "one", "our",
+        "out", "any", "has", "had", "its", "who", "how", "why", "did", "now", "new", "use", "this",
+        "that", "with", "from", "your", "have", "been", "they", "them", "then", "than", "when",
+        "what", "will", "into",
+    ))
 
     def grounded(self, call: Dict[str, Any], text: str, conversation_id: int) -> bool:
         """whether a call takes at least one of its values from text (the message and the earlier results). a recommended
         call that shares nothing with it was made up, like the tool's prompt example ("100 USD to EUR" in a fractal task).
+        derived arguments still count: 01 and 1, 7am and 07:00, mem and memory, weekday and weekdays.
         a call that only looks around in the conversation's work (Tool.looks_around, a bash ls of its workdir) is grounded"""
         if self._registered.get(call.get("tool"), Tool).looks_around(call, conversation_id):
             return True
-        words = {word.lower() for word in self.GROUND_WORD.findall(text or "")}
         values = [value for key, value in call.items() if key != "tool"]
         # a value written in the message as it is counts too: "ls -la ~" has no word of 3 letters
         if any(isinstance(value, str) and value.strip() and value.strip().lower() in (text or "").lower() for value in values):
             return True
-        values = json.dumps(values, ensure_ascii=False, default=str)
-        return any(word.lower() in words for word in self.GROUND_WORD.findall(values))
+        message, args = (text or ""), json.dumps(values, ensure_ascii=False, default=str)
+        if self._ground_words(message) & self._ground_words(args):
+            return True
+        if self._ground_numbers(message) & self._ground_numbers(args):
+            return True
+        return self._ground_stems(self._ground_words(message), self._ground_words(args))
+
+    def _ground_words(self, text: str) -> set:
+        """the 3+ letter words of text, lower case, for grounded()"""
+        return {word.lower() for word in self.GROUND_WORD.findall(text) if not word.isdigit() and not self._ground_number(word)}
+
+    def _ground_number(self, token: str) -> Optional[str]:
+        """the integer a token starts with, leading zeros dropped, None when it has no number (7am and 07:00 are 7, 01 is 1)"""
+        match = re.match(r"0*(\d+)", token)
+        if not match:
+            return None
+        return str(int(match.group(1)))
+
+    def _ground_numbers(self, text: str) -> set:
+        """the numbers in text, leading zeros dropped, also the leading integer of a mixed token (7am)"""
+        found = set()
+        for word in self.GROUND_WORD.findall(text) + re.findall(r"\d+", text):
+            key = self._ground_number(word)
+            if key is not None:
+                found.add(key)
+        return found
+
+    def _ground_stems(self, message: set, args: set) -> bool:
+        """a 3+ letter word of the call is a prefix of one in the message, or the other way: mem/memory, weekday/weekdays.
+        a 3-letter stem must be at least 3 shorter than the other word, and not a closed-class word (GROUND_STOP)"""
+        for left in message:
+            for right in args:
+                shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+                if shorter in self.GROUND_STOP or not longer.startswith(shorter):
+                    continue
+                if len(shorter) >= 4 or (len(shorter) >= 3 and len(longer) >= len(shorter) + 3):
+                    return True
+        return False
 
     def cut_off_result(self, text: str, tools: List[str], length: bool = False) -> Optional[Dict[str, Any]]:
         """{tool name: note} when the last call of a setup reply was cut off (the reply ran out of tokens) and is one of

@@ -9,11 +9,10 @@ from .common_types import (
 from .utils import Utils
 from .message_queue import MessageQueue
 from .websocket_client import WebSocketClient
-from .image_styles import IMAGE_STYLE_OPTIONS, DEFAULT_IMAGE_STYLE, IMAGE_STYLE_ICONS
+from .image_styles import IMAGE_STYLES, IMAGE_STYLE_OPTIONS, DEFAULT_IMAGE_STYLE, IMAGE_STYLE_ICONS
 from .companion_settings import (
     CHATTINESS_OPTIONS, DEFAULT_CHATTINESS, QUIET_HOUR_OPTIONS, DEFAULT_QUIET_FROM, DEFAULT_QUIET_UNTIL,
-    PHOTO_OPTIONS, DEFAULT_PHOTOS, REACH_WINDOW_OPTIONS, DEFAULT_REACH_WINDOW,
-    put_companion_switch, pop_companion_switch
+    PHOTO_OPTIONS, DEFAULT_PHOTOS, REACH_WINDOW_OPTIONS, DEFAULT_REACH_WINDOW
 )
 
 __all__ = [
@@ -42,6 +41,7 @@ __all__ = [
     "GetRegisteredModelsResponse",
     "NodeTTSRequest",
     "HubTTSRequest",
+    "IMAGE_STYLES",
     "IMAGE_STYLE_OPTIONS", 
     "DEFAULT_IMAGE_STYLE",
     "CHATTINESS_OPTIONS",
@@ -52,7 +52,5 @@ __all__ = [
     "PHOTO_OPTIONS",
     "DEFAULT_PHOTOS",
     "REACH_WINDOW_OPTIONS",
-    "DEFAULT_REACH_WINDOW",
-    "put_companion_switch",
-    "pop_companion_switch"
+    "DEFAULT_REACH_WINDOW"
 ]

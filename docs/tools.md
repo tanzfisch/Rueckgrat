@@ -31,14 +31,13 @@ There are 25 tools, registered in this order in `ToolRegistry.__init__`.
 
 | Tool | With Laya | Without Laya | Priority | Kind | Needs |
 | --- | --- | --- | --- | --- | --- |
-| `websearch` | Laya; always offered to a job's worker and a companion `news` pass's lookup | LLM pick; the same always-runs | | detected | internet or library |
+| `websearch` | Laya (recommended 0.2, never forced); always offered to a job's worker and a companion `news` pass's lookup | LLM pick; the same always-runs | | detected | internet or library |
 | `generate_image` | Laya | LLM pick | | detected, detached | image |
 | `take_photo` | not detected: a prompt tool; in a chat turn a reply tool | the same | | optional, detached | image |
 | `convert` | Laya | LLM pick | | detected | |
 | `calculate` | Laya | LLM pick | | detected | |
 | `current_time` | Laya | LLM pick | | detected | |
 | `date_calc` | Laya | LLM pick | | detected | |
-| `wikipedia` | Laya | LLM pick | | detected | internet or library |
 | `weather` | Laya | LLM pick | | detected | internet |
 | `fetch_url` | only its text score: a link in the message (mandatory) | the same (never in the LLM pick) | | detected | |
 | `remember` | not detected: a prompt tool; in a chat turn a reply tool | the same | | optional, detached | embedding |
@@ -57,7 +56,7 @@ There are 25 tools, registered in this order in `ToolRegistry.__init__`.
 | `text_to_speech` | Laya | LLM pick | | detected, detached | tts |
 | `join_files` | Laya | LLM pick | | detected | |
 
-Without Laya, an LLM pick makes a picked tool recommended, a picked `task` or `spawn_job` sure; if the pick fails, only the text scores count. A message of fewer than 4 words always uses only the text scores (see Detection). The kinds:
+Without Laya, an LLM pick makes a picked tool recommended, a picked `task` or `spawn_job` sure; if the pick fails, only the text scores count. The kinds:
 
 - detected: the detection decides whether it is mandatory, recommended or not offered.
 - optional: one of the `PROMPT_TOOLS` (`remember`, `search_memory`, `take_photo`, `find_tools`). Every tool setup offers them, and the model decides on its own whether to call them.
@@ -72,41 +71,38 @@ Without Laya, an LLM pick makes a picked tool recommended, a picked `task` or `s
 | Tool | `MetaTask` | `Worker` | `TaskJob` | `CompanionJob` |
 | --- | :---: | :---: | :---: | :---: |
 | `websearch` | ✓ | ✓ | ✓ | ✓ |
-| `generate_image` | ✓ | ✓ | ✓ |  |
+| `generate_image` | ✓ | ✓ |  |  |
 | `take_photo` | ✓¹ |  |  | ✓² |
 | `convert` | ✓ | ✓ | ✓ | ✓ |
 | `calculate` | ✓ | ✓ | ✓ | ✓ |
 | `current_time` | ✓ | ✓ | ✓ | ✓ |
 | `date_calc` | ✓ | ✓ | ✓ | ✓ |
-| `wikipedia` | ✓ | ✓ | ✓ | ✓ |
 | `weather` | ✓ | ✓ | ✓ | ✓ |
 | `fetch_url` | ✓ | ✓ | ✓ | ✓ |
 | `remember` | ✓¹ |  |  |  |
-| `search_memory` | ✓ |  | ✓ | ✓ |
+| `search_memory` | ✓ | ✓ | ✓ | ✓ |
 | `spawn_job` | ✓ |  | ✓ |  |
 | `poll` | ✓ |  | ✓ | ✓ |
 | `show_map` | ✓ |  | ✓ | ✓ |
 | `price_finder` | ✓ | ✓ | ✓ | ✓ |
-| `bash` | ✓ | ✓⁴ | ✓ | ✓ |
-| `read_file` |  | ✓⁴ | ✓³ | ✓³ |
-| `edit_file` |  | ✓⁴ | ✓³ |  |
-| `write_file` | ✓ | ✓ | ✓ |  |
-| `share_file` | ✓ |  | ✓³ | ✓³ |
+| `bash` | ✓ | ✓ |  |  |
+| `read_file` |  | ✓ |  |  |
+| `edit_file` |  | ✓ |  |  |
+| `write_file` | ✓ | ✓ |  |  |
+| `share_file` | ✓ |  |  | ✓ |
 | `find_tools` | ✓ |  |  |  |
 | `task` | ✓ |  |  |  |
-| `text_to_speech` | ✓ | ✓ | ✓ |  |
-| `join_files` |  | ✓ | ✓ |  |
+| `text_to_speech` | ✓ | ✓ |  |  |
+| `join_files` | ✓ | ✓ |  |  |
 
 ¹ Not in the tool setup: the chat reply calls it itself at its end (`REPLY_TOOLS`).
 ² Only when the contact's settings allow photos.
-³ A pass's lookup gets them with a detected `bash` (`FILE_KIT`).
-⁴ A job's worker always has them (`JOB_TOOLS`, with `reset_sandbox` and `websearch`). It never offers files: the job delivers them (`JOB_EXCLUDED`).
 
-The exclusions come from `CHAT_EXCLUDED_TOOLS` and `REPLY_TOOLS` (`MetaTask`), `WORKER_EXCLUDED_TOOLS` with each worker's `allowed` and `excluded` (a pass's `ALLOWED_TOOLS` and `EXCLUDED_TOOLS`), and the companion settings. Both excluded lists hold the `LOOP_TOOLS`. What an agent's worker always has: `websearch` for a job's worker, `search_memory` for a pass's lookup, `take_photo` for a companion's, `websearch` for a `news` pass. Every tool still needs its capabilities (Needs above).
+Each kind of agent has one fixed list (`JOB_TOOLS`, `TaskJob.ALWAYS_TOOLS`, the companion's `ALWAYS_TOOLS`), of the tools the registry can use now. A companion pass also drops the tools the user's settings exclude (`take_photo` when photos are not allowed). A chat turn's exclusions are `CHAT_EXCLUDED_TOOLS` and `REPLY_TOOLS` (`MetaTask`). `read_file` and `edit_file` (`LOOP_TOOLS`) are only for a job's worker. Every tool still needs its capabilities (Needs above).
 
 # Choosing tools
 
-Chat turns choose their tools this way. Agents (a job's workers, the lookups of task and companion passes) run one detection when they start and then call their tools in a loop, see Workers in `agents.md`:
+Chat turns choose their tools this way. Agents (a job's workers, the lookups of task and companion passes) do not run tool detection: each kind has a fixed list, then calls those tools in a loop, see Workers in `agents.md`:
 
 1. A `ToolDetectionTask` scores the candidate tools and puts them into a mandatory and a recommended band.
 2. A `ToolExecutionTask` runs tool setup rounds: in each round the LLM writes the calls for that round's tools, and the calls run.
@@ -119,9 +115,10 @@ The rules for the two priority tools, `task` and `spawn_job`, are part of this o
 
 | Source | When | How the scores come about |
 | --- | --- | --- |
-| `short` | the message has fewer than 4 words (`MIN_DETECTION_WORDS`) | only the tools' text scores |
-| `laya` | Laya answers | one Laya question per tool question (`Tool.question`, or one made from the description; `text_only` tools get none). A `whole_message` tool (`spawn_job`) is also judged on the whole message. A tool's score is its best answer. The text scores are max'd in |
-| `llm` | Laya is down (`decide_whole` returns `None`) and the LLM picks | one LLM call (`TOOL_PICK_PROMPT`, temperature 0, a JSON schema that only allows the candidates' names) picks from the names and descriptions. A picked tool gets its recommended threshold, a picked `PRIORITY_TOOLS` tool its mandatory threshold, so it is sure exactly as when Laya is sure of it. The text scores are max'd in |
+| `gate` | P(chat)+P(scene) reaches `GATE_THRESHOLD` (0.8) and the follow-up score is below 0.4 | only the tools' text scores. The per-tool questions are not asked |
+| `laya` | Laya answers and the follow-up score is below 0.4 | one Laya question per tool question (`Tool.question`, or one made from the description; `text_only` tools get none). A `whole_message` tool (`spawn_job`) is also judged on the whole message. A tool's score is its best answer. The text scores are max'd in |
+| `followup` | the follow-up noul reaches 0.4 (`FOLLOWUP_RECOMMENDED_THRESHOLD`) or 0.65 (`FOLLOWUP_MANDATORY_THRESHOLD`) | at 0.65 the LLM pick (`_pick`) decides alone, Laya's per-tool scores (if already asked) stay in the trace only, the text scores are max'd in. Between 0.4 and 0.65 Laya's bands stay and what the pick chooses is added as recommended (a picked `PRIORITY_TOOLS` tool gets its mandatory threshold, as without Laya). The pick prompt then also gets a line about whether the contact's files already hold a project (`TOOL_PICK_PROJECT_HINT` or `TOOL_PICK_NO_PROJECT_HINT`); no line when there is no volume to check. The without-Laya pick does not get that line |
+| `llm` | Laya is down (`decide_whole` returns `None`) and the LLM picks | one LLM call (`TOOL_PICK_PROMPT`, temperature 0, a JSON schema that only allows the candidates' names) picks from the names and descriptions, with the same conversation history a chat reply sees when the detection has a `db` and `conversation_id`. A picked tool gets its recommended threshold, a picked `PRIORITY_TOOLS` tool its mandatory threshold, so it is sure exactly as when Laya is sure of it. The text scores are max'd in |
 | `text` | Laya is down and the LLM pick failed | only the text scores |
 
 A tool is mandatory when its score reaches its mandatory threshold and recommended when it reaches its recommended threshold. The defaults are 0.5 and 0.7 (`RECOMMENDED_THRESHOLD`, `MANDATORY_THRESHOLD`). Most tools set their own in their code (`Tool.thresholds`).
@@ -129,10 +126,16 @@ A tool is mandatory when its score reaches its mandatory threshold and recommend
 The text scores:
 
 - `fetch_url` scores 1.0 when the message holds a link (`URL_PATTERN`), so it is mandatory.
-- `spawn_job` scores its recommended threshold (0.7) when `MessageShape(prompt).complexity()` is at least 0.4 (`JOB_COMPLEXITY`), a message of several steps. A text score never makes it mandatory.
+- `spawn_job` scores its recommended threshold (0.85) when `MessageShape(prompt).complexity()` is at least 0.35 (`JOB_COMPLEXITY`), a message of several steps. A text score never makes it mandatory.
 - `show_map` scores 0.6 (above its mandatory threshold) for a short question like "where is ..." (`SHORT_WHERE`), unless the place is a word like "the" without a name after it.
 
 In a chat turn the detection also gets the contact's `SandboxVolume`, and Laya is asked the `PROJECT_QUESTIONS` too: does the user report a bug in a program, or ask for a fix or change to something made earlier? If that score reaches 0.5 and the contact's files hold a project (`SandboxVolume.has_project`), the `PROJECT_TOOLS` (`spawn_job`, `bash`, `write_file`) get that score.
+
+A chat/scene/work choice gate (`GATE_KEY`) runs first: three rotations of the same question in one `decide` call. When P(chat)+P(scene) reaches `GATE_THRESHOLD` (0.8), the per-tool questions are skipped, except when a text_score already reaches recommended (a link: `fetch_url`).
+
+The same gate batch also asks one follow-up noul question (`FOLLOWUP_KEY`, `FOLLOWUP_QUESTION`): does the latest message refer back to earlier in the conversation without itself stating a full new task? That is how a follow-up like "tell me when the file is ready" is not lost when the gate would skip. When a text_score vetoes the gate, the same question goes in the per-tool `decide_whole` batch instead, still no extra round trip. Short messages go through the gate and the follow-up question like any other message.
+
+A chat turn passes the conversation's `db` and `conversation_id` into the detection, so `_pick` reuses `ChatTask.conversation_messages` (the same history a reply sees). `find_tools` does not: it detects a task string, and the conversation would re-offer tools for the original message. On a follow-up pick, a chat turn also tells the LLM whether the contact's files already hold a project; the tuner (no sandbox volume) leaves that line out.
 
 ## Bands
 
@@ -152,7 +155,7 @@ In a chat turn the detection also gets the contact's `SandboxVolume`, and Laya i
 ```
 1  spawn_job, current_time, task
 2  date_calc
-3  search_memory, find_tools, wikipedia, websearch, fetch_url, weather, price_finder
+3  search_memory, find_tools, websearch, fetch_url, weather, price_finder
 4  convert
 5  calculate, bash, read_file, edit_file, share_file
 6  show_map, poll, write_file, generate_image, take_photo, remember
@@ -192,7 +195,7 @@ Background calls: the calls of an agent's `Worker` (a job's worker, a pass's loo
 
 ## Results
 
-The results of all rounds are merged per tool (`Tool.merge`: texts on separate lines, lists added up). For the reply they become a `TOOL_RESULTS` block, one line per tool. A failed tool keeps its text, or shows `failed: <error>`, so the reply does not claim it worked. The pages that `websearch`, `wikipedia` and `fetch_url` used are stored as the message's sources and shown as links under the answer.
+The results of all rounds are merged per tool (`Tool.merge`: texts on separate lines, lists added up). For the reply they become a `TOOL_RESULTS` block, one line per tool. A failed tool keeps its text, or shows `failed: <error>`, so the reply does not claim it worked. The pages that `websearch` and `fetch_url` used are stored as the message's sources and shown as links under the answer.
 
 ## Reply tools
 
@@ -218,7 +221,7 @@ The same dataset was used to measure `MessageShape` (`utils/message_shape.py`), 
 
 ## websearch
 
-Searches the web (DDGS search engines) and the offline library (Project NOMAD) for a `query`, the library in parallel with the web. The pages are read, and the answers found in them compete by quality for the best three (`GOOD_ANSWERS`). If the web finds nothing useful, it tries once more with only the key words. Without internet only the library is searched. The pages used become the answer's sources. A worker gets `websearch` in any case, unless its detection found a build tool; an empty search does not fail the worker.
+Searches the web (DDGS search engines) and the offline library (Project NOMAD) for a `query`, the library in parallel with the web. The pages are read, and the answers found in them compete by quality for the best three (`GOOD_ANSWERS`). If a top hit is a Wikipedia article, its clean summary is added as well (from Wikipedia online, or from the offline library's copy when the internet is not there or Wikipedia does not answer). If the web finds nothing useful, it tries once more with only the key words. Without internet only the library is searched; a Wikipedia article among those hits still contributes its lead summary. The pages used become the answer's sources. Laya's recommended threshold is 0.2 so the model is often offered the tool and can decide; mandatory is 1.0, so it is never forced. A worker gets `websearch` in any case, unless its detection found a build tool; an empty search does not fail the worker.
 
 ## generate_image
 
@@ -243,10 +246,6 @@ Returns the current date, time and weekday in a `timezone` (a city or a zone nam
 ## date_calc
 
 Counts the days between a `start` and an `end` date, or adds `days` to a start date, and gives the weekdays. Dates are `YYYY-MM-DD` or `today`, in the user's timezone unless the call names one.
-
-## wikipedia
-
-Looks up a `query` on Wikipedia (in `lang`, English by default), or in the offline library's copy without internet. Returns the article's summary with the source link.
 
 ## weather
 
@@ -286,7 +285,7 @@ Runs one `command` in the contact's sandbox container (`SandboxContainer`, image
 
 ## reset_sandbox
 
-Starts the contact's sandbox over (`what`, `system` by default): a fresh container from the clean image, when the agent broke the system or the user asks for a clean one (installs, their record and processes go, nothing is installed again, the files stay). Only when the user explicitly asks: `files` brings the files back to the backup made before the last worker that changed them (the replaced files are kept in the backup's safety copy, the agent cannot bring them back), `all` both. It has no question of its own: it is offered whenever `bash` is, and a job's worker always has it (`JOB_TOOLS`), a lookup with `bash` (`FILE_KIT`). Companion passes never get it.
+Starts the contact's sandbox over (`what`, `system` by default): a fresh container from the clean image, when the agent broke the system or the user asks for a clean one (installs, their record and processes go, nothing is installed again, the files stay). Only when the user explicitly asks: `files` brings the files back to the backup made before the last worker that changed them (the replaced files are kept in the backup's safety copy, the agent cannot bring them back), `all` both. It has no question of its own: it is offered whenever `bash` is, and a job's worker always has it (`JOB_TOOLS`). The lookups of task and companion passes never get it.
 
 ## read_file
 
@@ -318,4 +317,4 @@ Speaks a short `text`, or text files of the contact's files in their order, into
 
 ## join_files
 
-Joins `files` of the contact's files in their order into one new file `name`. An audio name (`.wav`, `.ogg`, `.mp3`) joins audio files, with a pause between them and converted to the first file's format; any other name joins text files, with a blank line between them (at most 10 MB). The file is kept and offered like `write_file`'s. Chat turns cannot use it (`CHAT_EXCLUDED_TOOLS`): it is for workers and task passes.
+Joins `files` of the contact's files in their order into one new file `name`. An audio name (`.wav`, `.ogg`, `.mp3`) joins audio files, with a pause between them and converted to the first file's format; any other name joins text files, with a blank line between them (at most 10 MB). The file is kept and offered like `write_file`'s. A chat turn can use it after `text_to_speech` (several chapters or episodes into one file), and a job's workers can too.

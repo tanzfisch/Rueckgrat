@@ -59,7 +59,7 @@ def date_calc(start, end=None, days=None, zone: ZoneInfo = ZoneInfo("UTC")) -> s
 
 class DateCalcTool(Tool):
     description = prompts.DATE_CALC_DESCRIPTION
-    thresholds = (0.55, 0.6)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.55, 0.72)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user ask how many days, weeks or months are left until something or have passed since something?",
         "Does the user ask what day of the week a date is?",

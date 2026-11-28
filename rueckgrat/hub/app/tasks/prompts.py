@@ -14,7 +14,10 @@ placeholders, filled with str.format (literal json braces are doubled):
   TRANSLATE_PROMPT          source, target: the language names
   TRANSCRIPT_SUMMARY_PROMPT, TRANSCRIPT_ENHANCE_PROMPT, TRANSCRIPT_ENHANCE_ONE_PROMPT   none (the text is the user message)
   UPDATE_CONTEXT_PROMPT     context (the current context as json), messages (one "- ..." line per latest message)
-  TOOL_PICK_PROMPT          tools (one "- name: description" line per tool), text (the message or task the tools are for)
+  TOOL_PICK_PROMPT          history (TOOL_PICK_HISTORY_HINT when there is a conversation, else empty), project (TOOL_PICK_PROJECT_HINT or TOOL_PICK_NO_PROJECT_HINT on a follow-up pick when the files were checked, else empty), tools (one "- name: description" line per tool), text (the message or task the tools are for)
+  TOOL_PICK_HISTORY_HINT    the sentence that tells the pick the earlier messages are the conversation
+  TOOL_PICK_PROJECT_HINT    the files already hold a project this message may continue
+  TOOL_PICK_NO_PROJECT_HINT the files hold no project, so the message probably starts something new
 """
 
 # ---------------------------------------------------------------- contact generator (ContactGeneratorTask)
@@ -32,7 +35,6 @@ USER INPUT:
 EXAMPLE PROFILE:
 {{
     "role": "Coach",
-    "age": "young adult",
     "personality": "warm, energetic, playful, direct, assertive, proactive, empathetic",
     "primary_objective": "help the user reach their fitness goals",
     "background_hook": "former collegiate athlete with a winning mindset",
@@ -79,7 +81,7 @@ EXAMPLE PROFILE:
 INSTRUCTIONS:
 - Invent a new profile based on the user input
 - Fill in information as applicable
-- role, age, personality, primary_objective -> infer them from gender and backstory
+- role, personality, primary_objective -> infer them from gender and backstory
 - appearance -> only body without clothing, use what the backstory says, invent fitting details for the rest
 - style, profile_picture_context -> make them fit the image style (its world, era and look)
 - background_hook -> invent an interessting and elaborate background story based on the given backstory (max 100 words)
@@ -202,13 +204,19 @@ SUMMARIZE_FOCUS_PART = "\nFocus on: {focus}"
 
 # ---------------------------------------------------------------- tool detection without laya (ToolDetectionTask._pick)
 
-TOOL_PICK_PROMPT = """TOOLS:
+TOOL_PICK_HISTORY_HINT = "The messages before this are the conversation so far, including the latest message (TEXT). Use them when TEXT refers back to earlier turns.\n\n"
+
+TOOL_PICK_PROJECT_HINT = "There is an existing project in the files that this message may continue.\n\n"
+
+TOOL_PICK_NO_PROJECT_HINT = "There is no existing project in the files, so the message probably starts something new.\n\n"
+
+TOOL_PICK_PROMPT = """{history}{project}TOOLS:
 {tools}
 
 TEXT:
 {text}
 
 Which of the TOOLS does doing what the TEXT asks need? Pick only tools the TEXT clearly needs, none when it needs none
-(small talk, a question you can answer yourself). Files to make, change, read or run need the tools that work with files.
+(small talk, a question you can answer yourself). A single file to make, change or read can use the tools that work with files. A larger multi-file program or project should lean to a tool that handles bigger background work.
 Respond with json like this: {{"tools": ["name", ...]}}
 """

@@ -1,31 +1,69 @@
 Changelog
 =========
 
+0.33.0
+------
+
+- #232 cleaning round
+  - create_rueckgrat_user.sh replaced by the README section "Creating a Rückgrat user"
+  - uninstall: a (all machines) ends the selection, no need to confirm with an empty answer
+  - the hub checks a contact's json with Pydantic models (PATCH /contacts/{id}, the default character, the contact generator): unknown keys are dropped, an imported character file's companion switch too, wrong values are refused
+  - the new contact wizard's persistent switch is the companion switch ("companion" in the generate request), no persistent key in the profile any more
+  - a contact's age is gone (profile page, contact generator): it was never stored
+  - the translator and transcriber offer all 100 whisper languages, each with its native name (shown in the picker) and a flag; the node's chatterbox languages come from the same list
+  - one list of image styles in app.common (IMAGE_STYLES: the chat's description and the hub's prompt parts per style)
+  - text_chunks.py split into TextChunker (sentence chunks) and SpeechText (what of a text is spoken)
+  - transcript_commands.py is TranscriptCommand (parse returns the command, not a tuple)
+  - a tool is only mandatory when Laya is quite sure: the tuner's mandatory (and the tools' current ones) is 1.2 times the derived value, at most 1.0, recommended is unchanged
+  - a chat/scene/work Laya choice gate skips the per-tool questions when the message is confidently casual talk or a scene; a text_score that already reaches recommended (a link: fetch_url) still runs, and the node's chunk merge keeps the highest P(work) so a work request in any part is not skipped
+  - a reply that shows nothing (only a remember call, or a cut off one) is answered once more with another seed, silently; still nothing: the message is dropped and an error is logged, the user is not told
+  - a worker no longer runs tool detection: each kind has one fixed list of the tools it may need (an agent job, a companion pass, a task), of the ones the registry can use now; a companion still drops the tools the user's settings exclude
+  - a worker that gets no reply no longer loops until its time limit: a turn without a call counts as one of its calls, 3 in a row end it with an error, it waits 2 s after a chat the node did not answer and does not ask again without the grammar then (Infrastructure.chat names the reason in info["error"]); the older turns in its prompt are capped to a tenth of the LLM slot's context (the oldest left out, the same turns in a row as one entry) and its turn messages, results header, errors and budget line are shorter
+  - a Laya follow-up question (does the latest message refer back to earlier in the conversation) runs in the same batch as the chat/scene/work gate, so a short follow-up is not lost when the gate would skip; at 0.65 the LLM pick decides with the same conversation history a reply sees, between 0.4 and 0.65 the pick is added as recommended on top of Laya's bands (a priority tool still becomes mandatory, as without Laya)
+  - tool detection no longer skips messages of fewer than 4 words: they go through the chat/scene/work gate and the follow-up question like any other message
+  - laya_tune: poll (0.65, 0.84), text_to_speech (0.55, 0.72), spawn_job (0.6, 0.78), wikipedia (0.45, 0.6) and write_file (0.4, 0.6) from the latest run; the tuner always scores the per-tool questions, also on a follow-up row
+  - websearch takes over wikipedia: when a top hit is a Wikipedia article, its summary is added (from the web, or from the offline library without internet); websearch is recommended at 0.2 and never forced (mandatory 1.0); the wikipedia labels in laya_tune were moved to websearch
+  - laya_tune --stack measures the whole tool stack: MetaTask's detection and the setup rounds, with a mock conversation and recorded tool calls (no web, sandbox or jobs); Laya and the LLM stay the live nodes
+  - laya_tune logs progress to stderr: each phase, one line per row with the rate and ETA, and when the lever advisor starts and finishes
+  - join_files is offered on a chat turn (it is no longer in CHAT_EXCLUDED_TOOLS); read_file and edit_file stay workers-only
+  - laya_tune --stack always has a text_to_speech node (TTS_NODE or the laya node) so the tool is scored and can be offered
+  - a recommended tool call is kept when its arguments are derived from the message (01 and 1, mem and memory); a prompt-example call that shares nothing is still dropped
+  - the follow-up question treats a self-contained new task (a project, API, app or script) as not a follow-up; stack mode's neutral history is a short hello, not an offer to help
+  - laya_tune applied bash (0.6, 0.75), calculate (0.8, 0.95), convert (0.65, 0.8), current_time (0.5, 0.75), task (0.65, 0.8), spawn_job (0.85, 0.9), MANDATORY_FACTOR 1.0 and JOB_COMPLEXITY 0.35; websearch stays (0.2, 1.0), GATE stays 0.8
+  - the lever advisor skips per-tool and gate levers on a file with no tool labels, and reports MANUAL_THRESHOLDS (websearch) as fixed
+  - on a follow-up, the LLM pick is told whether the contact's files already hold a project (no hint when they were not checked); a larger program or project should lean to background work rather than a single file change
+
+0.32.1
+------
+
+- added missing files
+
 0.32.0
 ------
 
 - #230 rethinking agents
--     redesigned the agent job worker loop, tasks and companion passes use the same worker framework as agent jobs
--     removed the run_code tool, code runs through spawn_job and bash
--     simple job loop: goal, check and folder decided at the start, one worker per step, only the step's check decides (run in a clean shell in the job's folder), a failed check gets one retry told what failed, then the job fails
--     own sandbox layer instead of llm-sandbox (removed, docker SDK added as hub dependency)
--     one long-lived sandbox container per contact on python:3.11-trixie, with passwordless sudo: sudo apt-get install works and stays while the container lives
--     sandboxes run in gVisor (runsc, HUB_SANDBOX_RUNTIME), the installer installs and registers it with Docker, without it the hub falls back to runc with a warning
--     gVisor is registered with --allow-suid so sudo works in the sandboxes, the installer adds it to an existing runsc registration, the hub warns when it is missing
--     packages installed with sudo apt are recorded and installed again when a container is made for a new image
--     the contact's files are backed up before every agent job worker that changes files, size limit HUB_SANDBOX_BACKUP_MAX_MB (default no limit)
--     new reset_sandbox tool: a fresh container from the clean image with the files kept, on request the files back to the last backup
--     idle sandbox containers are stopped after 24 hours (HUB_SANDBOX_IDLE_MINUTES), the next command starts them again
--     limits of 2 CPUs, 2 GB memory and 256 processes, the uninstall script removes sandboxes and backups
--     the task tool only takes over from spawn_job when the message says when to act (in 2 hours, every day, tomorrow, at 7pm), a build request with "tell me when it works" starts a job
--     task passes see the real state of the contact's background jobs and do not start a job just to check one
--     laya dataset: build requests from a sandbox test that must start a job
--     job workers get 40 calls (HUB_JOB_WORKER_CALLS) and end on finish or when their calls or time are used up, the check decides the rest
--     one folder per job, chosen at the start: a new project, a listed project the job names, for work on files the conversation's project, else the conversation's workdir, workers start in it
--     the job delivers the files (those it names, else the changed files without build output), a failed job sends what it made, reports never claim files that are not attached
--     a failed job's report says which step failed and why (the check and its output) and never promises to retry
--     workers know how long a reply can be (from the llm's context), short worker, plan and report prompts, no review, merge or retry llm calls
--     job workers always get the shell and file tools, the user's messages during a job go to its next step
+  - redesigned the agent job worker loop, tasks and companion passes use the same worker framework as agent jobs
+  - removed the run_code tool, code runs through spawn_job and bash
+  - simple job loop: goal, check and folder decided at the start, one worker per step, only the step's check decides (run in a clean shell in the job's folder), a failed check gets one retry told what failed, then the job fails
+  - own sandbox layer instead of llm-sandbox (removed, docker SDK added as hub dependency)
+  - one long-lived sandbox container per contact on python:3.11-trixie, with passwordless sudo: sudo apt-get install works and stays while the container lives
+  - sandboxes run in gVisor (runsc, HUB_SANDBOX_RUNTIME), the installer installs and registers it with Docker, without it the hub falls back to runc with a warning
+  - gVisor is registered with --allow-suid so sudo works in the sandboxes, the installer adds it to an existing runsc registration, the hub warns when it is missing
+  - packages installed with sudo apt are recorded and installed again when a container is made for a new image
+  - the contact's files are backed up before every agent job worker that changes files, size limit HUB_SANDBOX_BACKUP_MAX_MB (default no limit)
+  - new reset_sandbox tool: a fresh container from the clean image with the files kept, on request the files back to the last backup
+  - idle sandbox containers are stopped after 24 hours (HUB_SANDBOX_IDLE_MINUTES), the next command starts them again
+  - limits of 2 CPUs, 2 GB memory and 256 processes, the uninstall script removes sandboxes and backups
+  - the task tool only takes over from spawn_job when the message says when to act (in 2 hours, every day, tomorrow, at 7pm), a build request with "tell me when it works" starts a job
+  - task passes see the real state of the contact's background jobs and do not start a job just to check one
+  - laya dataset: build requests from a sandbox test that must start a job
+  - job workers get 40 calls (HUB_JOB_WORKER_CALLS) and end on finish or when their calls or time are used up, the check decides the rest
+  - one folder per job, chosen at the start: a new project, a listed project the job names, for work on files the conversation's project, else the conversation's workdir, workers start in it
+  - the job delivers the files (those it names, else the changed files without build output), a failed job sends what it made, reports never claim files that are not attached
+  - a failed job's report says which step failed and why (the check and its output) and never promises to retry
+  - workers know how long a reply can be (from the llm's context), short worker, plan and report prompts, no review, merge or retry llm calls
+  - job workers always get the shell and file tools, the user's messages during a job go to its next step
+
 
 0.31.0
 ------
@@ -42,15 +80,15 @@ Changelog
 - #220 added uninstall script
 - #167 companion greeting handling
 - #222 offline websearch, wikipedia and maps with an optional Project NOMAD in the LAN
--     installer asks for the NOMAD url, hub manager offline nomad changes or clears it later, no restart
--     wikipedia and websearch fall back to NOMAD's kiwix library without internet, websearch searches all books of the language
--     book list is read live from kiwix, the hub keeps no copy
--     show_map draws offline tiles in the hub from NOMAD's pmtiles, places are found by their wikipedia coordinates, a tap opens NOMAD's map
--     fetch_url is always available, without internet it still reads pages in the LAN, NOMAD and kiwix are allowed automatically
--     convert works offline, currency rates are saved once a day and fetched on the first hub start
--     hub manager offline simulate on|off acts as if there were no internet, offline status shows NOMAD, its library and map
--     new capabilities library and offline_map, shown in the chat's status
--     added pmtiles, mapbox-vector-tile and Pillow hub dependencies
+  - installer asks for the NOMAD url, hub manager offline nomad changes or clears it later, no restart
+  - wikipedia and websearch fall back to NOMAD's kiwix library without internet, websearch searches all books of the language
+  - book list is read live from kiwix, the hub keeps no copy
+  - show_map draws offline tiles in the hub from NOMAD's pmtiles, places are found by their wikipedia coordinates, a tap opens NOMAD's map
+  - fetch_url is always available, without internet it still reads pages in the LAN, NOMAD and kiwix are allowed automatically
+  - convert works offline, currency rates are saved once a day and fetched on the first hub start
+  - hub manager offline simulate on|off acts as if there were no internet, offline status shows NOMAD, its library and map
+  - new capabilities library and offline_map, shown in the chat's status
+  - added pmtiles, mapbox-vector-tile and Pillow hub dependencies
 - fixed offline library links with special characters in their path (encoded twice)
 - websearch always searches NOMAD's library next to the web, the best answers of both make the result
 - copy buttons on every text block of a bubble (text, code, quotes, tables tab separated) and in the text preview
@@ -70,22 +108,22 @@ Changelog
 - #197 added tts tool which turns text in to speech for the user to donwload
 - #212 added join_files tool which joins text or audio files into one file, for jobs and tasks only
 - #209 improved writing files to the sandbox
--     write_file and text_to_speech take a full path, e.g. a project folder
--     write_file only writes text, audio, image and archive files are refused
--     an existing file is only replaced with the overwrite flag
--     text_to_speech writes mp3, ogg or wav
--     job steps pass the paths of their saved files on to the next steps
--     websearch answers are part of the tool results
--     a bash ls of the work folder counts as grounded
--     tools mark themselves as fixable instead of the FIX_TOOLS list, problems keep their tool's name
--     a worker fails when its file tools still fail after the fix rounds
--     tools don't name other tools, the planner and tool setup explain how they work together
--     planner talks about works made of parts instead of audiobooks
--     agent jobs run up to 8 h, tasks and companion passes up to 90 min, job llm calls up to 30 min
--     tts timeout by priority: 4 min for chat, background requests wait as long as their job
--     tts node queues speech requests: chat first, requests of gone clients are skipped, a full queue answers busy and background requests retry
--     improved text_to_speech laya question, mandatory threshold 0.75
--     docs: communication.md describes how chat, hub and nodes talk, CONTRIBUTING.md renamed to DEVELOPMENT.md
+  - write_file and text_to_speech take a full path, e.g. a project folder
+  - write_file only writes text, audio, image and archive files are refused
+  - an existing file is only replaced with the overwrite flag
+  - text_to_speech writes mp3, ogg or wav
+  - job steps pass the paths of their saved files on to the next steps
+  - websearch answers are part of the tool results
+  - a bash ls of the work folder counts as grounded
+  - tools mark themselves as fixable instead of the FIX_TOOLS list, problems keep their tool's name
+  - a worker fails when its file tools still fail after the fix rounds
+  - tools don't name other tools, the planner and tool setup explain how they work together
+  - planner talks about works made of parts instead of audiobooks
+  - agent jobs run up to 8 h, tasks and companion passes up to 90 min, job llm calls up to 30 min
+  - tts timeout by priority: 4 min for chat, background requests wait as long as their job
+  - tts node queues speech requests: chat first, requests of gone clients are skipped, a full queue answers busy and background requests retry
+  - improved text_to_speech laya question, mandatory threshold 0.75
+  - docs: communication.md describes how chat, hub and nodes talk, CONTRIBUTING.md renamed to DEVELOPMENT.md
 - #216 added default backstory to character creation
 - #211 explorer button in conversations list
 - #213 copy path button on files in file explorer
@@ -97,22 +135,22 @@ Changelog
 ------
 
 - #208 fixing round
--     replies go to the chat session that asked for them, status messages only show in their conversation
--     fixed laya tune.sh
--     fixed old tool results leaking into later replies: a new seed per reply
--     device timezone is the default when the user has none set
--     downloads and tts voices are limited to their owner
--     empty transcripts are removed
--     fixed typos
--     tasks expose their route through getters only
--     removed db compatibility code for old versions
--     new users land on the profile wizard again after their first login
--     a failed tool call no longer stops the following tool rounds
--     current_time and date_calc use the user's time zone when none or "local" is given
--     the profile wizard only saves a time zone the user changed, settings can switch back to the device time zone
--     contact conversations of other users return 404
--     generated images are stored with their real file size
--     improved laya tool questions and thresholds, more laya training data
+  - replies go to the chat session that asked for them, status messages only show in their conversation
+  - fixed laya tune.sh
+  - fixed old tool results leaking into later replies: a new seed per reply
+  - device timezone is the default when the user has none set
+  - downloads and tts voices are limited to their owner
+  - empty transcripts are removed
+  - fixed typos
+  - tasks expose their route through getters only
+  - removed db compatibility code for old versions
+  - new users land on the profile wizard again after their first login
+  - a failed tool call no longer stops the following tool rounds
+  - current_time and date_calc use the user's time zone when none or "local" is given
+  - the profile wizard only saves a time zone the user changed, settings can switch back to the device time zone
+  - contact conversations of other users return 404
+  - generated images are stored with their real file size
+  - improved laya tool questions and thresholds, more laya training data
 
 0.28.0
 ------
@@ -129,7 +167,7 @@ Changelog
 ------
 
 - #176 ordering tool calls: laya-detected tools one at a time, then one optional request for the rest
--     fetch_url is selected by a url in the message, not by laya
+  - fetch_url is selected by a url in the message, not by laya
 - maps don't try to simulate dark mode anymore. it was too ugly
 - #175 the assistant can attach text files: one file as itself, several files of one message as a single zip
 - #109 cleanup round after too heavy AI use
@@ -178,25 +216,25 @@ Changelog
 ------
 
 - #146 patching security issues
-      installer: no sudo password handling (ssh keys or ssh/sudo prompt themselves), -p removed, host keys pinned (accept-new)
-      installer: asks for each machine's sudo password once at the start, temporary sudoers rule removed on exit
-      revocable refresh tokens (hashed, rotated, logout and password change revoke), log in once after the update
-      web fetches pinned to the checked address, redirects checked, HUB_FETCH_ALLOW for local pages
-      client config file only readable by its owner
-      create_rueckgrat_user.sh sets up a separate install user (ssh key, passwordless sudo) on all machines, use with install.sh -u
-      README explains which users, sudo rights and ssh keys the installer needs
+  - installer: no sudo password handling (ssh keys or ssh/sudo prompt themselves), -p removed, host keys pinned (accept-new)
+  - installer: asks for each machine's sudo password once at the start, temporary sudoers rule removed on exit
+  - revocable refresh tokens (hashed, rotated, logout and password change revoke), log in once after the update
+  - web fetches pinned to the checked address, redirects checked, HUB_FETCH_ALLOW for local pages
+  - client config file only readable by its owner
+  - create_rueckgrat_user.sh sets up a separate install user (ssh key, passwordless sudo) on all machines, use with install.sh -u
+  - README explains which users, sudo rights and ssh keys the installer needs
 - #121 fixed display of source URLs. now part of the chat bubble
 - #147 nightly maintenance: conversation summaries with vectors to find old conversations by meaning
 - #149 improve conversations: supressing made-up facts, sources or shared memories, lasting user facts kept in the context, fewer *actions* and questions
 - #150 stability pass
-      image downloads: failed single attempts only logged at debug, one error once all retries gave up
-      image downloads: two downloads of the same file no longer share one .part file (FileNotFoundError on rename)
-      edit profile from the settings goes back to the settings (was the contact list), also after save
-      translate page follows the "Enter sends" setting like the chat (Enter always made a new line)
-      gallery dates shown in local time (were UTC, images from the morning showed the day before)
-      chat mic: if the mic can't start (no audio device) the button goes back to off instead of an unhandled traceback
-      chat input has the keyboard focus on opening a conversation also with "Enter sends" on (flet's focus() missed shift_enter fields)
-      no more flet deprecation warnings: text field and dropdown borders use border=OutlineInputBorder (field_border in theme.py), NoInputBorder instead of InputBorder.NONE
+  - image downloads: failed single attempts only logged at debug, one error once all retries gave up
+  - image downloads: two downloads of the same file no longer share one .part file (FileNotFoundError on rename)
+  - edit profile from the settings goes back to the settings (was the contact list), also after save
+  - translate page follows the "Enter sends" setting like the chat (Enter always made a new line)
+  - gallery dates shown in local time (were UTC, images from the morning showed the day before)
+  - chat mic: if the mic can't start (no audio device) the button goes back to off instead of an unhandled traceback
+  - chat input has the keyboard focus on opening a conversation also with "Enter sends" on (flet's focus() missed shift_enter fields)
+  - no more flet deprecation warnings: text field and dropdown borders use border=OutlineInputBorder (field_border in theme.py), NoInputBorder instead of InputBorder.NONE
 - #18 page navigation with a back stack: back (header, Android, browser) returns to the page you came from, login and contacts start the stack anew
 - #148 installer installs all hosts at the same time (copies first, then one log per host in logs/install-<host>.log)
 
@@ -204,10 +242,10 @@ Changelog
 ------
 
 - #139 faster replies by optimizing meta job
-      using Laya to detect tool usage where possible
-      improved websearch now using headless browser
-      cach tts data for faster replay
-      improved conversation context now focuses on open questions and decisions
+  - using Laya to detect tool usage where possible
+  - improved websearch now using headless browser
+  - cach tts data for faster replay
+  - improved conversation context now focuses on open questions and decisions
 - #140 fixed text bubble selection color
 - #136 user can delete individual memories
 - #124 added galllery containing all pictures of the user account
@@ -263,7 +301,7 @@ Changelog
 - #84 auto install of models on demand for stt, tts and image gen
 - #15 added conversion tool
 - #59 tool index as first step to nested tooling
-      new tools: calculator, current time, date calc, wikipedia, weather, url fetcher
+  - new tools: calculator, current time, date calc, wikipedia, weather, url fetcher
 - install.sh and dev.sh improvements
 - fixed issue with hw detection durign install
 - added missing image style in character edit form
@@ -300,7 +338,7 @@ Changelog
 - #11 text to speech moved from client side piper to chatterbox running as a node service
 - #81 animation in ui when speaking user detected
 - #82 fixed speech playback on android, wav is played in app with flet-audio instead of aplay
-      speech runs in page.run_thread so the player connects to the page, player released after playback, added flet-audio 1.0.4 dependency
+  - speech runs in page.run_thread so the player connects to the page, player released after playback, added flet-audio 1.0.4 dependency
 - #80 allow user to upload voice samples for characters
 - #62 simplified character generation ui and backend
 - #83 improved character editing
@@ -315,9 +353,9 @@ Changelog
 
 - #76 configurable models path (during installation)
 - #44 made log level configurable for client
-      allows to change log level across the whole system at runtime see /log-level/{level}
+  - allows to change log level across the whole system at runtime see /log-level/{level}
 - #78 more flexible llama config per model in registry.json
-      faster reinstalls
+  - faster reinstalls
 - #73 hub and nodes can start in any order and reconnect automatically after a connection loss
 
 0.13.0
@@ -395,7 +433,7 @@ Changelog
 - #73 improving installer
 - #5 improving installer some more
 - #75 docker for chat
-  known issues: autostart fails, no audio output
+  - known issues: autostart fails, no audio output
 - #72 fixed bug where file open dialog oppened twice
 
 0.6.1
@@ -436,7 +474,7 @@ Changelog
 
 - #38 generate new context for each new conversation
 - #32 improved resource handling
-removed DEV_MODE again
+- removed DEV_MODE again
 - #17 working on discovery and decided to stick with simple config file
 - #22 added image overlay
 - #41 improve context update for better consistency, each new conversation begins with a randomized context
@@ -451,9 +489,9 @@ removed DEV_MODE again
 - #37 added code workspace
 - #5  added settings menu for client
 - #28 improved some of the existing contact templates
-added script to deploy docker image to remote location
-some refactor across the board
-some improvements to image generation prompts
+- added script to deploy docker image to remote location
+- some refactor across the board
+- some improvements to image generation prompts
 
 0.2.0
 -----
@@ -461,9 +499,9 @@ some improvements to image generation prompts
 - #3 image generation embedded in conversation
 - #13 added common module to share code amongst applications
 - #8 introduction of nested jobs processing user requests
-improved context generation to reduce size (- #1)
+- improved context generation to reduce size (- #1)
 - #19 reduced complexity in text classification
-improved promts for image, text and and context generation
-improved handling of image downloads
-improved bubbles layout for different aspect ratios of images
-added seed to llama.cpp interface
+- improved promts for image, text and and context generation
+- improved handling of image downloads
+- improved bubbles layout for different aspect ratios of images
+- added seed to llama.cpp interface
