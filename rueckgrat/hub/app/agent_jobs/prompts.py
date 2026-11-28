@@ -9,7 +9,8 @@ placeholders, filled with str.format (literal json braces are doubled):
                              characters one reply holds, Worker._reply_chars)
   WORKER_CHECK_PART          check: its step's check, a command, folder: where it runs (Worker.folder)
   FOLDER_PART                path: a job worker's folder, absolute (Worker.folder)
-  WORKER_EARLIER_PART        lines: the older turns, one short line per call
+  WORKER_EARLIER_PART        lines: the older turns, one short line per call (the same turns in a row as one), the newest that fit
+  WORKER_LEFT_OUT_PART       count: the oldest turns that did not fit, at the start of the lines
   WORKER_RESULTS_PART        results: the results of a turn's calls, "[n] tool: text" each
   WORKER_BUDGET_LEFT_PART    calls (left), total, minutes (left)
   WORKER_NOT_RUN_PART        count: calls per turn
@@ -25,6 +26,8 @@ placeholders, filled with str.format (literal json braces are doubled):
   PLAN_PROMPT                prompt (the job), max_steps, projects (the contact's projects, one line each)
   CHECK_FAILED_PART          check: a step's check, output: its output (Controller.step)
   WORKER_ERROR_PART          error: why a step's worker without a check crashed
+  WORKER_NO_ANSWER_PART      turns: failed turns in a row, reason: why the last chat got no reply (Worker.step, ends it as an error)
+  WORKER_NO_CALLS_PART       turns: replies in a row without a call (Worker.step, ends it as an error)
   USER_MESSAGES_PART         messages: the user's messages while the job runs, one "- " line each (Controller._start)
   RETRY_PART                 failed: CHECK_FAILED_PART or WORKER_ERROR_PART, after the goal of the retry (Controller._start)
   CHECKED_PART               check: the check a finished step passed (Controller._results_text)
@@ -67,14 +70,14 @@ Example:
 {"tool": "finish", "summary": "wordstat builds with cmake, ctest passes 12 tests"}
 """
 WORKER_EARLIER_PART = "\n\nYOUR EARLIER TURNS (shortened):\n{lines}"
-WORKER_RESULTS_PART = "RESULTS OF YOUR CALLS:\n{results}"
-WORKER_BUDGET_LEFT_PART = "You have {calls} of {total} calls and about {minutes} minutes left."
-WORKER_NOT_RUN_PART = "not run: at most {count} calls per turn, write it again in your next turn"
-WORKER_UNREADABLE_PART = "could not read this call, write it as json: {text}"
-WORKER_CUT_OFF_PART = ("your reply was cut off before its end, the call that was cut off did not run. Write shorter calls, "
-                       "e.g. change a long file piece by piece instead of writing it whole")
-WORKER_UNKNOWN_TOOL_PART = "{tool} is not one of your tools ({tools}, finish), not run"
-WORKER_NO_CALL_PART = 'your reply has no call. Reply with json: {"note": "...", "calls": [...]}'
+WORKER_LEFT_OUT_PART = "({count} turns before these are left out)"
+WORKER_RESULTS_PART = "RESULTS:\n{results}"
+WORKER_BUDGET_LEFT_PART = "{calls} of {total} calls and about {minutes} minutes left."
+WORKER_NOT_RUN_PART = "not run, at most {count} calls per turn: write it again next turn"
+WORKER_UNREADABLE_PART = "unreadable, write the call as json: {text}"
+WORKER_CUT_OFF_PART = "your reply was cut off, its last call did not run: write shorter calls, a long file piece by piece"
+WORKER_UNKNOWN_TOOL_PART = "{tool} is not your tool, not run (yours: {tools}, finish)"
+WORKER_NO_CALL_PART = 'no call in your reply, write json: {"note": "...", "calls": [...]}'
 WORKER_NO_RESULT_PART = "no result (nothing found)"
 WORKER_CHANGED_PART = "files changed: {files}"
 WORKER_COMMANDS_PART = "commands: {commands}"
@@ -89,6 +92,8 @@ PASS_FAILED_PART = "the lookup failed: {reason}"
 
 CHECK_FAILED_PART = "the check `{check}` failed:\n{output}"
 WORKER_ERROR_PART = "the worker ended with an error: {error}"
+WORKER_NO_ANSWER_PART = "the llm did not answer {turns} times in a row: {reason}"
+WORKER_NO_CALLS_PART = "{turns} replies in a row without a call"
 USER_MESSAGES_PART = "\n\nTHE USER WROTE WHILE THE JOB RAN:\n{messages}"
 RETRY_PART = "\n\nTHE LAST ATTEMPT did not reach the goal, {failed}"
 CHECKED_PART = "checked: `{check}` passed"

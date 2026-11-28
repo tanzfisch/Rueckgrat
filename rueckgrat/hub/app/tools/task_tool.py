@@ -11,7 +11,7 @@ class TaskTool(Tool):
     """#170 the user's tasks with this contact: something it does at a set time, once or repeating (UserTasks). at its time
     CompanionScheduler runs it as a TaskJob and the contact writes the result into the conversation"""
     description = prompts.TASK_DESCRIPTION
-    thresholds = (0.65, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.65, 0.8)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [    # no "remind" question: laya mixes it up with "remember" (the remember tool)
         "Does the user want an alarm to ring at a certain time?",
         "Does the user want to see, move or cancel one of their reminders or alarms?",

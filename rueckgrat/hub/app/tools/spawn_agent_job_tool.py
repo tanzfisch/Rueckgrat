@@ -15,7 +15,7 @@ from app.utils.message_shape import MessageShape
 logger = get_logger()
 
 FAIL_REASON_CHARS = 1200    # the failure as the contact gets it, the full one is in the protocol
-JOB_COMPLEXITY = 0.4        # a message whose shape (MessageShape.complexity) reaches it recommends spawn_job. t463: jobs of
+JOB_COMPLEXITY = 0.35       # a message whose shape (MessageShape.complexity) reaches it recommends spawn_job. t463: jobs of
                             # several steps 0.31-1.0, long but simple messages (a story, an email, a long question) at most 0.31
 
 
@@ -25,7 +25,7 @@ class SpawnAgentJobTool(Tool):
     description = prompts.SPAWN_JOB_DESCRIPTION
     # scored on laya (/tmp/probe_spawn.py): jobs 0.44-0.90, chat messages (a how-to with a code block, explain, a follow-up
     # question, poem, weather) at most 0.38. "commanding you to put a task in the background" took a venv how-to for a job (0.66)
-    thresholds = (0.7, 0.75)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.85, 0.9)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     whole_message = True    # a job of several steps shows as a whole: part by part the polished audiobook request scored 0.42, whole 0.98
     question = [
         "Is the user asking you to build a complete multi-file software project?",

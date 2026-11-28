@@ -14,6 +14,10 @@ from app.utils.content_filter import strip_text_noise
 from app.utils.page_render import render_page
 from app.utils.url_check import is_public_http_url, fetch, FetchBlocked
 from app.utils.library import Library, LibraryError
+from app.utils.wikipedia import (
+    WikipediaError, WikipediaUnreachable, is_wikipedia_book, library_page_summary,
+    library_summary, wikipedia_hit, wikipedia_page_summary,
+)
 
 from app.common import get_logger, MessageQueue
 logger = get_logger()
@@ -25,7 +29,7 @@ class WebsearchTool(Tool):
     LIBRARY_PAGES = 6           # offline: the best library hits read per search
     LIBRARY_PAGES_ONLINE = 3    # next to the web: fewer, their answer finding shares the llm with the web pages'
     LIBRARY_PAGE_CHARS = 8000   # of one library page's text, for the answer finding
-    thresholds = (0.65, 0.7)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.2, 1.0)    # offered often, never forced: mandatory 1.0 is recommended-only (laya_tune)
     question = [
         "Does the user ask you to search the internet for something?",
         "Does the user ask where to buy something or for the best deal on a product?",
@@ -37,6 +41,11 @@ class WebsearchTool(Tool):
         "Does the user ask for the current price of a stock, a crypto coin or a product?",
         "Does the user ask who is currently the leader or head of a country or company?",
         "Does the user want to find a shop, restaurant or business in a town?",
+        "Does the user ask who a famous person from history was?",
+        "Does the user ask to have a science theory or natural process explained?",
+        "Does the user ask what a science term means, like photosynthesis or a black hole?",
+        "Does the user ask you to tell them about a famous landmark, monument, war, treaty or historic event?",
+        "Does the user ask about the history of a country, an empire or an era?",
     ]
 
     @classmethod
@@ -419,11 +428,55 @@ class WebsearchTool(Tool):
         short = " ".join(words[:cls.SHORT_QUERY_WORDS])
         return short if short and short != query.strip() else None
 
+    def _wikipedia_answer(self, title: str, lang: str, url: str = "") -> Optional[dict]:
+        """the clean article summary as an answer, from the web or the offline library when the web does not answer"""
+        article = None
+        if self._online():
+            try:
+                article = wikipedia_page_summary(title, lang)
+            except WikipediaUnreachable:
+                if self._library() is None:
+                    return None
+                logger.info(f"wikipedia {title!r}: unreachable, asking the offline library")
+            except WikipediaError as e:
+                logger.debug(f"wikipedia summary {title!r}: {e}")
+                return None
+        if article is None:
+            library = self._library()
+            if library is None:
+                return None
+            try:
+                article = library_summary(library, title, lang)
+            except WikipediaError as e:
+                logger.debug(f"library wikipedia {title!r}: {e}")
+                return None
+        return {
+            "answer": article["summary"],
+            "answer_quality": 9,
+            "source": f"{article['book']} (offline library)" if article.get("book") else "Wikipedia",
+            "title": article["title"],
+            "url": article.get("url") or url,
+            "from_wikipedia": True,
+        }
+
+    def _first_wikipedia_answer(self, urls: list) -> Optional[dict]:
+        """the clean summary of the first top hit that is a Wikipedia article, or None"""
+        for url in urls:
+            hit = wikipedia_hit(url)
+            if hit is not None:
+                lang, title = hit
+                answer = self._wikipedia_answer(title, lang, url)
+                if answer is not None:
+                    return answer
+        return None
+
     def _answers(self, query: str, search_query: str) -> list:
         """the good answers to query from the pages a search for search_query finds, [] when there are none"""
         search_results = self._web_search(search_query, 10)
-        good_results = []
-        seen_urls = set()
+        wiki = self._first_wikipedia_answer([r["url"] for r in search_results])
+        wiki_title = wikipedia_hit(wiki["url"])[1].lower() if wiki and wikipedia_hit(wiki["url"]) else None
+        good_results = [wiki] if wiki else []
+        seen_urls = {wiki["url"]} if wiki else set()
         i = 0
         target = self.GOOD_ANSWERS
 
@@ -447,6 +500,10 @@ class WebsearchTool(Tool):
                     continue
 
                 if result["url"] in seen_urls:
+                    continue
+                hit = wikipedia_hit(result["url"])
+                if wiki_title and hit is not None and hit[1].lower() == wiki_title:
+                    seen_urls.add(result["url"])
                     continue
                 seen_urls.add(result["url"])
                 candidates.append({"url": result["url"], "title": result["title"], "source": self._get_org_name(result["url"]),
@@ -500,16 +557,37 @@ class WebsearchTool(Tool):
 
         def read(hit):
             try:
-                return Library.page_text(library.article(hit["book_id"], hit["path"]), self.LIBRARY_PAGE_CHARS)
+                html = library.article(hit["book_id"], hit["path"])
             except LibraryError as e:
                 logger.debug(f"library page {hit['url']}: {e}")
-                return ""
+                return "", None
+            text = Library.page_text(html, self.LIBRARY_PAGE_CHARS)
+            lead = None
+            if is_wikipedia_book(hit["book_id"]):
+                try:
+                    lead = library_page_summary(library, hit, html=html)
+                except WikipediaError:
+                    lead = None
+            return text, lead
 
         with ThreadPoolExecutor(max_workers=len(hits), thread_name_prefix="library") as pool:
-            texts = list(pool.map(read, hits))
-        candidates = [{"url": hit["url"], "title": hit["title"], "source": f"{hit['book']} (offline library)",
-                       "information": f"{hit['title']}\n{text}"} for hit, text in zip(hits, texts) if text]
-        return self._good_answers(query, candidates, self.GOOD_ANSWERS)
+            fetched = list(pool.map(read, hits))
+        wiki = None
+        candidates = []
+        for hit, (text, lead) in zip(hits, fetched):
+            if wiki is None and lead is not None:
+                wiki = {
+                    "answer": lead["summary"],
+                    "answer_quality": 9,
+                    "source": f"{lead['book']} (offline library)" if lead.get("book") else "Wikipedia",
+                    "title": lead["title"],
+                    "url": lead["url"],
+                    "from_wikipedia": True,
+                }
+            if text and not (wiki is not None and hit["url"] == wiki["url"]):
+                candidates.append({"url": hit["url"], "title": hit["title"], "source": f"{hit['book']} (offline library)",
+                                   "information": f"{hit['title']}\n{text}"})
+        return ([wiki] if wiki else []) + self._good_answers(query, candidates, self.GOOD_ANSWERS)
 
     def _web_answers(self, query: str) -> list:
         """the good answers to query from the web. nothing useful (no hits, or no page answers it): once more with the
@@ -537,8 +615,16 @@ class WebsearchTool(Tool):
             return []
 
     def _best(self, answers: list) -> list:
-        """the GOOD_ANSWERS best answers by quality, each added as a source"""
-        best = sorted(answers, key=lambda a: a["answer_quality"], reverse=True)[:self.GOOD_ANSWERS]
+        """the GOOD_ANSWERS best answers by quality, each added as a source. a Wikipedia article summary is always kept"""
+        wiki = [a for a in answers if a.get("from_wikipedia")]
+        wiki_urls = {a["url"] for a in wiki}
+        others = [a for a in answers if not a.get("from_wikipedia") and a["url"] not in wiki_urls]
+        best = sorted(others, key=lambda a: a["answer_quality"], reverse=True)[:self.GOOD_ANSWERS]
+        seen = {a["url"] for a in best}
+        for answer in wiki:
+            if answer["url"] not in seen:
+                best.append(answer)
+                seen.add(answer["url"])
         for answer in best:
             self.add_source(answer["url"], answer["title"])
         return best

@@ -733,14 +733,14 @@ lan_unusable() {
 }
 
 # lan_discover - find the machines on the LAN this user can log in to with the ssh key and use for install or
-# uninstall. fills LAN_ADDRS, LAN_NAMES, LAN_SUDO, LAN_INSTALLED, LAN_RUNNING (same index). quick and quiet: no prompts,
+# uninstall. fills LAN_ADDRS, LAN_NAMES, LAN_SUDO, LAN_INSTALLED, LAN_CONTAINERS_RUNNING (same index). quick and quiet: no prompts,
 # hosts without a key login are left out, the others that can't be used are listed with the reason.
 # this machine: install --in-place and uninstall need no ssh to it, so it is checked directly
 # Usage: lan_discover install|uninstall
 lan_discover() {
     local mode="$1" direct=false subnets=() addrs=() addr tmp i=0 k v reason
     local -A info
-    LAN_ADDRS=() LAN_NAMES=() LAN_SUDO=() LAN_INSTALLED=() LAN_RUNNING=()
+    LAN_ADDRS=() LAN_NAMES=() LAN_SUDO=() LAN_INSTALLED=() LAN_CONTAINERS_RUNNING=()
     [[ "$mode" == uninstall ]] || $IN_PLACE && direct=true
 
     mapfile -t subnets < <(lan_subnets)
@@ -780,7 +780,7 @@ lan_discover() {
         LAN_NAMES+=("${info[name]}")
         LAN_SUDO+=("${info[sudo]}")
         LAN_INSTALLED+=("${info[installed]:-no}")
-        LAN_RUNNING+=("${info[running]:-0}")
+        LAN_CONTAINERS_RUNNING+=("${info[running]:-0}")
     done
     rm -rf "$tmp"
 }
@@ -792,7 +792,7 @@ lan_host_label() {
     label=$(printf "%-15s %s" "${LAN_ADDRS[i]}" "${LAN_NAMES[i]}")
     is_local_host "${LAN_ADDRS[i]}" && label+=" (this machine)"
     [[ "${LAN_SUDO[i]}" == password ]] && label+="  🔐 sudo asks for the password"
-    [[ "${LAN_INSTALLED[i]}" == yes ]] && label+="  ✅ Rückgrat installed (${LAN_RUNNING[i]:-0} running)"
+    [[ "${LAN_INSTALLED[i]}" == yes ]] && label+="  ✅ Rückgrat installed (${LAN_CONTAINERS_RUNNING[i]:-0} containers running)"
     echo "$label"
 }
 

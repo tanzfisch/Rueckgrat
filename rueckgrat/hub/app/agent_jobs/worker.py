@@ -8,9 +8,12 @@ one for its lookup (lookup).
 the replies: with JSON_REPLIES the node holds them to turn_schema (a grammar). its "note" comes first, so a model writes
 its reasoning there before the calls. the node turns qwen's thinking off and keeps reasoning_content and <think> out of
 the content, so thinking never meets the grammar; a model that thinks inside the grammar can only think in the note. an
-empty reply with the grammar is asked again once without it (_ask). without JSON_REPLIES the model thinks freely and
+empty reply from a node that answered is asked again once without the grammar (_ask), one from a node that did not answer is
+not (nothing helps): step waits and counts the failed turn. a turn without a call costs one of the worker's calls, and
+MAX_FAILED_TURNS of them in a row end it with an error: a down llm does not loop until the time limit. without JSON_REPLIES the model thinks freely and
 parse_turn reads json, fences and <tool_call> xml, at the risk of replies it can't read (the model sees that as an error).
 """
+import itertools
 import json
 import os
 import re
@@ -31,6 +34,11 @@ TIME_LIMIT = 60 * float(os.environ.get("HUB_JOB_WORKER_MINUTES") or 30)       # 
 JSON_REPLIES = (os.environ.get("HUB_JOB_WORKER_JSON") or "true").lower() in ("1", "true", "yes")
 CALLS_PER_TURN = 3
 KEEP_TURNS = 4              # the last turns the model sees whole, the ones before as one line per call (_history)
+EARLIER_SHARE = 0.1         # of a llama slot's context for those lines, the oldest turns that do not fit are left out (_earlier_chars)
+DEFAULT_SLOT_TOKENS = 8192  # the context without a known slot (Infrastructure.chat's context_size)
+MAX_FAILED_TURNS = 3        # turns in a row without a call that end a worker with an error (step)
+FAILED_CHAT_WAIT = 2.0      # seconds before the next turn after a chat the node did not answer (step)
+UNREADABLE_CHARS = 120      # of a call that could not be read, in its error
 RESULT_CHARS = 4000         # of one call's result in a turn, its start and its end
 ARGUMENT_CHARS = 1500       # of one argument of a call in the turns the model sees again (an edit's whole file)
 LINE_CHARS = 160            # of one call in the short lines of the older turns
@@ -39,10 +47,11 @@ CHARS_PER_TOKEN = 3         # of code and json, for the reply size the prompt na
 MIN_REPLY_TOKENS = 4096     # without an llm (Infrastructure.MIN_LONG_REPLY_TOKENS)
 FINISH = "finish"
 PASS_CALLS = 8              # tool calls of a task's or companion pass's lookup (lookup)
-JOB_TOOLS = ("bash", "read_file", "edit_file", "reset_sandbox", "websearch")    # a job's worker always has them (Worker.always)
-# a job's worker never: photos for nothing, and the job delivers the files itself (Controller)
-JOB_EXCLUDED = ("take_photo", "share_file")
-FILE_KIT = ("read_file", "edit_file", "share_file", "reset_sandbox")    # come with bash for a pass's lookup
+# a job's worker has these (Worker.always): what it may need for a step, not photos, share_file (the job delivers the
+# files itself, Controller) or the chat's tools (spawn_job, remember, poll, show_map, task, find_tools)
+JOB_TOOLS = ("bash", "read_file", "edit_file", "write_file", "reset_sandbox", "websearch", "fetch_url",
+             "calculate", "convert", "current_time", "date_calc", "weather", "price_finder", "generate_image",
+             "join_files", "text_to_speech", "search_memory")
 CHANGING_TOOLS = {"bash", "edit_file"}  # a worker with one of them backs the files up before it starts (_back_up)
 EXIT_CODE = re.compile(r"^exit code (-?\d+)( \(stopped)?", re.MULTILINE)     # a bash result (BashTool._run)
 THINK = re.compile(r"<think>.*?(?:</think>|$)", re.DOTALL)
@@ -111,7 +120,7 @@ def parse_turn(text: str, names: List[str]) -> Tuple[str, List[Dict[str, Any]], 
             except ValueError:
                 call = None
             if call is None:
-                errors.append(prompts.WORKER_UNREADABLE_PART.format(text=block[:200]))
+                errors.append(prompts.WORKER_UNREADABLE_PART.format(text=block[:UNREADABLE_CHARS]))
             else:
                 calls.append(call)
     else:
@@ -120,7 +129,7 @@ def parse_turn(text: str, names: List[str]) -> Tuple[str, List[Dict[str, Any]], 
             try:
                 data = json.loads(item)
             except ValueError as e:
-                errors.append(prompts.WORKER_UNREADABLE_PART.format(text=f"{item[:200]} ({e})"))
+                errors.append(prompts.WORKER_UNREADABLE_PART.format(text=f"{item[:UNREADABLE_CHARS]} ({e})"))
                 continue
             if isinstance(data, dict) and isinstance(data.get("calls"), list):
                 note = note or str(data.get("note") or "")
@@ -130,7 +139,7 @@ def parse_turn(text: str, names: List[str]) -> Tuple[str, List[Dict[str, Any]], 
             for entry in items:
                 call = _call(entry)
                 if call is None:
-                    errors.append(prompts.WORKER_UNREADABLE_PART.format(text=json.dumps(entry, ensure_ascii=False)[:200]))
+                    errors.append(prompts.WORKER_UNREADABLE_PART.format(text=json.dumps(entry, ensure_ascii=False)[:UNREADABLE_CHARS]))
                 else:
                     calls.append(call)
         end = 0
@@ -156,16 +165,16 @@ def clip(text: str, limit: int = RESULT_CHARS) -> str:
     return f"{text[:head]}\n[... {len(text) - limit} characters cut]\n{text[-(limit - head):]}"
 
 
-def lookup(agent: AgentJob, goal: str, always=(), allowed=(), excluded=(), failed: bool = True) -> Tuple[str, "Worker"]:
+def lookup(agent: AgentJob, goal: str, always=(), excluded=(), failed: bool = True) -> Tuple[str, "Worker"]:
     """#230 a task's or companion pass's tools: a Worker on the agent's conversation reaches goal (PASS_GOAL_PART) in the
-    agent's thread, with PASS_CALLS calls and what is left of the agent's time. its tools: what its detection finds
-    (allowed: of the registry's WORKER_EXCLUDED_TOOLS) and always, never excluded. the files and data it holds go to the
-    agent's message (attachments, held_data). returns (what it found for the agent's prompt: its result_text, a failed
-    one's reason, "" for that when not failed, the worker)"""
+    agent's thread, with PASS_CALLS calls and what is left of the agent's time. its tools: always, never excluded (a
+    companion: the user's settings). the files and data it holds go to the agent's message (attachments, held_data).
+    returns (what it found for the agent's prompt: its result_text, a failed one's reason, "" for that when not failed,
+    the worker)"""
     left = agent.deadline - time.monotonic() if agent.deadline else TIME_LIMIT
     worker = Worker(f"{agent.role} lookup", prompts.PASS_GOAL_PART.format(goal=goal), time_limit=max(MIN_LLM_SECONDS, min(TIME_LIMIT, left)),
                     infrastructure=agent.infrastructure, tool_context=agent.tool_context)
-    worker.always, worker.allowed, worker.excluded = tuple(always), tuple(allowed), tuple(excluded)
+    worker.always = tuple(name for name in always if name not in excluded)
     worker.max_calls = PASS_CALLS
     result = worker.run() or {"error": "no result"}
     agent.attachments += worker.attachments
@@ -186,10 +195,9 @@ class Worker(AgentJob):
         self.check = ""             # its step's check command, shown in its prompt (Controller.spawn)
         self._folder = ""           # the job's folder below MOUNT_PATH, "" for a pass's lookup (set_folder)
         self.max_calls = MAX_CALLS
-        self.always = JOB_TOOLS     # its tools besides the detected ones (a pass's lookup: its own)
-        self.allowed = ()           # the registry's WORKER_EXCLUDED_TOOLS its detection may find anyway (a task: spawn_job)
-        self.excluded = JOB_EXCLUDED        # never its tools
-        self.calls = 0              # the tool calls so far
+        self.always = JOB_TOOLS     # its tools (a pass's lookup: its own)
+        self.calls = 0              # the tool calls so far, a turn without a call counts as one
+        self.failed_turns = 0       # the turns in a row without a call (step)
         self.tools: Optional[List[str]] = None      # its tools (_setup), finish besides
         self.turns: List[Dict[str, Any]] = []       # {"note", "calls": [{"call", "text", "ok"}]} in order
         self.commands: List[Tuple[str, int]] = []   # (command, exit code) of its bash calls
@@ -205,7 +213,9 @@ class Worker(AgentJob):
 
     def step(self) -> bool:
         """one turn: ask, run its calls. True when it called finish (the calls before it ran, the ones after it do not)
-        or its calls are used up: both end it as done"""
+        or its calls are used up: both end it as done. a turn without a call counts one call and, MAX_FAILED_TURNS in a
+        row, ends it with an error (the llm's, when the node did not answer); after a chat the node did not answer it
+        waits FAILED_CHAT_WAIT seconds"""
         if self.tools is None:
             self._setup()
         if self.calls >= self.max_calls:
@@ -214,6 +224,14 @@ class Worker(AgentJob):
         note, calls, errors = parse_turn(self._ask(), self.tools + [FINISH])
         turn = {"note": note, "calls": [{"call": None, "text": error, "ok": False} for error in errors]}
         self.turns.append(turn)
+        self.failed_turns = 0 if calls else self.failed_turns + 1
+        if not calls:
+            self.calls += 1
+            if self.failed_turns >= MAX_FAILED_TURNS:
+                self._fail()
+                return True
+            if self.llm_error:
+                self._stop.wait(FAILED_CHAT_WAIT)
         for index, call in enumerate(calls):
             if self._stop.is_set():
                 return True
@@ -228,6 +246,14 @@ class Worker(AgentJob):
             turn["calls"].append({"call": call, "text": text, "ok": ok})
         return False
 
+    def _fail(self) -> None:
+        """its result {error}: MAX_FAILED_TURNS turns in a row without a call, why the llm did not answer if it did not"""
+        reason = (prompts.WORKER_NO_ANSWER_PART.format(turns=self.failed_turns, reason=self.llm_error[:LINE_CHARS]) if self.llm_error
+                  else prompts.WORKER_NO_CALLS_PART.format(turns=self.failed_turns))
+        self.result = {"error": reason}
+        logger.warning(f"worker {self.role} {self.job_id}: {reason}")
+        self.trace("failed", ok=False, error=reason, calls=self.calls)
+
     def run(self) -> Optional[Dict[str, Any]]:
         """AgentJob.run, its time limit ends it as done too"""
         super().run()
@@ -240,19 +266,15 @@ class Worker(AgentJob):
         return next((turn["note"] for turn in reversed(self.turns) if turn.get("note")), "")
 
     def _setup(self) -> None:
-        """its tools and its folder's files before it starts: always, and the extras its task's detection finds (once,
-        not per turn, bash with FILE_KIT), never the excluded ones. one with tools that change files backs them up first
-        (_back_up), one with a folder and the shell starts in it (_enter)"""
+        """its tools and its folder's files before it starts: always, of the ones that can be used now (once, not per
+        turn). one with tools that change files backs them up first (_back_up), one with a folder and the shell starts
+        in it (_enter)"""
         registry = self.tool_context["tool_registry"] if self.tool_context else None
         if registry is None:
             self.tools, self._first = [], self._prompt()
             return
-        detected, recommended, decided, source = self.detect_tools(self._task())
-        names = detected + recommended
-        names += list(FILE_KIT) if "bash" in names else []
-        self.trace("tools", tools=names, detected=decided, detection=source)
-        names = [name for name in names + list(self.always) if name not in self.excluded]
-        self.tools = [name for name in registry.ordered_names(list(dict.fromkeys(names))) if name in registry.tools]
+        self.tools = registry.ordered_names(registry.available(list(self.always)))
+        self.trace("tools", tools=self.tools)
         if CHANGING_TOOLS & set(self.tools):
             self._back_up()
         if self._folder and "bash" in self.tools:
@@ -273,23 +295,6 @@ class Worker(AgentJob):
         except Exception as e:
             logger.warning(f"worker {self.role} {self.job_id}: folder not entered {repr(e)}")
 
-    def detect_tools(self, text: str) -> tuple:
-        """the tools of text by a ToolDetectionTask, without the registry's WORKER_EXCLUDED_TOOLS (but allowed) and
-        excluded: (detected, recommended, decided: None when nothing decided, the detection's source)"""
-        from app.tasks import ToolDetectionTask
-        registry = self.tool_context["tool_registry"]
-        excluded = tuple(name for name in registry.WORKER_EXCLUDED_TOOLS if name not in self.allowed) + tuple(self.excluded)
-        detection = ToolDetectionTask(text, registry, self.infrastructure, excluded_tools=excluded)
-        registry.task_queue.run(detection)
-        detection.trace(self.tool_context["conversation_id"], f"{self.role} {self.job_id}")
-        result = detection.get_result() or {}
-        decided = result.get("tool_names")     # None: nothing decided (no laya, no llm pick, no text score)
-        return decided or [], result.get("recommended") or [], decided, detection.source()
-
-    def _task(self) -> str:
-        """its own task, without the results of the steps before"""
-        return self.prompt.partition(prompts.RESULTS_MARKER_PART)[0]
-
     # ------------------------------------------------------------ the model's turn
 
     def _ask(self) -> str:
@@ -305,9 +310,9 @@ class Worker(AgentJob):
         if not JSON_REPLIES:
             return self.chat(messages, 0.3, timeout=timeout)
         reply = self.chat(messages, 0.3, json_schema=turn_schema(self.tools + [FINISH]), timeout=timeout)
-        if reply.strip():
+        if reply.strip() or self.llm_error:     # a node that did not answer is no use to ask again
             return reply
-        # nothing with the grammar (a node or model that can't hold it, e.g. thinking inside it): once more without
+        # an empty reply with the grammar (a node or model that can't hold it, e.g. thinking inside it): once more without
         logger.warning(f"worker {self.role} {self.job_id}: no reply with the json grammar, asked again without it")
         self.trace("no_json_reply", ok=False)
         left = max(0.0, self.deadline - time.monotonic()) if self.deadline else float(self.time_limit)
@@ -348,25 +353,45 @@ class Worker(AgentJob):
         return (tokens or MIN_REPLY_TOKENS) * CHARS_PER_TOKEN
 
     def _history(self) -> Tuple[str, List[Dict[str, str]]]:
-        """the turns so far: the older ones as short lines (one per call: tool, arguments, how it went) for the end of
-        the first message, "" for none, and the last KEEP_TURNS whole as assistant (its calls) and user (their results)
-        messages"""
+        """the turns so far: the older ones as short lines (_earlier) for the end of the first message, "" for none,
+        and the last KEEP_TURNS whole as assistant (its calls) and user (their results) messages"""
         older, recent = self.turns[:-KEEP_TURNS], self.turns[-KEEP_TURNS:]
-        earlier = ""
-        if older:
-            lines = []
-            for number, turn in enumerate(older, 1):
-                lines.append(f"turn {number}: {turn['note'][:LINE_CHARS]}" if turn["note"] else f"turn {number}:")
-                lines += [f"  - {self._short(entry)}" for entry in turn["calls"]]
-            earlier = prompts.WORKER_EARLIER_PART.format(lines="\n".join(lines))
         messages = []
         for turn in recent:
             calls = [self._shown(entry["call"]) for entry in turn["calls"] if entry["call"] is not None]
-            messages.append({"role": "assistant", "content": json.dumps({"note": turn["note"], "calls": calls}, ensure_ascii=False)})
+            messages.append({"role": "assistant", "content": json.dumps({"note": turn["note"], "calls": calls}, ensure_ascii=False, separators=(",", ":"))})
             results = "\n\n".join(f"[{number}] {entry['call']['tool'] if entry['call'] else 'error'}: {entry['text']}"
                                   for number, entry in enumerate(turn["calls"], 1))
             messages.append({"role": "user", "content": prompts.WORKER_RESULTS_PART.format(results=results)})
-        return earlier, messages
+        return self._earlier(older), messages
+
+    def _earlier(self, older: List[Dict[str, Any]]) -> str:
+        """the older turns for the end of the first message, "" for none: one short line per call under a line for the
+        turn (its number and note), the same turn in a row once ("5-40 (the same 36 times):"). the newest turns that fit
+        _earlier_chars, the ones before are left out (WORKER_LEFT_OUT_PART)"""
+        turns = [(turn["note"][:LINE_CHARS], tuple(self._short(entry) for entry in turn["calls"])) for turn in older]
+        blocks, number = [], 1
+        for (note, lines), same in itertools.groupby(turns):
+            count = len(list(same))
+            head = f"{number}." if count == 1 else f"{number}-{number + count - 1} (the same {count} times):"
+            blocks.append((count, "\n".join([f"{head} {note}".rstrip(), *(f"- {line}" for line in lines)])))
+            number += count
+        room, kept = self._earlier_chars(), []
+        for _, text in reversed(blocks):
+            room -= len(text) + 1
+            if room < 0:
+                break
+            kept.append(text)
+        left_out = sum(count for count, _ in blocks[:len(blocks) - len(kept)])
+        lines = ([prompts.WORKER_LEFT_OUT_PART.format(count=left_out)] if left_out else []) + kept[::-1]
+        return prompts.WORKER_EARLIER_PART.format(lines="\n".join(lines)) if lines else ""
+
+    def _earlier_chars(self) -> int:
+        """how many characters the lines of the older turns may have: EARLIER_SHARE of the llm's slot context in
+        characters (Infrastructure.slot_context, DEFAULT_SLOT_TOKENS when unknown), so the first message stays a small
+        part of the prompt while a long job keeps as much of its history as fits"""
+        tokens = (self.infrastructure.slot_context() if self.infrastructure is not None else None) or DEFAULT_SLOT_TOKENS
+        return int(tokens * CHARS_PER_TOKEN * EARLIER_SHARE)
 
     @staticmethod
     def _shown(call: Dict[str, Any]) -> Dict[str, Any]:
@@ -379,7 +404,7 @@ class Worker(AgentJob):
         call = entry["call"]
         if call is None:
             return f"error: {' '.join(entry['text'].split())[:LINE_CHARS]}"
-        arguments = " ".join(json.dumps({k: v for k, v in call.items() if k != "tool"}, ensure_ascii=False).split())
+        arguments = " ".join(json.dumps({k: v for k, v in call.items() if k != "tool"}, ensure_ascii=False, separators=(",", ":")).split())
         code = EXIT_CODE.search(entry["text"] or "")
         outcome = f"exit code {code.group(1)}" if code else ("ok" if entry["ok"] else f"failed: {' '.join(entry['text'].split())[:80]}")
         return f"{call['tool']} {arguments[:LINE_CHARS]} -> {outcome}"

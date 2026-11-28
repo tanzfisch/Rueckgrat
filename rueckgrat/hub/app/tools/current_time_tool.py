@@ -128,7 +128,7 @@ def format_time(now: datetime) -> str:
 
 class CurrentTimeTool(Tool):
     description = prompts.CURRENT_TIME_DESCRIPTION
-    thresholds = (0.6, 0.65)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.5, 0.75)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user want to know the current time or date somewhere?",
         "Does the user ask what time it is at a place, a region or a coast?"

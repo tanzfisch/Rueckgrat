@@ -76,7 +76,7 @@ def calculate(expression: str) -> str:
 
 class CalculatorTool(Tool):
     description = prompts.CALCULATOR_DESCRIPTION
-    thresholds = (0.75, 0.8)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.8, 0.95)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the message contain a math problem with numbers to solve?",
         "Does the user ask what a percentage, a tip or a share of an amount is?",

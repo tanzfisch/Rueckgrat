@@ -2,7 +2,7 @@
 the prompts the hub's prompt compilers build (app.utils): the chat persona (PromptCompiler, also used by agent job
 reports and the companion), the tool setup run (ToolPromptCompiler), the image tool's llm written image prompt
 (GenericImagePromptCompiler) and the framing words of the contacts' images (ContactImagePromptCompiler).
-the image styles (IMAGE_STYLES) stay in contact_image_prompt_compiler.py, they are kept in sync with the chat's profile page.
+the image styles' prompt parts (IMAGE_STYLES) are in app.common.image_styles, the one list the chat shows too.
 
 placeholders, filled with str.format (literal json braces are doubled). the compilers .strip() the persona sections:
   IDENTITY_PART             name, gender, role, personality, background_hook, body_language, style (IDENTITY_STYLE_PART or ""),

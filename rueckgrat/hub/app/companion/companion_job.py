@@ -10,10 +10,10 @@ from app.utils.clock import to_db, from_db, local_day, at_local, parse_hhmm
 from app.common import get_logger, Utils
 logger = get_logger()
 
-# the tools a pass's lookup always has, besides the detected ones: what the user told it before and a photo (when the
-# settings allow photos). of this kind too: laya's websearch questions are about chat messages, a news scan needs its websearch
-ALWAYS_TOOLS = ("search_memory", "take_photo")
-KIND_TOOLS = {"news": ("websearch",)}
+# the tools a pass's lookup has: what the user told it before, a photo (when the settings allow photos), lookup and
+# what it may show with its message (a poll or a map). not jobs, files, images or audio: those are for jobs the user asked for
+ALWAYS_TOOLS = ("search_memory", "take_photo", "websearch", "fetch_url", "weather", "current_time",
+                "date_calc", "calculate", "convert", "price_finder", "poll", "show_map", "share_file")
 
 # the guardrails (message limits, quiet hours, rows per pass) come from the contact's settings: CompanionSettings
 ROW_KINDS = ("event", "check_in", "news", "reflection")   # what a pass may put on the calendar, all one-off
@@ -39,8 +39,6 @@ class CompanionJob(AgentJob):
     the scheduler runs it on its own thread (run()) and re-arms or closes the row"""
     # it may take a photo and offer files of the contact's sandbox files (sent with its message), not make pictures, audio
     # or files: those are for jobs the user asked for. nor reset the sandbox: no one asked for it
-    EXCLUDED_TOOLS = ("generate_image", "write_file", "edit_file", "text_to_speech", "join_files", "reset_sandbox")
-    ALLOWED_TOOLS = ("poll", "show_map")     # its message shows the poll or map (ToolRegistry.show_held)
 
     def __init__(self, row: dict, db, infrastructure, tool_registry, tz, now: datetime):
         super().__init__("companion", row["kind"], time_limit=TIME_LIMIT, infrastructure=infrastructure)
@@ -148,8 +146,7 @@ class CompanionJob(AgentJob):
     def _lookup(self, kind: str, values: dict) -> str:
         """what the pass's lookup (worker.lookup on its intent: no jobs, images or memory writes) found, "" when it
         failed. a photo it took or files it offered are attached when it sends its message (_maybe_message)"""
-        found, worker = lookup(self, prompts.intent(kind, values), ALWAYS_TOOLS + KIND_TOOLS.get(kind, ()), self.ALLOWED_TOOLS,
-                               self.EXCLUDED_TOOLS + self.settings.excluded_tools, failed=False)
+        found, worker = lookup(self, prompts.intent(kind, values), ALWAYS_TOOLS, self.settings.excluded_tools, failed=False)
         if worker.calls:
             self.log["lookup"] = f"{', '.join(worker.called()) or 'no tools'} in {worker.calls} calls -> {short(found)}"
         return found

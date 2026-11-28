@@ -26,7 +26,7 @@ class TextToSpeechTool(ShareFileTool):
     max_attach_bytes = MAX_AUDIO_BYTES  # one file, held in memory once while it is written and attached, a larger one stays in the files
     sequential = False
     offered_with = ()
-    thresholds = (0.55, 0.75)   # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh (mandatory raised: chat look-alikes score up to 0.74)
+    thresholds = (0.55, 0.72)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the user want an audio file made from a text?",
         "Does the user ask you to create an mp3 or audio version of a text?",

@@ -7,8 +7,10 @@ from app.ui import BasePage
 from app.ui.widgets import Header, VoiceSelector, ProfileImageSlot, MessageBox
 from app.utils import Contact, Hub, Capabilities
 from app.audio import Text_To_Speech
-from app.common import (get_logger, Utils, IMAGE_STYLE_OPTIONS, IMAGE_STYLE_ICONS, CHATTINESS_OPTIONS, QUIET_HOUR_OPTIONS, PHOTO_OPTIONS,
-                        REACH_WINDOW_OPTIONS, put_companion_switch, pop_companion_switch)
+from app.common import (
+    get_logger, Utils, IMAGE_STYLE_OPTIONS, IMAGE_STYLE_ICONS, CHATTINESS_OPTIONS, 
+    QUIET_HOUR_OPTIONS, PHOTO_OPTIONS, REACH_WINDOW_OPTIONS
+)
 
 logger = get_logger()
 
@@ -160,7 +162,6 @@ class ProfilePage(BasePage):
         )
         self.role = _text_field("Role", "text")
         self.personality = _text_field("Persona", "text")
-        self.age = _text_field("Age", "text")
         self.voice_selector = VoiceSelector(Hub.get_predefined_voices(), on_play_sample=Text_To_Speech.play_voice_sample)
         self.companion_switch = ft.Switch(label="Companion (plans its own day, may write first)", active_color=theme.ACCENT,
                                           on_change=lambda e: self._show_companion_settings())
@@ -211,7 +212,6 @@ class ProfilePage(BasePage):
                                         self.gender_group,
                                     ]
                                 ),
-                                self.age,
                                 self.companion_switch,
                                 self.companion_settings,
                                 Capabilities.bind(ft.Row(     # only while the hub can speak
@@ -254,7 +254,6 @@ class ProfilePage(BasePage):
         self.name.value = ""
         self.role.value = ""
         self.personality.value = ""
-        self.age.value = ""
         self.profile_base = {}
         for _, kind, field in self.profile_fields:
             field.value = None if kind == "select" else ""
@@ -270,7 +269,6 @@ class ProfilePage(BasePage):
         self.set_gender(Utils.get_nested_value(contact, ["identity", "gender"], ""))
         self.role.value = Utils.get_nested_value(contact, ["identity", "role"], "")
         self.personality.value = Utils.get_nested_value(contact, ["identity", "personality"], "")
-        self.age.value = Utils.get_nested_value(contact, ["identity", "age"], "")
         profile = Utils.get_nested_value(contact, ["profile"], {}) or {}
         self.profile_base = copy.deepcopy(profile)
         for path, kind, field in self.profile_fields:
@@ -312,7 +310,7 @@ class ProfilePage(BasePage):
             return
         with open(files[0].path, "r") as file:
             data = json.load(file)
-        companion = pop_companion_switch(data)
+        companion = Utils.get_nested_value(data, ["profile", "companion_settings", "companion"], False)
         self.fill_form(data)
         # only the switch, Save sends a changed value through PUT /contacts/{id}/companion
         self.companion_switch.value = companion
@@ -328,7 +326,7 @@ class ProfilePage(BasePage):
         if voice and "predefined_id" in voice:
             # the voices.json id instead of the uuid, the uuid differs between hubs. the hub resolves it on import
             _set_nested_value(data["profile"], ["tts_parameters", "voice_id"], voice["predefined_id"])
-        put_companion_switch(data, self.companion_switch.value)
+        data.setdefault("profile", {}).setdefault("companion_settings", {})["companion"] = bool(self.companion_switch.value)
         with open(path, "w") as file:
             json.dump(data, file, indent=4)
 
@@ -403,7 +401,6 @@ class ProfilePage(BasePage):
                 "name": self.name.value or "",
                 "gender": gender,
                 "role": self.role.value or "",
-                "age": self.age.value or "",
                 "personality": self.personality.value or "",
             },
             "profile": profile,

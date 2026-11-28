@@ -3,7 +3,7 @@ tapped meanwhile, each with a label. all times are seconds of the recording: the
 and skip audio sent twice, the audio is not kept, so nothing shows them. the hub stores both (GET /transcripts/{id}),
 this is the copy the page shows and exports.
 
-the segments keep what was said. what is shown is interpreted here: the voice commands (app/common/transcript_commands)
+the segments keep what was said. what is shown is interpreted here: the voice commands (app/common/transcript_command)
 and the user's edits (Segment.edited, made after the recording). utterances run on in one paragraph until
 "new paragraph", a heading or a bookmark. a bookmark sits in the text where its time is: inside an utterance at the word
 boundary its time falls on (by the share of the utterance's time), so a bookmark set at the cursor stays there"""
@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from app.common.transcript_commands import parse_command, next_bookmark_label, next_bookmark_number, PARAGRAPH, HEADING, BOOKMARK, SCRATCH
+from app.common.transcript_command import TranscriptCommand
 
 # a segment sent again after a reconnect overlaps the one already there (same as ChatDB.SEGMENT_OVERLAP on the hub)
 SEGMENT_OVERLAP = 0.25
@@ -52,8 +52,8 @@ class Segment:
     kind: str = ""              # HEADING: added by the user after the recording, text its words. "": said
 
     @property
-    def command(self) -> tuple[str, str] | None:
-        return (HEADING, self.text) if self.kind == HEADING else parse_command(self.text)
+    def command(self) -> TranscriptCommand | None:
+        return TranscriptCommand(TranscriptCommand.HEADING, self.text) if self.kind == TranscriptCommand.HEADING else TranscriptCommand.parse(self.text)
 
     @property
     def shown(self) -> str:
@@ -61,7 +61,7 @@ class Segment:
         if self.edited is not None:
             return self.edited.strip()
         command = self.command
-        return command[1] if command and command[0] == HEADING else self.text
+        return command.get_argument() if command and command.get_kind() == TranscriptCommand.HEADING else self.text
 
 
 @dataclass(eq=False)     # by identity: two bookmarks can have the same time
@@ -157,7 +157,7 @@ class Transcript:
 
     def next_label(self) -> str:
         """the label of a bookmark tapped now: Bookmark n, unique (next_bookmark_label), renamed later if wanted"""
-        return next_bookmark_label([b.label for b in self.bookmarks])
+        return TranscriptCommand.next_bookmark_label([b.label for b in self.bookmarks])
 
     def name(self, bookmark: Bookmark) -> str:
         """its label. one without (an older hub stored a spoken "bookmark" so): Bookmark n numbered on after the labelled
@@ -166,7 +166,7 @@ class Transcript:
             return bookmark.label.strip()
         defaults = [b.label.strip() for b in self.bookmarks if b.label.strip().startswith("Bookmark ")]
         unlabelled = [b for b in self.bookmarks if not b.label.strip()]
-        return f"Bookmark {next_bookmark_number(defaults) + unlabelled.index(bookmark)}"
+        return f"Bookmark {TranscriptCommand.next_bookmark_number(defaults) + unlabelled.index(bookmark)}"
 
     ########### interpreting the voice commands and edits
     def items(self) -> list[Item]:
@@ -176,14 +176,14 @@ class Transcript:
         items: list[Item] = []
         for segment in self.segments:
             command = segment.command
-            kind = command[0] if command else TEXT
-            if kind == SCRATCH:     # the piece said before it: a heading added later between them stays
-                said = [i for i, item in enumerate(items) if item.segment.kind != HEADING]
+            kind = command.get_kind() if command else TEXT
+            if kind == TranscriptCommand.SCRATCH:     # the piece said before it: a heading added later between them stays
+                said = [i for i, item in enumerate(items) if item.segment.kind != TranscriptCommand.HEADING]
                 if said:
                     items.pop(said[-1])
-            elif kind == PARAGRAPH:
-                items.append(Item(PARAGRAPH, segment))
-            elif kind in (TEXT, HEADING) and segment.shown:
+            elif kind == TranscriptCommand.PARAGRAPH:
+                items.append(Item(TranscriptCommand.PARAGRAPH, segment))
+            elif kind in (TEXT, TranscriptCommand.HEADING) and segment.shown:
                 items.append(Item(kind, segment))
         return items
 
@@ -235,7 +235,7 @@ class Transcript:
         t1, t2 = self.time_at(segment, start, text), self.time_at(segment, end, text)
         before, after = " ".join(text[:start].split()), " ".join(text[end:].split())
         parts = [{"start": segment.start, "end": t1, "text": before, "kind": ""}] if before else []
-        parts.append({"start": t1, "end": t1, "text": heading, "kind": HEADING})
+        parts.append({"start": t1, "end": t1, "text": heading, "kind": TranscriptCommand.HEADING})
         if after:
             parts.append({"start": t2, "end": segment.end, "text": after, "kind": ""})
         return parts
@@ -255,17 +255,17 @@ class Transcript:
             i, k = self.anchor(bookmark, items)
             anchors.setdefault(i, []).append((k, bookmark))
         blocks: list[Block] = []
-        paragraph = Block(PARAGRAPH)
+        paragraph = Block(TranscriptCommand.PARAGRAPH)
 
         def flush():
             nonlocal paragraph
             if paragraph.pieces:
                 blocks.append(paragraph)
-            paragraph = Block(PARAGRAPH)
+            paragraph = Block(TranscriptCommand.PARAGRAPH)
 
         def mark(bookmark: Bookmark):
             flush()
-            blocks.append(Block(BOOKMARK, bookmark=bookmark))
+            blocks.append(Block(TranscriptCommand.BOOKMARK, bookmark=bookmark))
 
         for i, item in enumerate(items + [None]):
             here = sorted(anchors.get(i, []), key=lambda a: a[0])     # stable: same offset keeps the time order
@@ -273,11 +273,11 @@ class Transcript:
                 mark(bookmark)
             if item is None:
                 break
-            if item.kind == PARAGRAPH:
+            if item.kind == TranscriptCommand.PARAGRAPH:
                 flush()
-            elif item.kind == HEADING:
+            elif item.kind == TranscriptCommand.HEADING:
                 flush()
-                blocks.append(Block(HEADING, pieces=[(item.segment, item.segment.shown)]))
+                blocks.append(Block(TranscriptCommand.HEADING, pieces=[(item.segment, item.segment.shown)]))
             else:
                 text, done = item.segment.shown, 0
                 for k, bookmark in [a for a in here if a[0] > 0]:
@@ -292,7 +292,7 @@ class Transcript:
         """the first words after the marker"""
         blocks = self.blocks()
         index = next((i for i, b in enumerate(blocks) if b.bookmark is bookmark), len(blocks))
-        following = next((b for b in blocks[index + 1:] if b.kind != BOOKMARK and b.text), None)
+        following = next((b for b in blocks[index + 1:] if b.kind != TranscriptCommand.BOOKMARK and b.text), None)
         if following is None:
             return ""
         words = following.text.split()
@@ -321,7 +321,7 @@ class Transcript:
 
     def plain_text(self) -> str:
         """what is shown as plain text, the headings as ## lines, without the bookmarks: what the summary is made of"""
-        return "\n\n".join(f"## {b.text}" if b.kind == HEADING else b.text for b in self.blocks() if b.kind != BOOKMARK and b.text)
+        return "\n\n".join(f"## {b.text}" if b.kind == TranscriptCommand.HEADING else b.text for b in self.blocks() if b.kind != TranscriptCommand.BOOKMARK and b.text)
 
     def file_name(self) -> str:
         local = local_time(self.created_at)
@@ -334,7 +334,7 @@ class Transcript:
         and its label as 🏷️ *label*"""
         lines = [f"# {md_escape(self.title())}", ""]
         blocks = self.blocks()
-        headings = [b for b in blocks if b.kind == HEADING]
+        headings = [b for b in blocks if b.kind == TranscriptCommand.HEADING]
         number = {id(b): n for n, b in enumerate(headings, 1)}     # by identity: two headings can read the same
         if headings:
             lines += ["## Contents", ""]
@@ -348,9 +348,9 @@ class Transcript:
             lines.append("")
         lines += ["## Transcript", ""]
         for block in blocks:
-            if block.kind == BOOKMARK:
+            if block.kind == TranscriptCommand.BOOKMARK:
                 lines += [f'<a id="bookmark-{self.number(block.bookmark)}"></a>', "", f"🏷️ *{md_escape(self.name(block.bookmark))}*", ""]
-            elif block.kind == HEADING:
+            elif block.kind == TranscriptCommand.HEADING:
                 lines += [f'<a id="heading-{number[id(block)]}"></a>', "", f"### {md_escape(block.text)}", ""]
             else:
                 lines += [md_escape(block.text), ""]

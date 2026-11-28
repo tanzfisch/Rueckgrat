@@ -7,7 +7,6 @@ from .conversion_tool import ConversionTool
 from .calculator_tool import CalculatorTool
 from .current_time_tool import CurrentTimeTool
 from .date_calc_tool import DateCalcTool
-from .wikipedia_tool import WikipediaTool
 from .weather_tool import WeatherTool
 from .fetch_url_tool import FetchUrlTool
 from .remember_tool import RememberTool
@@ -35,7 +34,6 @@ __all__ = [
     "CalculatorTool",
     "CurrentTimeTool",
     "DateCalcTool",
-    "WikipediaTool",
     "WeatherTool",
     "FetchUrlTool",
     "RememberTool",

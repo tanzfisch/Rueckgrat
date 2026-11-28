@@ -39,7 +39,7 @@ class BashTool(Tool):
     functions (RESTORE), running processes do not"""
     description = prompts.BASH_DESCRIPTION
     sequential = True
-    thresholds = (0.6, 0.65)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    thresholds = (0.6, 0.75)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
     question = [
         "Does the message ask to copy, move, rename, delete, list or unzip files or folders that already exist?",
         "Does the message ask to run git, like clone, pull or status?",
