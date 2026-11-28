@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.34.0
+------
+
+- #234 play button for audio attachments and in the file explorer
+
 0.33.0
 ------
 

@@ -8,8 +8,7 @@ import time
 import flet as ft
 from app.ui import theme
 from app.ui.widgets.file_card import size_text
-from .text_preview import TextPreview
-from .audio_player import AudioPlayer, is_audio
+from .file_open_button import FileOpenButton
 
 from app.common import get_logger
 logger = get_logger()
@@ -126,14 +125,11 @@ class FilesPanel(ft.Container):
             return
         self.page.show_dialog(ft.SnackBar(ft.Text(f"Copied {text}")))
 
-    def _open_button(self, entry: dict) -> ft.Control:
-        """an audio file opens in the player, any other file in the text preview"""
-        audio = is_audio(entry["name"])
-        viewer = AudioPlayer if audio else TextPreview
-        return ft.IconButton(icon=ft.Icons.AUDIOTRACK if audio else ft.Icons.VISIBILITY_OUTLINED, icon_size=18,
-                             icon_color=theme.TEXT, tooltip=f"{'Play' if audio else 'Preview'} {entry['name']}",
-                             on_click=lambda e, p=entry["path"], s=entry.get("size") or 0: self.page.run_task(
-                                 viewer.open, self.page, p, s, lambda: self._source.file(p)))
+    def _open_button(self, entry: dict) -> FileOpenButton:
+        """the same preview or play button a file chip under a message uses (FileOpenButton)"""
+        path = entry["path"]
+        return FileOpenButton(path, entry.get("size") or 0, lambda: self._source.file(path),
+                              label=entry["name"])
 
     def _row(self, entry: dict) -> ft.Control:
         """a folder opens on a tap and has a zip button, a file has a save button, both a copy path button"""
