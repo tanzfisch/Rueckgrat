@@ -215,14 +215,35 @@ class AudioPlayer(ft.Container):
             page.overlay.remove(self)
             page.update()
 
+    def get_name(self) -> str:
+        """the file this player was opened for (the path or name given to open)"""
+        return self._name
+
+    @classmethod
+    def current(cls, page: ft.Page):
+        """the player shown on the page, None if none is open"""
+        for control in reversed(page.overlay):
+            if isinstance(control, cls):
+                return control
+        return None
+
     @classmethod
     def close_open(cls, page: ft.Page) -> bool:
         """closes the player if one is shown (and stops it), returns True if it did"""
-        for control in reversed(page.overlay):
-            if isinstance(control, cls):
-                control._close()
-                return True
-        return False
+        player = cls.current(page)
+        if player is None:
+            return False
+        player._close()
+        return True
+
+    @classmethod
+    async def play(cls, page: ft.Page, name: str, size: int, fetch) -> None:
+        """opens and plays the file (open), or toggles pause if this file is already in the open player"""
+        player = cls.current(page)
+        if player is not None and player.get_name() == name:
+            await player.toggle()
+            return
+        await cls.open(page, name, size, fetch)
 
     @classmethod
     async def open(cls, page: ft.Page, name: str, size: int, fetch) -> None:

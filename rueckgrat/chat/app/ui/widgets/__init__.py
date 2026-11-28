@@ -20,6 +20,7 @@ from .price_view import PriceView
 from .text_preview import TextPreview
 from .copy_button import CopyButton
 from .file_card import FileCard, FileCards
+from .file_open_button import FileOpenButton
 from .audio_player import AudioPlayer
 from .files_panel import FilesPanel
 from .files_dock import FilesDock
@@ -54,6 +55,7 @@ __all__ = [
     "CopyButton",
     "FileCard",
     "FileCards",
+    "FileOpenButton",
     "AudioPlayer",
     "FilesPanel",
     "FilesDock",
