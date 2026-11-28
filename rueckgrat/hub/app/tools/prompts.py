@@ -463,12 +463,13 @@ Examples:
 
 # ---------------------------------------------------------------- remember
 
-REMEMBER_DESCRIPTION = "save one short fact to remember in later conversations (about the user, their life, plans, preferences or your relationship)"
+REMEMBER_DESCRIPTION = "save one short lasting fact about the user, their life, the people around them, their preferences, or something they named or own"
 
 REMEMBER_PROMPT = """
 REMEMBER:
 
-Whenever the user tells you a durable fact about themselves that will still be true later (name, identity, relationships, long-term history, location, job, health and allergies, pets, hobbies, lasting preferences, plans with a date), store it. Skip temporary wants or comments about media/videos.
+Store a fact that will still matter in later conversations: who the user is, their life and people, a lasting preference, or something they named or own.
+Do not store what they asked for this turn, the details of a task, a file path or a working directory, or what you did.
 
 Write in third person. Max 200 characters. One fact only.
 
