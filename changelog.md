@@ -1,6 +1,17 @@
 Changelog
 =========
 
+0.34.0
+------
+
+- #234 play button for audio attachments and in the file explorer
+- #231 display images with show button as attachment and in file explorer
+- share_file is a detection candidate (Laya questions and the follow-up pick), and is still offered with bash
+- tighter share_file and follow-up Laya questions (attach or send an existing file; continuing, changing or stopping an earlier turn)
+- CopyButton does not update after it was removed from the page (a streamed block re-rendered during the copy check)
+- bash gets a recommended text score when the message asks to write or create a script or program and also to run it; find_tools is to be called when the user asks for work no offered tool can do, instead of claiming the work will be done
+- generate_image's logo/poster question is for a designed graphic (an app icon, a poster, a logo), and a bash write-and-run text score keeps generate_image recommended at most
+
 0.33.0
 ------
 

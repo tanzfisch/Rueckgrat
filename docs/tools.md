@@ -18,9 +18,10 @@ A tool class describes itself with a few attributes:
 | `whole_message` | its questions are also judged on the whole message |
 | `text_only` | no Laya questions, only `text_score` detects it |
 | `text_score()` | a score from code (a pattern or the message's shape), on the same scale as Laya's |
-| `offered_with` | it is a companion: offered as optional together with these tools, no question of its own |
+| `offered_with` | it is a companion: also offered as optional together with these tools. A companion with no questions of its own is not a detection candidate |
 | `requires`, `requires_any` | capabilities it needs (all of `requires`, one of `requires_any`). Without them it is not detected, offered, listed or run |
 | `overrides` | tools it makes needless when both are detected |
+| `caps` | tools its `text_score`, once it reaches recommended, demotes to recommended (never mandatory) |
 | `sequential` | its calls in one round run one after another, in their order |
 
 `ToolRegistry` (`tools/tool_registry.py`) registers the tools at hub start and holds the rules for using them. `ToolRegistry.tools` only returns the tools whose capabilities are available right now (`Infrastructure.available`), so a tool disappears while its node or the internet is down.
@@ -50,7 +51,7 @@ There are 25 tools, registered in this order in `ToolRegistry.__init__`.
 | `read_file` | not detected: a worker's loop tool | the same | | loop, sequential | |
 | `edit_file` | not detected: a worker's loop tool | the same | | loop, sequential | |
 | `write_file` | Laya; the project questions | LLM pick; no project questions | | detected, detached | |
-| `share_file` | not detected: a companion of `bash` | the same | | companion, sequential | |
+| `share_file` | Laya; also a companion of `bash` when the detection did not pick it | LLM pick; the same companion offer | | detected, companion, sequential | |
 | `find_tools` | not detected: a prompt tool | the same | | optional | |
 | `task` | Laya | LLM pick, sure when picked | yes, first; ends the setup | detected | |
 | `text_to_speech` | Laya | LLM pick | | detected, detached | tts |
@@ -60,7 +61,7 @@ Without Laya, an LLM pick makes a picked tool recommended, a picked `task` or `s
 
 - detected: the detection decides whether it is mandatory, recommended or not offered.
 - optional: one of the `PROMPT_TOOLS` (`remember`, `search_memory`, `take_photo`, `find_tools`). Every tool setup offers them, and the model decides on its own whether to call them.
-- companion: offered as optional whenever one of its `offered_with` tools is offered.
+- companion: also offered as optional whenever one of its `offered_with` tools is offered. A companion with Laya questions (`share_file`) is a detection candidate as well; one without (`reset_sandbox`) is only a companion.
 - loop: in `LOOP_TOOLS`. Only a job's worker has them, in its loop (see `agents.md`); no tool setup detects or offers them.
 - detached: in `DETACHED_TOOLS`. In a chat turn its calls can go on in the background (see Running the calls).
 
@@ -111,7 +112,7 @@ The rules for the two priority tools, `task` and `spawn_job`, are part of this o
 
 ## Detection
 
-`ToolDetectionTask` (`tasks/tool_detection_task.py`) scores every candidate tool. The candidates are the tools that can be used now, minus the excluded ones and minus the optional ones (prompt tools and companions are offered without a detection). The source of the decision is recorded (`source()`):
+`ToolDetectionTask` (`tasks/tool_detection_task.py`) scores every candidate tool. The candidates are the tools that can be used now, minus the excluded ones and minus the optional ones (prompt tools, and companions that have no questions of their own). A companion with questions (`share_file`) is a candidate, so Laya and the follow-up pick can choose it; it is still offered with `bash` when the detection did not pick it. The source of the decision is recorded (`source()`):
 
 | Source | When | How the scores come about |
 | --- | --- | --- |
@@ -127,13 +128,15 @@ The text scores:
 
 - `fetch_url` scores 1.0 when the message holds a link (`URL_PATTERN`), so it is mandatory.
 - `spawn_job` scores its recommended threshold (0.85) when `MessageShape(prompt).complexity()` is at least 0.35 (`JOB_COMPLEXITY`), a message of several steps. A text score never makes it mandatory.
+- `bash` scores its recommended threshold (0.6) when the message asks to write or create a script or program and also to run or execute it. A text score never makes it mandatory. It does not fire on writing a script alone, or on running code the user already gave.
+When a tool's text_score reaches recommended, the tools in its `caps` list stay recommended at most (`ToolDetectionTask._cap`). `bash` caps `generate_image`, so a write-and-run script does not force image generation.
 - `show_map` scores 0.6 (above its mandatory threshold) for a short question like "where is ..." (`SHORT_WHERE`), unless the place is a word like "the" without a name after it.
 
 In a chat turn the detection also gets the contact's `SandboxVolume`, and Laya is asked the `PROJECT_QUESTIONS` too: does the user report a bug in a program, or ask for a fix or change to something made earlier? If that score reaches 0.5 and the contact's files hold a project (`SandboxVolume.has_project`), the `PROJECT_TOOLS` (`spawn_job`, `bash`, `write_file`) get that score.
 
 A chat/scene/work choice gate (`GATE_KEY`) runs first: three rotations of the same question in one `decide` call. When P(chat)+P(scene) reaches `GATE_THRESHOLD` (0.8), the per-tool questions are skipped, except when a text_score already reaches recommended (a link: `fetch_url`).
 
-The same gate batch also asks one follow-up noul question (`FOLLOWUP_KEY`, `FOLLOWUP_QUESTION`): does the latest message refer back to earlier in the conversation without itself stating a full new task? That is how a follow-up like "tell me when the file is ready" is not lost when the gate would skip. When a text_score vetoes the gate, the same question goes in the per-tool `decide_whole` batch instead, still no extra round trip. Short messages go through the gate and the follow-up question like any other message.
+The same gate batch also asks one follow-up noul question (`FOLLOWUP_KEY`, `FOLLOWUP_QUESTION`): is the user continuing, changing, or stopping something from an earlier turn, rather than starting a new task? That is how a short follow-up is not lost when the gate would skip. When a text_score vetoes the gate, the same question goes in the per-tool `decide_whole` batch instead, still no extra round trip. Short messages go through the gate and the follow-up question like any other message.
 
 A chat turn passes the conversation's `db` and `conversation_id` into the detection, so `_pick` reuses `ChatTask.conversation_messages` (the same history a reply sees). `find_tools` does not: it detects a task string, and the conversation would re-offer tools for the original message. On a follow-up pick, a chat turn also tells the LLM whether the contact's files already hold a project; the tuner (no sandbox volume) leaves that line out.
 
@@ -146,7 +149,7 @@ A chat turn passes the conversation's `db` and `conversation_id` into the detect
 - A mandatory priority tool becomes the only mandatory tool. Of the recommended tools only the ones that outrank it stay (`task` over `spawn_job`).
 - Otherwise a tool that another one overrides (`Tool.overrides`, only `price_finder` over `websearch`) is dropped: by a mandatory tool from both bands, by a recommended one only from the recommended band.
 
-`ToolExecutionTask` then adds the `PROMPT_TOOLS` to the mandatory band, drops the excluded tools and the ones that cannot be used now, and adds the companions of the offered tools to the mandatory band (`share_file` with `bash`). The setup prompt lists three kinds of tools (`split_tools`): mandatory (detected, must be called), recommended (the model decides), and optional (prompt tools and companions).
+`ToolExecutionTask` then adds the `PROMPT_TOOLS` to the mandatory band, drops the excluded tools and the ones that cannot be used now, and adds the companions of the offered tools: companion-only tools (`reset_sandbox` with `bash`) join the mandatory band and the setup lists them as optional (`split_tools`); a companion that is also a detection candidate (`share_file`) joins only when it was not already picked, and stays optional, so it is not mandatory just because `bash` is. The setup prompt lists three kinds of tools (`split_tools`): mandatory (detected, must be called), recommended (the model decides), and optional (prompt tools, companion-only tools, and undetected companions).
 
 ## Rounds
 
@@ -167,7 +170,7 @@ Only groups with a tool in them become rounds. A setup with nothing but prompt t
 
 A recommended priority tool gets a round of its own:
 
-- It comes first when it outranks every sure tool. A sure tool is a mandatory tool that is not optional, so the prompt tools and the companions never count.
+- It comes first when it outranks every sure tool. A sure tool is a mandatory tool that is not optional, so the prompt tools and the companion-only tools never count (a detected `share_file` can).
 - Otherwise it comes last, so an uncertain priority tool does not take over from a sure tool (for example a mandatory `bash` or `fetch_url`).
 - A mandatory priority tool is alone in its band anyway (see Bands).
 
@@ -225,7 +228,7 @@ Searches the web (DDGS search engines) and the offline library (Project NOMAD) f
 
 ## generate_image
 
-Generates a picture from a `positive_prompt` on the image node. With a stored message the planned file is attached at once and filled when the image is done (it is detached in a chat turn). Without one (agents) the file is held in the result's `attachments` and attached to the message the agent posts later.
+Makes a new picture (art, a photo, an illustration) from a `positive_prompt` on the image node. It is for a picture invented from a description, including a logo, a poster or an icon, not for an image file a program is asked to write. When `bash`'s write-and-run text score fires, `generate_image` stays recommended at most. With a stored message the planned file is attached at once and filled when the image is done (it is detached in a chat turn). Without one (agents) the file is held in the result's `attachments` and attached to the message the agent posts later.
 
 ## take_photo
 
@@ -301,11 +304,11 @@ Writes one text file (`path`, `content`) into the contact's files and offers it 
 
 ## share_file
 
-Offers files that are already in the contact's files to the user as download cards, without writing anything. A `path` (or a list) is a file or a folder: all its files up to 50, without `.git`, caches and packages. Relative paths start at the conversation's bash folder. It has no question of its own: it is offered whenever `bash` is, and runs after their calls in the same round. For a job, a task pass or a companion pass the files are held and attached to the message the agent posts later.
+Offers files that are already in the contact's files to the user as download cards, without writing anything. A `path` (or a list) is a file or a folder: all its files up to 50, without `.git`, caches and packages. Relative paths start at the conversation's bash folder. It has its own Laya question (thresholds (0.5, 0.7)): does the user ask to attach or send them a file that is already in the files? A follow-up that asks for such a file can pick it directly. It is still offered whenever `bash` is, and runs after their calls in the same round. For a job, a task pass or a companion pass the files are held and attached to the message the agent posts later.
 
 ## find_tools
 
-Asks for the tools of a `task` that the offered tools cannot do (for example the next quiz question as a poll). The call only notes the task. `ToolExecutionTask` runs a detection on it and offers what it finds in extra rounds.
+Asks for the tools of a `task` that the offered tools cannot do (for example the next quiz question as a poll). Call it when the user asks for work no offered tool can do, instead of claiming that work will be done in the reply. The call only notes the task. `ToolExecutionTask` runs a detection on it and offers what it finds in extra rounds.
 
 ## task
 

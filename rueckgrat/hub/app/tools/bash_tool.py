@@ -40,6 +40,7 @@ class BashTool(Tool):
     description = prompts.BASH_DESCRIPTION
     sequential = True
     thresholds = (0.6, 0.75)    # (recommended, mandatory) for the laya questions, from laya_tune/tune.sh
+    caps = ("generate_image",)  # a write-and-run text score: generate_image stays recommended at most
     question = [
         "Does the message ask to copy, move, rename, delete, list or unzip files or folders that already exist?",
         "Does the message ask to run git, like clone, pull or status?",
@@ -54,6 +55,21 @@ class BashTool(Tool):
     @classmethod
     def name(cls) -> str:
         return "bash"
+
+    # write or create a script or program, and also run or execute it (not write alone, not "a script to run later")
+    WRITE_SCRIPT = re.compile(r"\b(?:write|create|make)\b.{0,120}\b(?:script|program)s?\b", re.IGNORECASE | re.DOTALL)
+    RUN_IT = re.compile(
+        r"\b(?:(?:and|then|and then|afterwards|after that)\s+(?:please\s+)?(?:run|execute)(?:\s+it)?|"
+        r"(?:please\s+)?(?:run|execute)\s+(?:it|(?:the|this|that)\s+(?:script|program|code|file)))\b",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def text_score(cls, prompt: str) -> float:
+        """recommended: the message asks to write or create a script or program and also to run it. never mandatory:
+        spawn_job may still be the better fit for a larger project"""
+        text = prompt or ""
+        return cls.thresholds[0] if cls.WRITE_SCRIPT.search(text) and cls.RUN_IT.search(text) else 0.0
 
     # a plain listing: "ls -la", "ls .", "ls <workdir>", "cd <workdir> && ls -la", nothing chained, piped or substituted
     LISTING = re.compile(r"(?:cd\s+(?P<folder>[\w./~-]+)\s*&&\s*)?ls(?:\s+-[a-zA-Z]+)*(?:\s+(?P<path>[\w./~-]+))?")

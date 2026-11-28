@@ -21,7 +21,11 @@ class ShareFileTool(Tool):
     attach_held, merge), and so is writing it without replacing a file unless the call says overwrite (_write)"""
     description = prompts.SHARE_FILE_DESCRIPTION
     sequential = True           # runs after the round's bash calls that make the files
-    offered_with = ("bash",)   # no laya question: offered (optional) whenever a tool that makes files is
+    offered_with = ("bash",)    # also offered (optional) with bash when the detection did not pick it
+    thresholds = (0.5, 0.7)     # (recommended, mandatory) for the laya questions, the detection defaults
+    question = [
+        "Does the user ask to attach or send them a file that is already in the files?",
+    ]
     # the largest file it attaches. every file of a shared folder is read into memory at once, so not more by default
     max_attach_bytes = MAX_ATTACH_BYTES
 
